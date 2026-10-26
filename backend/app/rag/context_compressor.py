@@ -4,6 +4,7 @@ import re
 from typing import Any
 
 from app.rag.query_processor import extract_query_terms
+from app.rag.source_provenance import PARSER_ORIGINAL, original_text_of, provenance_of
 
 
 def get_prompt_text(item: dict[str, Any]) -> str:
@@ -13,10 +14,15 @@ def get_prompt_text(item: dict[str, Any]) -> str:
     `snippet`（展示用短片段）。修前各消费点写 `snippet or text`，snippet 非空
     即短路全文压缩器——`compress_context_list` 的产物从未进入提示词。
 
-    优先级：prompt_text → text → content → snippet（最后一级仅兼容不含正文键的
-    旧载荷 / 外部工具结果；prompt_text 存在的正常检索链路上 snippet 永远不会
-    被选中）。
+    PR2/R2：有真实 original_text 时永远直接返回 O，预填 prompt_text 无论是
+    空串、E 或其它内容都不得覆盖原文。marker 为 parser_original 但 O 缺失时
+    同样禁止回退 E；只有明确 legacy 载荷才保留旧的兼容 fallback。
     """
+    original = original_text_of(item)
+    if original is not None:
+        return original
+    if provenance_of(item) == PARSER_ORIGINAL:
+        return ""
     return (
         item.get("prompt_text")
         or item.get("text")

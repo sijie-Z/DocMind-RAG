@@ -758,7 +758,7 @@ class TestAnswerCacheConsumer:
         assert all(event.content != "LEGACY-CACHED-ANSWER" for event in events)
 
     @pytest.mark.asyncio
-    async def test_provenance_strict_accepts_original_answer_cache(self, monkeypatch):
+    async def test_provenance_strict_skips_even_original_answer_cache(self, monkeypatch):
         _enable(monkeypatch, answer=True)
         _fake_redis(monkeypatch)
         monkeypatch.setattr(settings, "RAG_SOURCE_PROVENANCE_MODE", "strict")
@@ -777,14 +777,19 @@ class TestAnswerCacheConsumer:
             ],
             organization_id=1,
         )
+        get_spy = AsyncMock(wraps=sem_cache.get)
+        set_spy = AsyncMock(wraps=sem_cache.set)
+        sem_cache.get = get_spy
+        sem_cache.set = set_spy
 
         fake_rag = _fake_rag_stack(_VEC_A, AsyncMock(return_value=([], None)), {})
         events = await _run_chat(_mock_chat_session(), fake_rag, sem_cache, query)
 
-        assert fake_rag.search_knowledge_base.await_count == 0
-        cached = [event for event in events if event.type == "message" and event.is_cached]
-        assert cached and cached[0].content == "ORIGINAL-CACHED-ANSWER"
-        assert cached[0].sources[0]["textProvenance"] == "parser_original"
+        get_spy.assert_not_called()
+        set_spy.assert_not_called()
+        assert fake_rag.search_knowledge_base.await_count == 1, "strict 必须总是重新检索"
+        assert not any(event.type == "message" and event.is_cached for event in events)
+        assert all(event.content != "ORIGINAL-CACHED-ANSWER" for event in events)
 
     @pytest.mark.asyncio
     async def test_provenance_failure_emits_structured_error_not_answer(self, monkeypatch):

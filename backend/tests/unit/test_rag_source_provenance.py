@@ -25,6 +25,7 @@ from app.core.elasticsearch import (
 )
 from app.models.document import DocumentChunk
 from app.rag.cache import RetrievalCache, SemanticCache
+from app.rag.context_compressor import get_prompt_text
 from app.rag.pipeline import RAGPipeline
 from app.rag.reranker import _hit_passage
 from app.rag.retriever import HybridRetriever, _keyword_arm_terms
@@ -458,6 +459,15 @@ def _s2_result(*, original=True):
     return HybridRetriever()._post_process(S2_QUERY, [_s2_hit(original=original)], top_k=1)[0]
 
 
+def _s2_filter(results, *, mode):
+    return filter_original_results(
+        results,
+        mode=mode,
+        query=S2_QUERY,
+        snippet_builder=HybridRetriever._build_snippet,
+    )
+
+
 class _S2FakeCompletions:
     def __init__(self, captured):
         self.captured = captured
@@ -535,12 +545,12 @@ def test_s2_strict_gate_filters_or_raises_never_returns_fake_empty():
     clean = _s2_result()
     legacy = _s2_result(original=False)
 
-    assert filter_original_results([clean, legacy], mode=STRICT) == [clean]
-    assert filter_original_results([], mode=STRICT) == []
-    assert filter_original_results([legacy], mode=COMPAT) == [legacy]
+    assert _s2_filter([clean, legacy], mode=STRICT) == [clean]
+    assert _s2_filter([], mode=STRICT) == []
+    assert _s2_filter([legacy], mode=COMPAT) == [legacy]
 
     with pytest.raises(SourceProvenanceUnavailableError) as exc_info:
-        filter_original_results([legacy], mode=STRICT)
+        _s2_filter([legacy], mode=STRICT)
     error = exc_info.value
     assert error.code == "source_original_unavailable"
     assert error.status == "needs_rebuild"
@@ -556,18 +566,18 @@ def test_s2_chat_sources_use_original_and_mark_legacy(monkeypatch):
     legacy = _s2_result(original=False)
 
     monkeypatch.setattr(settings, "RAG_SOURCE_PROVENANCE_MODE", COMPAT)
-    clean_source = build_sources_list([clean])[0]
+    clean_source = build_sources_list([clean], query=S2_QUERY)[0]
     assert clean_source["content"] == clean["snippet"]
     assert clean_source["textProvenance"] == PARSER_ORIGINAL
     assert clean_source["chunkId"] == clean["chunk_id"]
     assert "银河公司" not in clean_source["content"]
 
-    legacy_source = build_sources_list([legacy])[0]
+    legacy_source = build_sources_list([legacy], query=S2_QUERY)[0]
     assert legacy_source["textProvenance"] == LEGACY_UNVERIFIED
     assert "银河公司" in legacy_source["content"]
 
     monkeypatch.setattr(settings, "RAG_SOURCE_PROVENANCE_MODE", STRICT)
-    assert build_sources_list([legacy])[0]["content"] == ""
+    assert build_sources_list([legacy], query=S2_QUERY)[0]["content"] == ""
 
 
 @pytest.mark.asyncio
@@ -676,7 +686,7 @@ async def test_s2_fresh_results_strict_raises_needs_rebuild_not_normal_empty(mon
     assert exc_info.value.status == "needs_rebuild"
 
 
-def test_s2_answer_cache_with_legacy_sources_is_rejected_as_whole(monkeypatch):
+def test_s2_answer_cache_strict_is_always_disabled(monkeypatch):
     legacy_source = normalize_source_metadata({"documentId": "doc-old", "content": "mixed"})
     original_source = normalize_source_metadata(
         {"documentId": "doc-new", "textProvenance": PARSER_ORIGINAL}
@@ -685,8 +695,8 @@ def test_s2_answer_cache_with_legacy_sources_is_rejected_as_whole(monkeypatch):
     monkeypatch.setattr(settings, "RAG_SOURCE_PROVENANCE_MODE", STRICT)
     assert _cached_answer_provenance_blocked({"sources": [legacy_source]}) is True
     assert _cached_answer_provenance_blocked({"sources": [legacy_source, original_source]})
-    assert _cached_answer_provenance_blocked({"sources": [original_source]}) is False
-    assert _cached_answer_provenance_blocked({"sources": []}) is False
+    assert _cached_answer_provenance_blocked({"sources": [original_source]}) is True
+    assert _cached_answer_provenance_blocked({"sources": []}) is True
 
     monkeypatch.setattr(settings, "RAG_SOURCE_PROVENANCE_MODE", COMPAT)
     assert _cached_answer_provenance_blocked({"sources": [legacy_source]}) is False
@@ -705,3 +715,157 @@ def test_s2_provenance_error_is_structured_needs_rebuild_event():
         "document_ids": ["doc-1", "doc-2"],
         "unverified_count": 2,
     }
+
+
+# ── R2：预填证据/raw cache 不可信，模式切换不得共享结果子集 ─────────────
+
+
+def _s2_corrupt_original(prompt_state):
+    result = _s2_result()
+    if prompt_state == "missing":
+        result.pop("prompt_text", None)
+    elif prompt_state == "empty":
+        result["prompt_text"] = ""
+    else:
+        result["prompt_text"] = ENHANCED
+    result["snippet"] = ENHANCED
+    return result
+
+
+@pytest.mark.parametrize("prompt_state", ["missing", "empty", "enhanced"])
+def test_s2_r2_get_prompt_text_never_falls_back_to_e_for_original(prompt_state):
+    item = _s2_corrupt_original(prompt_state)
+
+    assert get_prompt_text(item) == ORIGINAL
+
+    item["original_text"] = None
+    assert get_prompt_text(item) == "", "original marker 缺 O 时也不得回退 E"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("prompt_state", ["missing", "empty", "enhanced"])
+async def test_s2_r2_direct_chat_stream_rebuilds_prompt_from_original(monkeypatch, prompt_state):
+    monkeypatch.setattr(settings, "RAG_SOURCE_PROVENANCE_MODE", STRICT)
+    captured = []
+    pipeline = RAGPipeline(openai_client=_S2FakeClient(captured))
+
+    _ = [
+        chunk
+        async for chunk in pipeline.chat_stream(
+            S2_QUERY,
+            [_s2_corrupt_original(prompt_state)],
+            enable_compression=False,
+            enable_masking=False,
+        )
+    ]
+
+    prompt = captured[0]["messages"][-1]["content"]
+    assert ORIGINAL in prompt
+    assert "银河公司" not in prompt
+    assert "2099" not in prompt
+
+
+def test_s2_r2_source_snippet_is_recomputed_from_original_with_same_query(monkeypatch):
+    monkeypatch.setattr(settings, "RAG_SOURCE_PROVENANCE_MODE", STRICT)
+    source = build_sources_list([_s2_corrupt_original("enhanced")], query=S2_QUERY)[0]
+
+    assert source["content"] == HybridRetriever._build_snippet(ORIGINAL, S2_QUERY)
+    assert source["textProvenance"] == PARSER_ORIGINAL
+    assert "银河公司" not in source["content"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("cache_kind", ["exact", "semantic"])
+async def test_s2_r2_raw_cache_is_normalized_before_evidence_use(monkeypatch, cache_kind):
+    monkeypatch.setattr(settings, "RAG_SOURCE_PROVENANCE_MODE", STRICT)
+    pipeline = RAGPipeline()
+    corrupted = _s2_corrupt_original("enhanced")
+    pipeline.retriever = MagicMock()
+    pipeline.retriever.retrieve = AsyncMock()
+
+    if cache_kind == "exact":
+        pipeline.cache = SimpleNamespace(
+            get=AsyncMock(return_value=[corrupted]),
+            set=AsyncMock(),
+        )
+    else:
+        pipeline.cache = SimpleNamespace(get=AsyncMock(return_value=None), set=AsyncMock())
+        pipeline.semantic_cache = SimpleNamespace(
+            enabled=True,
+            get=AsyncMock(return_value={"sources": [corrupted]}),
+            set=AsyncMock(),
+        )
+        pipeline.get_embedding = AsyncMock(return_value=[0.1, 0.2])
+
+    results, _ = await pipeline.search_knowledge_base(S2_QUERY, 1, top_k=1)
+
+    assert len(results) == 1
+    assert results[0]["prompt_text"] == ORIGINAL
+    assert results[0]["snippet"] == HybridRetriever._build_snippet(ORIGINAL, S2_QUERY)
+    assert results[0]["retrieval_text"] == ENHANCED
+    assert "银河公司" not in results[0]["snippet"]
+    pipeline.retriever.retrieve.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_s2_r2_strict_compat_exact_cache_roundtrip_preserves_full_candidates(monkeypatch):
+    monkeypatch.setattr("app.rag.cache._get_redis", lambda: None)
+    monkeypatch.setattr(settings, "RAG_ENABLE_CACHE", True)
+    monkeypatch.setattr(settings, "SEMANTIC_CACHE_RETRIEVAL_ENABLED", False)
+    monkeypatch.setattr(settings, "RAG_ENABLE_RERANKER", False)
+    pipeline = RAGPipeline()
+    pipeline.cache = RetrievalCache()
+    legacy = _s2_result(original=False)
+    clean = _s2_result()
+    legacy.update({"chunk_id": "legacy-chunk", "document_id": "doc-legacy"})
+    clean.update({"chunk_id": "clean-chunk", "document_id": "doc-clean"})
+    pipeline.retriever.retrieve = AsyncMock(return_value=([legacy, clean], [], None, []))
+    query = f"{S2_QUERY} r2-mode-isolation-unique"
+
+    monkeypatch.setattr(settings, "RAG_SOURCE_PROVENANCE_MODE", STRICT)
+    strict_results, _ = await pipeline.search_knowledge_base(
+        query, 987, top_k=5, search_mode="hybrid"
+    )
+    assert [item["chunk_id"] for item in strict_results] == ["clean-chunk"]
+    assert pipeline.retriever.retrieve.await_count == 1
+
+    pipeline.retriever.retrieve.reset_mock()
+    monkeypatch.setattr(settings, "RAG_SOURCE_PROVENANCE_MODE", COMPAT)
+    compat_results, _ = await pipeline.search_knowledge_base(
+        query, 987, top_k=5, search_mode="hybrid"
+    )
+    assert {item["chunk_id"] for item in compat_results} == {
+        "legacy-chunk",
+        "clean-chunk",
+    }
+    assert pipeline.retriever.retrieve.await_count == 1, (
+        "strict→compat 必须重新取得完整候选，不能命中 strict filtered 子集"
+    )
+
+    pipeline.retriever.retrieve.reset_mock()
+    monkeypatch.setattr(settings, "RAG_SOURCE_PROVENANCE_MODE", STRICT)
+    strict_again, _ = await pipeline.search_knowledge_base(
+        query, 987, top_k=5, search_mode="hybrid"
+    )
+    assert [item["chunk_id"] for item in strict_again] == ["clean-chunk"]
+    pipeline.retriever.retrieve.assert_not_called()
+
+    monkeypatch.setattr(settings, "RAG_SOURCE_PROVENANCE_MODE", COMPAT)
+    compat_again, _ = await pipeline.search_knowledge_base(
+        query, 987, top_k=5, search_mode="hybrid"
+    )
+    assert {item["chunk_id"] for item in compat_again} == {
+        "legacy-chunk",
+        "clean-chunk",
+    }
+    pipeline.retriever.retrieve.assert_not_called()
+
+
+def test_s2_r2_semantic_cache_namespace_includes_provenance_mode():
+    compat_prefix, compat_index = SemanticCache.retrieval_namespace(COMPAT)
+    strict_prefix, strict_index = SemanticCache.retrieval_namespace(STRICT)
+
+    assert compat_prefix != strict_prefix
+    assert compat_index != strict_index
+    assert SemanticCache.for_retrieval(COMPAT).prefix == compat_prefix
+    assert SemanticCache.for_retrieval(STRICT).prefix == strict_prefix

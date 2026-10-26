@@ -6,13 +6,14 @@ missing/unknown provenance marker is always legacy, never evidence of originalit
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Any
 
 PARSER_ORIGINAL = "parser_original"
 LEGACY_UNVERIFIED = "legacy_unverified"
 COMPAT = "compat"
 STRICT = "strict"
-CACHE_SCHEMA_VERSION = "v2"
+CACHE_SCHEMA_VERSION = "v3"
 
 
 def normalize_mode(mode: str | None) -> str:
@@ -82,24 +83,78 @@ class SourceProvenanceUnavailableError(RuntimeError):
         }
 
 
-def filter_original_results(
-    results: list[dict[str, Any]], *, mode: str | None
-) -> list[dict[str, Any]]:
-    """Apply the same strict gate to fresh and cached retrieval results.
+def normalize_result_for_evidence(
+    item: dict[str, Any],
+    *,
+    query: str,
+    mode: str | None,
+    snippet_builder: Callable[[str, str], str],
+) -> dict[str, Any]:
+    """Rebuild prompt/snippet from real O; never trust precomputed evidence fields."""
+    normalized = dict(item)
+    normalized_mode = normalize_mode(mode)
+    original = original_text_of(normalized)
+    if original is not None:
+        normalized["original_text"] = original
+        normalized["text_provenance"] = PARSER_ORIGINAL
+        normalized["prompt_text"] = original
+        normalized["snippet"] = snippet_builder(original, query)
+        return normalized
 
-    Compat preserves every result. Strict keeps verifiable originals; if hits exist
-    but none is original, it raises a structured needs-rebuild state instead of
-    returning a misleading normal empty result.
+    normalized["original_text"] = None
+    normalized["text_provenance"] = LEGACY_UNVERIFIED
+    if normalized_mode == STRICT:
+        normalized["prompt_text"] = ""
+        normalized["snippet"] = ""
+        return normalized
+
+    # Only explicit legacy compat may use the old retrieval-text fallback. Dual-field
+    # entries always take the O branch above, even when prompt_text/snippet contain E.
+    retrieval_text = (
+        normalized.get("prompt_text")
+        or normalized.get("retrieval_text")
+        or normalized.get("text")
+        or normalized.get("content")
+        or normalized.get("snippet")
+        or ""
+    )
+    normalized["prompt_text"] = retrieval_text
+    if not normalized.get("snippet"):
+        normalized["snippet"] = snippet_builder(retrieval_text, query) if retrieval_text else ""
+    return normalized
+
+
+def filter_original_results(
+    results: list[dict[str, Any]],
+    *,
+    mode: str | None,
+    query: str,
+    snippet_builder: Callable[[str, str], str],
+) -> list[dict[str, Any]]:
+    """Normalize fresh/cache results, then apply the strict evidence gate.
+
+    Compat preserves every result but still rebuilds dual-field evidence from O.
+    Strict keeps verifiable originals; if hits exist but none is original, it raises
+    a structured needs-rebuild state instead of returning a misleading empty list.
     """
+    normalized = [
+        normalize_result_for_evidence(
+            item,
+            query=query,
+            mode=mode,
+            snippet_builder=snippet_builder,
+        )
+        for item in results
+    ]
     if normalize_mode(mode) == COMPAT:
-        return list(results)
-    originals = [item for item in results if is_original_result(item)]
-    if results and not originals:
+        return normalized
+    originals = [item for item in normalized if is_original_result(item)]
+    if normalized and not originals:
         document_ids = [
-            str(item.get("document_id") or item.get("documentId") or "") for item in results
+            str(item.get("document_id") or item.get("documentId") or "") for item in normalized
         ]
         raise SourceProvenanceUnavailableError(
             [document_id for document_id in document_ids if document_id],
-            unverified_count=len(results),
+            unverified_count=len(normalized),
         )
     return originals

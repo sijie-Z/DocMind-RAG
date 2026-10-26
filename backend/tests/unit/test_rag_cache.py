@@ -162,4 +162,4 @@ class TestSemanticCacheOrgIsolation:
 
         await cache.set("query", embedding, "answer", [], organization_id=7)
 
-        assert any(key.startswith("rag:sem:v2:org:7:") for key in fake.values)
+        assert any(key.startswith("rag:sem:v3:compat:org:7:") for key in fake.values)

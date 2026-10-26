@@ -437,15 +437,17 @@ class TestChainWiring:
 class TestModeScopedCache:
     """覆盖仅作用于该请求：缓存按模式分域（不借位、不污染）。"""
 
-    def test_exact_key_auto_is_v2_and_forced_is_scoped(self):
+    def test_exact_key_auto_is_v3_compat_and_forced_is_scoped(self):
         from app.rag.cache import RetrievalCache
 
         cache = RetrievalCache()
-        # PR2：自动/显式模式统一带正文契约版本；v1 不再读取。
-        assert cache._key("Q", 2, 10) == "org=2|topk=10|prov=v2|q=q"
-        assert cache._key("Q", 2, 10, None) == "org=2|topk=10|prov=v2|q=q"
+        # R2：自动/显式模式统一带 schema 与 provenance mode；v1/v2 不再读取。
+        assert cache._key("Q", 2, 10) == "org=2|topk=10|prov=v3|prov_mode=compat|q=q"
+        assert cache._key("Q", 2, 10, None) == "org=2|topk=10|prov=v3|prov_mode=compat|q=q"
         # 显式模式分域且互不相同
-        assert cache._key("Q", 2, 10, "vector") == ("org=2|topk=10|mode=vector|prov=v2|q=q")
+        assert cache._key("Q", 2, 10, "vector") == (
+            "org=2|topk=10|mode=vector|prov=v3|prov_mode=compat|q=q"
+        )
         keys = {cache._key("Q", 2, 10, m) for m in ("vector", "keyword", "hybrid")} | {
             cache._key("Q", 2, 10)
         }

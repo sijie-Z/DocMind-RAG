@@ -80,9 +80,14 @@ def _source_filename(hit: dict[str, Any]) -> str:
     return (hit.get("_source") or {}).get("filename", "未知")
 
 
-def _gate_source_provenance(results: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Apply one strict gate to fresh, exact-cache, and semantic-cache results."""
-    return filter_original_results(results, mode=settings.RAG_SOURCE_PROVENANCE_MODE)
+def _gate_source_provenance(results: list[dict[str, Any]], *, query: str) -> list[dict[str, Any]]:
+    """Normalize evidence from O, then apply the same strict gate everywhere."""
+    return filter_original_results(
+        results,
+        mode=settings.RAG_SOURCE_PROVENANCE_MODE,
+        query=query,
+        snippet_builder=HybridRetriever._build_snippet,
+    )
 
 
 class RAGPipeline:
@@ -172,14 +177,25 @@ class RAGPipeline:
                 RAG_RETRIEVAL_UNAVAILABLE.labels(state="failed").inc()
                 raise RetrievalUnavailableError(f"知识库索引不可用，检索已拒绝：{index_error}")
 
+            # SemanticCache 是轻量命名空间配置；真实实例按本次 mode 选择，
+            # 测试替身/自定义实现保持原对象。避免 strict 子集写入 compat 域。
+            if isinstance(self.semantic_cache, SemanticCache):
+                self.semantic_cache = SemanticCache.for_retrieval(
+                    settings.RAG_SOURCE_PROVENANCE_MODE
+                )
+
             # Exact cache (skip for document-specific queries)
             if not document_ids:
                 cached = await self.cache.get(
-                    query, organization_id, top_k, search_mode=search_mode
+                    query,
+                    organization_id,
+                    top_k,
+                    search_mode=search_mode,
+                    provenance_mode=settings.RAG_SOURCE_PROVENANCE_MODE,
                 )
                 if cached is not None:
                     # v2 cache still needs the same strict gate as a fresh result.
-                    cached = _gate_source_provenance(cached)
+                    cached = _gate_source_provenance(cached, query=query)
                     RAG_CACHE_HITS.labels(cache_type="exact").inc()
                     self.metrics.inc("cache_hit")
                     self.metrics.record_event("cache_hit", 1)
@@ -200,7 +216,13 @@ class RAGPipeline:
                         debug_info["cache"] = {
                             "cache_type": "exact",
                             "hit": True,
-                            **self.cache.describe_key(query, organization_id, top_k, search_mode),
+                            **self.cache.describe_key(
+                                query,
+                                organization_id,
+                                top_k,
+                                search_mode,
+                                provenance_mode=settings.RAG_SOURCE_PROVENANCE_MODE,
+                            ),
                         }
                     return cached, debug_info
                 RAG_CACHE_MISSES.inc()
@@ -239,7 +261,9 @@ class RAGPipeline:
                         hit_info=sem_meta,
                     )
                     if sem_cached:
-                        cached_sources = _gate_source_provenance(sem_cached.get("sources", []))
+                        cached_sources = _gate_source_provenance(
+                            sem_cached.get("sources", []), query=query
+                        )
                         RAG_CACHE_HITS.labels(cache_type="semantic").inc()
                         self.metrics.inc("semantic_cache_hit")
                         self.metrics.inc("cache_hit")
@@ -257,6 +281,7 @@ class RAGPipeline:
                                 top_k,
                                 cached_sources,
                                 search_mode=search_mode,
+                                provenance_mode=settings.RAG_SOURCE_PROVENANCE_MODE,
                             )
                         if debug and debug_info is not None:
                             debug_info["cache_hit"] = True
@@ -530,7 +555,7 @@ class RAGPipeline:
             # 评分、重排、doc-cap/top-k 均已按 E 完成；strict 只在证据出口
             # 过滤 legacy，绝不把「未迁移」伪装成正常空结果或写入 cache。
             before_provenance_gate = len(result)
-            result = _gate_source_provenance(result)
+            result = _gate_source_provenance(result, query=query)
             if debug and debug_info is not None:
                 debug_info["source_provenance"] = {
                     "mode": settings.RAG_SOURCE_PROVENANCE_MODE,
@@ -549,7 +574,14 @@ class RAGPipeline:
             cache_safe = not failures and not degraded_reasons and not rerank_degraded
             if not document_ids and result and cache_safe:
                 # issue #225 决策 7A：精确缓存键带模式段（None=自动路由，键与修前逐字节相同）。
-                await self.cache.set(query, organization_id, top_k, result, search_mode=search_mode)
+                await self.cache.set(
+                    query,
+                    organization_id,
+                    top_k,
+                    result,
+                    search_mode=search_mode,
+                    provenance_mode=settings.RAG_SOURCE_PROVENANCE_MODE,
+                )
             # 语义缓存写入与读侧同一原则：显式模式一律不写（`not search_mode` 守卫）。
             # 缺它时 vector/hybrid 臂回传的非空 qv 会经上面回填的 query_vector 让本
             # 条件变真——强制模式的结果会被写进组织级语义缓存，随后同 query 的自动
@@ -659,7 +691,7 @@ class RAGPipeline:
             )
 
         # 防御性兜底：直接调用 chat_stream 时也不能绕开 strict provenance gate。
-        context = _gate_source_provenance(context)
+        context = _gate_source_provenance(context, query=query)
         masking_enabled = enable_masking and getattr(settings, "ENABLE_PII_MASKING", False)
         from app.services.masking_service import masking_service
 

@@ -92,12 +92,12 @@ class TestSemanticCacheNamespaceIsolation:
         from app.rag.pipeline import RAGPipeline
 
         pipeline = RAGPipeline()
-        assert pipeline.semantic_cache.prefix == SemanticCache.RETRIEVAL_PREFIX
+        assert pipeline.semantic_cache.prefix == SemanticCache.for_retrieval().prefix
         assert pipeline.semantic_cache.prefix != SemanticCache().prefix
         assert pipeline.semantic_cache.index_key != SemanticCache().index_key
 
     @pytest.mark.asyncio
-    async def test_v1_exact_and_semantic_namespaces_are_not_read(self, monkeypatch):
+    async def test_v1_v2_exact_and_semantic_namespaces_are_not_read(self, monkeypatch):
         fake = _FakeRedis()
         monkeypatch.setattr("app.rag.cache._get_redis", lambda: fake)
         monkeypatch.setattr("app.rag.cache.settings.RAG_ENABLE_CACHE", True)
@@ -106,16 +106,20 @@ class TestSemanticCacheNamespaceIsolation:
 
         old_query = "v1-only-query-20261027"
         old_exact_key = f"rag:cache:org=3|topk=5|q={old_query}"
+        old_v2_exact_key = f"rag:cache:org=3|topk=5|prov=v2|q={old_query}"
         fake.values[old_exact_key] = json.dumps([{"text": "legacy mixed"}])
+        fake.values[old_v2_exact_key] = json.dumps([{"text": "legacy mixed v2"}])
         assert await RetrievalCache().get(old_query, 3, 5) is None
 
         embedding = [0.1] * 32
         answer_cache = SemanticCache()
         retrieval_cache = SemanticCache.for_retrieval()
-        old_keys = {old_exact_key}
+        old_keys = {old_exact_key, old_v2_exact_key}
         for cache, prefix, index_key in (
             (answer_cache, "rag:sem:", "rag:semantic_index"),
+            (answer_cache, "rag:sem:v2:", "rag:semantic_index:v2"),
             (retrieval_cache, "rag:sem:retrieval:", "rag:semantic_index:retrieval"),
+            (retrieval_cache, "rag:sem:retrieval:v2:", "rag:semantic_index:retrieval:v2"),
         ):
             old_key = f"{prefix}org:3:{cache._hash_key(embedding)}"
             old_keys.add(old_key)
@@ -174,7 +178,7 @@ class TestSharedRetrievalCacheInvalidation:
 
         serving = RetrievalCache()
         await serving.set("缓存查询2", 9, 5, [{"text": "旧内容"}])
-        assert "rag:cache:org=9|topk=5|prov=v2|q=缓存查询2" in fake.values
+        assert "rag:cache:org=9|topk=5|prov=v3|prov_mode=compat|q=缓存查询2" in fake.values
 
         await RetrievalCache().clear_for_org(9)
 

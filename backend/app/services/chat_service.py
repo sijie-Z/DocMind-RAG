@@ -20,14 +20,15 @@ from app.models.prompt import PromptTemplate
 from app.rag.cache import SemanticCache
 from app.rag.errors import LLMNotConfiguredError, RetrievalUnavailableError
 from app.rag.pipeline import no_context_system_prompt
+from app.rag.retriever import HybridRetriever
 from app.rag.source_provenance import (
     PARSER_ORIGINAL,
     STRICT,
     SourceProvenanceUnavailableError,
     normalize_mode,
+    normalize_result_for_evidence,
     normalize_source_metadata,
     provenance_of,
-    sources_have_unverified,
 )
 from app.services.chat_seq import next_message_seq
 from app.services.memory_service import get_memory_system
@@ -98,14 +99,12 @@ def _provenance_error_event(
 
 
 def _cached_answer_provenance_blocked(cached_res: dict) -> bool:
-    """A cached answer may already contain legacy text, so strict rejects the whole entry."""
-    if normalize_mode(settings.RAG_SOURCE_PROVENANCE_MODE) != STRICT:
-        return False
-    sources = cached_res.get("sources") or []
-    return sources_have_unverified(sources)
+    """Strict disables answer cache: snippets cannot prove the whole answer used only O."""
+    _ = cached_res  # 保留小 helper 便于调用点与测试共用同一策略。
+    return normalize_mode(settings.RAG_SOURCE_PROVENANCE_MODE) == STRICT
 
 
-def build_sources_list(context_results: list[dict]) -> list[dict]:
+def build_sources_list(context_results: list[dict], *, query: str = "") -> list[dict]:
     """把检索结果转为前端来源卡片契约。
 
     issue #185：分数必须**可证伪**——
@@ -119,15 +118,20 @@ def build_sources_list(context_results: list[dict]) -> list[dict]:
     sources = []
     provenance_mode = normalize_mode(settings.RAG_SOURCE_PROVENANCE_MODE)
     for idx, r in enumerate(context_results, 1):
+        r = normalize_result_for_evidence(
+            r,
+            query=query,
+            mode=provenance_mode,
+            snippet_builder=HybridRetriever._build_snippet,
+        )
         relevance = r.get("relevance_score")
         text_provenance = provenance_of(r)
         if text_provenance == PARSER_ORIGINAL:
-            # Never fall back to E merely because an O snippet was not provided.
-            content = r.get("snippet") or (r.get("original_text") or "")[:240]
+            content = r["snippet"]
         elif provenance_mode == STRICT:
             content = ""
         else:
-            content = r.get("snippet") or (r.get("text", "")[:240])
+            content = r.get("snippet") or ""
         sources.append(
             {
                 "filename": r.get("filename", "未知文档"),
@@ -417,7 +421,9 @@ async def run_rag_pipeline(
     # get 仍要求查询文本通过条号/数字/实体等价判定；关闭时连 embedding 都不算。
     # 测试替身（_ExplodingSemanticCache / _RecordingSemanticCache）无 enabled
     # 属性 → 按原有行为参与（getattr 默认 True）。
-    sem_cache_active = bool(getattr(_semantic_cache, "enabled", True))
+    sem_cache_active = bool(getattr(_semantic_cache, "enabled", True)) and (
+        normalize_mode(settings.RAG_SOURCE_PROVENANCE_MODE) != STRICT
+    )
     if not active_doc_ids and not strict_mode and sem_cache_active:
         query_vector = await rag_service.get_embedding(user_content)
         if query_vector:
@@ -618,7 +624,7 @@ async def run_rag_pipeline(
             )
         )
 
-    sources_list = build_sources_list(context_results)
+    sources_list = build_sources_list(context_results, query=user_content)
     if retrieval_unavailable is None:
         # 故障态不是「回答未命中来源」：不污染 groundedness 质量口径（issue #292），
         # 可用性口径由 RAG_RETRIEVAL_UNAVAILABLE 指标承担。
@@ -767,6 +773,7 @@ async def run_rag_pipeline(
     if (
         not active_doc_ids
         and not strict_mode
+        and normalize_mode(settings.RAG_SOURCE_PROVENANCE_MODE) != STRICT
         and query_vector is not None
         and retrieval_unavailable
         is None  # issue #292：故障态答案绝不写问答缓存（否则故障形态被固化 3600s）
