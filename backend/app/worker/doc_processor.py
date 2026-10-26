@@ -294,13 +294,15 @@ class DocumentProcessor:
             return DEFERRED
         except Exception as e:
             logger.error("[DOC_PROC] failed document_id=%s: %s", document_id, e, exc_info=True)
-            preserve_indexed = getattr(
-                doc, "_reprocess_previous_status", None
-            ) == DocumentStatus.INDEXED and not getattr(doc, "_es_delete_started", False)
+            preserve_indexed = (
+                getattr(doc, "_reprocess_previous_status", None) == DocumentStatus.INDEXED
+                and not getattr(doc, "_db_chunks_committed", False)
+                and not getattr(doc, "_es_delete_started", False)
+            )
             if preserve_indexed:
                 logger.info(
-                    "[DOC_PROC] rebuild failed before ES delete; restoring INDEXED "
-                    "document_id=%s job_id=%s",
+                    "[DOC_PROC] rebuild failed before DB chunk commit and ES delete; "
+                    "restoring INDEXED document_id=%s job_id=%s",
                     document_id,
                     job_id,
                 )
@@ -368,11 +370,12 @@ class DocumentProcessor:
                 )
                 return STALE_RUN
 
-            # 仅本次 run 的瞬态上下文，不落库/不改迁移。PARSING 前的状态
-            # 决定 ES delete 尚未开始时失败是否应恢复最后可用版本。
+            # 仅本次 run 的瞬态上下文，不落库/不改迁移。只有 DB chunk 替换
+            # 尚未提交且 ES delete 尚未开始时，失败才可恢复最后可用版本。
             doc._reprocess_previous_status = (
                 doc.status if job is not None and job.trigger_type == "reprocess" else None
             )
+            doc._db_chunks_committed = False
             doc._es_delete_started = False
             doc.status = DocumentStatus.PARSING
             doc.parse_error = None
@@ -489,24 +492,69 @@ class DocumentProcessor:
             await session.execute(delete(DocumentChunk).where(DocumentChunk.document_id == doc.id))
             session.add_all(chunk_rows)
             await session.commit()
+            # 旧 DB chunks 已不可恢复。此后的任何失败都只能收敛为 FAILED，
+            # 不得把「旧 ES + 新 DB」重新标成代表旧版可检索的 INDEXED。
+            doc._db_chunks_committed = True
 
         await create_index_if_not_exists()
         client = await get_elasticsearch()
-        # 在调用前记录阶段边界；delete 开始后的 bulk/verify/切换失败不在
-        # 本阶段旧版保留承诺内，仍按现有 FAILED 语义收敛。
+        # delete 开始后的失败不在本阶段旧版保留承诺内。响应没有异常并不
+        # 等于删除成功：false/空响应、shard failures、超时都必须 fail closed。
         doc._es_delete_started = True
-        await client.delete_by_query(
+        delete_response = await client.delete_by_query(
             index=settings.ELASTICSEARCH_INDEX_NAME,
             query={"term": {"document_id": doc.id}},
             refresh=True,
         )
+        if not delete_response:
+            raise RuntimeError(f"ES delete failed for document {doc.id}: empty/false response")
+        try:
+            failures = delete_response.get("failures") or []
+            shards = delete_response.get("_shards") or {}
+            shard_failures = shards.get("failures") or []
+            failed_shards = int(shards.get("failed", 0) or 0)
+            timed_out = bool(delete_response.get("timed_out", False))
+        except (AttributeError, TypeError, ValueError) as e:
+            raise RuntimeError(
+                f"ES delete failed for document {doc.id}: unreadable response"
+            ) from e
+        if failures or shard_failures or failed_shards or timed_out:
+            raise RuntimeError(
+                f"ES delete failed for document {doc.id}: failures={failures!r}, "
+                f"shard_failures={shard_failures!r}, failed_shards={failed_shards}, "
+                f"timed_out={timed_out}"
+            )
+
+        # 即使响应看似成功，也必须在 bulk 前回读确认旧 chunk 已清零；否则
+        # 「部分删除 + 部分 bulk」可能碰巧达到预期总数并混入旧版。
+        remaining_response = await client.count(
+            index=settings.ELASTICSEARCH_INDEX_NAME,
+            query={"term": {"document_id": doc.id}},
+        )
+        try:
+            remaining = int(remaining_response.get("count"))
+        except (AttributeError, TypeError, ValueError) as e:
+            raise RuntimeError(
+                f"ES delete verification failed for document {doc.id}: unreadable count"
+            ) from e
+        if remaining:
+            raise RuntimeError(
+                f"ES delete verification failed for document {doc.id}: "
+                f"{remaining} old chunk(s) remain"
+            )
+
         await ElasticsearchTools.bulk_index_documents(es_docs)
         # 回读确认把「INDEXED ⟹ 可检索」变成可执行断言（issue #181；
         # bulk 的 raise_on_error 只防部分失败，不能代替这条断言——
         # 完整说明见 document_status.verify_indexed 的 docstring；
-        # 校验范围在 #224 加严：embedding 有效性与 organization_id 一致性）
+        # 校验范围在 #224 加严：embedding 有效性与 organization_id 一致性）。
+        # 替换成功还必须精确匹配条数且所有 chunk 完整可检索，不能只 warning。
         await _verify_indexed(
-            client, doc.id, len(es_docs), organization_id=str(doc.organization_id)
+            client,
+            doc.id,
+            len(es_docs),
+            organization_id=str(doc.organization_id),
+            require_complete=True,
         )
 
         # 替换成功后按组织清空 RAG 缓存，避免旧内容仍命中缓存

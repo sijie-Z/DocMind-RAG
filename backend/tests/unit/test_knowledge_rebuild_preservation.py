@@ -55,14 +55,32 @@ class FakeES:
         }
         self.docs = {"old-es-id": old_source}
         self.delete_calls = []
+        self.bulk_calls = []
+        self.delete_fault = None
         self.indices = self
 
     async def delete_by_query(self, *, index, query, refresh):
         self.delete_calls.append({"index": index, "query": deepcopy(query)})
+        if self.delete_fault == "exception":
+            raise RuntimeError("delete exploded")
         doomed = [key for key, source in self.docs.items() if _matches(source, query)]
-        for key in doomed:
-            self.docs.pop(key)
-        return {"failures": [], "deleted": len(doomed)}
+        if self.delete_fault != "partial":
+            for key in doomed:
+                self.docs.pop(key)
+        deleted = 0 if self.delete_fault == "partial" else len(doomed)
+        if self.delete_fault == "false":
+            return False
+        if self.delete_fault == "failures":
+            return {"failures": [{"cause": "injected shard failure"}], "deleted": deleted}
+        if self.delete_fault == "shard_failures":
+            return {
+                "failures": [],
+                "deleted": deleted,
+                "_shards": {"total": 2, "successful": 1, "failed": 1},
+            }
+        if self.delete_fault == "timed_out":
+            return {"failures": [], "deleted": deleted, "timed_out": True}
+        return {"failures": [], "deleted": deleted}
 
     async def search(self, *, index, query):
         sources = [source for source in self.docs.values() if _matches(source, query)]
@@ -163,14 +181,30 @@ def _make_processor(monkeypatch):
     return processor
 
 
-def _wire_bulk(monkeypatch, fake_es, error=None):
+def _wire_bulk(monkeypatch, fake_es, error=None, limit=None, drop_embedding=False):
     async def fake_bulk(es_docs):
+        fake_es.bulk_calls.append(deepcopy(es_docs))
         if error is not None:
             raise error
-        for item in es_docs:
-            fake_es.docs[item["_id"]] = deepcopy(item["_source"])
+        docs_to_write = es_docs if limit is None else es_docs[:limit]
+        for item in docs_to_write:
+            source = deepcopy(item["_source"])
+            if drop_embedding and item is docs_to_write[-1]:
+                source.pop("embedding")
+            fake_es.docs[item["_id"]] = source
 
     monkeypatch.setattr(dp_mod.ElasticsearchTools, "bulk_index_documents", fake_bulk)
+
+
+def _wire_parse_and_embedding(monkeypatch, processor):
+    async def parse_ok(*args):
+        return {"chunks": deepcopy(NEW_CHUNKS)}
+
+    async def embed_ok(texts):
+        return [[0.3, 0.4] for _ in texts]
+
+    monkeypatch.setattr(processor.parser, "parse_document", parse_ok)
+    monkeypatch.setattr(processor, "_get_embeddings", embed_ok)
 
 
 async def _search_texts(fake_es):
@@ -294,29 +328,133 @@ async def test_successful_rebuild_exposes_only_new_version(session_factory, fake
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("fault", ["bulk", "verify", "count", "embedding"])
 async def test_failure_after_es_delete_keeps_existing_failure_semantics(
-    session_factory, fake_es, monkeypatch
+    session_factory, fake_es, monkeypatch, fault
 ):
-    """Bulk failure is explicitly outside this phase's old-version guarantee."""
+    """Post-delete indexing failures converge to FAILED, never partial SUCCESS."""
     await _seed_indexed_version(session_factory)
     job_id = await _submit_rebuild(session_factory, monkeypatch)
     processor = _make_processor(monkeypatch)
-    _wire_bulk(monkeypatch, fake_es, RuntimeError("bulk failed after delete"))
+    if fault == "bulk":
+        _wire_bulk(monkeypatch, fake_es, RuntimeError("bulk failed after delete"))
+    elif fault == "count":
+        _wire_bulk(monkeypatch, fake_es, limit=1)
+    elif fault == "embedding":
+        _wire_bulk(monkeypatch, fake_es, drop_embedding=True)
+    else:
+        _wire_bulk(monkeypatch, fake_es)
+        monkeypatch.setattr(
+            dp_mod,
+            "_verify_indexed",
+            AsyncMock(side_effect=RuntimeError("verify unavailable")),
+        )
+    _wire_parse_and_embedding(monkeypatch, processor)
 
-    async def parse_ok(*args):
-        return {"chunks": deepcopy(NEW_CHUNKS)}
+    result = await processor.process(DOC_ID, job_id)
 
-    async def embed_ok(texts):
-        return [[0.3, 0.4] for _ in texts]
-
-    monkeypatch.setattr(processor.parser, "parse_document", parse_ok)
-    monkeypatch.setattr(processor, "_get_embeddings", embed_ok)
-
-    assert await processor.process(DOC_ID, job_id) is False
-
-    doc, job, _ = await _load_state(session_factory, job_id)
+    doc, job, chunks = await _load_state(session_factory, job_id)
+    texts = await _search_texts(fake_es)
+    expected_error = {
+        "bulk": "bulk failed after delete",
+        "verify": "verify unavailable",
+        "count": "索引校验失败",
+        "embedding": "可检索性不完整",
+    }[fault]
+    expected_es = {
+        "bulk": [],
+        "verify": [chunk["chunk_text"] for chunk in NEW_CHUNKS],
+        "count": [NEW_CHUNKS[0]["chunk_text"]],
+        "embedding": [chunk["chunk_text"] for chunk in NEW_CHUNKS],
+    }[fault]
+    assert result is False, f"{fault} was reported as success; ES texts={texts}"
     assert len(fake_es.delete_calls) == 1
     assert doc.status == DocumentStatus.FAILED
+    assert expected_error in doc.parse_error
     assert job.status == KnowledgeJobStatus.FAILED
-    assert "bulk failed after delete" in job.error_message
-    assert await _search_texts(fake_es) == []
+    assert expected_error in job.error_message
+    assert [row.chunk_text for row in chunks] == [chunk["chunk_text"] for chunk in NEW_CHUNKS]
+    assert texts == expected_es
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("fault", ["create_index", "get_client"])
+async def test_post_commit_es_initialization_failure_cannot_restore_indexed(
+    session_factory, fake_es, monkeypatch, fault
+):
+    """Real SQLite proves the DB was replaced before this post-commit failure."""
+    await _seed_indexed_version(session_factory)
+    original_es = deepcopy(fake_es.docs)
+    job_id = await _submit_rebuild(session_factory, monkeypatch)
+    processor = _make_processor(monkeypatch)
+    _wire_bulk(monkeypatch, fake_es)
+    _wire_parse_and_embedding(monkeypatch, processor)
+    error_message = f"{fault} failed after DB commit"
+    if fault == "create_index":
+        monkeypatch.setattr(
+            dp_mod,
+            "create_index_if_not_exists",
+            AsyncMock(side_effect=RuntimeError(error_message)),
+        )
+    else:
+        monkeypatch.setattr(
+            dp_mod,
+            "get_elasticsearch",
+            AsyncMock(side_effect=RuntimeError(error_message)),
+        )
+
+    result = await processor.process(DOC_ID, job_id)
+
+    doc, job, chunks = await _load_state(session_factory, job_id)
+    assert result is False
+    assert [row.chunk_text for row in chunks] == [chunk["chunk_text"] for chunk in NEW_CHUNKS], (
+        "fault injection must happen after the real SQLite chunk commit"
+    )
+    assert fake_es.docs == original_es
+    assert fake_es.delete_calls == []
+    assert doc.status == DocumentStatus.FAILED, (
+        "the DB no longer contains the old version; old ES + new DB must not be INDEXED"
+    )
+    assert doc.parse_error == error_message
+    assert job.status == KnowledgeJobStatus.FAILED
+    assert job.error_message == error_message
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("fault", "expected_error"),
+    [
+        ("exception", "delete exploded"),
+        ("false", "empty/false response"),
+        ("failures", "failures="),
+        ("shard_failures", "failed_shards=1"),
+        ("timed_out", "timed_out=True"),
+        ("partial", "1 old chunk(s) remain"),
+    ],
+)
+async def test_delete_faults_never_report_success_or_mix_versions(
+    session_factory, fake_es, monkeypatch, fault, expected_error
+):
+    """Delete exceptions, false/failed responses, and partial deletion all fail closed."""
+    await _seed_indexed_version(session_factory)
+    job_id = await _submit_rebuild(session_factory, monkeypatch)
+    processor = _make_processor(monkeypatch)
+    # partial 同时限制 bulk 为 1 条：旧版 1 + 新版 1 恰好等于预期总数 2，
+    # 因而能证伪「只做最终条数校验就足够」的实现。
+    _wire_bulk(monkeypatch, fake_es, limit=1 if fault == "partial" else None)
+    _wire_parse_and_embedding(monkeypatch, processor)
+    fake_es.delete_fault = fault
+
+    result = await processor.process(DOC_ID, job_id)
+
+    doc, job, chunks = await _load_state(session_factory, job_id)
+    texts = await _search_texts(fake_es)
+    assert result is False, f"{fault} was reported as success; ES texts={texts}"
+    assert doc.status == DocumentStatus.FAILED
+    assert expected_error in doc.parse_error
+    assert job.status == KnowledgeJobStatus.FAILED
+    assert expected_error in job.error_message
+    assert [row.chunk_text for row in chunks] == [chunk["chunk_text"] for chunk in NEW_CHUNKS]
+    assert fake_es.bulk_calls == [], "an unconfirmed delete must not be followed by bulk"
+    expected_es = [OLD_TEXT] if fault in {"exception", "partial"} else []
+    assert texts == expected_es

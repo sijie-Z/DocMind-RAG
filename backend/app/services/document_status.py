@@ -24,7 +24,14 @@ from app.models.document import Document, DocumentStatus
 logger = logging.getLogger(__name__)
 
 
-async def verify_indexed(client, document_id: str, expected: int, *, organization_id: str) -> int:
+async def verify_indexed(
+    client,
+    document_id: str,
+    expected: int,
+    *,
+    organization_id: str,
+    require_complete: bool = False,
+) -> int:
     """确认该文档的 chunk **真的**能被检索到；不能就抛错。
 
     三条不变式（issue #181 / #224）——「状态 = INDEXED」必须意味着文档可被检索：
@@ -49,6 +56,10 @@ async def verify_indexed(client, document_id: str, expected: int, *, organizatio
     「状态 = INDEXED ⟹ 这篇文档在 ES 里查得到」这条不变式，此前唯一的执行者是
     「bulk 库大概会抛错」这个假设。回读校验把它变成一条可执行的断言 ——
     库的行为变了、mapping 改了、将来有人把 bulk 换成别的写法，都不再能让它悄悄失效。
+
+    ``require_complete=True`` 用于文档替换成功路径：实际条数必须等于预期，
+    且每条 chunk 都必须带 embedding 并属于预期组织。部分写入或新旧混杂只能
+    失败，不能只留 warning 后仍由调用方写入 INDEXED/job SUCCESS。
 
     返回实际索引到的条数（便于调用方记录）。
     """
@@ -104,12 +115,23 @@ async def verify_indexed(client, document_id: str, expected: int, *, organizatio
         )
 
     if indexed != expected:
-        # 部分落库：文档确实可被检索到，但内容不完整。不阻断，但必须留痕。
+        if require_complete:
+            raise RuntimeError(
+                f"索引校验失败：文档 {document_id} 预期 {expected} 条 chunk，"
+                f"实际 {indexed} 条。拒绝把不完整或混杂的替换结果标记为已索引。"
+            )
+        # 非替换调用方保留既有留痕语义；worker 替换链必须 require_complete。
         logger.warning(
             "[DOC_STATE] 索引条数与预期不符 document_id=%s 预期=%d 实际=%d",
             document_id,
             expected,
             indexed,
+        )
+    if require_complete and (with_embedding != indexed or with_org != indexed):
+        raise RuntimeError(
+            f"索引校验失败：文档 {document_id} 的 chunk 可检索性不完整"
+            f"（总数={indexed}，带 embedding={with_embedding}，组织匹配={with_org}，"
+            f"预期={expected}）。拒绝把该文档标记为已索引。"
         )
     if with_embedding < indexed or with_org < indexed:
         # 部分 chunk 对某条检索引擎通道不可见：文档整体可检索（有带向量的、
