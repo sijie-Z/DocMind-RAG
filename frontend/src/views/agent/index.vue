@@ -255,7 +255,7 @@
                   class="plan-standalone execution-step-result"
                   data-testid="execution-step-result"
                 >
-                  <span class="plan-standalone-badge">步骤结果</span>
+                  <span class="plan-standalone-badge">{{ t('agent.stepResult') }}</span>
                   <span class="plan-standalone-text">{{ executionStepResultText(evt) }}</span>
                 </div>
                 <!-- Retry hint（issue #250 第 6 条收尾：事件此前只落 store 的

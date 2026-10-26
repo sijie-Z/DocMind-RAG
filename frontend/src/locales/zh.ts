@@ -886,6 +886,7 @@ export default {
 
   agent: {
     sessionSelectorLabel: '选择 Agent 会话',
+    stepResult: '步骤结果',
     newSessionOption: '+ 新建会话',
     untitledSession: '未命名',
     backToChat: '返回对话',
