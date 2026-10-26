@@ -30,6 +30,7 @@ from app.agent.executor import (
     Executor,
     _legacy_step_result_event,
 )
+from app.agent.final_synthesis import FinalInputPacket, FinalSynthesisResult, FinalSynthesizer
 from app.agent.memory_bridge import AgentMemoryBridge
 from app.agent.planner import Plan, Planner, PlanStep
 from app.agent.reflector import Reflector
@@ -251,6 +252,7 @@ class PERAgentLoop:
         self._executor: Executor | None = None
         self._reflector: Reflector | None = None
         self._reviewer: Reviewer | None = None
+        self._final_synthesizer: FinalSynthesizer | None = None
 
     @property
     def planner(self) -> Planner:
@@ -277,6 +279,12 @@ class PERAgentLoop:
         if self._reviewer is None:
             self._reviewer = Reviewer(self.client, self.config)
         return self._reviewer
+
+    @property
+    def final_synthesizer(self) -> FinalSynthesizer:
+        if self._final_synthesizer is None:
+            self._final_synthesizer = FinalSynthesizer(self.client, self.config)
+        return self._final_synthesizer
 
     def _should_continue_execution(self, final_output: str, plan, remaining_steps: list) -> bool:
         """Conditional edge: decide if execution should continue or proceed to reflection.
@@ -707,6 +715,7 @@ class PERAgentLoop:
         plan: Plan | None = None
         final_output = ""
         unified = ai_config.unified_final_enabled()
+        direct_unified = unified and not self.config.enable_tools
         # Hooks（issue #474）：turn_stopping deny 的次数（有界继续，见常量注释）。
         turn_stopping_denials = 0
 
@@ -925,65 +934,66 @@ class PERAgentLoop:
                                     len(skipped),
                                 )
             else:
-                # Tool-less mode: single LLM call
-                messages = self._build_messages(query, history, context_docs, memory_context)
-                llm_started = time.perf_counter()
-                llm_recorded = False
-                call_attempted = False
-                try:
-                    llm_client = self.client
-                    call_attempted = True
-                    response = await llm_client.chat.completions.create(
-                        model=self.config.get_deep_model(),
-                        messages=messages,
-                        temperature=self.config.temperature,
-                        max_tokens=self.config.max_tokens,
-                        timeout=self.config.timeout,
-                    )
-                    # issue #510 第一步：调用级 JSONL 与用量同入口（延迟/提示词摘要）
-                    record_llm_usage(
-                        response,
-                        ctx,
-                        latency_ms=(time.perf_counter() - llm_started) * 1000,
-                        messages=messages,
-                    )
-                    llm_recorded = True
-                    content = response.choices[0].message.content or ""
-                    if content:
-                        yield AgentEvent(type="chunk", content=content)
-                        pass_output = content
-                        if self.checkpoint_live is not None:
-                            self.checkpoint_live["partial_output"] = partial_prefix + pass_output
-                except Exception as e:
-                    # issue #301（批 A #11）：直接回答的 LLM 调用失败 = 本次 run
-                    # 零产出，不得再走"COMPLETED + clean_success=true"假成功链：
-                    # 失败进 ctx.failures（对齐 #293 范式：complete_step 是唯一
-                    # 写者 → run_report clean_success=False），并置 run_failed 标志
-                    # （service 收尾据此置任务 FAILED 而不是 COMPLETED）。
-                    if call_attempted and not llm_recorded:
-                        record_llm_call_error(
-                            ctx,
+                # Tool-less mode also uses the stage-2 final phase.  The legacy
+                # direct provider call remains only for the default-off path.
+                if unified:
+                    pass_output = ""
+                else:
+                    messages = self._build_messages(query, history, context_docs, memory_context)
+                    llm_started = time.perf_counter()
+                    llm_recorded = False
+                    call_attempted = False
+                    try:
+                        llm_client = self.client
+                        call_attempted = True
+                        response = await llm_client.chat.completions.create(
                             model=self.config.get_deep_model(),
-                            error=e,
+                            messages=messages,
+                            temperature=self.config.temperature,
+                            max_tokens=self.config.max_tokens,
+                            timeout=self.config.timeout,
+                        )
+                        # issue #510 第一步：调用级 JSONL 与用量同入口（延迟/提示词摘要）
+                        record_llm_usage(
+                            response,
+                            ctx,
                             latency_ms=(time.perf_counter() - llm_started) * 1000,
                             messages=messages,
                         )
-                    self.run_failed = True
-                    self.run_failure = f"LLM Error: {e}"
-                    ctx.complete_step(
-                        step_id="direct_llm",
-                        description="直接回答（无工具模式）",
-                        tool=None,
-                        status="failed",
-                        error=self.run_failure,
-                    )
-                    yield AgentEvent(type="error", content=f"LLM Error: {e}")
+                        llm_recorded = True
+                        content = response.choices[0].message.content or ""
+                        if content:
+                            yield AgentEvent(type="chunk", content=content)
+                            pass_output = content
+                            if self.checkpoint_live is not None:
+                                self.checkpoint_live["partial_output"] = partial_prefix + pass_output
+                    except Exception as e:
+                        # issue #301（批 A #11）：直接回答失败不得伪装成 COMPLETED。
+                        if call_attempted and not llm_recorded:
+                            record_llm_call_error(
+                                ctx,
+                                model=self.config.get_deep_model(),
+                                error=e,
+                                latency_ms=(time.perf_counter() - llm_started) * 1000,
+                                messages=messages,
+                            )
+                        self.run_failed = True
+                        self.run_failure = f"LLM Error: {e}"
+                        ctx.complete_step(
+                            step_id="direct_llm",
+                            description="直接回答（无工具模式）",
+                            tool=None,
+                            status="failed",
+                            error=self.run_failure,
+                        )
+                        yield AgentEvent(type="error", content=f"LLM Error: {e}")
 
             # 最终答案以最后一版计划的执行产出为准：replan 后旧计划的产出
             # 已被取代，不能再混进 record_interaction / run report。
             # resume 的 partial_prefix：拼一次，让重存/记录拿到完整回复
             # （崩溃前已流给用户的部分不会在 resume 流里重放，见最小版边界）。
-            final_output = partial_prefix + pass_output
+            # Unified mode never treats a local/partial prefix as final assistant text.
+            final_output = "" if unified else partial_prefix + pass_output
 
             # T3 checkpoint：一轮执行返回（覆盖 replan 交界）。partial_output
             # 与 final_output 同源——快照里的答案前缀永远是"当前这一版"的。
@@ -1057,7 +1067,12 @@ class PERAgentLoop:
             # ── Phase 3: Reflection ──────────────────────────────────────────
             # 预算已尽则跳过反思：不再为"评价结果"发起额外 LLM 调用（issue #203 ②）。
             replan_requested = False
-            if self.config.enable_reflection and plan.steps and not self.config.over_budget(ctx):
+            if (
+                self.config.enable_reflection
+                and plan.steps
+                and not direct_unified
+                and not self.config.over_budget(ctx)
+            ):
                 results = self.memory.get_all_results()
                 feedback_parts: list[str] = []
                 async for event in self.reflector.reflect(plan, results, ctx=ctx):
@@ -1232,8 +1247,58 @@ class PERAgentLoop:
             ):
                 yield end_event
             return
+
+        final_result: FinalSynthesisResult | None = None
+        final_packet: FinalInputPacket | None = None
+        if unified:
+            final_packet = FinalInputPacket.from_plan(
+                query,
+                plan,
+                context=memory_context,
+                history=history if direct_unified else None,
+                direct=direct_unified,
+            )
+            all_failed = (
+                self.config.enable_tools
+                and any(s.status == "failed" for s in plan.steps)
+                and not any(s.status == "completed" for s in plan.steps)
+            )
+            if all_failed:
+                # No provider call and no fabricated assistant body for a wholly
+                # failed execution.  Its already-established terminal state wins.
+                final_result = FinalSynthesisResult(
+                    status="all_steps_failed",
+                    error="all_steps_failed",
+                    legacy=final_packet.legacy,
+                    degraded=final_packet.degraded,
+                )
+                final_output = ""
+            else:
+                final_result = await self.final_synthesizer.synthesize(final_packet, ctx=ctx)
+                final_output = final_result.content if final_result.ok else ""
+                if not final_result.ok:
+                    self.run_failed = True
+                    self.run_failure = f"最终综合未完成: {final_result.status}"
+                    ctx.complete_step(
+                        step_id="final_synthesis",
+                        description="统一最终答案综合",
+                        tool=None,
+                        status="failed",
+                        error=final_result.status,
+                    )
+                    yield AgentEvent(
+                        type="error",
+                        content=f"最终综合未完成（{final_result.status}）",
+                    )
+            ctx.artifacts["final_synthesis"] = final_result.as_artifact()
+
         # 预算已尽则跳过对抗审查（同 Phase 3，issue #203 ②）。
-        if self.config.enable_reflection and plan.steps and not self.config.over_budget(ctx):
+        if (
+            self.config.enable_reflection
+            and plan.steps
+            and not self.config.over_budget(ctx)
+            and (not unified or (final_result is not None and final_result.ok))
+        ):
             results = self.memory.get_all_results()
             yield AgentEvent(
                 type="thinking",
@@ -1241,7 +1306,15 @@ class PERAgentLoop:
                 thinking_type="evaluation",
             )
             await _yield_control()
-            review = await self.reviewer.review(plan, results, ctx=ctx)
+            if unified:
+                review = await self.reviewer.review_final(
+                    final_packet,
+                    final_output,
+                    ctx=ctx,
+                    synthesis_messages=final_result.messages,
+                )
+            else:
+                review = await self.reviewer.review(plan, results, ctx=ctx)
             issues = review.get("issues_found", [])
             high_issues = [i for i in issues if i.get("severity") == "high"]
             # §5c：消费 recommendation（此前全仓零读取者）。取值收敛到
@@ -1259,7 +1332,7 @@ class PERAgentLoop:
             ):
                 recommendation = "error"
             else:
-                recommendation = "pass"
+                recommendation = "error" if unified else "pass"
             # 结构化记录：run report 读取；SSE 侧另经 decision 携带。
             ctx.artifacts["review"] = {
                 "recommendation": recommendation,
@@ -1319,10 +1392,11 @@ class PERAgentLoop:
                         "Adversarial review found %d high-severity issues", len(high_issues)
                     )
                     for issue in high_issues:
-                        final_output += (
-                            f"\n\n⚠️ **审查发现**: {issue.get('description', '')}\n"
-                            f"  建议: {issue.get('suggestion', '')}"
-                        )
+                        if not unified:
+                            final_output += (
+                                f"\n\n⚠️ **审查发现**: {issue.get('description', '')}\n"
+                                f"  建议: {issue.get('suggestion', '')}"
+                            )
                         yield AgentEvent(
                             type="thinking",
                             content=f"审查发现高风险问题: {issue.get('description', '')}",
@@ -1335,6 +1409,11 @@ class PERAgentLoop:
                         issue.get("severity", "unknown"),
                         issue.get("description", "")[:100],
                     )
+
+        # Exactly one assistant chunk, emitted only after final-draft review.
+        # No execution_step_result/local chunk is ever reused as final text.
+        if unified and final_result is not None and final_result.ok:
+            yield AgentEvent(type="chunk", content=final_output)
 
         # ── Phase 4: Store + Finalize ─────────────────────────────────────
         await self.memory.record_interaction(query, final_output)

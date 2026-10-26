@@ -19,6 +19,7 @@ from typing import Any
 from openai import AsyncOpenAI
 
 from app.agent.config import AgentConfig
+from app.agent.final_synthesis import FinalInputPacket
 from app.agent.planner import Plan
 from app.agent.usage import record_llm_call_error, record_llm_usage
 
@@ -61,6 +62,19 @@ REVIEWER_SYSTEM_PROMPT = """你是一个**对抗性质检专家**（Adversarial 
 
 ⚠️ 你是故意挑剔的——即使结果看起来很好，也要至少找出1-2个潜在风险点。
 """
+
+
+FINAL_REVIEWER_SYSTEM_PROMPT = """你是最终答案的对抗性质检专家。审查对象是最终草稿，
+事实材料是与 FinalSynthesizer 完全相同的原始 query、步骤终态和最终 attempt 证据。
+
+只挑错并返回结构化 verdict，不得重写、补写或返回修改后的 assistant 正文。重点检查：
+草稿是否回答原始请求、是否被局部结论带偏、是否遗漏失败/skipped 账目、是否存在
+证据不支持的断言、是否混淆相同 index 但不同 tool_call_id 的来源。
+
+审查不可用或输出不可解析都不是 pass。高严重度问题也只进入 issues_found，由调用方
+记录和暴露，绝不能追加进草稿。输出 JSON：overall_assessment、issues_found、
+key_strengths、recommendation（pass / revise / reject）。每个 issue 包含 severity、
+description、evidence、suggestion。"""
 
 
 class Reviewer:
@@ -109,6 +123,16 @@ class Reviewer:
             {"role": "system", "content": prompt},
             {"role": "user", "content": "请对上述执行结果进行对抗性质检。"},
         ]
+        return await self._review_messages(messages, goal=plan.goal, ctx=ctx)
+
+    async def _review_messages(
+        self,
+        messages: list[dict[str, str]],
+        *,
+        goal: str,
+        ctx=None,
+    ) -> dict[str, Any]:
+        """Common provider/parse path for legacy result review and final-draft review."""
         llm_started = time.perf_counter()
         llm_recorded = False
         try:
@@ -203,7 +227,7 @@ class Reviewer:
             logger.warning(
                 "Adversarial review: model output missing recommendation recorded as error "
                 "(error_kind=no_verdict), goal=%s",
-                plan.goal[:40],
+                goal[:40],
             )
 
         # issue #301 #9（评审 m3 尾款）：判定必须是**可用的非空字符串**。
@@ -224,18 +248,70 @@ class Reviewer:
                 "Adversarial review: model gave no usable recommendation "
                 "(error_kind=no_verdict, type=%s), goal=%s",
                 type(recommendation_value).__name__,
-                plan.goal[:40],
+                goal[:40],
             )
 
         issues_high = sum(1 for i in review_data["issues_found"] if i.get("severity") == "high")
         logger.info(
             "Review complete: %s, %d issues (%d high), recommendation=%s",
-            plan.goal[:40],
+            goal[:40],
             len(review_data["issues_found"]),
             issues_high,
             review_data["recommendation"],
         )
         return review_data
+
+    async def review_final(
+        self,
+        packet: FinalInputPacket,
+        draft: str,
+        ctx=None,
+        *,
+        synthesis_messages: list[dict[str, str]] | None = None,
+    ) -> dict[str, Any]:
+        """Review a final draft against the same packet/prompt evidence as synthesis.
+
+        The returned mapping is diagnostic only.  No code in this method mutates
+        ``draft`` or appends issues to it, including reject/revise/error outcomes.
+        """
+        if synthesis_messages:
+            evidence_prompt = "\n".join(
+                str(message.get("content", ""))
+                for message in synthesis_messages
+                if message.get("role") == "user"
+            )
+        else:
+            # Standalone callers still share the packet itself.  The loop passes
+            # synthesis_messages so trimming/accounting is byte-for-byte identical.
+            evidence_prompt = json.dumps(
+                {
+                    "query": packet.query,
+                    "plan_id": packet.plan_id,
+                    "goal": packet.goal,
+                    "steps": packet.steps,
+                    "context": packet.context,
+                    "history": packet.history,
+                    "legacy": packet.legacy,
+                    "degraded": packet.degraded,
+                },
+                ensure_ascii=False,
+                default=str,
+            )
+        messages = [
+            {"role": "system", "content": FINAL_REVIEWER_SYSTEM_PROMPT},
+            {
+                "role": "user",
+                "content": (
+                    "## 原始用户请求\n"
+                    f"{packet.query}\n\n"
+                    "## 与最终综合相同的输入\n"
+                    f"{evidence_prompt}\n\n"
+                    "## 待审查最终草稿（不得修改）\n"
+                    f"{draft}"
+                ),
+            },
+        ]
+        return await self._review_messages(messages, goal=packet.goal, ctx=ctx)
 
     def _build_results_summary(self, plan: Plan, results: dict[str, Any]) -> str:
         """Build a concise summary of execution results for the reviewer."""

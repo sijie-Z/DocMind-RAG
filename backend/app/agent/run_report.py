@@ -104,7 +104,7 @@ def build_run_report(ctx: ExecutionContext, final_output: str = "") -> dict[str,
         "clean_success": clean_success,
     }
 
-    return {
+    report = {
         "task_id": ctx.task_id,
         # issue #510 第二步：ID 语义贯通 —— task_id 一次 run / request_id 一次
         # HTTP 请求（与 X-Request-ID 同源）；与 SSE、llm_calls.jsonl、结构化日志
@@ -132,6 +132,23 @@ def build_run_report(ctx: ExecutionContext, final_output: str = "") -> dict[str,
         # issue #202 评审 minor-8：人读报告此前答不出"花了多少 token"
         "total_tokens": ctx.total_tokens,
     }
+    final_artifact = ctx.artifacts.get("final_synthesis")
+    if isinstance(final_artifact, dict):
+        # Final tokens are already included in total_tokens by record_llm_usage.
+        # This separate projection makes final-phase overhead attributable without
+        # adding prompt/completion bodies or changing the ten-field JSONL schema.
+        report["final_synthesis"] = {
+            "status": final_artifact.get("status") or "unknown",
+            "error": final_artifact.get("error"),
+            "tokens": final_artifact.get("tokens") or 0,
+            "latency_ms": final_artifact.get("latency_ms") or 0,
+            "included": final_artifact.get("included") or 0,
+            "truncated": final_artifact.get("truncated") or 0,
+            "omitted": final_artifact.get("omitted") or 0,
+            "legacy": bool(final_artifact.get("legacy")),
+            "degraded": bool(final_artifact.get("degraded")),
+        }
+    return report
 
 
 def _grade_hint(ctx: ExecutionContext) -> str:
@@ -186,6 +203,20 @@ def render_run_report_text(report: dict[str, Any]) -> str:
         lines.append(f"  FAILURE: {f}")
     for r in ev["reflect_decisions"]:
         lines.append(f"  - {r}")
+    final = report.get("final_synthesis")
+    if isinstance(final, dict):
+        lines.append("")
+        lines.append("## Final synthesis")
+        lines.append(f"  status: {final['status']}")
+        lines.append(f"  tokens: {final['tokens']}; latency_ms: {final['latency_ms']}")
+        lines.append(
+            "  evidence: "
+            f"included={final['included']}; truncated={final['truncated']}; "
+            f"omitted={final['omitted']}"
+        )
+        lines.append(f"  legacy: {final['legacy']}; degraded: {final['degraded']}")
+        if final.get("error"):
+            lines.append(f"  error: {final['error']}")
     lines.append("")
     lines.append("## Final output (preview)")
     lines.append(f"  {report['final_output_preview']}")
