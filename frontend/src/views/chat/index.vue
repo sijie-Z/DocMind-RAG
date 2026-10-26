@@ -135,11 +135,12 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, watch, nextTick } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount, watch, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useChatStore } from '@/stores/chat'
 import { useUserStore } from '@/stores/user'
+import { useAgentStore } from '@/stores/agent'
 import { useAppStore } from '@/stores/app'
 import { useDedupedMessage } from '@/utils/message'
 import { useConfirmDangerousAction } from '@/utils/confirm'
@@ -163,7 +164,26 @@ const route = useRoute()
 const router = useRouter()
 const chatStore = useChatStore()
 const userStore = useUserStore()
+const agentStore = useAgentStore()
 const appStore = useAppStore()
+
+// 复合异步 owner：页面 generation + #549 同步 identityEpoch；卸载另使旧页面永久失效。
+let conversationGeneration = 0
+let conversationViewActive = true
+const getConversationOwner = () => `${agentStore.identityEpoch}:${conversationGeneration}`
+const routeConversationId = () => {
+  const id = route.query.conversation_id
+  return typeof id === 'string' ? id : ''
+}
+const ownsConversationOwner = (owner: string, expectedRouteId?: string) => (
+  conversationViewActive
+  && owner === getConversationOwner()
+  && (expectedRouteId === undefined || routeConversationId() === expectedRouteId)
+)
+onBeforeUnmount(() => {
+  conversationViewActive = false
+  conversationGeneration += 1
+})
 
 const chatMessagesRef = ref()
 const msgLoadError = ref(false)
@@ -189,12 +209,19 @@ const {
 const {
   conversations, isListLoading, sidebarOpen, currentConversationId,
   fetchConversations, handleDeleteConversation, convLoadError
-} = useChatSessions()
+} = useChatSessions(getConversationOwner)
+
+const advanceConversationGeneration = () => {
+  conversationGeneration += 1
+  // 路由代次变化时，旧列表响应必须丢弃；仅在确有在途请求时补最新请求。
+  if (isListLoading.value) void fetchConversations()
+  return getConversationOwner()
+}
 
 const {
   sseStatus, useSSE, useStream, isLoading, isRetrieving,
-  effectiveConnectionStatus, connectWebSocket
-} = useChatConnection(messages, baseScrollToBottom, fetchConversations)
+  effectiveConnectionStatus, connectWebSocket, disconnectWebSocket
+} = useChatConnection(messages, baseScrollToBottom, fetchConversations, getConversationOwner)
 
 // E7：历史加载态与生成态分离 —— 切会话拉历史不再复用 isLoading（修前会误现
 // 「停止生成」按钮、生成 loading 与流式光标）。停止生成统一走 useChatSend 版本
@@ -233,11 +260,12 @@ const toggleDebug = () => {
 
 const {
   inputMessage, strictMode, privacyMode, handleSend: baseHandleSend, regenerateMessage,
-  stopGeneration
+  resetSendState, stopGeneration
 } = useChatSend(
   messages, attachedFiles, attachedFileIds,
   baseScrollToBottom, fetchConversations,
   isLoading, isRetrieving, sseStatus, useSSE, useStream, debugEnabled, debugData,
+  getConversationOwner,
 )
 
 // issue #508（方案 B）：深度分析（Agent/PER）只在 /agent 工作台提供（审批/计划
@@ -399,10 +427,45 @@ const checkScreenSize = () => {
 
 const toggleSidebar = () => appStore.toggleSidebar()
 
-const newConversation = () => {
+const resetConversationView = (reconnect = false) => {
+  advanceConversationGeneration()
+  resetSendState()
   messages.value = []
-  attachedFiles.value = []
+  isLoadingHistory.value = false
+  msgLoadError.value = false
   chatStore.setCurrentConversation(null)
+  // WS 后端在 body 无 ID 时会回退到连接 URL 的旧 ID；空白态必须重建连接。
+  if (reconnect && !useSSE.value) {
+    disconnectWebSocket()
+    void connectWebSocket()
+  }
+}
+
+const resetConversationForIdentity = () => {
+  // 不推进页面 generation：身份失效由同一 owner 中的 identityEpoch 独立判别。
+  resetSendState()
+  messages.value = []
+  conversations.value = []
+  attachedFiles.value = []
+  isLoadingHistory.value = false
+  msgLoadError.value = false
+  convLoadError.value = false
+  chatStore.setCurrentConversation(null)
+  disconnectWebSocket()
+  const owner = getConversationOwner()
+  // #549 在 login 提交 B userInfo 前先递增 epoch；B 请求等身份提交完成后再发。
+  void nextTick(() => {
+    if (!ownsConversationOwner(owner) || !userStore.isLoggedIn) return
+    if (!useSSE.value) void connectWebSocket()
+    void fetchConversations()
+  })
+}
+watch(() => agentStore.identityEpoch, resetConversationForIdentity, { flush: 'sync' })
+
+const newConversation = () => {
+  // 有 query 时由 watcher 统一重置；无 query 不会触发 watcher，需在此处理。
+  if (!route.query.conversation_id) resetConversationView(true)
+  attachedFiles.value = []
   router.push({ query: {} })
   if (window.innerWidth < 768) sidebarOpen.value = false
 }
@@ -416,12 +479,19 @@ const handleSelectConversation = async (conv: Conversation) => {
   if (window.innerWidth < 768) sidebarOpen.value = false
 }
 
-const loadConversation = async (id: string) => {
+const loadConversation = async (id: string, ownerGeneration?: string) => {
+  const generation = ownerGeneration ?? advanceConversationGeneration()
+  const ownsResponse = () => ownsConversationOwner(generation, id)
+  if (!ownsResponse()) return
+  resetSendState()
+  // 显式切换的 WS 也换 owner；初始深链由 onMounted 末尾统一连接，避免重复 socket。
+  if (ownerGeneration === undefined && !useSSE.value) disconnectWebSocket()
   // E7：历史加载用独立状态（isLoadingHistory），不再复用生成态 isLoading
   isLoadingHistory.value = true
   msgLoadError.value = false
   try {
     const res = await getConversationMessages(id)
+    if (!ownsResponse()) return
     if (res.data) {
       const rawData = res.data as unknown as Record<string, unknown>
       // 无权/会话不存在：HTTP 200 但 { success:false, message:"无权访问" }（chat.py:340）
@@ -450,11 +520,15 @@ const loadConversation = async (id: string) => {
       }))
     }
   } catch {
+    if (!ownsResponse()) return
     message.error(t('chat.historyFailed'))
     msgLoadError.value = true
   } finally {
-    isLoadingHistory.value = false
-    scrollToBottom('auto', true)
+    if (ownsResponse()) {
+      isLoadingHistory.value = false
+      if (ownerGeneration === undefined && !useSSE.value) void connectWebSocket()
+      scrollToBottom('auto', true)
+    }
   }
 }
 
@@ -465,8 +539,7 @@ const loadConversation = async (id: string) => {
 watch(() => route.query.conversation_id, (newId) => {
   const id = typeof newId === 'string' ? newId : ''
   if (!id) {
-    messages.value = []
-    chatStore.setCurrentConversation(null)
+    resetConversationView(true)
     return
   }
   if (id === chatStore.currentConversation?.id) return
@@ -571,14 +644,20 @@ const handleOpenSource = async (source: KnowledgeSource) => {
 onMounted(async () => {
   const token = userStore.token || getToken()
   if (!token) { router.push({ name: 'Login' }); return }
+  const conversationId = routeConversationId()
+  // 初始 query 仅是候选；每个 await 后都要重新核对当前路由与 generation。
+  if (conversationId) advanceConversationGeneration()
+  else resetConversationView()
+  const generation = getConversationOwner()
   checkScreenSize()
   window.addEventListener('resize', checkScreenSize)
   const handleResize = () => { windowWidth.value = window.innerWidth }
   window.addEventListener('resize', handleResize)
   void loadOrgPrivacyPolicy()
   await fetchConversations()
-  const conversationId = route.query.conversation_id as string
-  if (conversationId) await loadConversation(conversationId)
+  if (!ownsConversationOwner(generation, conversationId)) return
+  if (conversationId) await loadConversation(conversationId, generation)
+  if (!ownsConversationOwner(generation, conversationId)) return
 
   // URL 消费型参数一次性捕获 + 统一清理：prompt（提示词填入输入框）与
   // q/context（搜索「问问 AI」跨页上下文）用后即清；promptName 为旧链接
@@ -627,6 +706,7 @@ onMounted(async () => {
   if (!userStore.userInfo?.id) {
     try { await userStore.getUserInfo() } catch { /* 已登录但获取失败，仍尝试连接 */ }
   }
+  if (!ownsConversationOwner(generation, conversationId)) return
   if (userStore.token || getToken()) {
     connectWebSocket()
   }

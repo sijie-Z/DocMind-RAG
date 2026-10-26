@@ -10,7 +10,8 @@ import type { WebSocketMessage } from '@/utils/websocket'
 export function useChatConnection(
   messages: { value: ChatMessage[] },
   scrollToBottom: (_behavior?: ScrollBehavior, _force?: boolean) => void,
-  fetchConversations: () => Promise<void>
+  fetchConversations: () => Promise<void>,
+  getGeneration: () => string = () => '',
 ) {
   const message = useDedupedMessage()
   const { t } = useI18n()
@@ -30,6 +31,8 @@ export function useChatConnection(
   })
 
   const connectWebSocket = async () => {
+    const generation = getGeneration()
+    const ownsGeneration = () => generation === getGeneration()
     if (useSSE.value) return
     if (!userStore.isLoggedIn) return
 
@@ -37,25 +40,33 @@ export function useChatConnection(
     if (!userId || userId <= 0) {
       try {
         await userStore.getUserInfo()
+        if (!ownsGeneration()) return
         userId = userStore.userInfo?.id
         await new Promise(resolve => setTimeout(resolve, 100))
-      } catch (e) { return }
+        if (!ownsGeneration()) return
+      } catch { return }
     }
-    if (!userId || userId <= 0) return
+    if (!userId || userId <= 0 || !ownsGeneration()) return
 
     connectionStatus.value = 'connecting'
 
     wsService.off('connect'); wsService.off('disconnect'); wsService.off('error'); wsService.off('message'); wsService.off('chunk')
 
-    wsService.on('connect', () => { connectionStatus.value = 'connected' })
-    wsService.on('disconnect', () => { connectionStatus.value = 'disconnected' })
+    wsService.on('connect', () => {
+      if (ownsGeneration()) connectionStatus.value = 'connected'
+    })
+    wsService.on('disconnect', () => {
+      if (ownsGeneration()) connectionStatus.value = 'disconnected'
+    })
     wsService.on('error', (data: WebSocketMessage) => {
+      if (!ownsGeneration()) return
       connectionStatus.value = 'error'
       if (data.content) message.error(data.content)
       isLoading.value = false
     })
 
     wsService.on('chunk', (data: WebSocketMessage) => {
+      if (!ownsGeneration()) return
       isRetrieving.value = false
       if (data.conversationId && (!chatStore.currentConversation || chatStore.currentConversation.id !== data.conversationId)) {
         chatStore.setCurrentConversation({
@@ -85,6 +96,7 @@ export function useChatConnection(
     })
 
     wsService.on('message', (data: WebSocketMessage) => {
+      if (!ownsGeneration()) return
       if (data.content) {
         isRetrieving.value = false
         const lastMsg = messages.value[messages.value.length - 1]

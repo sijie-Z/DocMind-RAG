@@ -34,6 +34,7 @@ class WebSocketService {
   private connectionStatus: 'connecting' | 'connected' | 'disconnected' | 'error' = 'disconnected'
   private currentUserId: number = 0
   private manualDisconnect = false
+  private connectionSeq = 0
 
   private getWsBaseUrl(): string {
     if (import.meta.env.DEV) {
@@ -90,24 +91,28 @@ class WebSocketService {
 
     try {
       this.manualDisconnect = false
-      this.ws = new WebSocket(wsUrl, [`auth.${cleanToken}`])
-      this.setupEventListeners()
+      const owner = ++this.connectionSeq
+      const socket = new WebSocket(wsUrl, [`auth.${cleanToken}`])
+      this.ws = socket
+      this.setupEventListeners(socket, owner)
     } catch {
       // Exception during connection setup
       this.handleConnectionError()
     }
   }
 
-  private setupEventListeners() {
-    if (!this.ws) return
+  private setupEventListeners(socket: WebSocket, owner: number) {
+    const ownsSocket = () => this.ws === socket && this.connectionSeq === owner
 
-    this.ws.onopen = () => {
+    socket.onopen = () => {
+      if (!ownsSocket()) return
       this.connectionStatus = 'connected'
       this.reconnectAttempts = 0
       this.emit('connect', { type: 'connect' })
     }
 
-    this.ws.onmessage = (event) => {
+    socket.onmessage = (event) => {
+      if (!ownsSocket()) return
       try {
         const data = JSON.parse(event.data) as WebSocketMessage
         this.handleMessage(data)
@@ -116,15 +121,18 @@ class WebSocketService {
       }
     }
 
-    this.ws.onclose = (_event) => {
+    socket.onclose = (_event) => {
+      if (!ownsSocket()) return
+      this.ws = null
       this.connectionStatus = 'disconnected'
       this.emit('disconnect', { type: 'disconnect' })
       if (!this.manualDisconnect) {
-        this.attemptReconnect()
+        this.attemptReconnect(owner)
       }
     }
 
-    this.ws.onerror = () => {
+    socket.onerror = () => {
+      if (!ownsSocket()) return
       this.connectionStatus = 'error'
       this.emit('error', { type: 'error', content: 'WebSocket连接错误' })
     }
@@ -185,7 +193,7 @@ class WebSocketService {
     return true
   }
 
-  private attemptReconnect() {
+  private attemptReconnect(owner: number) {
     if (this.reconnectAttempts >= this.maxReconnectAttempts) {
       return
     }
@@ -201,7 +209,7 @@ class WebSocketService {
       this.reconnectTimer = null
       // ISS-3：守卫自 connect() 顶部迁入此处——「手动断开后禁止被遗留的
       // 重连定时器悄悄重连」只约束自动重连路径；显式 connect() 不再被拦。
-      if (this.manualDisconnect) return
+      if (this.manualDisconnect || this.connectionSeq !== owner) return
       if (this.currentUserId > 0) {
         this.connect(this.currentUserId)
       }
@@ -214,10 +222,12 @@ class WebSocketService {
       clearTimeout(this.reconnectTimer)
       this.reconnectTimer = null
     }
-    if (this.ws) {
+    this.connectionSeq += 1
+    const socket = this.ws
+    this.ws = null
+    if (socket) {
       this.manualDisconnect = true
-      this.ws.close()
-      this.ws = null
+      socket.close()
     }
     this.connectionStatus = 'disconnected'
     this.reconnectAttempts = 0
