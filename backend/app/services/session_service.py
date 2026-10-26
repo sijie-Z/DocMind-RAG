@@ -21,6 +21,7 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import AsyncSessionLocal
+from app.core.log_safety import log_safe
 from app.core.security import require_organization
 from app.exceptions import AuthorizationError
 from app.models.agent_task import AgentTask, TaskStatus
@@ -245,9 +246,8 @@ async def save_session_interaction(
                 # T4：目标会话已归属其他组织（含本次有效组织无法解析为 None 的
                 # 情形）——明确拒绝，绝不静默写入。
                 logger.warning(
-                    f"Refusing to save interaction into session {session_id} of "
-                    f"organization {existing.organization_id} "
-                    f"from organization {organization_id} (user={user_id})"
+                    "Refusing to save interaction into session %s due to organization mismatch",
+                    log_safe(session_id),
                 )
                 raise AuthorizationError("会话不属于当前组织，拒绝写入")
             elif existing.organization_id is None:

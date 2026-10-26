@@ -37,8 +37,10 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 import app.models  # noqa: F401 — 注册全部表，供 create_all
 from app.agent import checkpoint
 from app.agent.config import AgentConfig
+from app.agent.events import AgentEvent
 from app.agent.exec_context import ExecutionContext
 from app.agent.loop import PERAgentLoop
+from app.agent.planner import Plan, PlanStep
 from app.agent.service import AgentService
 from app.core.database import Base
 from app.models.agent_task import AgentTask, TaskStatus
@@ -56,6 +58,10 @@ def _hermetic(monkeypatch):
 
     monkeypatch.setattr(ExecutionContext, "save", _save)
     monkeypatch.setattr(PERAgentLoop, "_write_experiences", AsyncMock())
+    monkeypatch.setattr("app.agent.service.notify_task_terminal", AsyncMock())
+    monkeypatch.setattr("app.agent.executor.tool_ledger.register_calls", AsyncMock())
+    monkeypatch.setattr("app.agent.executor.tool_ledger.mark_dispatched", AsyncMock())
+    monkeypatch.setattr("app.agent.executor.tool_ledger.record_result", AsyncMock())
 
 
 @pytest.fixture
@@ -112,6 +118,39 @@ def _tool_call_client(tool_name: str, args_json: str, synthesis: str = "降级�
             msg.tool_calls = None
             msg.content = synthesis
         msg.role = "assistant"
+        return SimpleNamespace(
+            choices=[SimpleNamespace(message=msg, finish_reason="stop")],
+            usage=SimpleNamespace(prompt_tokens=1, completion_tokens=1),
+        )
+
+    client.chat.completions.create = _create
+    return client
+
+
+def _mixed_success_failure_client():
+    """第一步直答成功，第二步请求禁用工具且没有有效降级文本。"""
+    client = MagicMock()
+    execution_calls = 0
+
+    async def _create(*, messages, tools=None, **kwargs):
+        nonlocal execution_calls
+        msg = MagicMock()
+        msg.role = "assistant"
+        if tools:
+            execution_calls += 1
+            if execution_calls == 1:
+                msg.tool_calls = None
+                msg.content = "第一步有效答案"
+            else:
+                tc = MagicMock()
+                tc.id = "tc-mixed"
+                tc.function.name = "delegate_subtask"
+                tc.function.arguments = "{}"
+                msg.tool_calls = [tc]
+                msg.content = ""
+        else:
+            msg.tool_calls = None
+            msg.content = ""
         return SimpleNamespace(
             choices=[SimpleNamespace(message=msg, finish_reason="stop")],
             usage=SimpleNamespace(prompt_tokens=1, completion_tokens=1),
@@ -340,18 +379,32 @@ async def test_tooless_success_stays_completed_and_all_green(db_factory):
     assert report_events and "clean_success: True" in report_events[-1].content
 
 
-# ── #11 分界（评审 P3-4）：部分步骤失败 → 保持 COMPLETED 不翻转 ─────────────
+# ── 工具模式终态分界：全败 / 有效降级 / 部分成功 ─────────────────────────
 
 
 @pytest.mark.asyncio
-async def test_tools_partial_step_failure_stays_completed_not_flipped(db_factory):
-    """既有分界语义钉防（评审 P3-4）：受限工具集里模型发未列名工具 → 该步骤
-    失败进 ctx.failures / 报告非全绿，但任务终态保持 COMPLETED 不翻转。
+async def test_tools_all_failed_with_only_placeholders_marks_failed(db_factory):
+    """唯一步骤失败、只有失败占位 chunk：任务必须 FAILED，原因可追溯到步骤。"""
+    cfg = _agent_config(enable_planning=False, tool_tags=["search", "analysis"])
+    client = _tool_call_client("delegate_subtask", "{}", synthesis="")
+    svc = AgentService(openai_client=client)
 
-    分界：只有"无工具直答 LLM 全败（零产出）"才置 run_failed→FAILED（#11）；
-    "部分步骤失败但有降级产出"是既有 COMPLETED 语义。变异 S3（任意
-    ctx.failures 非空 → run_failed）此前在旧套件零红——本用例精确抓红。
-    """
+    events = [e async for e in svc.chat(QUERY, organization_id=1, user_id=USER_ID, config=cfg)]
+
+    task_id = _task_id_of(events)
+    row = await _get_task(db_factory, task_id)
+    assert row.status == TaskStatus.FAILED, "无成功步骤且无有效产出的工具 run 不得伪装完成"
+    assert row.last_error and "s1" in row.last_error
+    assert "delegate_subtask" in row.last_error
+    chunks = [e.content for e in events if e.type == "chunk" and e.content]
+    assert chunks == ["[该步骤因 API 连接问题未能完成，已跳过]"]
+    report_events = [e for e in events if e.type == "run_report"]
+    assert report_events and "clean_success: False" in report_events[-1].content
+
+
+@pytest.mark.asyncio
+async def test_tools_valid_degradation_stays_completed_not_flipped(db_factory):
+    """失败步骤已有明确有效降级文本：保留 COMPLETED，但报告仍如实非全绿。"""
     cfg = _agent_config(enable_planning=False, tool_tags=["search", "analysis"])
     svc = AgentService(openai_client=_tool_call_client("delegate_subtask", "{}"))
 
@@ -359,13 +412,51 @@ async def test_tools_partial_step_failure_stays_completed_not_flipped(db_factory
 
     task_id = _task_id_of(events)
     row = await _get_task(db_factory, task_id)
-    assert row.status == TaskStatus.COMPLETED, (
-        f"部分步骤失败保持既有语义（不翻转），实际 {row.status}——只有零产出全败才 FAILED"
-    )
+    assert row.status == TaskStatus.COMPLETED
     report_events = [e for e in events if e.type == "run_report"]
-    assert report_events and "clean_success: False" in report_events[-1].content, (
-        "报告必须非全绿（部分步骤失败进 ctx.failures）"
-    )
-    assert any(e.type == "chunk" and e.content for e in events), "降级输出必须存在"
+    assert report_events and "clean_success: False" in report_events[-1].content
+    chunks = [e.content for e in events if e.type == "chunk" and e.content]
+    assert "降级合成答案" in chunks
     surface = [e for e in events if e.type == "error" and "收尾失败" in (e.content or "")]
     assert not surface, "成功写路径不得出现收尾失败噪音"
+
+
+@pytest.mark.asyncio
+async def test_tools_partial_step_success_stays_completed(db_factory, monkeypatch):
+    """一步成功、一步失败：即使存在失败占位，也必须保留部分成功的 COMPLETED。"""
+
+    async def _two_step_plan(
+        self,
+        query,
+        history,
+        memory_context,
+        ctx,
+        plan_sink,
+        replan_feedback="",
+    ):
+        plan = Plan(
+            id="partial-success",
+            goal=query,
+            steps=[
+                PlanStep(id="s1", description="成功步骤"),
+                PlanStep(id="s2", description="失败步骤", dependencies=["s1"]),
+            ],
+        )
+        plan_sink.append(plan)
+        yield AgentEvent(type="plan_complete", plan_id=plan.id, plan_goal=plan.goal)
+
+    monkeypatch.setattr(PERAgentLoop, "_plan_once", _two_step_plan)
+    cfg = _agent_config(enable_planning=False, tool_tags=["search", "analysis"])
+    svc = AgentService(openai_client=_mixed_success_failure_client())
+
+    events = [e async for e in svc.chat(QUERY, organization_id=1, user_id=USER_ID, config=cfg)]
+
+    task_id = _task_id_of(events)
+    row = await _get_task(db_factory, task_id)
+    assert row.status == TaskStatus.COMPLETED
+    assert (row.completed_steps, row.total_steps) == (1, 2)
+    chunks = [e.content for e in events if e.type == "chunk" and e.content]
+    assert "第一步有效答案" in chunks
+    assert "[该步骤因 API 连接问题未能完成，已跳过]" in chunks
+    report_events = [e for e in events if e.type == "run_report"]
+    assert report_events and "clean_success: False" in report_events[-1].content

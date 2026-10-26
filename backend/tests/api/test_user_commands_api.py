@@ -32,7 +32,7 @@ import app.agent.commands.execution as execution_mod
 import app.api.v1.endpoints.agent as agent_api
 import app.api.v1.endpoints.chat as chat_api
 import app.api.v1.endpoints.commands as commands_api
-from app.agent.commands import Command, CommandArg, CommandResult, command_registry
+from app.agent.commands import Command, CommandArg, CommandFailure, CommandResult, command_registry
 from app.agent.commands.types import ERROR_RESULT_TOO_LARGE, CommandExecution
 from app.agent.service import agent_service
 from app.core.config import settings
@@ -64,8 +64,14 @@ class FakeRedis:
         return 1
 
     async def eval(self, script, numkeys, *args):
-        assert 'redis.call("get", KEYS[1]) == ARGV[1]' in script, "必须是 compare-and-del"
+        assert 'redis.call("get", KEYS[1]) == ARGV[1]' in script, "必须先比较 owner"
         key, token = args[0], args[1]
+        if 'redis.call("set", KEYS[1], ARGV[2]' in script:
+            value = args[2]
+            if self.store.get(key) == token:
+                self.store[key] = value
+                return 1
+            return 0
         if self.store.get(key) == token:
             self.store.pop(key, None)
             return 1
@@ -146,6 +152,25 @@ def _patch_admin(monkeypatch, value: bool):
         return value
 
     monkeypatch.setattr(execution_mod, "is_org_admin", _is_admin)
+
+
+def _stateful_session_loader(state, calls):
+    """模拟真实 owner/org/scope 条件；历史 NULL 与超管旁路语义保持一致。"""
+
+    async def _load(db, session_id, user, scope):
+        calls.append((session_id, user.id, scope))
+        if session_id != state["id"] or state["user_id"] != user.id:
+            return None
+        resource_org = state["organization_id"]
+        if not scope.bypass_org and resource_org is not None and resource_org != scope.org_id:
+            return None
+        return SimpleNamespace(
+            id=state["id"],
+            user_id=state["user_id"],
+            organization_id=resource_org,
+        )
+
+    return _load
 
 
 @pytest.fixture
@@ -350,6 +375,410 @@ def test_execute_idempotency_key_returns_same_execution_id(client, auth, monkeyp
     assert first["execution_id"] == second["execution_id"]
     assert first["content"] == "run-1" and second["content"] == "run-1"
     assert calls == [1], "handler 只执行一次"
+
+
+def test_empty_session_id_is_normalized_for_completed_replay(client, auth, monkeypatch, fake_redis):
+    _patch_admin(monkeypatch, False)
+    loader = AsyncMock()
+    monkeypatch.setattr(commands_api, "load_accessible_session", loader)
+    body = {"line": "/help", "session_id": "", "idempotency_key": "empty-session"}
+    first = client.post("/api/v1/commands/execute", json=body)
+    replay = client.post("/api/v1/commands/execute", json=body)
+    assert first.status_code == 200 and replay.status_code == 200, replay.text
+    assert replay.json()["data"]["execution_id"] == first.json()["data"]["execution_id"]
+    envelope = json.loads(fake_redis.store["cmd:idem:7:empty-session"])
+    assert envelope["session_id"] is None
+    assert envelope["resource_org_id"] is None
+    loader.assert_not_called()
+
+
+def test_export_replay_cannot_cross_org_without_session(client, auth, monkeypatch):
+    """A 的导出正文不得随 user+key 释放给 B 组织、无 session 的请求。"""
+    principal = _user(org_id=1)
+    app.dependency_overrides[get_current_user] = lambda: principal
+    _patch_admin(monkeypatch, False)
+    calls = []
+
+    async def _export(ctx, args):
+        calls.append((ctx.organization_id, ctx.session_id, args["format"]))
+        return CommandResult(content="ORG-A-SECRET")
+
+    export = command_registry.resolve("export")[0]
+    monkeypatch.setattr(export, "handler", _export)
+
+    async def _accessible(db, session_id, user, scope):
+        return SimpleNamespace(id=session_id, organization_id=1)
+
+    monkeypatch.setattr(commands_api, "load_accessible_session", _accessible)
+    first = client.post(
+        "/api/v1/commands/execute",
+        json={
+            "line": "/export json",
+            "session_id": "session-A",
+            "idempotency_key": "cross-org",
+        },
+    )
+    principal.organization_id = 2
+    replay = client.post(
+        "/api/v1/commands/execute",
+        json={"line": "/export json", "idempotency_key": "cross-org"},
+    )
+    assert first.status_code == 200, first.text
+    assert replay.status_code == 409, replay.text
+    assert replay.json()["error_code"] == "COMMAND_BUSY"
+    assert "ORG-A-SECRET" not in replay.text
+    assert calls == [(1, "session-A", "json")]
+
+
+@pytest.mark.parametrize("second_session", ["session-B", None], ids=["different", "missing"])
+def test_export_replay_rejects_same_org_session_change(client, auth, monkeypatch, second_session):
+    principal = _user(org_id=1)
+    app.dependency_overrides[get_current_user] = lambda: principal
+    _patch_admin(monkeypatch, False)
+    calls = []
+
+    async def _export(ctx, args):
+        calls.append(1)
+        return CommandResult(content="SESSION-A-SECRET")
+
+    monkeypatch.setattr(command_registry.resolve("export")[0], "handler", _export)
+
+    async def _accessible(db, session_id, user, scope):
+        return SimpleNamespace(id=session_id, organization_id=1)
+
+    monkeypatch.setattr(commands_api, "load_accessible_session", _accessible)
+    first = client.post(
+        "/api/v1/commands/execute",
+        json={"line": "/export", "session_id": "session-A", "idempotency_key": "session"},
+    )
+    body = {"line": "/export", "idempotency_key": "session"}
+    if second_session is not None:
+        body["session_id"] = second_session
+    replay = client.post("/api/v1/commands/execute", json=body)
+    assert first.status_code == 200
+    assert replay.status_code == 409, replay.text
+    assert "SESSION-A-SECRET" not in replay.text
+    assert calls == [1]
+
+
+def test_session_replay_reloads_cached_session_and_normalizes_request(client, auth, monkeypatch):
+    principal = _user(org_id=1)
+    app.dependency_overrides[get_current_user] = lambda: principal
+    _patch_admin(monkeypatch, False)
+    handler_calls = []
+    loader_calls = []
+
+    async def _export(ctx, args):
+        handler_calls.append(args)
+        return CommandResult(content="authorized-export")
+
+    monkeypatch.setattr(command_registry.resolve("export")[0], "handler", _export)
+
+    async def _accessible(db, session_id, user, scope):
+        loader_calls.append((db, session_id, user, scope))
+        return SimpleNamespace(id=session_id, organization_id=1)
+
+    monkeypatch.setattr(commands_api, "load_accessible_session", _accessible)
+    first = client.post(
+        "/api/v1/commands/execute",
+        json={"line": "/export", "session_id": "session-A", "idempotency_key": "positive"},
+    )
+    replay = client.post(
+        "/api/v1/commands/execute",
+        json={
+            "line": "export markdown",
+            "session_id": "session-A",
+            "idempotency_key": "positive",
+        },
+    )
+    assert first.status_code == 200 and replay.status_code == 200
+    assert replay.json()["data"]["execution_id"] == first.json()["data"]["execution_id"]
+    assert replay.json()["data"]["content"] == "authorized-export"
+    assert handler_calls == [{"format": "markdown"}]
+    assert [call[1] for call in loader_calls] == ["session-A"] * 3
+    assert all(call[2] is principal for call in loader_calls)
+    assert len({id(call[0]) for call in loader_calls}) == 1
+    replay_scope = loader_calls[-1][3]
+    assert replay_scope.bypass_org is False and replay_scope.org_id == 1
+
+
+@pytest.mark.parametrize(
+    ("is_superuser", "resource_org"),
+    [(True, 2), (False, None)],
+    ids=["superuser-other-org", "historical-null-org"],
+)
+def test_session_replay_allows_visible_original_resource_org(
+    client, auth, monkeypatch, fake_redis, is_superuser, resource_org
+):
+    """resource org 可合法不同于 effective org；不能用 effective org 代替资源属性。"""
+    principal = _user(org_id=1, is_superuser=is_superuser)
+    app.dependency_overrides[get_current_user] = lambda: principal
+    _patch_admin(monkeypatch, False)
+    state = {"id": "session-A", "user_id": 7, "organization_id": resource_org}
+    loader_calls = []
+    handler_calls = []
+
+    async def _export(ctx, args):
+        handler_calls.append(1)
+        return CommandResult(content="VISIBLE-ORIGINAL-EXPORT")
+
+    monkeypatch.setattr(command_registry.resolve("export")[0], "handler", _export)
+    monkeypatch.setattr(
+        commands_api,
+        "load_accessible_session",
+        _stateful_session_loader(state, loader_calls),
+    )
+    body = {
+        "line": "/export",
+        "session_id": "session-A",
+        "idempotency_key": "resource-positive",
+    }
+    first = client.post("/api/v1/commands/execute", json=body)
+    replay = client.post("/api/v1/commands/execute", json=body)
+    assert first.status_code == 200 and replay.status_code == 200, replay.text
+    assert replay.json()["data"]["execution_id"] == first.json()["data"]["execution_id"]
+    assert handler_calls == [1]
+    assert len(loader_calls) == 3
+    scopes = [call[2] for call in loader_calls]
+    assert all(scope.bypass_org is is_superuser for scope in scopes)
+    envelope = json.loads(fake_redis.store["cmd:idem:7:resource-positive"])
+    assert envelope["organization_id"] == 1
+    assert envelope["resource_org_id"] == resource_org
+
+
+@pytest.mark.parametrize(
+    ("is_superuser", "mutated_org"),
+    [(True, 2), (False, None)],
+    ids=["superuser-bypass-still-visible", "historical-null-still-visible"],
+)
+def test_session_replay_rejects_resource_org_change_even_when_loader_returns_session(
+    client, auth, monkeypatch, is_superuser, mutated_org
+):
+    """loader 非 None 不足以免责：资源 org 变化必须拒绝，即使当前 scope 仍可见。"""
+    principal = _user(org_id=1, is_superuser=is_superuser)
+    app.dependency_overrides[get_current_user] = lambda: principal
+    _patch_admin(monkeypatch, False)
+    state = {"id": "session-A", "user_id": 7, "organization_id": 1}
+    loader_calls = []
+    handler_calls = []
+
+    async def _export(ctx, args):
+        handler_calls.append(1)
+        return CommandResult(content="MUTATED-RESOURCE-SECRET")
+
+    monkeypatch.setattr(command_registry.resolve("export")[0], "handler", _export)
+    monkeypatch.setattr(
+        commands_api,
+        "load_accessible_session",
+        _stateful_session_loader(state, loader_calls),
+    )
+    body = {
+        "line": "/export",
+        "session_id": "session-A",
+        "idempotency_key": "resource-mutated",
+    }
+    first = client.post("/api/v1/commands/execute", json=body)
+    state["organization_id"] = mutated_org
+    replay = client.post("/api/v1/commands/execute", json=body)
+    assert first.status_code == 200
+    assert replay.status_code == 404, replay.text
+    assert replay.json()["error_code"] == "SESSION_NOT_FOUND"
+    assert "MUTATED-RESOURCE-SECRET" not in replay.text
+    assert handler_calls == [1]
+    assert len(loader_calls) == 3
+
+
+@pytest.mark.parametrize("reason", ["deleted", "owner-changed", "scope-invisible"])
+def test_session_replay_denies_inaccessible_original_without_leaking(
+    client, auth, monkeypatch, reason
+):
+    principal = _user(org_id=1)
+    app.dependency_overrides[get_current_user] = lambda: principal
+    _patch_admin(monkeypatch, False)
+    handler_calls = []
+    loader_calls = []
+
+    async def _export(ctx, args):
+        handler_calls.append(1)
+        return CommandResult(content="ORIGINAL-SESSION-SECRET")
+
+    monkeypatch.setattr(command_registry.resolve("export")[0], "handler", _export)
+
+    async def _guard(db, session_id, user, scope):
+        loader_calls.append((reason, session_id))
+        if len(loader_calls) == 3:
+            return None
+        return SimpleNamespace(id=session_id, organization_id=1)
+
+    monkeypatch.setattr(commands_api, "load_accessible_session", _guard)
+    first = client.post(
+        "/api/v1/commands/execute",
+        json={"line": "/export", "session_id": "session-A", "idempotency_key": "guard"},
+    )
+    replay = client.post(
+        "/api/v1/commands/execute",
+        json={"line": "/export", "session_id": "session-A", "idempotency_key": "guard"},
+    )
+    assert first.status_code == 200
+    assert replay.status_code == 404, replay.text
+    assert replay.json()["error_code"] == "SESSION_NOT_FOUND"
+    assert "ORIGINAL-SESSION-SECRET" not in replay.text
+    assert handler_calls == [1]
+    assert len(loader_calls) == 3
+
+
+def test_session_replay_guard_db_error_is_503_not_reexecution(client, auth, monkeypatch):
+    principal = _user(org_id=1)
+    app.dependency_overrides[get_current_user] = lambda: principal
+    _patch_admin(monkeypatch, False)
+    handler_calls = []
+    loader_calls = []
+
+    async def _export(ctx, args):
+        handler_calls.append(1)
+        return CommandResult(content="CACHED-DB-SECRET")
+
+    monkeypatch.setattr(command_registry.resolve("export")[0], "handler", _export)
+
+    async def _guard(db, session_id, user, scope):
+        loader_calls.append(session_id)
+        if len(loader_calls) == 3:
+            raise RuntimeError("database-credentials-must-not-leak")
+        return SimpleNamespace(id=session_id, organization_id=1)
+
+    monkeypatch.setattr(commands_api, "load_accessible_session", _guard)
+    first = client.post(
+        "/api/v1/commands/execute",
+        json={"line": "/export", "session_id": "session-A", "idempotency_key": "db-down"},
+    )
+    replay = client.post(
+        "/api/v1/commands/execute",
+        json={"line": "/export", "session_id": "session-A", "idempotency_key": "db-down"},
+    )
+    assert first.status_code == 200
+    assert replay.status_code == 503, replay.text
+    assert replay.json()["error_code"] == "SERVICE_UNAVAILABLE"
+    assert "CACHED-DB-SECRET" not in replay.text
+    assert "database-credentials" not in replay.text
+    assert handler_calls == [1]
+
+
+def test_replay_authorizer_uses_cached_context_not_second_body(client, auth, monkeypatch):
+    principal = _user(org_id=1)
+    app.dependency_overrides[get_current_user] = lambda: principal
+    _patch_admin(monkeypatch, False)
+    loader_calls = []
+
+    async def _accessible(db, session_id, user, scope):
+        loader_calls.append(session_id)
+        return SimpleNamespace(id=session_id, organization_id=1)
+
+    monkeypatch.setattr(commands_api, "load_accessible_session", _accessible)
+
+    async def _fake_execute(
+        ctx,
+        line,
+        *,
+        registry,
+        idempotency_key,
+        session_resource_org_id,
+        replay_authorizer,
+    ):
+        cached_session = "cached-A" if ctx.session_id else None
+        await replay_authorizer(
+            1,
+            cached_session,
+            1 if cached_session is not None else None,
+        )
+        return CommandExecution(command="help", line=line, success=True)
+
+    monkeypatch.setattr(commands_api, "execute", _fake_execute)
+    with_session = client.post(
+        "/api/v1/commands/execute", json={"line": "/help", "session_id": "body-B"}
+    )
+    without_session = client.post("/api/v1/commands/execute", json={"line": "/help"})
+    assert with_session.status_code == 200 and without_session.status_code == 200
+    assert loader_calls == ["body-B", "cached-A"]
+
+
+def test_replay_authorizer_independently_rejects_org_mismatch(client, auth, monkeypatch):
+    principal = _user(org_id=1)
+    app.dependency_overrides[get_current_user] = lambda: principal
+    _patch_admin(monkeypatch, False)
+
+    async def _fake_execute(
+        ctx,
+        line,
+        *,
+        registry,
+        idempotency_key,
+        session_resource_org_id,
+        replay_authorizer,
+    ):
+        try:
+            await replay_authorizer(2, None, None)
+        except CommandFailure as exc:
+            return CommandExecution(
+                command="help",
+                line=line,
+                success=False,
+                error_code=exc.code,
+                error_message=exc.message,
+            )
+        raise AssertionError("原 org 与当前有效 org 不一致时必须拒绝")
+
+    monkeypatch.setattr(commands_api, "execute", _fake_execute)
+    response = client.post("/api/v1/commands/execute", json={"line": "/help"})
+    assert response.status_code == 409, response.text
+    assert response.json()["error_code"] == "COMMAND_BUSY"
+
+
+def test_api_idempotent_replay_rechecks_current_admin_role(
+    client, auth, monkeypatch, admin_command
+):
+    role = {"admin": True}
+
+    async def _is_admin(db, user, organization_id):
+        return role["admin"]
+
+    monkeypatch.setattr(execution_mod, "is_org_admin", _is_admin)
+    calls = []
+
+    async def _secret(ctx, args):
+        calls.append(1)
+        return CommandResult(content="ADMIN-CACHED-SECRET")
+
+    command_registry.unregister(admin_command)
+    command_registry.register(
+        Command(name=admin_command, description="", permission="admin", handler=_secret)
+    )
+    body = {"line": f"/{admin_command}", "idempotency_key": "admin-demotion"}
+    first = client.post("/api/v1/commands/execute", json=body)
+    role["admin"] = False
+    replay = client.post("/api/v1/commands/execute", json=body)
+    assert first.status_code == 200
+    assert replay.status_code == 403, replay.text
+    assert replay.json()["error_code"] == "COMMAND_PERMISSION_DENIED"
+    assert "ADMIN-CACHED-SECRET" not in replay.text
+    assert calls == [1]
+
+
+def test_api_legacy_completed_entry_fails_closed(client, auth, monkeypatch, fake_redis):
+    _patch_admin(monkeypatch, False)
+    legacy = CommandExecution(
+        command="help",
+        line="/help",
+        success=True,
+        content="LEGACY-API-SECRET",
+        execution_id="legacy-id",
+    )
+    fake_redis.store["cmd:idem:7:legacy-api"] = json.dumps(legacy.to_dict())
+    response = client.post(
+        "/api/v1/commands/execute", json={"line": "/help", "idempotency_key": "legacy-api"}
+    )
+    assert response.status_code == 409, response.text
+    assert response.json()["error_code"] == "COMMAND_BUSY"
+    assert "LEGACY-API-SECRET" not in response.text
 
 
 def test_execute_redis_unavailable_is_503(client, auth, monkeypatch, no_model):

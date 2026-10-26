@@ -51,6 +51,9 @@ from app.core.step_runner import StepRunner
 
 logger = logging.getLogger(__name__)
 
+# 失败占位只用于告知跳过，不是有效答案；loop 终态判定必须识别同一固定文本。
+STEP_FAILURE_PLACEHOLDER = "[该步骤因 API 连接问题未能完成，已跳过]"
+
 # 跨请求熔断（issue #242 第 7 条）：LLM 步骤调用路径的进程级熔断器（每 worker 一份）。
 # 阈值 3（与 Executor.MAX_CONSECUTIVE_FAILURES 同量级）；计数口径 = **自上次复位累计**
 # 的失败数（成功的复位只发生在非 CLOSED 态，即半开探测成功时）——provider 连续挂的
@@ -366,18 +369,22 @@ class Executor:
         ``skip_objects``（id(tc)）是已被 hook deny 的调用，不参与审批暂停。
 
         issue #477：``TERMINAL_REQUIRE_APPROVAL=true`` 时 ``terminal_*`` 强制
-        审批（即使 ``approval_mode="never"``）。若没有审批通道
-        （``approval_check is None``），这些调用直接记为 deny——**fail-closed**，
-        绝不因为「没接审批」而静默执行。该加强只作用于 terminal_*，不改全局策略。
+        审批（即使 ``approval_mode="never"``）。若没有审批通道，这些调用沿用
+        既有的 deny 特例。普通 ``always/risky`` 调用则进入 unavailable 降级：
+        绝不因为「没接审批」而静默执行，也不伪造成用户拒绝。
         """
         terminal_forced_ids = {
             id(tc) for tc, _args in calls if self._terminal_approval_forced(tc.function.name)
         }
+        mode = getattr(self.config, "approval_mode", "risky")
+        skip = skip_objects or set()
+        hook_forced = forced_reasons or {}
         if self.approval_check is None:
-            # 无审批通道：terminal_* 强制审批的调用直接 deny（fail-closed）。
-            # hook 的 ask 在无通道时维持 develop 原语义（不审批、不阻断）。
+            # 普通 always/risky 调用由 _gate_materialization 统一物化为
+            # approval_unavailable；这里只保留 terminal 的既有 deny 特例。
+            # hook deny 已由 skip 排除；hook ask 无通道仍在主循环物化为 hook_denied。
             for tc, args in calls:
-                if id(tc) not in terminal_forced_ids:
+                if id(tc) in skip or id(tc) not in terminal_forced_ids:
                     continue
                 self.approval_decisions.append(
                     {
@@ -389,9 +396,6 @@ class Executor:
                     }
                 )
             return
-        mode = getattr(self.config, "approval_mode", "risky")
-        skip = skip_objects or set()
-        hook_forced = forced_reasons or {}
         pending: tuple[Any, dict[str, Any], str | None] | None = None
         for tc, args in calls:
             if id(tc) in skip:
@@ -463,13 +467,12 @@ class Executor:
         ``forced=True`` 表示 hook 的 ``ask`` 强制审批（即使 requires_approval
         为假）——粘滞 deny 与降级必须同样生效，否则 ask 会被 mode=never 绕过。
 
-        issue #477：``terminal_*`` 强制审批——无审批通道时 deny（fail-closed）。
+        issue #477：``terminal_*`` 强制审批——无审批通道时保留 deny 特例。
+        普通审批调用无通道时则返回 unavailable，不伪造人工决定。
         """
         hook_forced = forced
         terminal_forced = self._terminal_approval_forced(func_name)
         forced = hook_forced or terminal_forced
-        if self.approval_check is None and not forced:
-            return None
         if not forced and not approval.requires_approval(
             getattr(self.config, "approval_mode", "risky"), func_name
         ):
@@ -479,8 +482,8 @@ class Executor:
             return "deny" if decision.get("decision") == "deny" else None
         if self.approval_degraded:
             return "unavailable"
-        if self.approval_check is None and forced:
-            return "deny"
+        if self.approval_check is None:
+            return "deny" if forced else "unavailable"
         return None
 
     @staticmethod
@@ -1009,6 +1012,26 @@ class Executor:
             if pending:
                 await asyncio.gather(*pending, return_exceptions=True)
 
+    def _tool_retry_metadata(self, tool_name: str) -> dict[str, Any]:
+        """读取一次已派发调用的重试语义；canonical 名称与真实 handler 同源。"""
+        canonical = canonical_tool_name(tool_name)
+        entry = tool_registry.get(canonical)
+        semantic = getattr(entry, "semantic", None) if entry is not None else None
+        if not isinstance(semantic, dict):
+            semantic = {}
+        return {
+            "tool_name": canonical,
+            "retry_safe": semantic.get("retry_safe"),
+            "idempotent": semantic.get("idempotent"),
+        }
+
+    @staticmethod
+    def _retry_metadata_forbids_replay(metadata: dict[str, Any]) -> bool:
+        """双 false 禁止重放；非幂等仅显式 retry_safe=True 可交给既有策略。"""
+        retry_safe = metadata.get("retry_safe")
+        idempotent = metadata.get("idempotent")
+        return retry_safe is False or (idempotent is False and retry_safe is not True)
+
     async def _execute_step_with_retry(
         self,
         step: PlanStep,
@@ -1111,6 +1134,9 @@ class Executor:
 
             result_text = ""
             had_error = False
+            # tool_call 在真实派发点发出：按本 attempt 记录全部已派发工具，
+            # 不能用最后一个失败工具的元数据代表整个混合批次。
+            dispatched_retry_metadata: list[dict[str, Any]] = []
 
             async for event in self._execute_step_once(
                 step=step,
@@ -1122,7 +1148,11 @@ class Executor:
                 error_context=last_error if attempt > 0 else "",
                 ctx=ctx,
             ):
-                if event.type == "tool_error" or event.type == "error":
+                if event.type == "tool_call":
+                    dispatched_retry_metadata.append(
+                        self._tool_retry_metadata(event.tool_name or "")
+                    )
+                elif event.type == "tool_error" or event.type == "error":
                     had_error = True
                     last_error = event.content
                     # Capture error_type from the ToolResult when available
@@ -1148,6 +1178,21 @@ class Executor:
             policy = get_policy(last_error_type)
             if not policy.retryable:
                 break  # Fatal — skip straight to fallback
+
+            unsafe_dispatches = [
+                metadata["tool_name"]
+                for metadata in dispatched_retry_metadata
+                if self._retry_metadata_forbids_replay(metadata)
+            ]
+            if unsafe_dispatches:
+                # 任意已派发调用声明禁止自动重试，就不能重放整个步骤；即使本次
+                # error_type 来自另一个可重试工具，也不能重复其兄弟调用的副作用。
+                logger.warning(
+                    "步骤 %s 已派发禁止自动重试的工具 %s，不再重放整个步骤",
+                    step.id,
+                    log_safe(",".join(unsafe_dispatches)),
+                )
+                break
 
             if had_error and step.retry_strategy == "skip":
                 break
@@ -1270,7 +1315,7 @@ class Executor:
             )
             yield AgentEvent(
                 type="chunk",
-                content="[该步骤因 API 连接问题未能完成，已跳过]",
+                content=STEP_FAILURE_PLACEHOLDER,
                 plan_id=plan.id,
                 plan_step_id=step.id,
             )

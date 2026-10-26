@@ -11,12 +11,14 @@
    Lua **compare-and-del** 只释放自己的锁（TTL 兜底防死锁）。拿不到锁 →
    409 ``command_busy``。多 worker 部署下同一会话仍互斥。
 6. **幂等（issue #498）**：可选 ``idempotency_key`` →
-   ``cmd:idem:{user_id}:{key}``。首个请求 ``SET NX`` 抢占 **pending 占位**
-   （短 TTL，默认 300s，须覆盖单命令超时上限；worker 崩溃后可自愈重试），
-   完成后覆写为**完整响应 JSON**（TTL 24h）；**串行**重复请求返回同一
-   ``execution_id``，handler 只执行一次。**执行中并发**的重复请求最多等待
-   ~1s，仍未完成返回 409 ``command_busy``（Stripe 幂等键语义，契约见端点
-   docstring）。失败不缓存（删除 pending 键，允许重试）。
+   ``cmd:idem:{user_id}:{key}``。先解析命令并绑定参数，再以规范化命令、scope、
+   有效 org/session 和 args 计算 SHA-256 指纹；空 session 统一归一为 None。首个请求写入
+   v2 **pending 信封**（短 TTL，默认 300s，须覆盖单命令超时上限；worker 崩溃后可自愈
+   重试），并记录已加载原 session 的 resource_org_id。完成后由原 owner CAS 写入封装响应
+   的 completed 信封（TTL 24h）；**串行**同指纹请求在复核原会话资源归属与当前权限后
+   返回同一 ``execution_id``，handler 只执行一次。**执行中并发**的同指纹请求最多等待
+   ~1s，不同指纹或 legacy/损坏条目立即 409 ``command_busy``。
+   失败不缓存（compare-and-del 自己的 pending，允许重试）。
 7. **Redis 不可用**：**fail-closed** 返回 ``service_unavailable``（HTTP 503），
    绝不退回进程内锁假装互斥。
 8. **超时 / 取消**：handler 由 ``asyncio.wait_for`` 包裹（命令自带 timeout）；
@@ -39,11 +41,13 @@ handler 预期失败/依赖不可用）都收敛为结构化结果，不向 SSE 
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import logging
+import math
 import time
 import uuid
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Awaitable, Callable
 
 from app.agent.commands.parser import CommandSyntaxError, bind_args, parse_line
 from app.agent.commands.registry import CommandRegistry, agent_scope_for_session
@@ -72,7 +76,9 @@ logger = logging.getLogger(__name__)
 
 _LOCK_PREFIX = "cmd:lock:"
 _IDEM_PREFIX = "cmd:idem:"
+_IDEM_VERSION = 2
 _IDEM_PENDING = "pending"
+_IDEM_COMPLETED = "completed"
 
 # Lua compare-and-del：只有仍持有锁（token 相同）才删除，避免误删后来者的锁。
 _RELEASE_LOCK_LUA = """
@@ -81,6 +87,17 @@ if redis.call("get", KEYS[1]) == ARGV[1] then
 end
 return 0
 """
+
+# 完成写回同样必须持有原 pending owner；TTL 过期后的新 claimant 不得被旧 writer 覆盖。
+_COMPLETE_IDEMPOTENCY_LUA = """
+if redis.call("get", KEYS[1]) == ARGV[1] then
+    redis.call("set", KEYS[1], ARGV[2], "EX", tonumber(ARGV[3]))
+    return 1
+end
+return 0
+"""
+
+ReplayAuthorizer = Callable[[int | None, str | None, int | None], Awaitable[None]]
 
 # 幂等 pending 的等待窗口：50ms × 20 = 1s（覆盖普通命令的完成时间）。
 _IDEM_POLL_INTERVAL = 0.05
@@ -146,18 +163,178 @@ def lock_redis_key(agent: CommandContext) -> str:
     return f"{_LOCK_PREFIX}{agent.session_id or agent.user_id}"
 
 
-async def _wait_for_idempotent_result(client, key: str) -> dict | None:
-    """轮询幂等键：已完成返回响应 dict；pending 超时仍无结果返回 ``None``。"""
+def _idempotency_fingerprint(
+    agent: CommandContext,
+    command_name: str,
+    resolved_scope: str,
+    args: dict,
+) -> str:
+    """绑定规范化命令、有效上下文和已绑定参数；角色在重放时另行复核。"""
+    payload = {
+        "version": _IDEM_VERSION,
+        "canonical_command": command_name,
+        "resolved_scope": resolved_scope,
+        "organization_id": agent.organization_id,
+        "session_id": agent.session_id or None,
+        "args": args,
+    }
+    canonical = json.dumps(
+        payload,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    )
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def _serialize_idempotency_envelope(
+    agent: CommandContext,
+    *,
+    state: str,
+    fingerprint: str,
+    command_name: str,
+    resolved_scope: str,
+    resource_org_id: int | None,
+    owner: str,
+    execution: CommandExecution | None = None,
+) -> str:
+    payload = {
+        "version": _IDEM_VERSION,
+        "state": state,
+        "fingerprint": fingerprint,
+        "organization_id": agent.organization_id,
+        "session_id": agent.session_id or None,
+        "resource_org_id": resource_org_id if agent.session_id else None,
+        "command": command_name,
+        "scope": resolved_scope,
+        "owner": owner,
+    }
+    if execution is not None:
+        payload["execution"] = execution.to_dict()
+    return json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+
+def _valid_completed_execution(execution: dict, envelope: dict) -> bool:
+    """completed 的嵌套响应必须与外层上下文一致，且不得夹带失败/双重正文。"""
+    required = {
+        "execution_id",
+        "command",
+        "line",
+        "scope",
+        "success",
+        "status",
+        "result",
+        "content",
+        "data",
+        "args",
+        "error_code",
+        "error_message",
+        "error_field",
+        "duration_ms",
+    }
+    if not required.issubset(execution):
+        return False
+    if not isinstance(execution["execution_id"], str) or not execution["execution_id"]:
+        return False
+    if execution["command"] != envelope["command"] or execution["scope"] != envelope["scope"]:
+        return False
+    if execution["success"] is not True or execution["status"] != "completed":
+        return False
+    if not isinstance(execution["line"], str) or not isinstance(execution["args"], dict):
+        return False
+    content = execution["content"]
+    data = execution["data"]
+    result = execution["result"]
+    if not isinstance(content, str) or not isinstance(data, dict) or not isinstance(result, dict):
+        return False
+    if result.get("content") != content or result.get("data") != data:
+        return False
+    if any(execution[field] != "" for field in ("error_code", "error_message", "error_field")):
+        return False
+    duration = execution["duration_ms"]
+    return (
+        isinstance(duration, (int, float))
+        and not isinstance(duration, bool)
+        and math.isfinite(duration)
+        and duration >= 0
+    )
+
+
+def _decode_idempotency_envelope(raw) -> dict | None:
+    """只接受完整 v2 信封；legacy、损坏和内部不一致数据一律返回 None。"""
+    try:
+        payload = json.loads(raw)
+    except (TypeError, ValueError):
+        return None
+    required = {
+        "version",
+        "state",
+        "fingerprint",
+        "organization_id",
+        "session_id",
+        "resource_org_id",
+        "command",
+        "scope",
+        "owner",
+    }
+    if not isinstance(payload, dict) or not required.issubset(payload):
+        return None
+    if type(payload["version"]) is not int or payload["version"] != _IDEM_VERSION:
+        return None
+    if payload["state"] not in (_IDEM_PENDING, _IDEM_COMPLETED):
+        return None
+    fingerprint = payload["fingerprint"]
+    if (
+        not isinstance(fingerprint, str)
+        or len(fingerprint) != 64
+        or any(char not in "0123456789abcdef" for char in fingerprint)
+    ):
+        return None
+    organization_id = payload["organization_id"]
+    if organization_id is not None and type(organization_id) is not int:
+        return None
+    session_id = payload["session_id"]
+    if session_id is not None and (not isinstance(session_id, str) or not session_id):
+        return None
+    resource_org_id = payload["resource_org_id"]
+    if resource_org_id is not None and type(resource_org_id) is not int:
+        return None
+    if session_id is None and resource_org_id is not None:
+        return None
+    if any(
+        not isinstance(payload[field], str) or not payload[field]
+        for field in ("command", "scope", "owner")
+    ):
+        return None
+    if payload["state"] == _IDEM_PENDING:
+        return payload if "execution" not in payload else None
+    execution = payload.get("execution")
+    if not isinstance(execution, dict) or not _valid_completed_execution(execution, payload):
+        return None
+    return payload
+
+
+async def _wait_for_idempotent_result(
+    client,
+    key: str,
+    *,
+    fingerprint: str,
+    command_name: str,
+    resolved_scope: str,
+) -> dict | None:
+    """同指纹 pending 才等待；任何 legacy/损坏/冲突条目都立即 fail-closed。"""
     for attempt in range(_IDEM_POLL_ATTEMPTS):
         raw = await client.get(key)
         if raw is None:
             return None
-        try:
-            payload = json.loads(raw)
-        except (TypeError, ValueError):
+        envelope = _decode_idempotency_envelope(raw)
+        if envelope is None or envelope["fingerprint"] != fingerprint:
             return None
-        if isinstance(payload, dict) and payload.get("status") in ("completed", "failed"):
-            return payload
+        if envelope["command"] != command_name or envelope["scope"] != resolved_scope:
+            return None
+        if envelope["state"] == _IDEM_COMPLETED:
+            return envelope
         if attempt + 1 < _IDEM_POLL_ATTEMPTS:
             await asyncio.sleep(_IDEM_POLL_INTERVAL)
     return None
@@ -169,10 +346,14 @@ async def execute(
     *,
     registry: CommandRegistry | None = None,
     idempotency_key: str | None = None,
+    session_resource_org_id: int | None = None,
+    replay_authorizer: ReplayAuthorizer | None = None,
     redis=None,
 ) -> CommandExecution:
     """对 ``agent`` 执行一行命令（无模型轮次、不写会话）。
 
+    ``session_resource_org_id`` 由 HTTP 入口从已加载的原 session 读取；历史 NULL 资源
+    也为 None，由非空 session_id 与无会话命令区分。
     ``redis`` 仅用于测试注入（FakeRedis）；生产走 ``app.core.redis.redis_client``。
     """
     if registry is None:
@@ -214,13 +395,48 @@ async def execute(
             data={"reason": "redis_unavailable"},
         )
 
-    # ── 幂等：先抢占，重复请求直接返回同一执行信封 ─────────────────────────
+    # 幂等指纹必须基于解析、注册表解析和默认值绑定后的规范语义。
     idem_key = idempotency_redis_key(agent.user_id, idempotency_key)
+    try:
+        name, tokens = parse_line(text)
+    except CommandSyntaxError as exc:
+        return fail(exc.code, exc.message, field_name=exc.field_name)
+
+    command, scope = registry.resolve(name, agent_scope=agent_scope)
+    if command is None:
+        return fail(ERROR_UNKNOWN_COMMAND, f"未知命令：/{name}。输入 /help 查看可用命令。")
+
+    execution.command = command.name
+    execution.scope = scope
+
+    if (
+        not idem_key
+        and command.permission == "admin"
+        and not (agent.is_admin or agent.is_superuser)
+    ):
+        return fail(ERROR_PERMISSION_DENIED, f"命令 /{command.name} 仅限组织管理员使用")
+
+    try:
+        args = bind_args(command, tokens)
+    except CommandSyntaxError as exc:
+        return fail(exc.code, exc.message, field_name=exc.field_name)
+    execution.args = args
+
+    # ── 幂等：规范语义完成后才抢占；旧条目和冲突上下文一律 fail-closed。 ─────
     idem_pending = False
     idem_pending_value = ""
+    idem_owner = ""
     if idem_key:
-        idem_pending_value = json.dumps(
-            {"state": _IDEM_PENDING, "execution_id": execution.execution_id}
+        fingerprint = _idempotency_fingerprint(agent, command.name, scope, args)
+        idem_owner = uuid.uuid4().hex
+        idem_pending_value = _serialize_idempotency_envelope(
+            agent,
+            state=_IDEM_PENDING,
+            fingerprint=fingerprint,
+            command_name=command.name,
+            resolved_scope=scope,
+            resource_org_id=session_resource_org_id,
+            owner=idem_owner,
         )
         try:
             claimed = await client.set(
@@ -238,7 +454,13 @@ async def execute(
             )
         if not claimed:
             try:
-                cached = await _wait_for_idempotent_result(client, idem_key)
+                cached = await _wait_for_idempotent_result(
+                    client,
+                    idem_key,
+                    fingerprint=fingerprint,
+                    command_name=command.name,
+                    resolved_scope=scope,
+                )
             except Exception as exc:  # noqa: BLE001 — 读取失败同样 fail closed
                 logger.warning("命令幂等键读取失败（fail-closed）：%s", type(exc).__name__)
                 return fail(
@@ -246,61 +468,75 @@ async def execute(
                     "命令服务暂不可用（幂等存储不可用），请稍后重试",
                     data={"reason": "redis_unavailable"},
                 )
-            if cached is not None:
-                replay = CommandExecution.from_dict(cached)
-                if text:
-                    replay.line = text
-                # 重放前复核权限（评审 minor）：同一用户可能已失去管理员身份；
-                # 缓存的敏感结果不得因幂等而越过当前授权。
-                cached_command = (
-                    registry.resolve(replay.command, agent_scope=agent_scope)[0]
-                    if replay.command
-                    else None
+            if cached is None:
+                return fail(
+                    ERROR_COMMAND_BUSY,
+                    "幂等键已绑定到其他请求，或相同命令仍在执行",
                 )
-                if (
-                    cached_command is not None
-                    and cached_command.permission == "admin"
-                    and not agent.is_admin
-                ):
-                    return fail(
-                        ERROR_PERMISSION_DENIED,
-                        f"命令 /{cached_command.name} 仅限组织管理员使用",
+            cached_execution = cached["execution"]
+            if cached_execution["args"] != args:
+                return fail(ERROR_COMMAND_BUSY, "幂等键的请求参数或缓存上下文不一致")
+            if cached["organization_id"] != agent.organization_id:
+                return fail(ERROR_COMMAND_BUSY, "幂等键的原组织与当前有效组织不一致")
+            if cached["session_id"] != (agent.session_id or None):
+                return fail(ERROR_COMMAND_BUSY, "幂等键的原会话与当前请求不一致")
+            if cached["session_id"] is not None and replay_authorizer is None:
+                return fail(
+                    ERROR_SERVICE_UNAVAILABLE,
+                    "命令服务暂不可用（无法复核原会话），请稍后重试",
+                    data={"reason": "replay_authorizer_unavailable"},
+                )
+            if replay_authorizer is not None:
+                try:
+                    await replay_authorizer(
+                        cached["organization_id"],
+                        cached["session_id"],
+                        cached["resource_org_id"],
                     )
-                logger.info(
-                    "命令幂等重放 (execution_id=%s, user=%s, key=%s)",
-                    replay.execution_id,
-                    agent.user_id,
-                    log_safe(idempotency_key or ""),
+                except CommandFailure as exc:
+                    return fail(
+                        exc.code,
+                        exc.message,
+                        field_name=exc.field_name,
+                        data=exc.data or None,
+                    )
+                except asyncio.CancelledError:
+                    raise
+                except Exception as exc:  # noqa: BLE001 — 授权依赖失败不得释放正文
+                    logger.warning("命令重放授权失败（fail-closed）：%s", type(exc).__name__)
+                    return fail(
+                        ERROR_SERVICE_UNAVAILABLE,
+                        "命令服务暂不可用（重放授权失败），请稍后重试",
+                        data={"reason": "replay_authorizer_unavailable"},
+                    )
+            if command.permission == "admin" and not (agent.is_admin or agent.is_superuser):
+                return fail(
+                    ERROR_PERMISSION_DENIED,
+                    f"命令 /{command.name} 仅限组织管理员使用",
                 )
-                _audit(agent, replay)
-                return replay
-            return fail(
-                ERROR_COMMAND_BUSY,
-                "相同幂等键的命令正在执行，请稍后再试",
+            try:
+                replay = CommandExecution.from_dict(cached_execution)
+            except Exception as exc:  # noqa: BLE001 — 损坏响应不得外泄或触发重跑
+                logger.warning("命令幂等响应校验失败（fail-closed）：%s", type(exc).__name__)
+                return fail(ERROR_COMMAND_BUSY, "幂等缓存响应无效，请稍后重试")
+            logger.info(
+                "命令幂等重放 (execution_id=%s, user=%s, key=%s)",
+                replay.execution_id,
+                agent.user_id,
+                log_safe(idempotency_key or ""),
             )
+            _audit(agent, replay)
+            return replay
         idem_pending = True
 
     try:
-        try:
-            name, tokens = parse_line(text)
-        except CommandSyntaxError as exc:
-            return fail(exc.code, exc.message, field_name=exc.field_name)
-
-        command, scope = registry.resolve(name, agent_scope=agent_scope)
-        if command is None:
-            return fail(ERROR_UNKNOWN_COMMAND, f"未知命令：/{name}。输入 /help 查看可用命令。")
-
-        execution.command = command.name
-        execution.scope = scope
-
-        if command.permission == "admin" and not agent.is_admin:
+        # 首次执行在 handler 前拒绝；重放则在上方完成原上下文复核后按当前角色拒绝。
+        if (
+            idem_key
+            and command.permission == "admin"
+            and not (agent.is_admin or agent.is_superuser)
+        ):
             return fail(ERROR_PERMISSION_DENIED, f"命令 /{command.name} 仅限组织管理员使用")
-
-        try:
-            args = bind_args(command, tokens)
-        except CommandSyntaxError as exc:
-            return fail(exc.code, exc.message, field_name=exc.field_name)
-        execution.args = args
 
         # 超时口径：非数值 / <=0 回退默认值；上限 MAX_COMMAND_TIMEOUT（防呆）。
         try:
@@ -367,18 +603,34 @@ async def execute(
         execution.duration_ms = (time.perf_counter() - started) * 1000
         _audit(agent, execution)
 
-        # 幂等结果覆写：完整响应 JSON，供重复请求原样重放。
+        # 成功结果只能由原 pending owner 通过 CAS 写回；写回失败保留 pending 至 TTL，
+        # 绝不清理成 cache miss 让重试请求再次执行已完成的 handler。
         if idem_key:
+            idem_pending = False
             try:
-                await client.set(
-                    idem_key,
-                    json.dumps(execution.to_dict(), ensure_ascii=False),
-                    ex=settings.COMMANDS_IDEMPOTENCY_TTL_SECONDS,
+                completed_value = _serialize_idempotency_envelope(
+                    agent,
+                    state=_IDEM_COMPLETED,
+                    fingerprint=fingerprint,
+                    command_name=command.name,
+                    resolved_scope=scope,
+                    resource_org_id=session_resource_org_id,
+                    owner=idem_owner,
+                    execution=execution,
                 )
-                idem_pending = False
+                stored = await client.eval(
+                    _COMPLETE_IDEMPOTENCY_LUA,
+                    1,
+                    idem_key,
+                    idem_pending_value,
+                    completed_value,
+                    str(settings.COMMANDS_IDEMPOTENCY_TTL_SECONDS),
+                )
+                if not stored:
+                    logger.warning("命令幂等结果未写回：pending 已被新 owner 接管")
             except Exception as exc:  # noqa: BLE001 — 已执行完成，不因缓存失败改判
                 logger.warning(
-                    "命令幂等结果写入失败（本次成功；重复请求可能重跑）：%s",
+                    "命令幂等结果写入失败（保留 pending 至 TTL）：%s",
                     type(exc).__name__,
                 )
         return execution

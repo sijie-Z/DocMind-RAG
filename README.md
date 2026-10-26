@@ -330,12 +330,21 @@ cp .env.example .env               # Windows: copy .env.example .env
 
 # 只要使用 Docker（含第 3 步的纯基础设施），都需要本文件（否则 compose 直接报错）：
 cp .env.docker.example .env.docker
-# 编辑 .env.docker，至少填入 LLM API Key：
-#   DEEPSEEK_API_KEY=sk-xxx
-#   DEEPSEEK_API_URL=https://api.deepseek.com
-# Embedding 默认走本机 Ollama（nomic-embed-text / 768 维），无需单独的 Embedding Key
-# （复用 DEEPSEEK_API_KEY）；使用云端 Embedding 时再填 EMBEDDING_API_KEY / EMBEDDING_API_URL。
+# 按下述必填项编辑 .env.docker；不要把真实密钥提交到仓库。
 ```
+
+- **Compose 插值必填**：`MYSQL_ROOT_PASSWORD`、`MYSQL_PASSWORD`、`MINIO_ACCESS_KEY`、
+  `MINIO_SECRET_KEY`、`GRAFANA_PASSWORD`，均须自行生成并填写，不提供默认密码。
+- **后端启动必填**：`SECRET_KEY`、`JWT_SECRET_KEY`；Chat 还需要 `DEEPSEEK_API_KEY`。
+  Embedding 默认走本机 Ollama（nomic-embed-text / 768 维），复用 Chat Key；云端
+  Embedding 再配置 `EMBEDDING_API_KEY` / `EMBEDDING_API_URL`。
+- Compose 的**全文件插值**先于服务选择：即使不选择 Grafana，`GRAFANA_PASSWORD`
+  仍为必填。这里只说明现状，不新增默认密码，也不放宽 Grafana 的安全校验。
+- `.env.example` 面向“宿主应用 + Docker 基础设施”，默认连接
+  `localhost:3308/docmind` 与 Redis `localhost:6390`。全 Docker 时 compose 仍覆盖为
+  容器内 `docmind-mysql:3306/docmind`、`docmind-redis:6379`，不要改用宿主发布端口。
+- 若 MySQL/Redis 也全部直接安装在本机，必须按实际地址、端口和库名修改 `.env`
+  （常见本机端口是 3306/6379，但以你的服务配置为准）。
 
 ### 3. 启动基础设施
 

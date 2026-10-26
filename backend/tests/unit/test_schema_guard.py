@@ -304,6 +304,45 @@ async def test_lifespan_converts_outdated_schema_to_exit_2(monkeypatch):
     assert recorded == [2]
 
 
+@pytest.mark.asyncio
+async def test_lifespan_guard_db_error_keeps_database_stage_log(monkeypatch, guard_logs, tmp_path):
+    """guard 前移后，普通 DB 异常仍带初始化阶段日志，且不误走 exit 2。"""
+    port_file = tmp_path / ".backend-port"
+    monkeypatch.setattr(
+        bootstrap,
+        "open",
+        lambda _path, mode: port_file.open(mode),
+        raising=False,
+    )
+    init_db = AsyncMock()
+    process_exit = MagicMock()
+    monkeypatch.setattr(bootstrap.os, "_exit", process_exit)
+    deps = bootstrap.LifespanDeps(
+        init_db=init_db,
+        init_redis=AsyncMock(),
+        init_elasticsearch=AsyncMock(),
+        close_redis=AsyncMock(),
+        close_db=AsyncMock(),
+        kafka_producer=MagicMock(),
+        es_client=None,
+        resolve_backend_port=lambda: 8000,
+        metrics_snapshot_task=lambda: None,
+        scheduled_tasks_loop=lambda: None,
+        schema_guard=AsyncMock(side_effect=ConnectionError("connection refused")),
+    )
+    lifespan = bootstrap.build_lifespan(deps)
+
+    with pytest.raises(ConnectionError, match="connection refused"):
+        async with lifespan(MagicMock()):
+            pass
+
+    assert init_db.await_count == 0
+    assert process_exit.call_count == 0
+    assert any(
+        r.levelno == logging.ERROR and "数据库初始化失败" in r.getMessage() for r in guard_logs
+    )
+
+
 # ── 接线与仓库自检 ────────────────────────────────────────────────────────
 
 

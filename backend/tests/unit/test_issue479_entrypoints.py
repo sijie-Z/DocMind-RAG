@@ -12,6 +12,7 @@ import os
 import subprocess
 import sys
 from pathlib import Path
+from unittest.mock import Mock
 
 import pytest
 
@@ -194,3 +195,52 @@ def test_headless_error_event_exits_1_with_log_safe_stderr(monkeypatch, capsys):
     # log_safe 把换行转义成字面 \n：stderr 只有一个物理行（print 的尾换行）
     assert captured.err.count("\n") == 1
     assert r"\nINJECTED-LINE" in captured.err
+
+
+def _stub_web_runtime(monkeypatch, port_free: bool | list[bool]):
+    """隔离端口、uvicorn 与端口文件；测试不得写真实 .backend-port。"""
+    from app.entrypoints import web
+
+    is_port_free = (
+        Mock(return_value=port_free) if isinstance(port_free, bool) else Mock(side_effect=port_free)
+    )
+    write_port_file = Mock()
+    uvicorn_run = Mock()
+    monkeypatch.setattr(web, "_port_helpers", lambda: (is_port_free, write_port_file))
+    monkeypatch.setattr(web, "setup_logging", Mock())
+    monkeypatch.setattr(web, "build_app", Mock(return_value=object()))
+    monkeypatch.setattr(web.uvicorn, "run", uvicorn_run)
+    monkeypatch.setattr(web.settings, "PORT", 8000)
+    monkeypatch.setattr(web.settings, "HOST", "127.0.0.1")
+    monkeypatch.setattr(web.settings, "LOG_LEVEL", "INFO")
+    monkeypatch.delenv("DOCMIND_PORT", raising=False)
+    return web, is_port_free, write_port_file, uvicorn_run
+
+
+def test_web_preserves_nonzero_system_exit_without_retrying(monkeypatch):
+    """空闲端口上的真实启动错误不得被伪装成整段端口冲突。"""
+    web, is_port_free, write_port_file, uvicorn_run = _stub_web_runtime(monkeypatch, True)
+    failure = SystemExit(3)
+    uvicorn_run.side_effect = failure
+
+    with pytest.raises(SystemExit) as caught:
+        web.run()
+
+    assert caught.value is failure
+    assert caught.value.code == 3
+    is_port_free.assert_called_once_with(8000)
+    write_port_file.assert_called_once_with(str(web.BACKEND_DIR), 8000)
+    uvicorn_run.assert_called_once()
+    assert uvicorn_run.call_args.kwargs["port"] == 8000
+
+
+def test_web_still_tries_next_port_when_precheck_finds_occupied(monkeypatch):
+    """对照：只有端口预检占用才切换到下一端口；文件写入仍为测试替身。"""
+    web, is_port_free, write_port_file, uvicorn_run = _stub_web_runtime(monkeypatch, [False, True])
+
+    web.run()
+
+    assert [call.args[0] for call in is_port_free.call_args_list] == [8000, 8001]
+    write_port_file.assert_called_once_with(str(web.BACKEND_DIR), 8001)
+    uvicorn_run.assert_called_once()
+    assert uvicorn_run.call_args.kwargs["port"] == 8001

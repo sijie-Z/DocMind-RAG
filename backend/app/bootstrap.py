@@ -152,6 +152,37 @@ async def read_db_revision(engine: Any) -> set[str] | None:
         return {row[0] for row in rows}
 
 
+async def read_db_business_table_count(engine: Any) -> int:
+    """只读统计业务表数量，供 AUTO_MIGRATE 区分真空库与无版本 legacy 库。
+
+    排除 Alembic 自己的版本表和 SQLite 内部表；连接/查询异常不吞，fail-closed。
+    """
+    from sqlalchemy import text
+
+    async with engine.connect() as conn:
+        if conn.dialect.name == "mysql":
+            count = (
+                await conn.execute(
+                    text(
+                        "SELECT COUNT(*) FROM information_schema.tables "
+                        "WHERE table_schema = DATABASE() AND table_name <> :t"
+                    ),
+                    {"t": ALEMBIC_VERSION_TABLE},
+                )
+            ).scalar()
+        else:
+            count = (
+                await conn.execute(
+                    text(
+                        "SELECT COUNT(*) FROM sqlite_master "
+                        "WHERE type = 'table' AND name <> :t AND name NOT LIKE 'sqlite_%'"
+                    ),
+                    {"t": ALEMBIC_VERSION_TABLE},
+                )
+            ).scalar()
+    return int(count or 0)
+
+
 def _run_alembic_upgrade() -> None:
     """同步执行 alembic upgrade head（供 asyncio.to_thread 在工作线程调用）。
 
@@ -209,20 +240,30 @@ async def enforce_schema_guard(
 
     do_auto_migrate = settings.AUTO_MIGRATE if auto_migrate is None else auto_migrate
     if do_auto_migrate:
-        logger.warning(
-            "AUTO_MIGRATE=true：schema 不在 head（current=%s head=%s），启动期兜底执行 "
-            "alembic upgrade head（审计）",
-            ",".join(sorted(current)) if current else "(none)",
-            ",".join(sorted(heads)),
-        )
-        await asyncio.to_thread(_run_alembic_upgrade)
-        current = await read_db_revision(engine)
-        if current == heads:
-            logger.info(
-                "AUTO_MIGRATE 完成：数据库已升级到迁移 head（%s）（审计）",
+        legacy_table_count = 0
+        if not current:
+            legacy_table_count = await read_db_business_table_count(engine)
+        if legacy_table_count:
+            logger.warning(
+                "AUTO_MIGRATE=true：库中没有 revision 但存在 %s 张业务表，"
+                "拒绝自动收养非空 legacy 库；请按提示显式 stamp/迁移",
+                legacy_table_count,
+            )
+        else:
+            logger.warning(
+                "AUTO_MIGRATE=true：schema 不在 head（current=%s head=%s），启动期兜底执行 "
+                "alembic upgrade head（审计）",
+                ",".join(sorted(current)) if current else "(none)",
                 ",".join(sorted(heads)),
             )
-            return
+            await asyncio.to_thread(_run_alembic_upgrade)
+            current = await read_db_revision(engine)
+            if current == heads:
+                logger.info(
+                    "AUTO_MIGRATE 完成：数据库已升级到迁移 head（%s）（审计）",
+                    ",".join(sorted(heads)),
+                )
+                return
 
     exc = SchemaOutdatedError(current, heads)
     logger.critical("%s", exc)
@@ -235,7 +276,7 @@ def _exit_for_schema_outdated(exc: SchemaOutdatedError) -> None:
 
     uvicorn 的 LifespanOn 会把启动期异常/SystemExit 折叠成 STARTUP_FAILURE=3
     （Server.startup → sys.exit(3)），而 issue #495 要求明确退出码 2，因此这里
-    直接 os._exit(2)。此时只完成了 init_db，尚无需要优雅清理的资源。
+    直接 os._exit(2)。此时仅进行了数据库连接/guard，其它服务尚未初始化，无需优雅清理。
     critical 日志已在 enforce_schema_guard 抛出前写入（含 current/head）；若异常
     从别处构造（未被记录），这里补一条。
     """
@@ -415,13 +456,10 @@ def build_lifespan(deps: LifespanDeps):
         logger.info(f"后端端口已同步到 .backend-port: {actual_port}")
 
         try:
-            await deps.init_db()
-            logger.info("数据库连接成功")
-
-            # issue #495：schema guard —— init_db 成功后、其它初始化之前校验
-            # alembic_version 是否处于迁移 head。落后时 enforce_schema_guard 先写
-            # critical（current/head/alembic upgrade head），再由这里以退出码 2
-            # 结束进程（uvicorn 会把普通启动异常折叠成 exit 3，故用 os._exit）。
+            # issue #495：guarded 入口必须先校验/迁移，再让 init_db 考虑 create_all。
+            # 真空库 + AUTO_MIGRATE=true 时由 Alembic 独占建表；升级后 init_db 看到
+            # revision 会跳过 create_all。AUTO_MIGRATE=false 则在写业务表前拒绝。
+            # SCHEMA_GUARD=false 时 guard 直接返回，兼容入口仍能由 create_all 引导空库。
             if deps.schema_guard is not None:
                 try:
                     guard_result = deps.schema_guard()
@@ -429,6 +467,12 @@ def build_lifespan(deps: LifespanDeps):
                         await guard_result
                 except SchemaOutdatedError as exc:
                     _exit_for_schema_outdated(exc)
+                except Exception as e:
+                    logger.error("数据库初始化失败（schema guard）: %s", e)
+                    raise
+
+            await deps.init_db()
+            logger.info("数据库连接成功")
 
             try:
                 await deps.init_redis()
@@ -1004,10 +1048,11 @@ async def _run_health_checks() -> tuple[dict, dict]:
 
 
 async def _run_readiness_checks() -> tuple[dict, dict]:
-    """`/readyz` 的三项就绪检查：DB SELECT 1 + ES 集群健康 + 知识库对账。"""
+    """`/readyz` 的四项就绪检查：DB + Redis + ES 集群健康 + 知识库对账。"""
     return await _collect_checks(
         {
             "database": _check_database(),
+            "redis": _check_redis(),
             "elasticsearch": _check_elasticsearch(),
             "knowledge_base": _check_knowledge_base(),
         }
@@ -1015,14 +1060,17 @@ async def _run_readiness_checks() -> tuple[dict, dict]:
 
 
 def _is_ready(services: dict) -> bool:
-    """就绪口径（issue #223）：DB 与 ES 必须 healthy，知识库对账不得为 unhealthy。
+    """就绪口径：DB、Redis 与 ES 必须 healthy，知识库对账不得为 unhealthy。
 
-    ES 的 ``disabled``（客户端不存在）与 ``degraded``（连接失败/超时）都视为不可用 ——
-    检索依赖 ES，不能把流量导给一个搜不到东西的实例。
+    Redis 是认证黑名单的硬依赖：disabled/degraded（含 ping 超时）都不能接流量，
+    否则已注销 Token 的黑名单查询会 fail-closed 503。不得改成黑名单失败放行。
+    ES 的 ``disabled`` 与 ``degraded`` 同样视为不可用。
     KB 的 ``degraded``（如 95%–100% 的 chunk 覆盖率）只告警、不摘流：索引抖动时
     整批 Pod 被摘流的代价大于少量 chunk 暂时缺失。
     """
     if services.get("database") != "healthy":
+        return False
+    if services.get("redis") != "healthy":
         return False
     if services.get("elasticsearch") != "healthy":
         return False
@@ -1283,8 +1331,8 @@ def build_app(
     async def readiness_check():
         """K8s readiness / compose healthcheck：依赖不可用 → 503。
 
-        检查 DB `SELECT 1`、ES 集群健康与知识库索引对账（与 `/health` 同一套收集函数）。
-        只有明确的不可用（unhealthy / disabled / degraded 的 ES，见 `_is_ready`）才摘流；
+        检查 DB `SELECT 1`、Redis `PING`、ES 集群健康与知识库索引对账。
+        DB、Redis、ES 的不可用（unhealthy / disabled / degraded）都会摘流；
         知识库的 degraded（≥95% 覆盖率的部分缺失）只告警。
         """
         services, kb_details = await _run_readiness_checks()

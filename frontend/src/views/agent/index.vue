@@ -779,6 +779,7 @@ function commandErrorMessage(err: unknown): { message: string; code: string } {
 async function handleCommand(line: string) {
   const text = line.trim()
   if (!text || agentStore.isLoading) return
+  const commandEpoch = agentStore.identityEpoch
   agentStore.clearMessages()
   agentStore.resetTask()
   stopping.value = false
@@ -817,10 +818,11 @@ async function handleCommand(line: string) {
     type: 'command_start',
     content: t('agentCommand.starting', { line: text }),
     command_name: parsedName,
-  })
+  }, commandEpoch)
 
   try {
     const res = await commandsApi.execute(text, agentStore.currentSessionId || undefined)
+    if (!agentStore.isIdentityEpochCurrent(commandEpoch)) return
     const data = apiUnwrap<CommandExecutionData>(res)
     if (!data) throw new Error('empty command response')
     if (data.success === false || data.status === 'failed') {
@@ -830,7 +832,7 @@ async function handleCommand(line: string) {
         content: data.error_message || t('agentCommand.failedFallback'),
         command_name: data.command || parsedName,
         error_type: data.error_code || 'command_failed',
-      })
+      }, commandEpoch)
     } else {
       agentStore.processEvent({
         type: 'command_result',
@@ -838,20 +840,23 @@ async function handleCommand(line: string) {
         content: data.result?.content ?? data.content,
         command_name: data.command || parsedName,
         command_data: data.result?.data ?? data.data ?? {},
-      })
+      }, commandEpoch)
     }
   } catch (err) {
+    if (!agentStore.isIdentityEpochCurrent(commandEpoch)) return
     const failure = commandErrorMessage(err)
     agentStore.processEvent({
       type: 'command_error',
       content: failure.message,
       command_name: parsedName,
       error_type: failure.code,
-    })
+    }, commandEpoch)
   } finally {
-    agentStore.setLoading(false)
-    // 命令不是 PER 轮次：收敛后回到 idle，不把任务态留在 running。
-    agentStore.setTaskState('idle')
+    if (agentStore.isIdentityEpochCurrent(commandEpoch)) {
+      agentStore.setLoading(false)
+      // 命令不是 PER 轮次：收敛后回到 idle，不把任务态留在 running。
+      agentStore.setTaskState('idle')
+    }
     scrollToBottom()
   }
 }
@@ -947,11 +952,13 @@ async function handleForkMessage(msg: AgentChatMessage) {
   }
   if (isInvalidBoundary(msg)) return
 
+  const forkEpoch = agentStore.identityEpoch
   forkBusy.value = true
   forkErrorText.value = ''
   const parentTitle = agentStore.currentSession?.title || sourceId
   try {
     const res = await sessionsApi.fork(sourceId, { message_id: msg.serverMessageId })
+    if (!agentStore.isIdentityEpochCurrent(forkEpoch)) return
     const data = apiUnwrap<SessionForkData>(res)
     if (!data?.id) throw new Error('fork response missing session id')
 
@@ -961,6 +968,7 @@ async function handleForkMessage(msg: AgentChatMessage) {
       isSeeded: data.is_seeded,
     }
     await refreshSessions()
+    if (!agentStore.isIdentityEpochCurrent(forkEpoch)) return
     // 取消任何在途的会话切换加载，避免旧响应覆盖子会话现场。
     const forkSeq = ++sessionLoadSeq
     agentStore.setCurrentSession(data.id)
@@ -1031,8 +1039,10 @@ async function openChildSession(sessionId: string) {
 
 /** 刷新会话列表（分叉后让子会话出现在下拉/谱系查询中）。 */
 async function refreshSessions() {
+  const requestEpoch = agentStore.identityEpoch
   try {
     const res = await agentApi.listSessions({ page: 1, page_size: 50 })
+    if (!agentStore.isIdentityEpochCurrent(requestEpoch)) return
     const data = apiUnwrap<{ sessions: AgentSession[] }>(res)
     if (Array.isArray(data?.sessions)) agentStore.setSessions(data.sessions)
   } catch {
@@ -1045,9 +1055,12 @@ async function loadSessionMessages(
   sessionId: string,
   isCurrent?: () => boolean,
 ): Promise<AgentSessionDetail | null> {
+  const requestEpoch = agentStore.identityEpoch
   const res = await agentApi.getSession(sessionId)
-  // 会话已切换：丢弃旧响应，避免覆盖新会话的消息流。
-  if (isCurrent && !isCurrent()) return null
+  // 会话或身份已切换：丢弃旧响应，避免覆盖新上下文的消息流。
+  if (!agentStore.isIdentityEpochCurrent(requestEpoch) || (isCurrent && !isCurrent())) {
+    return null
+  }
   const detail = apiUnwrap<AgentSessionDetail>(res)
   if (detail?.config) agentStore.updateConfig(detail.config)
   const raw = Array.isArray(detail?.messages) ? detail.messages : []
@@ -1082,6 +1095,7 @@ function scrollToBottom() {
 
 async function handleSend(query: string, refs?: ReferencedDoc[]) {
   if (agentStore.isLoading || !query.trim()) return
+  const runEpoch = agentStore.identityEpoch
 
   agentStore.clearMessages()
   agentStore.resetTask()
@@ -1126,7 +1140,7 @@ async function handleSend(query: string, refs?: ReferencedDoc[]) {
     await agentApi.chat(
       query,
       (event: AgentEvent) => {
-        agentStore.processEvent(event)
+        agentStore.processEvent(event, runEpoch)
         scrollToBottom()
       },
       {
@@ -1148,6 +1162,7 @@ async function handleSend(query: string, refs?: ReferencedDoc[]) {
       },
     )
   } catch (e: unknown) {
+    if (!agentStore.isIdentityEpochCurrent(runEpoch)) return
     // AbortError is expected when user clicks stop
     if (e instanceof DOMException && e.name === 'AbortError') {
       agentStore.updateLastAssistant((msg) => {
@@ -1164,15 +1179,17 @@ async function handleSend(query: string, refs?: ReferencedDoc[]) {
       })
     }
   } finally {
-    currentChatController = null
-    agentStore.setLoading(false)
-    stopping.value = false
-    if (stopFallbackTimer) {
-      clearTimeout(stopFallbackTimer)
-      stopFallbackTimer = null
+    if (currentChatController === chatController) currentChatController = null
+    if (agentStore.isIdentityEpochCurrent(runEpoch)) {
+      agentStore.setLoading(false)
+      stopping.value = false
+      if (stopFallbackTimer) {
+        clearTimeout(stopFallbackTimer)
+        stopFallbackTimer = null
+      }
+      // 跑完之后：回读 has_replay 决定是否亮「查看回放」入口（旁路，不阻塞收尾）
+      void refreshReplayFlag()
     }
-    // 跑完之后：回读 has_replay 决定是否亮「查看回放」入口（旁路，不阻塞收尾）
-    void refreshReplayFlag()
     scrollToBottom()
   }
 }
@@ -1189,22 +1206,24 @@ function handleStop() {
     return
   }
   stopping.value = true
+  const stopEpoch = agentStore.identityEpoch
   agentApi.cancelTask(taskId).catch(() => {
     // 503（取消通道不可用）等：如实退回断流
-    fallbackAbort()
+    fallbackAbort(stopEpoch)
   })
   // 兜底：run 卡在长调用里（工具/LLM 不中断，等它返回检查点）——给收敛窗口，
   // 超时仍未收敛才硬断流（UI 不无限等下去）。
   if (stopFallbackTimer) clearTimeout(stopFallbackTimer)
   stopFallbackTimer = setTimeout(() => {
     stopFallbackTimer = null
-    if (agentStore.isLoading) {
-      fallbackAbort()
+    if (agentStore.isIdentityEpochCurrent(stopEpoch) && agentStore.isLoading) {
+      fallbackAbort(stopEpoch)
     }
   }, 15000)
 }
 
-function fallbackAbort() {
+function fallbackAbort(expectedEpoch = agentStore.identityEpoch) {
+  if (!agentStore.isIdentityEpochCurrent(expectedEpoch)) return
   currentChatController?.abort()
   currentChatController = null
   agentStore.setLoading(false)
@@ -1226,6 +1245,7 @@ async function handleApprovalDecide(payload: {
 }) {
   const taskId = agentStore.taskId
   if (!taskId || approvalBusy.value) return
+  const runEpoch = agentStore.identityEpoch
   approvalBusy.value = true
   const controller = new AbortController()
   currentChatController = controller
@@ -1242,20 +1262,23 @@ async function handleApprovalDecide(payload: {
         note: payload.note,
       },
       (event: AgentEvent) => {
-        agentStore.processEvent(event)
+        agentStore.processEvent(event, runEpoch)
         scrollToBottom()
       },
       { signal: controller.signal },
     )
   } catch {
+    if (!agentStore.isIdentityEpochCurrent(runEpoch)) return
     message.error('审批提交失败，已刷新任务状态')
     await refreshTaskState(taskId)
   } finally {
     approvalBusy.value = false
-    currentChatController = null
-    agentStore.setLoading(false)
-    // 审批续跑收敛后同款回读（续跑是新的 run 收敛点）
-    void refreshReplayFlag()
+    if (currentChatController === controller) currentChatController = null
+    if (agentStore.isIdentityEpochCurrent(runEpoch)) {
+      agentStore.setLoading(false)
+      // 审批续跑收敛后同款回读（续跑是新的 run 收敛点）
+      void refreshReplayFlag()
+    }
     scrollToBottom()
   }
 }
@@ -1270,13 +1293,16 @@ async function handleApprovalDecide(payload: {
 async function handleSteer(text: string) {
   const taskId = agentStore.taskId
   if (!taskId || !text.trim() || steerBusy.value) return
+  const requestEpoch = agentStore.identityEpoch
   steerBusy.value = true
   try {
     const res = await agentApi.steerTask(taskId, text)
+    if (!agentStore.isIdentityEpochCurrent(requestEpoch)) return
     const data = apiUnwrap<{ message?: string }>(res)
     agentStore.addSteerSent(text)
     if (data?.message) message.success(data.message)
   } catch (err: unknown) {
+    if (!agentStore.isIdentityEpochCurrent(requestEpoch)) return
     const resp = (err as {
       response?: { status?: number; data?: { message?: unknown; detail?: unknown } }
     })?.response
@@ -1307,6 +1333,7 @@ async function handlePlanApprovalDecide(payload: {
 }) {
   const taskId = agentStore.taskId
   if (!taskId || planApprovalBusy.value) return
+  const runEpoch = agentStore.identityEpoch
   planApprovalBusy.value = true
   const controller = new AbortController()
   currentChatController = controller
@@ -1324,11 +1351,12 @@ async function handlePlanApprovalDecide(payload: {
         note: payload.note,
       },
       (event: AgentEvent) => {
-        agentStore.processEvent(event)
+        agentStore.processEvent(event, runEpoch)
         scrollToBottom()
       },
       { signal: controller.signal },
     )
+    if (!agentStore.isIdentityEpochCurrent(runEpoch)) return
     if (!outcome.streamed) {
       // 终态拒绝：决定已被受理并导致终态——如实告知，不用流装完成。
       agentStore.setTaskState('rejected')
@@ -1336,6 +1364,7 @@ async function handlePlanApprovalDecide(payload: {
       await refreshTaskState(taskId)
     }
   } catch (err: unknown) {
+    if (!agentStore.isIdentityEpochCurrent(runEpoch)) return
     const e = err as { status?: number; detail?: string }
     if (e?.status === 422) {
       message.error(e.detail || t('hitl.planEditInvalid'))
@@ -1345,16 +1374,18 @@ async function handlePlanApprovalDecide(payload: {
     await refreshTaskState(taskId)
   } finally {
     planApprovalBusy.value = false
-    currentChatController = null
-    agentStore.setLoading(false)
+    if (currentChatController === controller) currentChatController = null
+    if (agentStore.isIdentityEpochCurrent(runEpoch)) agentStore.setLoading(false)
     scrollToBottom()
   }
 }
 
 /** 从权威接口刷新任务现场（审批冲突/提交失败后的恢复路径）。 */
 async function refreshTaskState(taskId: string) {
+  const requestEpoch = agentStore.identityEpoch
   try {
     const res = await agentApi.getTask(taskId)
+    if (!agentStore.isIdentityEpochCurrent(requestEpoch)) return
     // F2：request 拦截器返回完整 AxiosResponse，信封在 res.data = {success, data}
     const data = apiUnwrap<AgentTaskView>(res)
     if (!data) return
@@ -1379,10 +1410,12 @@ async function refreshTaskState(taskId: string) {
 /** 刷新/重连后回到审批现场（消费既有 GET task + 持久化的 last task id）。
  *  HITL 工具审批与 B 计划审批两种现场都恢复。 */
 async function restorePendingApproval() {
+  const requestEpoch = agentStore.identityEpoch
   const last = agentStore.loadPersistedTaskId()
   if (!last) return
   try {
     const res = await agentApi.getTask(last)
+    if (!agentStore.isIdentityEpochCurrent(requestEpoch)) return
     // F2：读信封内层（res.data = {success, data}；此前读 res.data 导致
     // data.state 恒 undefined，刷新后审批卡永不恢复——浏览器验收实锤）
     const data = apiUnwrap<AgentTaskView>(res)
@@ -1402,10 +1435,31 @@ async function restorePendingApproval() {
       agentStore.setTaskId(null) // 陈旧指针：清掉
     }
   } catch {
+    if (!agentStore.isIdentityEpochCurrent(requestEpoch)) return
     // 任务不存在/无权（过期清理等）→ 清掉陈旧指针
     agentStore.setTaskId(null)
   }
 }
+
+// reset 时断流并清掉页面私有任务现场；共享 store 的旧回写由 epoch 拒绝。
+watch(
+  () => agentStore.identityEpoch,
+  () => {
+    currentChatController?.abort()
+    currentChatController = null
+    replayOpen.value = false
+    replayTaskId.value = ''
+    replayData.value = null
+    replayLoading.value = false
+    replayError.value = ''
+    lastRunHasReplay.value = null
+    showTasks.value = false
+    recentTasks.value = []
+    // ?id= 也是任务作用域现场，不能随组织重挂载带进下一身份。
+    if (route?.query?.id) syncRouteTaskId(null)
+  },
+  { flush: 'sync' },
+)
 
 // 组件卸载时中止进行中的 Agent SSE 流，防止请求悬挂
 onUnmounted(() => {
@@ -1421,6 +1475,7 @@ onUnmounted(() => {
 
 /** 运行收敛后回读权威 has_replay：只有"真有回放"才亮入口（不虚标、不空跳）。 */
 async function refreshReplayFlag() {
+  const requestEpoch = agentStore.identityEpoch
   const taskId = agentStore.taskId
   if (!taskId) {
     lastRunHasReplay.value = null
@@ -1428,10 +1483,11 @@ async function refreshReplayFlag() {
   }
   try {
     const res = await agentApi.getTask(taskId)
+    if (!agentStore.isIdentityEpochCurrent(requestEpoch)) return
     // SEAM-3：拦截器返回完整 AxiosResponse，信封在 res.data = {success, data} → apiUnwrap 解一层
     lastRunHasReplay.value = !!apiUnwrap<AgentTaskView>(res)?.has_replay
   } catch {
-    lastRunHasReplay.value = null
+    if (agentStore.isIdentityEpochCurrent(requestEpoch)) lastRunHasReplay.value = null
   }
 }
 
@@ -1457,6 +1513,7 @@ function syncRouteTaskId(taskId: string | null) {
 
 /** 打开回放时间线（入口按钮 / 任务记录 / 深链三处共用）。 */
 async function openReplay(taskId: string) {
+  const requestEpoch = agentStore.identityEpoch
   replayOpen.value = true
   replayTaskId.value = taskId
   replayData.value = null
@@ -1465,13 +1522,15 @@ async function openReplay(taskId: string) {
   syncRouteTaskId(taskId)
   try {
     const res = await agentApi.getReplay(taskId)
+    if (!agentStore.isIdentityEpochCurrent(requestEpoch)) return
     replayData.value = apiUnwrap<ReplayTimelineData>(res) || null
     if (!replayData.value) replayError.value = 'not_found'
   } catch (e: any) {
+    if (!agentStore.isIdentityEpochCurrent(requestEpoch)) return
     // 404（REPLAY_NOT_FOUND / TASK_NOT_FOUND）→ 诚实空态；其余 → 加载失败
     replayError.value = e?.response?.status === 404 ? 'not_found' : 'failed'
   } finally {
-    replayLoading.value = false
+    if (agentStore.isIdentityEpochCurrent(requestEpoch)) replayLoading.value = false
   }
 }
 
@@ -1484,15 +1543,18 @@ function closeReplay() {
 
 /** 任务记录（列表带 has_replay：完成态标出「有回放可看」）。 */
 async function loadRecentTasks() {
+  const requestEpoch = agentStore.identityEpoch
   tasksLoading.value = true
   try {
     const res = await agentApi.listTasks({ page: 1, page_size: 10 })
+    if (!agentStore.isIdentityEpochCurrent(requestEpoch)) return
     recentTasks.value = apiUnwrap<{ tasks: AgentTaskListItem[] }>(res)?.tasks || []
   } catch {
+    if (!agentStore.isIdentityEpochCurrent(requestEpoch)) return
     recentTasks.value = []
     message.error(t('agentTasks.loadFailed'))
   } finally {
-    tasksLoading.value = false
+    if (agentStore.isIdentityEpochCurrent(requestEpoch)) tasksLoading.value = false
   }
 }
 
@@ -1551,36 +1613,41 @@ async function handleSessionChange(sessionId: string | null) {
 
 /** E2：「清空」仅清空当前会话在界面的消息显示，须二次确认（不删服务端历史） */
 async function handleClearMessages() {
+  const requestEpoch = agentStore.identityEpoch
   const confirmed = await confirmDangerousAction(
     t('agent.clearConfirmTitle'),
     t('agent.clearConfirm'),
   )
-  if (!confirmed) return
+  if (!confirmed || !agentStore.isIdentityEpochCurrent(requestEpoch)) return
   agentStore.clearMessages()
 }
 
 async function handleSessionDelete(sessionId: string) {
+  const requestEpoch = agentStore.identityEpoch
   const session = agentStore.sessions.find((s) => s.id === sessionId)
   const confirmed = await confirmDangerousAction(
     t('agent.deleteSessionConfirmTitle'),
     t('agent.deleteSessionConfirm', { title: session?.title || sessionId }),
   )
-  if (!confirmed) return
+  if (!confirmed || !agentStore.isIdentityEpochCurrent(requestEpoch)) return
   try {
     await agentApi.deleteSession(sessionId)
+    if (!agentStore.isIdentityEpochCurrent(requestEpoch)) return
     agentStore.setSessions(agentStore.sessions.filter((s) => s.id !== sessionId))
     if (agentStore.currentSessionId === sessionId) {
       agentStore.setCurrentSession(null)
     }
     message.success('会话已删除')
   } catch (e) {
-    message.error('删除会话失败')
+    if (agentStore.isIdentityEpochCurrent(requestEpoch)) message.error('删除会话失败')
   }
 }
 
 async function handleNewSession() {
+  const requestEpoch = agentStore.identityEpoch
   try {
     const res = await agentApi.createSession('New Agent Session')
+    if (!agentStore.isIdentityEpochCurrent(requestEpoch)) return
     // 创建端点只回 {success, data:{id, title}}（agent.py:585-591），真载荷用
     // apiUnwrap 解一层；旧实现把整个信封当会话对象 → 幻影「Untitled ()」项（选中即
     // 404）、currentSessionId 失效（B26）
@@ -1597,7 +1664,7 @@ async function handleNewSession() {
       message.success('已创建新会话')
     }
   } catch (e) {
-    message.error('创建会话失败')
+    if (agentStore.isIdentityEpochCurrent(requestEpoch)) message.error('创建会话失败')
   }
 }
 
@@ -1628,6 +1695,7 @@ async function reloadInit() {
 }
 
 async function loadInit() {
+  const requestEpoch = agentStore.identityEpoch
   initLoading.value = true
   initError.value = false
   try {
@@ -1636,6 +1704,7 @@ async function loadInit() {
       agentApi.listSessions(),
       agentApi.getConfig(),
     ])
+    if (!agentStore.isIdentityEpochCurrent(requestEpoch)) return
     // 三个端点均为 {success, data} 信封（agent.py:450-472 工具数组在 data、
     // :500-556 会话在 data.sessions、:696-710 配置在 data）——统一经
     // apiUnwrap 解一层。旧实现把信封当载荷 →
@@ -1648,10 +1717,11 @@ async function loadInit() {
     if (Array.isArray(sessionsData?.sessions)) agentStore.setSessions(sessionsData.sessions)
     if (configData && typeof configData === 'object') agentStore.updateConfig(configData)
   } catch (e) {
+    if (!agentStore.isIdentityEpochCurrent(requestEpoch)) return
     initError.value = true
     try { message.error('Agent 初始化失败') } catch { /* provider not ready */ }
   } finally {
-    initLoading.value = false
+    if (agentStore.isIdentityEpochCurrent(requestEpoch)) initLoading.value = false
   }
 }
 </script>

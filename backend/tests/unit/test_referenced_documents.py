@@ -62,6 +62,7 @@ class _FakePipeline:
         top_k=5,
         document_ids=None,
         debug=False,
+        search_mode=None,
     ):
         self.calls.append({"query": query, "document_ids": document_ids, "org": organization_id})
         if self.fail:

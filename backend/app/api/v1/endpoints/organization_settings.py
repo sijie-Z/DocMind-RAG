@@ -17,7 +17,7 @@ from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
-from app.core.security import get_current_user, require_org_admin
+from app.core.security import get_bound_api_key_org_id, get_current_user, require_org_admin
 from app.exceptions import AuthorizationError, NotFoundError
 from app.models.organization import Organization, user_organization
 from app.models.user import User
@@ -43,13 +43,9 @@ async def _ensure_membership(db: AsyncSession, current_user: User, organization_
     """超管旁路；其余用户必须是该组织成员（当前组织或成员关系）。"""
     if getattr(current_user, "is_superuser", False):
         return
-    # 仅真实 org-bound API Key 受 key.org 硬约束；JWT 也带 token_organization_id，
-    # 因此必须同时识别 api_key_id。unbound key 与 JWT 继续走原多组织成员语义。
-    bound_key_org_id = (
-        getattr(current_user, "token_organization_id", None)
-        if getattr(current_user, "api_key_id", None) is not None
-        else None
-    )
+    # 与 core.security 共用严格 bound-key 识别，MagicMock 不得触发硬绑定；
+    # JWT/unbound key 继续走原多组织成员语义。
+    bound_key_org_id = get_bound_api_key_org_id(current_user)
     if bound_key_org_id is not None and organization_id != bound_key_org_id:
         raise AuthorizationError("无权访问该组织的设置")
     if current_user.organization_id == organization_id:

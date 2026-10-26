@@ -189,7 +189,7 @@
                           <template #icon>
                             <n-icon size="10" class="mr-0.5"><DocumentTextOutline /></n-icon>
                           </template>
-                          [{{ Number(idx) + 1 }}] {{ source.filename || source.title || t('chat.sourceDoc') }}
+                          [{{ citationRank(source, Number(idx)) }}] {{ source.filename || source.title || t('chat.sourceDoc') }}
                         </n-tag>
                       </template>
                       <div class="max-w-sm p-2">
@@ -309,6 +309,7 @@ import RetryHintLine from '@/components/agent/RetryHintLine.vue'
 import RunReportBlock from '@/components/agent/RunReportBlock.vue'
 import type { ChatMessage, KnowledgeSource } from '@/types/chat'
 import type { AgentEvent } from '@/types/agent'
+import { citationRank } from '../utils/citations'
 
 const { t } = useI18n()
 

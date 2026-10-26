@@ -11,10 +11,12 @@
 """
 
 import asyncio
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from app.agent import checkpoint
 from app.agent.config import AgentConfig
 from app.agent.events import AgentEvent
 from app.agent.exec_context import ExecutionContext
@@ -179,12 +181,22 @@ async def test_reflection_retry_passes_ctx_to_executor():
     loop = PERAgentLoop(MagicMock(), AgentConfig(), organization_id=1)
     received: dict = {}
 
-    async def _spy(*, step, plan, history, organization_id, user_id, enable_thinking, ctx=None):
+    async def _spy(
+        *,
+        step,
+        plan,
+        history,
+        organization_id,
+        user_id,
+        enable_thinking,
+        ctx=None,
+        on_step_done=None,
+    ):
         received["ctx"] = ctx
         yield AgentEvent(type="chunk", content="retry-ok")
 
     executor_spy = MagicMock()
-    executor_spy._execute_step_with_retry = _spy
+    executor_spy._execute_single_step = _spy
     loop._executor = executor_spy
 
     plan = _chain("A")
@@ -259,6 +271,8 @@ async def test_budget_exceeded_skips_remaining_dispatch():
 class _FakeMemory:
     def __init__(self):
         self.results: dict = {}
+        self.interactions: list[tuple[str, str]] = []
+        self.experiences: list[dict] = []
 
     def reset_working(self):
         self.results = {}
@@ -272,8 +286,14 @@ class _FakeMemory:
     def get_step_result(self, step_id, run_id=None):
         return self.results.get(step_id)
 
-    async def record_interaction(self, user_input, assistant_response):
+    async def record_experience(self, **kwargs):
+        self.experiences.append(kwargs)
+
+    async def record_lesson(self, **kwargs):
         pass
+
+    async def record_interaction(self, user_input, assistant_response):
+        self.interactions.append((user_input, assistant_response))
 
 
 class _OneStepPlanner:
@@ -377,6 +397,135 @@ async def test_budget_gate_skips_reflection_and_review():
 
 async def _collect(loop) -> list:
     return [e async for e in loop.run("问题")]
+
+
+@pytest.mark.asyncio
+async def test_reflection_retry_success_uses_normal_step_finalize(monkeypatch):
+    """真 Executor + fake LLM：反思重试成功必须复用正常步骤终态收尾。"""
+    llm_calls: list[dict] = []
+    checkpoints: list[dict] = []
+
+    async def _save_checkpoint(**kwargs):
+        plan = kwargs.get("plan")
+        checkpoints.append(
+            {
+                "trigger": kwargs.get("trigger"),
+                "partial_output": kwargs.get("partial_output"),
+                "statuses": [s.status for s in plan.steps] if plan else None,
+                "results": [s.result for s in plan.steps] if plan else None,
+                "completed_steps": plan.completed_steps if plan else None,
+                "failed_steps": plan.failed_steps if plan else None,
+            }
+        )
+        return True
+
+    monkeypatch.setattr(checkpoint, "save_checkpoint", _save_checkpoint)
+
+    def _response(content):
+        message = SimpleNamespace(content=content, tool_calls=None, role="assistant")
+        return SimpleNamespace(
+            choices=[SimpleNamespace(message=message, finish_reason="stop")],
+            usage=SimpleNamespace(prompt_tokens=1, completion_tokens=1),
+        )
+
+    async def _create(**kwargs):
+        call_index = len(llm_calls)
+        llm_calls.append(kwargs)
+        if call_index == 0:
+            raise RuntimeError("initial step failure (simulated)")
+        if call_index == 1:
+            return _response(
+                '{"achievement": 20, "decision": "retry", "retry_step_id": "s1",'
+                ' "reasoning": "需要重试", "gaps": [], "quality_issues": []}'
+            )
+        if call_index == 2:
+            return _response("重试后的有效答案")
+        raise AssertionError("反思重试成功后不应再发起其他 LLM 调用")
+
+    client = MagicMock()
+    client.chat.completions.create = _create
+    cfg = AgentConfig(
+        enable_memory=False,
+        enable_thinking=False,
+        enable_skills=False,
+        enable_experience=False,
+        max_retries_per_step=1,
+    )
+    loop = PERAgentLoop(client, cfg, organization_id=1, user_id=0)
+    memory = _FakeMemory()
+    loop.memory = memory
+    loop._planner = _OneStepPlanner()
+    loop._reviewer = _CountingReviewer()
+    loop._write_experiences = AsyncMock()
+
+    [e async for e in loop.run("问题", task_id="reflection-retry")]
+
+    assert len(llm_calls) == 3, "初次执行、反思判定、反思重试各一次调用"
+    plan = loop.checkpoint_live["plan"]
+    step = plan.steps[0]
+    assert step.status == "completed"
+    assert step.result == "重试后的有效答案"
+    assert step.error_context is None
+    assert step.retry_count == 0, "反思轮次不得混入内层 attempt 计数"
+    assert (plan.completed_steps, plan.failed_steps) == (1, 0)
+    assert plan.is_complete
+    assert loop.run_failed is False
+
+    assert memory.results["s1"] == {
+        "description": "唯一一步",
+        "status": "completed",
+        "result": "重试后的有效答案",
+    }
+    assert memory.interactions[-1][0] == "问题"
+    assert "重试后的有效答案" in memory.interactions[-1][1]
+
+    step_saves = [c for c in checkpoints if c["trigger"] == "after_each_step"]
+    assert len(step_saves) == 2, "初次失败与反思重试成功都必须触发步终态快照"
+    retry_save = step_saves[-1]
+    assert retry_save["statuses"] == ["completed"]
+    assert retry_save["results"] == ["重试后的有效答案"]
+    assert (retry_save["completed_steps"], retry_save["failed_steps"]) == (1, 0)
+    assert "重试后的有效答案" in retry_save["partial_output"]
+    assert checkpoints[-1]["trigger"] == "on_finish"
+    assert checkpoints[-1]["statuses"] == ["completed"]
+    assert "重试后的有效答案" in checkpoints[-1]["partial_output"]
+
+
+@pytest.mark.asyncio
+async def test_reflection_retry_budget_is_independent_of_inner_attempts():
+    """内层 attempt 已达上限，不得消耗或阻断独立的反思重试额度。"""
+    cfg = AgentConfig(enable_memory=False, enable_thinking=False, max_retries_per_step=1)
+    llm_calls = 0
+
+    async def _create(**kwargs):
+        nonlocal llm_calls
+        llm_calls += 1
+        message = SimpleNamespace(content="反思恢复答案", tool_calls=None, role="assistant")
+        return SimpleNamespace(
+            choices=[SimpleNamespace(message=message, finish_reason="stop")],
+            usage=SimpleNamespace(prompt_tokens=1, completion_tokens=1),
+        )
+
+    client = MagicMock()
+    client.chat.completions.create = _create
+    loop = PERAgentLoop(client, cfg, organization_id=1)
+    memory = _FakeMemory()
+    loop.memory = memory
+    plan = _chain("A")
+    step = plan.steps[0]
+    step.status = "failed"
+    step.error_context = "inner attempts exhausted"
+    step.retry_count = cfg.max_retries_per_step
+    plan.failed_steps = 1
+
+    [e async for e in loop._retry_step("s1", plan, None, ctx=ExecutionContext(query="q"))]
+
+    assert llm_calls == 1, "内层额度耗尽不得阻断首次反思重试"
+    assert step.status == "completed"
+    assert step.result == "反思恢复答案"
+    assert step.retry_count == cfg.max_retries_per_step, "反思轮次不得写入内层 attempt 计数"
+    assert (plan.completed_steps, plan.failed_steps) == (1, 0)
+    assert memory.results["s1"]["result"] == "反思恢复答案"
 
 
 # ── 配置面 ──────────────────────────────────────────────────────────────────
