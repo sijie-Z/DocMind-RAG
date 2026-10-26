@@ -6,6 +6,13 @@ from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
+def unified_final_enabled() -> bool:
+    """内部灰度门：阶段 1 只切换局部事件与证据采集，不启用最终综合。"""
+    from app.core.config import settings
+
+    return bool(getattr(settings, "AGENT_UNIFIED_FINAL_ENABLED", False))
+
+
 def _auto_tier_defaults(
     *,
     explicitly_set: set[str] | frozenset[str] | None = None,
@@ -255,6 +262,10 @@ class AISettings(BaseSettings):
     # true 时 executor 对 terminal_* 强制走人工审批（即使 approval_mode="never"）；
     # 无审批通道时 fail-closed（结构化 approval_denied），绝不静默执行。
     TERMINAL_REQUIRE_APPROVAL: bool = True
+
+    # 最终综合阶段 1 的内部灰度门。默认 False；只用于测试局部事件与证据采集，
+    # 不代表 FinalSynthesizer、final-only resume 或最终答案投递已经实现。
+    AGENT_UNIFIED_FINAL_ENABLED: bool = False
 
     # Observability — Langfuse
     # Deprecated candidate（issue #510 第三步待仓库所有者批准删除；未获批准前

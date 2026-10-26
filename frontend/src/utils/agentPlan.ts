@@ -8,7 +8,12 @@
  * 聊天页事件来自 chat.py 的投影（camelCase），故入参用最小结构约定
  * （PlanStepSource / PlanStepUpdate），由调用方做字段映射。
  */
-import type { PlanStep, PlanStepStatus } from '@/types/agent'
+import type {
+  AgentEvent,
+  ExecutionStepResultPayload,
+  PlanStep,
+  PlanStepStatus,
+} from '@/types/agent'
 
 const PLAN_STEP_STATUSES: PlanStepStatus[] = [
   'pending',
@@ -82,4 +87,72 @@ export function applyPlanStepUpdate(steps: PlanStep[], event: PlanStepUpdate): v
   if (event.retry_attempt && event.retry_attempt > step.retry_count) {
     step.retry_count = event.retry_attempt
   }
+}
+
+/** 兼容字符串 JSON、对象 content 与旧 ExecutorAgent 字段；未知字段直接忽略。 */
+export function parseExecutionStepResult(content: unknown): ExecutionStepResultPayload | null {
+  let value = content
+  if (typeof value === 'string') {
+    if (!value) return null
+    try {
+      value = JSON.parse(value)
+    } catch {
+      return null
+    }
+  }
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+  const payload = value as Record<string, unknown>
+  if (typeof payload.step_id !== 'string' || !payload.step_id) return null
+  return payload as unknown as ExecutionStepResultPayload
+}
+
+function errorText(error: unknown): string | undefined {
+  if (error === null || error === undefined || error === '') return undefined
+  if (typeof error === 'string') return error
+  if (typeof error === 'object' && !Array.isArray(error)) {
+    const value = error as Record<string, unknown>
+    if (typeof value.message === 'string') return value.message
+    if (typeof value.code === 'string') return value.code
+  }
+  return String(error)
+}
+
+export function applyExecutionStepResult(
+  steps: PlanStep[],
+  event: Pick<AgentEvent, 'content'> & { plan_step_id?: string },
+): void {
+  const payload = parseExecutionStepResult(event.content)
+  if (!payload) return
+  const step = steps.find((s) => s.id === (payload.step_id || event.plan_step_id))
+  if (!step) return
+
+  if (payload.status && PLAN_STEP_STATUSES.includes(payload.status)) {
+    step.status = payload.status
+  }
+  if (typeof payload.result === 'string') {
+    step.result = payload.result
+  } else if (payload.result === null) {
+    step.result = undefined
+  } else if (typeof payload.local_synthesis?.content === 'string') {
+    step.result = payload.local_synthesis.content
+  }
+  const error = payload.error !== undefined ? payload.error : payload.error_context
+  if (error !== undefined) step.error_context = errorText(error)
+  if (payload.evidence) step.evidence = payload.evidence
+  if (payload.local_synthesis) step.local_synthesis = payload.local_synthesis
+  if (payload.evidence_schema) step.evidence_schema = payload.evidence_schema
+  const retryCount = payload.retry_count
+  if (typeof retryCount === 'number' && retryCount > step.retry_count) {
+    step.retry_count = retryCount
+  }
+}
+
+/** 时间线只展示局部步骤结果；该文本不会写入 msg.content/thinkingText。 */
+export function executionStepResultText(event: Pick<AgentEvent, 'content'>): string {
+  const payload = parseExecutionStepResult(event.content)
+  if (!payload) return ''
+  if (typeof payload.result === 'string') return payload.result
+  const error = errorText(payload.error !== undefined ? payload.error : payload.error_context)
+  if (error) return error
+  return payload.local_synthesis?.content || ''
 }

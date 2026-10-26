@@ -877,6 +877,7 @@ export default {
 
   agent: {
     sessionSelectorLabel: 'Select agent session',
+    stepResult: 'Step result',
     newSessionOption: '+ New session',
     untitledSession: 'Untitled',
     backToChat: 'Back to Chat',

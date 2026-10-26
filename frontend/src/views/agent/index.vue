@@ -249,6 +249,15 @@
                 >
                   ❌ {{ evt.content }}
                 </div>
+                <!-- 阶段 1：局部综合是诊断时间线条目，不是 Final answer。 -->
+                <div
+                  v-else-if="evt.type === 'execution_step_result'"
+                  class="plan-standalone execution-step-result"
+                  data-testid="execution-step-result"
+                >
+                  <span class="plan-standalone-badge">{{ t('agent.stepResult') }}</span>
+                  <span class="plan-standalone-text">{{ executionStepResultText(evt) }}</span>
+                </div>
                 <!-- Retry hint（issue #250 第 6 条收尾：事件此前只落 store 的
                      msg.events，视图没有渲染分支 —— UI 仍看不到；#253 run_report
                      同款处置的"展示"一半；issue #289 抽为共享组件，与聊天页
@@ -493,6 +502,7 @@ import { agentApi } from '@/api/agent'
 import { commandsApi, type CommandExecutionData } from '@/api/commands'
 import { sessionsApi, type SessionForkData, type SessionLineageData } from '@/api/sessions'
 import { apiUnwrap } from '@/utils/apiUnwrap'
+import { executionStepResultText } from '@/utils/agentPlan'
 import { useDedupedMessage } from '@/utils/message'
 import { useConfirmDangerousAction } from '@/utils/confirm'
 import type {

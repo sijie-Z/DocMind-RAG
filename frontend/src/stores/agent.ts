@@ -11,7 +11,7 @@ import type {
   PlanStep,
   ToolInfo,
 } from '@/types/agent'
-import { applyPlanStepUpdate, buildPlanStep } from '@/utils/agentPlan'
+import { applyExecutionStepResult, applyPlanStepUpdate, buildPlanStep } from '@/utils/agentPlan'
 
 /** 持久化"最近一次运行的 task_id"：刷新/重连后回到审批现场的钥匙。 */
 const LAST_TASK_KEY = 'docmind.agent.lastTaskId'
@@ -170,6 +170,17 @@ export const useAgentStore = defineStore('agent', () => {
           msg.events.push(event)
         })
         applyPlanStepUpdate(planSteps.value, event)
+        break
+
+      case 'execution_step_result':
+        // 局部综合只进入诊断时间线与 PlanStep；绝不拼进 assistant 正文或思考。
+        updateLastAssistant((msg) => {
+          msg.events.push(event)
+        })
+        applyExecutionStepResult(planSteps.value, event)
+        updateLastAssistant((msg) => {
+          msg.planSteps = [...planSteps.value]
+        })
         break
 
       case 'reflection':

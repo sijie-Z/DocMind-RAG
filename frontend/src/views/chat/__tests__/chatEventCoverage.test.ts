@@ -77,7 +77,7 @@ const CHAT_AGENT_EVENT_EXEMPTIONS: Record<string, string> = {
   reflection: '反思结果只在 /agent 工作台事件台账展示',
   run_report: '运行报告只在 /agent 工作台展示',
   execution_context: '运行上下文徽标只在 /agent 工作台展示',
-  execution_step_result: '后端已发射；/agent 暂未渲染（既有缺口，另行跟进）；Chat 已无 Agent 模式',
+  execution_step_result: '后端已发射；/agent 已归约到时间线和 PlanStep（不写 assistant 正文）；Chat 已无 Agent 模式',
   retry_hint: '重试提示只在 /agent 工作台事件台账展示',
   done: 'Agent 终态事件；Chat 的 RAG 终态是 message（非 done）',
   // ── HITL / 控制面：Chat 没有审批卡与恢复入口，统一由 /agent 承担 ──
