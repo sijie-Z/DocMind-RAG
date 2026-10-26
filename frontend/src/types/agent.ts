@@ -237,6 +237,53 @@ export interface ApprovalDecisionInput {
   note?: string
 }
 
+export interface StoredTextEvidence {
+  content: string
+  original_length: number
+  stored_length: number
+  truncated: boolean
+}
+
+export interface SourceEvidence {
+  /** tool_call_id#原始 sources.index；跨 tool call 不重新赋 rank */
+  key: string
+  index: number
+  content: string
+}
+
+export interface ToolCallEvidence {
+  schema: 'docmind.tool_evidence/v1' | string
+  step_id: string
+  attempt: number
+  tool_call_id: string
+  tool: string
+  status: string
+  error?: { code: string; message: string } | null
+  content: string
+  original_length: number
+  stored_length: number
+  truncated: boolean
+  sources: Array<Record<string, any>>
+  evidence: SourceEvidence[]
+}
+
+export interface ExecutionStepResultPayload {
+  schema?: string
+  step_id: string
+  description?: string
+  status?: PlanStepStatus
+  result?: string | null
+  error?: unknown
+  error_context?: unknown
+  tool_hint?: string | null
+  attempt?: number
+  retry_count?: number
+  evidence_schema?: string
+  local_synthesis?: StoredTextEvidence
+  evidence?: ToolCallEvidence[]
+  legacy_chunk_normalized?: boolean
+}
+
 export interface PlanStep {
   id: string
   description: string
@@ -246,6 +293,9 @@ export interface PlanStep {
   result?: string
   error_context?: string
   retry_count: number
+  evidence?: ToolCallEvidence[]
+  local_synthesis?: StoredTextEvidence | null
+  evidence_schema?: string
   // 计划语义字段（issue #289 G7：由 plan_step 事件落账，PlanTree 按非默认值出徽标）
   parallel_group?: number | null
   risk_level?: string

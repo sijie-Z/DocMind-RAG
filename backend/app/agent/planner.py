@@ -20,6 +20,7 @@ Plan format (JSON, extracted from LLM response):
 """
 
 import asyncio
+import copy
 import json
 import logging
 import re
@@ -117,6 +118,11 @@ class PlanStep:
     retry_strategy: str = "auto_retry"  # auto_retry | ask_user | skip
     fallback_tool: str | None = None  # alternative tool
 
+    # ── 阶段 1 结构化证据（legacy 缺省不写回旧 checkpoint）──
+    evidence: list[dict[str, Any]] = field(default_factory=list)
+    local_synthesis: dict[str, Any] | None = None
+    evidence_schema: str = "legacy"
+
     # ── Checkpoint（issue #201 最小版）──
 
     def to_checkpoint_dict(self) -> dict[str, Any]:
@@ -124,8 +130,9 @@ class PlanStep:
 
         _save_plan 的 payload 缺这三项——对"步骤做没做完"这个问题它答不了，
         因此 checkpoint 里存的是**全量**步骤状态（result 在 executor 侧已截 [:2000]）。
+        阶段 1 证据只在实际产生时做加法；legacy 步骤的键集保持原样。
         """
-        return {
+        payload = {
             "id": self.id,
             "description": self.description,
             "dependencies": list(self.dependencies),
@@ -140,9 +147,34 @@ class PlanStep:
             "fallback_tool": self.fallback_tool,
             "fallback_chain": getattr(self, "fallback_chain", None),
         }
+        if self.evidence_schema != "legacy" or self.evidence or self.local_synthesis is not None:
+            payload.update(
+                {
+                    "evidence_schema": self.evidence_schema,
+                    "evidence": copy.deepcopy(self.evidence),
+                    "local_synthesis": copy.deepcopy(self.local_synthesis),
+                }
+            )
+        return payload
 
     @classmethod
     def from_checkpoint_dict(cls, data: dict[str, Any]) -> "PlanStep":
+        has_evidence = any(
+            key in data for key in ("evidence_schema", "evidence", "local_synthesis")
+        )
+        raw_evidence = data.get("evidence") or []
+        if not isinstance(raw_evidence, list) or not all(
+            isinstance(item, dict) for item in raw_evidence
+        ):
+            raise ValueError("PlanStep.evidence 必须是对象列表")
+        local_synthesis = data.get("local_synthesis")
+        if local_synthesis is not None and not isinstance(local_synthesis, dict):
+            raise ValueError("PlanStep.local_synthesis 必须是对象")
+        evidence_schema = data.get("evidence_schema")
+        if evidence_schema is None:
+            evidence_schema = "docmind.step_evidence/v1" if has_evidence else "legacy"
+        if not isinstance(evidence_schema, str) or not evidence_schema:
+            raise ValueError("PlanStep.evidence_schema 必须是非空字符串")
         step = cls(
             id=data.get("id", ""),
             description=data.get("description", ""),
@@ -156,6 +188,9 @@ class PlanStep:
             risk_level=data.get("risk_level", "low"),
             retry_strategy=data.get("retry_strategy", "auto_retry"),
             fallback_tool=data.get("fallback_tool"),
+            evidence=copy.deepcopy(raw_evidence),
+            local_synthesis=copy.deepcopy(local_synthesis),
+            evidence_schema=evidence_schema,
         )
         # fallback_chain 是 v2 字段（dataclass 未声明、executor 用 getattr 读）：
         # 只在快照里出现过才回填，保持"没有该属性的步骤"与旧行为一致。

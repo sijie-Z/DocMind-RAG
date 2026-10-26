@@ -11,6 +11,7 @@ Backward-compatible: PERAgentLoop.run() yields the same AgentEvent types as
 the old AgentLoop plus new event types (thinking, plan_*, reflection).
 """
 
+import json
 import logging
 import time
 from collections.abc import AsyncGenerator, Awaitable, Callable
@@ -24,7 +25,11 @@ from app.agent.config import AgentConfig
 from app.agent.context import ContextEngine
 from app.agent.events import AgentEvent
 from app.agent.exec_context import ExecutionContext
-from app.agent.executor import STEP_FAILURE_PLACEHOLDER, Executor
+from app.agent.executor import (
+    STEP_FAILURE_PLACEHOLDER,
+    Executor,
+    _legacy_step_result_event,
+)
 from app.agent.memory_bridge import AgentMemoryBridge
 from app.agent.planner import Plan, Planner, PlanStep
 from app.agent.reflector import Reflector
@@ -34,6 +39,7 @@ from app.agent.run_report import build_run_report, render_run_report_text
 from app.agent.skill_prompt import build_skills_index
 from app.agent.skills import skill_manager
 from app.agent.usage import record_llm_call_error, record_llm_usage
+from app.core.config import ai as ai_config
 from app.core.log_safety import log_safe
 
 logger = logging.getLogger(__name__)
@@ -113,6 +119,28 @@ def _plan_steps_payload(plan: Plan) -> list[dict[str, Any]]:
         }
         for s in plan.steps
     ]
+
+
+def _execution_step_payload(content: Any) -> dict[str, Any]:
+    if isinstance(content, dict):
+        return content
+    if not isinstance(content, str) or not content:
+        return {}
+    try:
+        payload = json.loads(content)
+    except (json.JSONDecodeError, TypeError, ValueError):
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def _payload_result_text(payload: dict[str, Any]) -> str:
+    result = payload.get("result")
+    if isinstance(result, str):
+        return result
+    local = payload.get("local_synthesis")
+    if isinstance(local, dict) and isinstance(local.get("content"), str):
+        return local["content"]
+    return ""
 
 
 DEFAULT_SYSTEM_PROMPT = """你是 DocMind 智能助手，一个基于企业知识库的 AI Agent。
@@ -678,6 +706,7 @@ class PERAgentLoop:
         # MAX_REPLANS_PER_RUN 保证终止，不允许无界循环。
         plan: Plan | None = None
         final_output = ""
+        unified = ai_config.unified_final_enabled()
         # Hooks（issue #474）：turn_stopping deny 的次数（有界继续，见常量注释）。
         turn_stopping_denials = 0
 
@@ -752,6 +781,7 @@ class PERAgentLoop:
                 self.executor.reset_for_request()
                 self._arm_executor_hitl()
                 execution_output = ""
+                legacy_chunks: dict[str, list[str]] = {}
                 try:
                     async for event in self.executor.execute(
                         plan=plan,
@@ -770,6 +800,43 @@ class PERAgentLoop:
                         # 表现为"只找到文档列表信息，没有拿到可总结的正文"。
                         document_context=document_context or "",
                     ):
+                        if unified and event.type == "chunk":
+                            step_id = event.plan_step_id
+                            if not step_id:
+                                running = [s for s in plan.steps if s.status == "running"]
+                                if len(running) == 1:
+                                    step_id = running[0].id
+                                elif len(plan.steps) == 1:
+                                    step_id = plan.steps[0].id
+                            legacy_chunks.setdefault(step_id, []).append(event.content)
+                            execution_output += event.content
+                            # 局部综合不是 assistant 正文；阶段 2 才会消费这些证据。
+                            continue
+                        structured_payload: dict[str, Any] = {}
+                        if unified and event.type == "execution_step_result":
+                            structured_payload = _execution_step_payload(event.content)
+                            step_id = str(
+                                structured_payload.get("step_id") or event.plan_step_id or ""
+                            )
+                            if step_id:
+                                # 结构化事件是权威结果；旧替身重复吐的 chunk 不双写。
+                                legacy_chunks.pop(step_id, None)
+                        if (
+                            unified
+                            and event.type == "thinking"
+                            and event.plan_step_status in ("completed", "failed", "skipped")
+                        ):
+                            parts = legacy_chunks.pop(event.plan_step_id, None)
+                            if parts:
+                                step = next(
+                                    (s for s in plan.steps if s.id == event.plan_step_id), None
+                                )
+                                yield _legacy_step_result_event(
+                                    plan,
+                                    step,
+                                    "".join(parts),
+                                    step_id=event.plan_step_id,
+                                )
                         yield event
                         if event.type == "chunk":
                             pass_output += event.content
@@ -780,7 +847,10 @@ class PERAgentLoop:
                                     partial_prefix + pass_output
                                 )
                         elif event.type == "execution_step_result" and event.content:
-                            execution_output += event.content
+                            if unified:
+                                execution_output += _payload_result_text(structured_payload)
+                            else:
+                                execution_output += event.content
                         elif event.type == "thinking" and event.plan_step_status in (
                             "completed",
                             "failed",
@@ -792,6 +862,16 @@ class PERAgentLoop:
                             # 置位）时 executor 已抛出，走不到本分支。
                             async for steer_event in self._consume_steering(run_state_live):
                                 yield steer_event
+                    if unified:
+                        for step_id, parts in legacy_chunks.items():
+                            step = next((s for s in plan.steps if s.id == step_id), None)
+                            yield _legacy_step_result_event(
+                                plan,
+                                step,
+                                "".join(parts),
+                                step_id=step_id,
+                            )
+                        legacy_chunks.clear()
                 except approval.ApprovalRequired as req:
                     # 审批暂停：快照与任务态已由审批回调持久化（waiting_approval）；
                     # 本 run 平静结束——绝不给 service 任何"完成"信号，也不置终态。
@@ -1712,6 +1792,8 @@ class PERAgentLoop:
                 plan_step_id=step.id,
                 retry_attempt=reflection_attempt,
             )
+            unified = ai_config.unified_final_enabled()
+            legacy_retry_chunks: list[str] = []
             async for retry_event in self.executor._execute_single_step(
                 step=step,
                 plan=plan,
@@ -1722,7 +1804,12 @@ class PERAgentLoop:
                 ctx=ctx,
                 on_step_done=self._make_step_checkpoint_callback(),
             ):
+                if unified and retry_event.type == "chunk":
+                    legacy_retry_chunks.append(retry_event.content)
+                    continue
                 yield retry_event
+            if unified and legacy_retry_chunks:
+                yield _legacy_step_result_event(plan, step, "".join(legacy_retry_chunks))
             return
 
     def _apply_skill_hints(self, plan: Plan, query: str) -> str | None:

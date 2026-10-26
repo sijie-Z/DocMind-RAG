@@ -20,6 +20,7 @@ from app.agent.registry import (
 )
 from app.agent.run_context import RunContext
 from app.agent.usage import ctx_from_run_context, record_llm_call_error, record_llm_usage
+from app.core.config import ai as ai_config
 
 logger = logging.getLogger(__name__)
 
@@ -52,6 +53,8 @@ _AGENT_SEARCH_TOTAL_EVIDENCE_MAX_CHARS = 8000
 
 def _build_search_payload(
     entries: list[tuple[float, float | None, str, str, str]],
+    *,
+    include_evidence: bool = False,
 ) -> str:
     """把 (score, relevance, filename, document_id, snippet) 列表打包为结构化 JSON 信封。
 
@@ -80,14 +83,24 @@ def _build_search_payload(
             entries, 1
         )
     )
-    return json.dumps(
-        {
-            "kind": SEARCH_RESULTS_PAYLOAD_KIND,
-            "sources": sources,
-            "content": content,
-        },
-        ensure_ascii=False,
-    )
+    payload: dict[str, Any] = {
+        "kind": SEARCH_RESULTS_PAYLOAD_KIND,
+        "sources": sources,
+        "content": content,
+    }
+    if include_evidence:
+        # 与 sources 同序、使用原始 index；不从 content 正文反推来源。
+        payload["evidence"] = [
+            {"index": index, "content": snippet}
+            for index, (
+                _score,
+                _relevance_score,
+                _filename,
+                _document_id,
+                snippet,
+            ) in enumerate(entries, 1)
+        ]
+    return json.dumps(payload, ensure_ascii=False)
 
 
 # ─── Search Tools ────────────────────────────────────────────────────────────
@@ -207,7 +220,10 @@ async def search_knowledge_base(
                 snippet,
             )
         )
-    return _build_search_payload(entries)
+    return _build_search_payload(
+        entries,
+        include_evidence=ai_config.unified_final_enabled(),
+    )
 
 
 async def _vector_search_impl(
@@ -270,7 +286,10 @@ async def _vector_search_impl(
                 compress(src.get("content") or "", query, max_chars=300),
             )
         )
-    return _build_search_payload(entries)
+    return _build_search_payload(
+        entries,
+        include_evidence=ai_config.unified_final_enabled(),
+    )
 
 
 @register_tool(
