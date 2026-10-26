@@ -6,7 +6,7 @@
 >
 > **口径纪律**：`live`（真实嵌入 / 真实 ES / 真实模型）与 `fake`（确定性伪嵌入）不可混写；含嵌套 / 不含嵌套必须写明；旧版本（Eval v1：28 条）与新版本（Eval v1.5：80 条）不可混比。
 
-维护：DocMind 维护者（issue #513）。最近复核：2026-10-25。
+维护：DocMind 维护者（issue #513）。最近复核：2026-10-27。
 
 ## 1. 源码派生 facts（机器校验，七项与 docs/facts.json 同值）
 
@@ -17,7 +17,7 @@
 | sse_event_types | 24 | live：`EventType = Literal[...]` 闭集（含 agent 事件子集 16；不含 `ThinkingType` 等非事件 Literal） | `cd backend && python scripts/check_doc_facts.py --print-derived` | 2026-10-24 | `docs/facts.json` 同值；源码 `backend/app/agent/events.py` |
 | endpoint_modules | 28 | live：`ROUTER_SPECS` 字典键（声明顺序、去重；不含嵌套 router 内部子模块） | `cd backend && python scripts/check_doc_facts.py --print-derived` | 2026-10-24 | `docs/facts.json` 同值；源码 `backend/app/api/v1/router.py` |
 | frontend_routes | 34 | live：`routes` 数组 `path:` 字面量（**含 `children` 嵌套**；注释与 redirect 回调内对象不计） | `cd backend && python scripts/check_doc_facts.py --print-derived` | 2026-10-24 | `docs/facts.json` 同值；12 条顶层 + 22 条页面子路由；**29 条具名路由是另一口径** |
-| http_route_decorators | 206 | live：`@router.get/post/put/patch/delete/head/options` 装饰器总数（`app/api/v1/endpoints/**`，含子目录） | `cd backend && python scripts/check_doc_facts.py --print-derived` | 2026-10-24 | `docs/facts.json` 同值；不与 `endpoint_modules` 混用 |
+| http_route_decorators | 207 | live：`@router.get/post/put/patch/delete/head/options` 装饰器总数（`app/api/v1/endpoints/**`，含子目录） | `cd backend && python scripts/check_doc_facts.py --print-derived` | 2026-10-27 | `docs/facts.json` 同值；不与 `endpoint_modules` 混用 |
 | websocket_route_decorators | 3 | live：`@router.websocket` 装饰器数（`app/api/v1/endpoints/**`；与 HTTP 分开计） | `cd backend && python scripts/check_doc_facts.py --print-derived` | 2026-10-24 | `docs/facts.json` 同值 |
 
 ## 2. 检索评测（Eval v1.5）
