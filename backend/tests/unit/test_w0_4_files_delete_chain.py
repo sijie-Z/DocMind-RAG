@@ -26,7 +26,7 @@ from sqlalchemy import Delete
 
 import app.rag.cache as cache_mod
 import app.services.knowledge_service as ks_mod
-from app.exceptions import AppError, AuthorizationError, NotFoundError
+from app.exceptions import AppError, AuthorizationError, NotFoundError, ServiceUnavailableError
 
 DOC_ID = "doc-w0-4"
 ORG_ID = 7
@@ -156,7 +156,11 @@ async def test_unified_chain_cleans_children_es_and_caches_in_order(monkeypatch)
 
     # 4. ES 按 document_id 清索引
     assert fake_es.delete_calls == [
-        {"index": svc.index_name, "query": {"term": {"document_id": DOC_ID}}}
+        {
+            "index": svc.index_name,
+            "query": {"term": {"document_id": DOC_ID}},
+            "refresh": True,
+        }
     ]
 
     # 5. RAG 缓存按文档所属 org 清（两个命名空间都要清）
@@ -196,22 +200,29 @@ async def test_unified_chain_keeps_minio_object_shared_by_other_documents(monkey
 
 
 @pytest.mark.asyncio
-async def test_unified_chain_survives_es_outage(monkeypatch):
-    """ES 不可用是 best-effort：不得挡住 DB 侧删除（否则 /files 删除会 500）。"""
+async def test_unified_chain_fails_closed_on_es_outage(monkeypatch):
+    """ES 不可用时保留 DB，不 commit、不清缓存，并返回可重试失败。"""
     svc = ks_mod.KnowledgeService()
     doc = MagicMock()
     doc.file_path = None
     doc.organization_id = ORG_ID
     session = _RecordingSession(doc)
+    retrieval_clears: list[int] = []
+    semantic_clears: list[int] = []
 
     monkeypatch.setattr(ks_mod, "AsyncSessionLocal", lambda: session)
     monkeypatch.setattr(ks_mod, "get_elasticsearch", AsyncMock(side_effect=RuntimeError("es down")))
-    monkeypatch.setattr(cache_mod, "RetrievalCache", _recording_cache([]))
-    monkeypatch.setattr(cache_mod, "SemanticCache", _recording_cache([]))
+    monkeypatch.setattr(cache_mod, "RetrievalCache", _recording_cache(retrieval_clears))
+    monkeypatch.setattr(cache_mod, "SemanticCache", _recording_cache(semantic_clears))
 
-    assert await svc.delete_knowledge_thoroughly(DOC_ID, ORG_ID) is True
-    assert session.commit_count == 1
-    assert [stmt.table.name for stmt in session.deletes][-1] == "documents"
+    with pytest.raises(ServiceUnavailableError) as exc_info:
+        await svc.delete_knowledge_thoroughly(DOC_ID, ORG_ID)
+
+    assert exc_info.value.status_code == 503
+    assert session.commit_count == 0
+    assert session.deletes == []
+    assert retrieval_clears == []
+    assert semantic_clears == []
 
 
 # ── 端点：委托统一链路、入参 org、契约与异常透传 ────────────────────────────

@@ -301,7 +301,7 @@ def _pinned_externals(monkeypatch):
     - MinIO：stat 报不存在、put/remove 空操作（不读写任何对象存储）；
     - Kafka：不初始化（TestClient 不跑 lifespan）→ 端点走进程内兜底；
     - 文档处理：空操作（本测试只关心行级效果，不触发真实解析/embedding）；
-    - ES：客户端不可用（删除路径必须容忍 —— CI 无 ES，生产也允许 ES 抖动）；
+    - ES：内存替身明确返回成功且无 failures（不接触真实 ES；失败契约由单测覆盖）；
     - RAG 缓存：不走 Redis。
     autouse：服务级用例同样走「删文件 + 清 ES 索引」这两步，不钉会把
     remove_object / ES 查询打到开发机真实服务上。
@@ -313,8 +313,12 @@ def _pinned_externals(monkeypatch):
     async def _noop_initialize():
         return None
 
+    class _FakeES:
+        async def delete_by_query(self, **_kwargs):
+            return {"deleted": 0, "failures": []}
+
     monkeypatch.setattr(es_module._holder, "initialize", _noop_initialize)
-    monkeypatch.setattr(es_module._holder, "_client", None)
+    monkeypatch.setattr(es_module._holder, "_client", _FakeES())
 
     class _FakeMinio:
         def stat_object(self, *a, **k):

@@ -110,6 +110,7 @@ def get_user_org_id(current_user: User) -> int | None:
     非空 org-bound API Key 始终使用认证时已挂载并校验的 key.org_id，即使用户
     后来切换 primary org 也不漂移。JWT 与 org-unbound key 保持原有 primary-first
     行为；JWT 的 token 回退只接受具体 int，MagicMock 不得成为组织上下文。
+    该回退仍只消费 auth_service 已校验过的组织成员关系。
     """
     bound_key_org_id = get_bound_api_key_org_id(current_user)
     if bound_key_org_id is not None:
