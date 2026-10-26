@@ -1478,10 +1478,12 @@ async def chat_stream_endpoint(
             # W0-5：完整异常/堆栈只进服务端日志（带 request_id，供排障关联）；
             # 客户端只收映射后的用户可读文案——绝不出现 str(e)、文件路径、SQL、
             # 堆栈或内部类名。无组织等可预期拒绝映射为 403 语义文案；其余未预期
-            # 异常为通用文案 + 请求编号。日志不记录 org/user 标识。
+            # 异常为通用文案 + 请求编号。日志不记录 org。
             logger.error(
-                "SSE stream error (request_id=%s): %s",
+                "SSE stream error (request_id=%s user=%s): %s",
                 log_safe(request_id),
+                # codeql[py/clear-text-logging-sensitive-data] 数值审计 ID 非凭据
+                current_user.id,
                 log_safe(e),
                 exc_info=True,
             )
