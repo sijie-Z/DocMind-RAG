@@ -218,6 +218,7 @@ class DocumentProcessor:
             return DEFERRED
         notify()
         heartbeat_task: asyncio.Task | None = None
+        doc = None
         if lock_acquired is True:
             heartbeat_task = asyncio.create_task(self._lock_heartbeat_loop(document_id))
         try:
@@ -293,7 +294,19 @@ class DocumentProcessor:
             return DEFERRED
         except Exception as e:
             logger.error("[DOC_PROC] failed document_id=%s: %s", document_id, e, exc_info=True)
-            await self._mark_failed(document_id, str(e), job_id)
+            preserve_indexed = getattr(
+                doc, "_reprocess_previous_status", None
+            ) == DocumentStatus.INDEXED and not getattr(doc, "_es_delete_started", False)
+            if preserve_indexed:
+                logger.info(
+                    "[DOC_PROC] rebuild failed before ES delete; restoring INDEXED "
+                    "document_id=%s job_id=%s",
+                    document_id,
+                    job_id,
+                )
+                await self._mark_failed(document_id, str(e), job_id, preserve_indexed=True)
+            else:
+                await self._mark_failed(document_id, str(e), job_id)
             return False
         finally:
             if heartbeat_task is not None:
@@ -355,6 +368,12 @@ class DocumentProcessor:
                 )
                 return STALE_RUN
 
+            # 仅本次 run 的瞬态上下文，不落库/不改迁移。PARSING 前的状态
+            # 决定 ES delete 尚未开始时失败是否应恢复最后可用版本。
+            doc._reprocess_previous_status = (
+                doc.status if job is not None and job.trigger_type == "reprocess" else None
+            )
+            doc._es_delete_started = False
             doc.status = DocumentStatus.PARSING
             doc.parse_error = None
             if job:
@@ -473,6 +492,9 @@ class DocumentProcessor:
 
         await create_index_if_not_exists()
         client = await get_elasticsearch()
+        # 在调用前记录阶段边界；delete 开始后的 bulk/verify/切换失败不在
+        # 本阶段旧版保留承诺内，仍按现有 FAILED 语义收敛。
+        doc._es_delete_started = True
         await client.delete_by_query(
             index=settings.ELASTICSEARCH_INDEX_NAME,
             query={"term": {"document_id": doc.id}},
@@ -535,8 +557,17 @@ class DocumentProcessor:
                     document_id,
                 )
 
-    async def _mark_failed(self, document_id: str, error: str, job_id: int | None) -> None:
-        """条件写入 FAILED：**绝不覆盖已 INDEXED 的终态**（A3-P0 终态回退防线）。"""
+    async def _mark_failed(
+        self,
+        document_id: str,
+        error: str,
+        job_id: int | None,
+        *,
+        preserve_indexed: bool = False,
+    ) -> None:
+        """写入失败终态；符合条件的 ES 前重建失败恢复最后可用版本。"""
+        target_status = DocumentStatus.INDEXED if preserve_indexed else DocumentStatus.FAILED
+        parse_error = None if preserve_indexed else error
         async with AsyncSessionLocal() as session:
             result = await session.execute(
                 update(Document)
@@ -544,7 +575,7 @@ class DocumentProcessor:
                     Document.id == document_id,
                     Document.status != DocumentStatus.INDEXED,
                 )
-                .values(status=DocumentStatus.FAILED, parse_error=error)
+                .values(status=target_status, parse_error=parse_error)
                 .execution_options(synchronize_session=False)
             )
             await session.commit()
