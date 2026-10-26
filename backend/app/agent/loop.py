@@ -1346,7 +1346,7 @@ class PERAgentLoop:
                 "unavailable",
             ):
                 recommendation = "error"
-            elif raw_recommendation.startswith("pass"):
+            elif raw_recommendation == "pass":
                 recommendation = "pass"
             elif unified:
                 recommendation = "error"
@@ -1457,6 +1457,24 @@ class PERAgentLoop:
         # checkpoint.mark_terminal 负责——loop 不碰 AgentTask 状态机。
         await self._save_checkpoint("on_finish")
 
+        if unified:
+            # Run the completion hook before publishing the completed report.
+            # A cancel arriving inside it must converge without a contradictory
+            # completed RunReport/execution_context or a successful done event.
+            async for end_event in self._emit_turn_end(
+                "failed" if self.run_failed else "completed",
+                task_id=task_id,
+                session_id=session_id,
+            ):
+                yield end_event
+            cancel_event = await self._cancel_event()
+            if cancel_event is not None:
+                async for event in self._converge_cancelled(
+                    cancel_event, task_id=task_id, session_id=session_id
+                ):
+                    yield event
+                return
+
         # ── Run report (observe-only, no behavior change) ───────────────
         # Pure projection of what the run already recorded into ctx.
         # Does NOT trigger retry/replan/approval/memory/experience. See ADR-1.
@@ -1505,13 +1523,15 @@ class PERAgentLoop:
                     yield event
                 return
 
-        # ── Hooks（issue #474）：agent/turn_end —— 轮次结束（serial 观察）────
-        async for end_event in self._emit_turn_end(
-            "failed" if self.run_failed else "completed",
-            task_id=task_id,
-            session_id=session_id,
-        ):
-            yield end_event
+        # ── Hooks（issue #474）：legacy 保持 report → turn_end → done 顺序；
+        # unified 已在报告前完成 turn_end 与 post-hook 取消门。
+        if not unified:
+            async for end_event in self._emit_turn_end(
+                "failed" if self.run_failed else "completed",
+                task_id=task_id,
+                session_id=session_id,
+            ):
+                yield end_event
 
         yield AgentEvent(type="done", plan_progress=1.0)
 

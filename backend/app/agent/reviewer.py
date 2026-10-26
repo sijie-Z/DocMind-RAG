@@ -11,6 +11,7 @@ with a fundamentally different perspective: it is told to be critical and
 to find problems, not to assess quality neutrally.
 """
 
+import copy
 import json
 import logging
 import time
@@ -19,7 +20,7 @@ from typing import Any
 from openai import AsyncOpenAI
 
 from app.agent.config import AgentConfig
-from app.agent.final_synthesis import FinalInputPacket
+from app.agent.final_synthesis import FINAL_SYSTEM_PROMPT, FinalInputPacket
 from app.agent.planner import Plan
 from app.agent.usage import record_llm_call_error, record_llm_usage
 
@@ -269,49 +270,88 @@ class Reviewer:
         *,
         synthesis_messages: list[dict[str, str]] | None = None,
     ) -> dict[str, Any]:
-        """Review a final draft against the same packet/prompt evidence as synthesis.
+        """Review a draft with shared system context, roles and current evidence.
 
-        The returned mapping is diagnostic only.  No code in this method mutates
-        ``draft`` or appends issues to it, including reject/revise/error outcomes.
+        History stays in its original roles.  Only the current user message holds
+        the final evidence packet and draft; the synthesis task prompt is never
+        reused as the reviewer's task prompt.
         """
-        if synthesis_messages:
-            evidence_prompt = "\n".join(
-                str(message.get("content", ""))
-                for message in synthesis_messages
-                if message.get("role") == "user"
-            )
+        messages = self._build_final_review_messages(packet, draft, synthesis_messages)
+        review = await self._review_messages(messages, goal=packet.goal, ctx=ctx)
+        recommendation = str(review.get("recommendation") or "").strip().lower()
+        known_verdict = (
+            recommendation == "pass"
+            or recommendation.startswith(("reject", "revise", "error"))
+            or recommendation in ("skipped", "unavailable")
+        )
+        if known_verdict:
+            return review
+
+        # Valid JSON with an unknown verdict is a model-side no_verdict, not a
+        # provider outage.  Keep this distinct from explicit error/service_error.
+        logger.warning(
+            "Adversarial review: unknown final recommendation recorded as no_verdict, goal=%s",
+            packet.goal[:40],
+        )
+        review["recommendation"] = "error"
+        review["error_kind"] = "no_verdict"
+        review["error"] = "模型返回的 JSON 包含未知 recommendation 判定"
+        return review
+
+    @staticmethod
+    def _build_final_review_messages(
+        packet: FinalInputPacket,
+        draft: str,
+        synthesis_messages: list[dict[str, str]] | None,
+    ) -> list[dict[str, str]]:
+        base_system = ""
+        history: list[dict[str, str]] = []
+        if packet.base_messages:
+            if packet.base_messages[0].get("role") == "system":
+                base_system = str(packet.base_messages[0].get("content", ""))
+            history = copy.deepcopy(packet.base_messages[1:-1])
+        elif synthesis_messages:
+            if synthesis_messages[0].get("role") == "system":
+                # Standalone callers may not have base_messages.  Strip only the
+                # exact synthesis instruction; retain the caller's own context.
+                base_system = (
+                    str(synthesis_messages[0].get("content", ""))
+                    .replace(FINAL_SYSTEM_PROMPT, "")
+                    .rstrip()
+                )
+            history = copy.deepcopy(synthesis_messages[1:-1])
         else:
-            # Standalone callers still share the packet itself.  The loop passes
-            # synthesis_messages so trimming/accounting is byte-for-byte identical.
-            evidence_prompt = json.dumps(
-                {
-                    "query": packet.query,
-                    "plan_id": packet.plan_id,
-                    "goal": packet.goal,
-                    "steps": packet.steps,
-                    "context": packet.context,
-                    "history": packet.history,
-                    "legacy": packet.legacy,
-                    "degraded": packet.degraded,
-                },
-                ensure_ascii=False,
-                default=str,
+            history = copy.deepcopy(packet.history)
+
+        system = (
+            f"{base_system}\n\n{FINAL_REVIEWER_SYSTEM_PROMPT}"
+            if base_system
+            else FINAL_REVIEWER_SYSTEM_PROMPT
+        )
+        messages = [{"role": "system", "content": system}, *history]
+        if synthesis_messages and synthesis_messages[-1].get("role") == "user":
+            current = str(synthesis_messages[-1].get("content", ""))
+        else:
+            evidence_payload = {
+                "query": packet.query,
+                "plan_id": packet.plan_id,
+                "goal": packet.goal,
+                "steps": packet.steps,
+                "context": packet.context,
+                "legacy": packet.legacy,
+                "degraded": packet.degraded,
+            }
+            current = (
+                "## 原始用户请求\n"
+                f"{packet.query}\n\n"
+                "## 当前步骤与最终 attempt 证据（历史消息不属于证据）\n"
+                f"{json.dumps(evidence_payload, ensure_ascii=False, default=str)}"
             )
-        messages = [
-            {"role": "system", "content": FINAL_REVIEWER_SYSTEM_PROMPT},
-            {
-                "role": "user",
-                "content": (
-                    "## 原始用户请求\n"
-                    f"{packet.query}\n\n"
-                    "## 与最终综合相同的输入\n"
-                    f"{evidence_prompt}\n\n"
-                    "## 待审查最终草稿（不得修改）\n"
-                    f"{draft}"
-                ),
-            },
-        ]
-        return await self._review_messages(messages, goal=packet.goal, ctx=ctx)
+        if packet.query not in current:
+            current = f"## 原始用户请求\n{packet.query}\n\n{current}"
+        current += f"\n\n## 待审查最终草稿（不得修改）\n{draft}"
+        messages.append({"role": "user", "content": current})
+        return messages
 
     def _build_results_summary(self, plan: Plan, results: dict[str, Any]) -> str:
         """Build a concise summary of execution results for the reviewer."""

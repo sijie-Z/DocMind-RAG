@@ -963,6 +963,136 @@ async def test_cancel_inside_reviewer_skips_chunk_and_successful_done():
     assert loop.memory.interactions == []
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("raw_content", "expected", "warning_kind"),
+    [
+        ('{"issues_found": [], "recommendation": "pass"}', "pass", "none"),
+        ('{"issues_found": [], "recommendation": "passage"}', "error", "no_verdict"),
+        ('{"issues_found": [], "recommendation": "maybe"}', "error", "no_verdict"),
+        ("not-json", "error", "no_verdict"),
+        ('{"issues_found": [], "recommendation": "error"}', "error", "service_error"),
+    ],
+    ids=["pass", "passage", "maybe", "unparsed", "error"],
+)
+async def test_final_verdict_is_exact_and_unknown_is_not_service_error(
+    raw_content,
+    expected,
+    warning_kind,
+):
+    synthesis_provider = _FakeProvider("FINAL-BODY")
+    review_provider = _FakeProvider(raw_content)
+    loop = _loop(synthesis_provider, statuses=("completed",), reflection=True)
+    loop._reviewer = Reviewer(review_provider, loop.config)
+
+    events = [event async for event in loop.run("q")]
+    report = next(event.content for event in events if event.type == "run_report")
+    warnings = [
+        event.content
+        for event in events
+        if event.type == "thinking" and "对抗审查未完成" in event.content
+    ]
+
+    assert [event.content for event in events if event.type == "chunk"] == ["FINAL-BODY"]
+    assert f"review_recommendation: {expected}" in report
+    if warning_kind == "none":
+        assert warnings == []
+    else:
+        expected_text = "模型未给出判定" if warning_kind == "no_verdict" else "审查服务异常"
+        assert len(warnings) == 1
+        assert expected_text in warnings[0]
+
+
+@pytest.mark.asyncio
+async def test_reviewer_receives_same_system_roles_and_evidence_without_synthesis_task():
+    synthesis_provider = _FakeProvider("FINAL-BODY")
+    review_provider = _FakeProvider('{"issues_found": [], "recommendation": "pass"}')
+    loop = _loop(synthesis_provider, statuses=("completed",), reflection=True)
+    loop._reviewer = Reviewer(review_provider, loop.config)
+    loop.config.system_prompt_override = "OVERRIDE-R3"
+    loop.config.personality = "precise"
+    history = [
+        {"role": "user", "content": "HISTORY-USER-R3"},
+        {"role": "assistant", "content": "HISTORY-ASSISTANT-R3"},
+    ]
+    docs = [{"filename": "facts.txt", "prompt_text": "UNIQUE-DOC-R3"}]
+
+    events = [
+        event
+        async for event in loop.run(
+            "CURRENT-QUERY-R3",
+            history=history,
+            context_docs=docs,
+        )
+    ]
+    synthesis_messages = synthesis_provider.calls[0]["messages"]
+    review_messages = review_provider.calls[0]["messages"]
+    review_system = review_messages[0]["content"]
+    evidence_key = "call-plan-1-s1#20"
+
+    assert [event.content for event in events if event.type == "chunk"] == ["FINAL-BODY"]
+    assert [message["role"] for message in synthesis_messages] == [
+        "system",
+        "user",
+        "assistant",
+        "user",
+    ]
+    assert [message["role"] for message in review_messages] == [
+        "system",
+        "user",
+        "assistant",
+        "user",
+    ]
+    assert "OVERRIDE-R3" in review_system
+    assert "UNIQUE-DOC-R3" in review_system
+    assert "准确、简洁、直接" in review_system
+    assert "对抗性质检" in review_system
+    assert "最终答案综合器" not in review_system
+    assert review_messages[1]["content"] == "HISTORY-USER-R3"
+    assert review_messages[2]["content"] == "HISTORY-ASSISTANT-R3"
+    assert all(evidence_key not in message["content"] for message in review_messages[1:-1])
+    assert evidence_key in review_messages[-1]["content"]
+    assert "CURRENT-QUERY-R3" in review_messages[-1]["content"]
+    assert "FINAL-BODY" in review_messages[-1]["content"]
+    assert "最终答案综合器" not in review_messages[-1]["content"]
+
+
+@pytest.mark.asyncio
+async def test_cancel_inside_completed_turn_end_hook_prevents_done_and_completed_report():
+    provider = _FakeProvider("FINAL-BEFORE-LATE-CANCEL")
+    loop = _loop(provider, statuses=("completed",), reflection=False)
+    cancel_requested = False
+    turn_end_statuses: list[str] = []
+
+    async def cancel_check() -> bool:
+        return cancel_requested
+
+    original_emit = loop._emit_turn_end
+
+    async def emit_and_cancel(status, **kwargs):
+        nonlocal cancel_requested
+        turn_end_statuses.append(status)
+        if status == "completed":
+            cancel_requested = True
+        async for event in original_emit(status, **kwargs):
+            yield event
+
+    loop._emit_turn_end = emit_and_cancel
+    loop.cancel_check = cancel_check
+
+    events = [event async for event in loop.run("q")]
+
+    assert [event.content for event in events if event.type == "chunk"] == [
+        "FINAL-BEFORE-LATE-CANCEL"
+    ]
+    assert not any(event.type == "done" for event in events)
+    assert not any(event.type == "run_report" for event in events)
+    assert any(event.type == "run_cancelled" for event in events)
+    assert turn_end_statuses == ["completed", "cancelled"]
+    assert loop.run_cancelled is True
+    assert loop.run_failed is False
+
+
 def test_unified_final_flag_default_remains_false():
     assert ai_config.AISettings.model_fields["AGENT_UNIFIED_FINAL_ENABLED"].default is False
 
