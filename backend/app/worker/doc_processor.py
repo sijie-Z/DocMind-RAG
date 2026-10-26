@@ -78,6 +78,14 @@ class StaleRunOutcome:
 STALE_RUN = StaleRunOutcome()
 
 
+def _original_text_and_provenance(chunk_data: dict) -> tuple[str | None, str]:
+    """Return only a real parser original; never promote retrieval text as a fallback."""
+    original_text = chunk_data.get("original_text")
+    if isinstance(original_text, str) and original_text.strip():
+        return original_text, "parser_original"
+    return None, "legacy_unverified"
+
+
 class LockLostError(Exception):
     """持锁 run 在阶段边界发现锁已被接管：立即中止，不再写终态/索引。"""
 
@@ -424,14 +432,20 @@ class DocumentProcessor:
         ``metadata.page_number``（``metadata.enabled=false``，存而不索引），而
         上游一直取不到的 None 值也让它无从救起；解析/切分侧产出页码后才真正生效。
 
+        PR1 只增加持久化：``content/chunk_text`` 仍是检索文本；``original_text``
+        只保存 parser 真实原文。缺原文时写 ``legacy_unverified``，不把检索文本
+        复制成原文。消费者仍沿用原字段，本 PR 不改变 prompt/sources/UI。
+
         ``embedding`` 由调用方注入（本 helper 不关心向量来源，便于单测）。
         """
         metadata = chunk_data.get("metadata", {}) or {}
-        original_text = chunk_data.get("original_text") or chunk_data["chunk_text"]
-        clause_fields = extract_clause_fields(original_text)
-        return {
+        original_text, text_provenance = _original_text_and_provenance(chunk_data)
+        # 条款兼容可以回退到 chunk_text；持久化 original 绝不能使用该 fallback。
+        clause_fields = extract_clause_fields(original_text or chunk_data["chunk_text"])
+        source = {
             "content": chunk_data["chunk_text"],
             "chunk_text": chunk_data["chunk_text"],
+            "text_provenance": text_provenance,
             "organization_id": str(doc.organization_id),
             "document_id": doc.id,
             "filename": doc.filename,
@@ -455,6 +469,9 @@ class DocumentProcessor:
                 "section_title": metadata.get("section_title"),
             },
         }
+        if original_text is not None:
+            source["original_text"] = original_text
+        return source
 
     async def _replace_document_state(
         self, doc: Document, chunks_data: list[dict], embeddings: list[list[float]]
@@ -465,6 +482,8 @@ class DocumentProcessor:
         for i, (chunk_data, embedding) in enumerate(zip(chunks_data, embeddings, strict=False)):
             chunk_id = str(uuid.uuid4())
             metadata = chunk_data.get("metadata", {}) or {}
+            original_text, text_provenance = _original_text_and_provenance(chunk_data)
+            row_metadata = {**metadata, "text_provenance": text_provenance}
             chunk_index = chunk_data.get("chunk_index", i)
             chunk_rows.append(
                 DocumentChunk(
@@ -472,12 +491,13 @@ class DocumentProcessor:
                     document_id=doc.id,
                     chunk_index=chunk_index,
                     chunk_text=chunk_data["chunk_text"],
+                    original_text=original_text,
                     chunk_length=chunk_data["chunk_length"],
                     start_pos=chunk_data.get("start_pos"),
                     end_pos=chunk_data.get("end_pos"),
                     page_number=metadata.get("page_number"),
                     section_title=metadata.get("section_title"),
-                    meta_data=metadata,
+                    meta_data=row_metadata,
                 )
             )
             source = self._build_es_source(doc, chunk_id, chunk_index, chunk_data)

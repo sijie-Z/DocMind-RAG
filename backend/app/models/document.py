@@ -113,6 +113,9 @@ class DocumentChunk(Base):
     # 分块信息
     chunk_index: Mapped[int] = mapped_column(Integer, comment="分块序号")
     chunk_text: Mapped[str] = mapped_column(Text, comment="分块文本内容")
+    original_text: Mapped[str | None] = mapped_column(
+        Text, comment="未加检索背景摘要的原文；legacy 分块为 NULL"
+    )
     chunk_length: Mapped[int] = mapped_column(Integer, comment="分块长度")
 
     # 上下文信息
