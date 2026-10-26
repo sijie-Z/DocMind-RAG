@@ -13,7 +13,7 @@ import {
 } from '@/api/conversation'
 import { apiUnwrap } from '@/utils/apiUnwrap'
 
-export function useChatSessions() {
+export function useChatSessions(getGeneration: () => string = () => '') {
   const router = useRouter()
   const message = useDedupedMessage()
   const dialog = useDialog()
@@ -32,11 +32,16 @@ export function useChatSessions() {
   })
 
   const currentConversationId = computed(() => chatStore.currentConversation?.id)
+  let listRequestSeq = 0
 
   const fetchConversations = async () => {
+    const requestSeq = ++listRequestSeq
+    const generation = getGeneration()
+    const ownsResponse = () => requestSeq === listRequestSeq && generation === getGeneration()
     isListLoading.value = true
     try {
       const res = await getConversations({ page: currentPage.value, page_size: 50 })
+      if (!ownsResponse()) return
       // 宽容解包（口径见 @/types/common.ts）：真实响应为
       // {success, data: {data: [...], total, page, page_size}} 双层体。
       const page = apiUnwrap<ConversationListResponse | null>(res)
@@ -52,11 +57,12 @@ export function useChatSessions() {
         hasMore.value = false
       }
       convLoadError.value = false
-    } catch (error) {
+    } catch {
+      if (!ownsResponse()) return
       message.error(t('chat.loadFailed'))
       convLoadError.value = true
     } finally {
-      isListLoading.value = false
+      if (requestSeq === listRequestSeq) isListLoading.value = false
     }
   }
 
@@ -73,16 +79,18 @@ export function useChatSessions() {
       positiveText: t('common.confirm'),
       negativeText: t('common.cancel'),
       onPositiveClick: async () => {
+        const generation = getGeneration()
         try {
           await deleteConversation(id)
+          if (generation !== getGeneration()) return
           message.success(t('common.deleteSuccess'))
           if (currentConversationId.value === id) {
             chatStore.setCurrentConversation(null)
             router.push({ query: {} })
           }
           await fetchConversations()
-        } catch (error) {
-          message.error(t('common.deleteFailed'))
+        } catch {
+          if (generation === getGeneration()) message.error(t('common.deleteFailed'))
         }
       }
     })

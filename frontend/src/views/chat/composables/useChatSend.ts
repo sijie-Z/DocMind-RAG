@@ -21,6 +21,7 @@ export function useChatSend(
   useStream: { value: boolean },
   debugEnabled?: { value: boolean },
   debugData?: { value: RetrievalDebugData | null },
+  getGeneration: () => string = () => '',
 ) {
   const message = useDedupedMessage()
   const { t } = useI18n()
@@ -45,6 +46,8 @@ export function useChatSend(
   }
 
   const handleSSESend = async (preprocessedMessage?: string) => {
+    const generation = getGeneration()
+    const ownsGeneration = () => generation === getGeneration()
     let userMessage = preprocessedMessage ?? inputMessage.value.trim()
     const currentFiles = [...attachedFiles.value]
     const hasParsedContent = currentFiles.some(f => f.parsedContent)
@@ -101,6 +104,7 @@ export function useChatSend(
 
     const writeStreamContent = () => {
       cancelScheduledFlush = null
+      if (!ownsGeneration()) return
       const lastMsg = messages.value[messages.value.length - 1]
       if (lastMsg && lastMsg.messageType === 'assistant' && lastMsg.id === aiMsgId) {
         lastMsg.content = fullContent
@@ -137,6 +141,7 @@ export function useChatSend(
     // W2-T7 项 4：「流式响应」开关真接线——关闭时只累积 fullContent 不逐字落屏，
     // 等 message 终态一次性落屏（非流式展示）；开启时按帧节流落屏（默认行为不回归）。
     const onChunk = (data: SSEMessage) => {
+      if (!ownsGeneration()) return
       sseStatus.value = 'connected'
       if (data.conversationId && (!chatStore.currentConversation || chatStore.currentConversation.id !== data.conversationId)) {
         chatStore.setCurrentConversation({
@@ -160,6 +165,7 @@ export function useChatSend(
     }
 
     const onMessage = (data: SSEMessage) => {
+      if (!ownsGeneration()) return
       isLoading.value = false
       isRetrieving.value = false
       sseStatus.value = 'connected'
@@ -189,6 +195,7 @@ export function useChatSend(
     }
 
     const onError = (data: SSEMessage) => {
+      if (!ownsGeneration()) return
       isLoading.value = false
       isRetrieving.value = false
       sseStatus.value = 'error'
@@ -201,10 +208,12 @@ export function useChatSend(
     // ISS-3：后端 warning 事件（落库失败可见 / Agent 侧降级提示）此前被传输层
     // 白名单静默丢弃，聊天页无任何提示；补订阅，content 原样提示并带 i18n 兜底。
     const onWarning = (data: SSEMessage) => {
+      if (!ownsGeneration()) return
       message.warning(data.content || t('chat.sseWarning'))
     }
 
     const onDebug = (data: SSEMessage) => {
+      if (!ownsGeneration()) return
       if (debugData && debugEnabled?.value) {
         debugData.value = (data as unknown as Record<string, unknown>).data as RetrievalDebugData
       }
@@ -222,6 +231,7 @@ export function useChatSend(
     // emit，sseService.ts），此前 Chat 页只 off 未 on —— 自动退避等待期用户
     // 毫无提示；现在退避时给出进度提示。
     const onRetry = (data: SSEMessage) => {
+      if (!ownsGeneration()) return
       message.info(t('chat.retrying', {
         attempt: data.attempt ?? 1,
         maxRetries: data.maxRetries ?? 3,
@@ -249,12 +259,14 @@ export function useChatSend(
         }
       })
 
+      if (!ownsGeneration()) return
       if (!sent) {
         message.error(t('chat.sendFailed'))
         isLoading.value = false
         attachedFiles.value = currentFiles
       }
-    } catch (error) {
+    } catch {
+      if (!ownsGeneration()) return
       message.error(t('chat.networkError'))
       isLoading.value = false
       attachedFiles.value = currentFiles
@@ -338,7 +350,7 @@ export function useChatSend(
         isLoading.value = false
         attachedFiles.value = currentFiles
       }
-    } catch (error) {
+    } catch {
       message.error(t('chat.networkError'))
       isLoading.value = false
       attachedFiles.value = currentFiles
@@ -353,6 +365,15 @@ export function useChatSend(
     if (!previousUserMessage || isLoading.value) return
     inputMessage.value = previousUserMessage
     await handleSend()
+  }
+
+  const resetSendState = () => {
+    // 取消当前页面的落屏帧和网络流；事件回调另有 generation 门，abort 不是唯一防线。
+    activeStream?.cancel()
+    activeStream = null
+    sseService.abort()
+    isLoading.value = false
+    isRetrieving.value = false
   }
 
   const stopGeneration = () => {
@@ -395,6 +416,7 @@ export function useChatSend(
     handleSSESend,
     handleKeydown,
     regenerateMessage,
+    resetSendState,
     stopGeneration,
   }
 }
