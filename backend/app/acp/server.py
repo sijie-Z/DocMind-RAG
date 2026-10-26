@@ -725,6 +725,11 @@ class AcpServer:
                 raise RPCError(JSONRPC_INTERNAL_ERROR, message)
             if terminal_type == "run_cancelled":
                 return "cancelled"
+            if terminal_type == "done" and last_error_event is not None:
+                raise RPCError(
+                    JSONRPC_INTERNAL_ERROR,
+                    sanitized_error_content(last_error_event),
+                )
             if terminal_task_state == "failed":
                 raise RPCError(JSONRPC_INTERNAL_ERROR, "Agent 执行失败")
             if state.cancel_event.is_set():

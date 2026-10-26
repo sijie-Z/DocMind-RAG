@@ -416,11 +416,7 @@ async def agent_chat(
             # HITL：暂停（approval_required）/取消（run_cancelled）不是"完成"——
             # 不落库半成品回答：真完成由 approval/resume 流收尾时补写，
             # 避免同一轮问答落成两条消息。
-            if body.session_id and last_event_type not in (
-                "approval_required",
-                "run_cancelled",
-                "plan_approval_required",
-            ):
+            if body.session_id and _final_save_allowed(last_event_type, answers):
                 # issue #277（评审 or1268 R2 收账）：会话落库 org 必须与运行读侧
                 # 同一来源（resolved org）——此前传 raw current_user.organization_id，
                 # 凡 org 来自 token_organization_id 回退（或走无组织超管回源）的用户，
@@ -487,7 +483,9 @@ async def agent_chat(
         if body.session_id:
             # saved=false 专门标记"本轮落库出错"（None 且无异常 = 越权拒绝或空回复，
             # 两者都不写、也都没有落库错误）。
-            done_data["saved"] = save_error is None
+            done_data["saved"] = save_error is None and _final_save_allowed(
+                last_event_type, answers
+            )
         if assistant_message_id:
             done_data["message_id"] = assistant_message_id
         # HITL：暂停/取消时如实盖章任务态——前端据此显示"等待审批/已取消"，
@@ -708,11 +706,7 @@ async def resume_agent_task(
             # org 与 /chat 同链（issue #277/R2 对齐）：传 resolved org
             # （effective_org_id，含 token 组织回退 / 无组织超管回源），
             # 不传 raw current_user.organization_id——两者对回退用户不相等。
-            if session_id and last_event_type not in (
-                "approval_required",
-                "run_cancelled",
-                "plan_approval_required",
-            ):
+            if session_id and _final_save_allowed(last_event_type, answers):
                 try:
                     assistant_message_id = await _save_session_interaction(
                         session_id,
@@ -766,7 +760,9 @@ async def resume_agent_task(
         if done_request_id:
             done_data["request_id"] = done_request_id
         if session_id:
-            done_data["saved"] = save_error is None
+            done_data["saved"] = save_error is None and _final_save_allowed(
+                last_event_type, answers
+            )
         if assistant_message_id:
             done_data["message_id"] = assistant_message_id
         # HITL：同 /chat——再次暂停/取消时如实盖章任务态。
@@ -888,11 +884,7 @@ async def decide_agent_task_approval(
                 answers.add(event)
 
             # 会话补写：只在 run 真正完成时（再次暂停/取消不写半成品，同 /chat 口径）。
-            if session_id and last_event_type not in (
-                "approval_required",
-                "run_cancelled",
-                "plan_approval_required",
-            ):
+            if session_id and _final_save_allowed(last_event_type, answers):
                 try:
                     assistant_message_id = await _save_session_interaction(
                         session_id,
@@ -950,7 +942,9 @@ async def decide_agent_task_approval(
         if done_request_id:
             done_data["request_id"] = done_request_id
         if session_id:
-            done_data["saved"] = save_error is None
+            done_data["saved"] = save_error is None and _final_save_allowed(
+                last_event_type, answers
+            )
         if assistant_message_id:
             done_data["message_id"] = assistant_message_id
         if last_event_type == "approval_required":
@@ -1115,11 +1109,7 @@ async def decide_agent_task_plan_approval(
                 answers.add(event)
 
             # 会话补写：只在 run 真正完成时（再次暂停/取消不写半成品，同 /chat 口径）。
-            if session_id and last_event_type not in (
-                "approval_required",
-                "run_cancelled",
-                "plan_approval_required",
-            ):
+            if session_id and _final_save_allowed(last_event_type, answers):
                 try:
                     assistant_message_id = await _save_session_interaction(
                         session_id,
@@ -1177,7 +1167,9 @@ async def decide_agent_task_plan_approval(
         if done_request_id:
             done_data["request_id"] = done_request_id
         if session_id:
-            done_data["saved"] = save_error is None
+            done_data["saved"] = save_error is None and _final_save_allowed(
+                last_event_type, answers
+            )
         if assistant_message_id:
             done_data["message_id"] = assistant_message_id
         if last_event_type == "approval_required":
@@ -1899,6 +1891,15 @@ async def _load_session_messages(
     except Exception as e:
         logger.warning(f"Failed to load session messages: {e}")
         return []
+
+
+def _final_save_allowed(last_event_type: str, answers: FinalAnswerAccumulator) -> bool:
+    return (
+        last_event_type
+        not in ("approval_required", "run_cancelled", "plan_approval_required", "error")
+        and not answers.blocked
+        and answers.task_state != "failed"
+    )
 
 
 async def _save_session_interaction(

@@ -344,7 +344,17 @@ async def run_agent(
 
     duration = time.perf_counter() - start
 
-    if not result.success and not answers.answer:
+    if answers.blocked or answers.task_state == "failed":
+        errors.append(
+            {
+                "step_id": request_id,
+                "type": "agent_failure",
+                "message": "Agent execution failed",
+                "recoverable": False,
+            }
+        )
+        answer = ""
+    elif not result.success and not answers.answer:
         errors.append(
             {
                 "step_id": request_id,

@@ -11,8 +11,13 @@ import pytest
 from app.acp.server import AcpServer
 from app.agent.events import AgentEvent, FinalAnswerAccumulator
 from app.entrypoints import headless
-from app.rpc.dispatcher import RPCService
-from app.services.webhook_service import WebhookService
+from app.rpc.dispatcher import RPCError, RPCService
+from app.services.webhook_service import (
+    WebhookDeliveryError,
+    WebhookDeliveryTerminalError,
+    WebhookService,
+)
+from tests.unit.test_final_recovery_s3 import _valid_ready_payload
 
 
 def _events(*events):
@@ -37,14 +42,10 @@ def _successful_stream(task_id="task-authoritative"):
 
 
 def test_accumulator_priority_and_done_serialization():
-    snapshot = {
-        "answer_contract": "single_final/v1",
-        "final_answer": "SNAPSHOT",
-        "partial_output": "LEGACY-MUST-NOT-USE",
-    }
+    snapshot = _valid_ready_payload()
     answers = FinalAnswerAccumulator(snapshot)
     answers.add(AgentEvent(type="chunk", content="STREAM"))
-    assert answers.answer == "SNAPSHOT"
+    assert answers.answer == "READY"
     answers.add(AgentEvent(type="done", final_answer="TERMINAL", task_state="completed"))
     assert answers.answer == "TERMINAL"
 
@@ -58,6 +59,33 @@ def test_accumulator_priority_and_done_serialization():
         ]
         == "OK"
     )
+
+
+def test_unverified_error_and_failed_answers_are_blocked():
+    invalid = FinalAnswerAccumulator(
+        {
+            "answer_contract": "single_final/v1",
+            "final_phase": "ready",
+            "final_answer": "STALE-READY",
+        }
+    )
+    assert invalid.answer == ""
+    assert invalid.blocked is True
+    assert invalid.can_save is False
+
+    valid = FinalAnswerAccumulator(_valid_ready_payload())
+    assert valid.answer == "READY"
+    valid.add(AgentEvent(type="error", content="bad checkpoint"))
+    valid.add(AgentEvent(type="done", final_answer="MUST-NOT-RECOVER", task_state="completed"))
+    assert valid.answer == ""
+    assert valid.terminal_answer == ""
+    assert valid.can_save is False
+
+    failed = FinalAnswerAccumulator()
+    failed.add(AgentEvent(type="chunk", content="partial"))
+    failed.add(AgentEvent(type="done", task_state="failed", final_answer="STALE"))
+    assert failed.answer == ""
+    assert failed.can_save is False
 
 
 @pytest.mark.asyncio
@@ -98,6 +126,40 @@ async def test_rpc_stream_uses_authoritative_answer_and_task_id():
     assert handled is False
 
 
+@pytest.mark.asyncio
+async def test_rpc_failed_done_is_error_and_has_no_answer():
+    service = object.__new__(RPCService)
+    service._session_seq = {}
+    service._cancelled_sessions = set()
+    service.dispatcher = None
+    answers = FinalAnswerAccumulator()
+    last_type, answer, _ = await service._stream_events(
+        "session-1",
+        _events(AgentEvent(type="done", task_state="failed", final_answer="STALE")),
+        answers,
+    )
+    assert last_type == "error"
+    assert answer == ""
+
+
+@pytest.mark.asyncio
+async def test_acp_failed_done_is_rejected():
+    server = object.__new__(AcpServer)
+    state = SimpleNamespace(
+        cancel_event=asyncio.Event(),
+        active_task_id="",
+        update_seq=0,
+        drain=lambda: 0,
+        enqueue_update=lambda _update: None,
+    )
+    with pytest.raises(RPCError):
+        await server._drive(
+            state,
+            _events(AgentEvent(type="done", task_state="failed", final_answer="STALE")),
+            [],
+        )
+
+
 def test_headless_and_webhook_use_same_authoritative_answer(monkeypatch, capsys):
     from app.agent import service as service_module
 
@@ -118,6 +180,41 @@ def test_headless_and_webhook_use_same_authoritative_answer(monkeypatch, capsys)
     assert answers.task_id == "task-authoritative"
 
 
+def test_headless_failed_done_is_nonzero_and_not_completed(monkeypatch, capsys):
+    from app.agent import service as service_module
+
+    monkeypatch.setattr(
+        service_module.agent_service,
+        "chat",
+        lambda **_kwargs: _events(AgentEvent(type="done", task_state="failed", final_answer="")),
+    )
+    args = SimpleNamespace(query="q", user_id=1, org_id=1, dry_run=False, json=True)
+    assert headless.run(args) == 1
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["status"] == "failed"
+    assert payload["answer"] == ""
+
+
+@pytest.mark.parametrize(
+    ("state", "error_type"),
+    [
+        ("failed", WebhookDeliveryError),
+        ("cancelled", WebhookDeliveryTerminalError),
+        ("waiting_approval", WebhookDeliveryTerminalError),
+    ],
+)
+def test_webhook_failed_cancelled_or_paused_done_is_not_success(state, error_type):
+    service = object.__new__(WebhookService)
+    answers = FinalAnswerAccumulator()
+    agent = SimpleNamespace(
+        chat=lambda **_kwargs: _events(AgentEvent(type="done", task_state=state, final_answer=""))
+    )
+    rule = SimpleNamespace(org_id=1, created_by=1)
+    with pytest.raises(error_type):
+        asyncio.run(service._run_chat(agent, rule, "session-1", "q", [], answers=answers))
+    assert answers.answer == ""
+
+
 @pytest.mark.asyncio
 async def test_agent_api_and_benchmark_use_authoritative_answer(monkeypatch):
     monkeypatch.setenv("DEEPSEEK_API_KEY", "fake")
@@ -126,11 +223,13 @@ async def test_agent_api_and_benchmark_use_authoritative_answer(monkeypatch):
     import benchmark.run as benchmark_run
 
     class _Loop:
+        stream = _successful_stream
+
         def __init__(self, *_args, **_kwargs):
             pass
 
         async def run(self, _query):
-            async for event in _successful_stream():
+            async for event in type(self).stream():
                 yield event
 
     class _Tracer:
@@ -186,3 +285,17 @@ async def test_agent_api_and_benchmark_use_authoritative_answer(monkeypatch):
         enable_experience=False,
     )
     assert benchmark_result.answer == "AUTHORITATIVE"
+
+    _Loop.stream = staticmethod(
+        lambda: _events(AgentEvent(type="done", task_state="failed", final_answer="STALE"))
+    )
+    failed_api = await agent_api.run_agent("q")
+    assert failed_api["answer"] == ""
+    assert failed_api["errors"][0]["type"] == "agent_failure"
+    failed_benchmark = await benchmark_run._run_agent(
+        {"id": "q2", "question": "q", "difficulty": "easy", "subcategory": "test"},
+        org_id=1,
+        enable_experience=False,
+    )
+    assert failed_benchmark.answer == "Error: Agent execution failed"
+    assert failed_benchmark.tool_failures == 1

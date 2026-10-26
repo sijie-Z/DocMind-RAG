@@ -276,22 +276,66 @@ class FinalAnswerAccumulator:
         self.chunks: list[str] = []
         self.task_id = ""
         self.task_state = ""
+        self.blocked = False
+        self.validation_error = ""
+        if is_final and self.snapshot_answer:
+            if snapshot.get("final_phase") != "ready":
+                self._block("failed", "final_snapshot_not_ready")
+            else:
+                try:
+                    from app.agent import checkpoint
+
+                    checkpoint.final_packet_from_snapshot(snapshot)
+                except checkpoint.FinalCheckpointError as exc:
+                    self._block("failed", str(exc))
+
+    def _block(self, state: str, reason: str = "") -> None:
+        self.blocked = True
+        self.task_state = state
+        self.validation_error = self.validation_error or reason
+        self.terminal_answer = ""
+        self.snapshot_answer = ""
 
     def add(self, event: AgentEvent) -> None:
         task_id = getattr(event, "task_id", "")
         if task_id:
             self.task_id = task_id
         event_type = getattr(event, "type", "")
+        if event_type == "error":
+            self._block("failed", "error_event")
+            return
+        if event_type == "run_cancelled":
+            self._block("cancelled", "cancelled_event")
+            return
+        if event_type in ("approval_required", "plan_approval_required"):
+            self._block("paused", "paused_event")
+            return
+        if self.blocked:
+            return
         if event_type == "chunk":
             self.chunks.append(getattr(event, "content", "") or "")
         elif event_type == "done":
-            self.task_state = getattr(event, "task_state", "")
+            task_state = getattr(event, "task_state", "")
+            if task_state in (
+                "failed",
+                "cancelled",
+                "paused",
+                "waiting_approval",
+                "waiting_plan_approval",
+            ):
+                self._block(
+                    "failed" if task_state == "failed" else task_state, "terminal_not_success"
+                )
+                return
+            self.task_state = task_state
             final_answer = getattr(event, "final_answer", "")
             if final_answer:
                 self.terminal_answer = final_answer
 
     @property
     def answer(self) -> str:
+        if self.blocked:
+            return ""
         # A successful terminal frame wins over the snapshot and stream.  Ready
         # snapshots outrank replayed chunks; only legacy v1 keeps partial prefix.
         return (
@@ -299,3 +343,7 @@ class FinalAnswerAccumulator:
             or self.snapshot_answer
             or self.legacy_prefix + "".join(self.chunks)
         )
+
+    @property
+    def can_save(self) -> bool:
+        return not self.blocked and bool(self.answer.strip())

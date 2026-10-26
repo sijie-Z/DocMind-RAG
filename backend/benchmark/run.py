@@ -252,7 +252,11 @@ async def _run_agent(
         answers.chunks.append(f"\n[Error: {e}]")
 
     duration = time.perf_counter() - start
-    answer = answers.answer or "(no answer)"
+    if answers.blocked or answers.task_state == "failed":
+        answer = "Error: Agent execution failed"
+        tool_failures += 1
+    else:
+        answer = answers.answer or "(no answer)"
 
     result = QuestionResult(
         id=qid,

@@ -27,6 +27,7 @@ def _hermetic(monkeypatch):
     monkeypatch.setattr(ai_config, "unified_final_enabled", lambda: True, raising=False)
     monkeypatch.setattr(ExecutionContext, "save", AsyncMock())
     monkeypatch.setattr(h.ExecutionContext, "save", AsyncMock())
+    monkeypatch.setattr(checkpoint, "cancel_status", AsyncMock(return_value=False))
 
 
 def _capture_snapshots(monkeypatch) -> list[dict]:
@@ -63,6 +64,54 @@ def _done(events) -> AgentEvent:
 
 def _phase(snapshots, phase: str) -> dict:
     return next(snapshot for snapshot in snapshots if snapshot.get("final_phase") == phase)
+
+
+def _valid_ready_payload() -> dict:
+    step = PlanStep(id="s1", description="step", status="completed", result="local")
+    plan = Plan(id="p-ready", goal="g", steps=[step], completed_steps=1)
+    base_messages = [
+        {"role": "system", "content": "system"},
+        {"role": "user", "content": "q"},
+    ]
+    from app.agent.final_synthesis import FinalInputPacket
+
+    packet = FinalInputPacket.from_plan("q", plan, base_messages=base_messages)
+    final_state = {
+        "phase": "ready",
+        "input": {
+            "query": "q",
+            "context": "",
+            "history": [],
+            "direct": False,
+            "base_messages": base_messages,
+        },
+        "input_hash": checkpoint.final_input_hash(packet),
+        "draft": "READY",
+        "messages": base_messages,
+        "answer": "READY",
+    }
+    return checkpoint.build_envelope(
+        ctx=ExecutionContext(query="q", task_id="task-ready"),
+        plan=plan,
+        trigger="final_ready",
+        config=h._config(),
+        final_state=final_state,
+    )
+
+
+def _packet(payload):
+    from app.agent.final_synthesis import FinalInputPacket
+
+    data = payload["final_input"]
+    plan = Plan.from_checkpoint_dict(payload["plan"])
+    return FinalInputPacket.from_plan(
+        data["query"],
+        plan,
+        context=data.get("context", ""),
+        history=data.get("history", []),
+        direct=data.get("direct", False),
+        base_messages=data.get("base_messages", []),
+    )
 
 
 def _assert_no_execution(loop, provider):
@@ -171,7 +220,18 @@ async def test_failed_final_provider_has_no_answer_and_resume_does_not_replay_to
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("damage", ["missing_plan", "non_terminal", "bad_evidence", "bad_hash"])
+@pytest.mark.parametrize(
+    "damage",
+    [
+        "missing_plan",
+        "non_terminal",
+        "bad_evidence",
+        "bad_hash",
+        "local_synthesis",
+        "bad_messages",
+        "nested_index",
+    ],
+)
 async def test_final_checkpoint_damage_fails_closed_without_planning_or_tools(
     monkeypatch,
     damage,
@@ -186,14 +246,27 @@ async def test_final_checkpoint_damage_fails_closed_without_planning_or_tools(
         payload["plan"]["steps"][0]["status"] = "pending"
     elif damage == "bad_evidence":
         payload["plan"]["steps"][0]["evidence"] = "broken"
+    elif damage == "local_synthesis":
+        payload["plan"]["steps"][0]["local_synthesis"]["content"] = 123
+        payload["final_input_hash"] = checkpoint.final_input_hash(_packet(payload))
+    elif damage == "bad_messages":
+        payload = copy.deepcopy(_phase(snapshots, "review_pending"))
+        payload["final_messages"] = ["not-a-message-object"]
+    elif damage == "nested_index":
+        payload["plan"]["steps"][0]["evidence"][0]["evidence"][0]["index"] = "not-an-int"
+        payload["final_input_hash"] = checkpoint.final_input_hash(_packet(payload))
     else:
         payload["final_input_hash"] = "mismatch"
+
+    with pytest.raises(checkpoint.FinalCheckpointError):
+        checkpoint.final_packet_from_snapshot(payload)
 
     provider = h._FakeProvider("MUST-NOT-RUN")
     resumed = _loop(provider, reflection=False)
     events = [event async for event in resumed.run("q", task_id="task-damage", resume=payload)]
 
     _assert_no_execution(resumed, provider)
+    assert resumed._reviewer.calls == []
     assert resumed.run_failed is True
     assert any(event.type == "error" for event in events)
     assert not any(event.type == "chunk" for event in events)
@@ -246,6 +319,62 @@ async def test_cancel_during_ready_write_rolls_back_delivery_before_chunk(monkey
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("cancel_state", [True, None], ids=["cancelled", "unavailable"])
+async def test_cancel_rollback_write_failure_cannot_replay_stale_ready(
+    monkeypatch,
+    cancel_state,
+):
+    snapshots = []
+    cancel_requested = False
+
+    async def cancel_check() -> bool:
+        return cancel_requested
+
+    async def flaky_save(**kwargs):
+        nonlocal cancel_requested
+        if kwargs["trigger"] == "cancelled":
+            return False
+        envelope = checkpoint.build_envelope(
+            ctx=kwargs["ctx"],
+            plan=kwargs["plan"],
+            trigger=kwargs["trigger"],
+            partial_output=kwargs.get("partial_output", ""),
+            history=kwargs.get("history"),
+            config=kwargs.get("config"),
+            run_state=kwargs.get("run_state"),
+            session_id=kwargs.get("session_id", ""),
+            final_state=kwargs.get("final_state"),
+        )
+        snapshots.append(envelope)
+        if kwargs["trigger"] == "final_ready":
+            cancel_requested = True
+        return True
+
+    monkeypatch.setattr(checkpoint, "save_checkpoint", flaky_save)
+    monkeypatch.setattr(checkpoint, "request_cancel", AsyncMock(return_value=True))
+    loop = _loop(h._FakeProvider("STALE-READY"), reflection=False)
+    loop.cancel_check = cancel_check
+    [event async for event in loop.run("q", task_id="task-stale-ready")]
+    persisted = copy.deepcopy(snapshots[-1])
+    assert persisted["final_phase"] == "ready"
+    assert loop.run_cancelled is True
+
+    monkeypatch.setattr(checkpoint, "cancel_status", AsyncMock(return_value=cancel_state))
+    provider = h._FakeProvider("MUST-NOT-REPLAY")
+    resumed = _loop(provider, reflection=False)
+    events = [
+        event async for event in resumed.run("q", task_id="task-stale-ready", resume=persisted)
+    ]
+
+    assert resumed.run_failed is True
+    assert not any(event.type == "chunk" for event in events)
+    assert not any(event.type == "done" for event in events)
+    assert resumed._planner.calls == 0
+    assert resumed._executor.executed_plans == []
+    assert provider.calls == []
+
+
+@pytest.mark.asyncio
 async def test_legacy_v1_completed_steps_do_not_replay_and_partial_is_not_final(monkeypatch):
     _capture_snapshots(monkeypatch)
     step = PlanStep(
@@ -287,7 +416,7 @@ async def test_ready_prepare_resume_is_read_only_and_does_not_claim(monkeypatch)
         is_terminal=True,
         session_id="session-1",
     )
-    payload = {"answer_contract": "single_final/v1", "final_phase": "ready"}
+    payload = _valid_ready_payload()
     monkeypatch.setattr(
         checkpoint,
         "load_for_resume",

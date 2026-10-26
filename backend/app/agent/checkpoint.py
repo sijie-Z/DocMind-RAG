@@ -154,15 +154,19 @@ async def request_cancel(task_id: str) -> bool:
         return False
 
 
-async def is_cancel_requested(task_id: str) -> bool:
-    """查询取消旗；通道故障按"未取消"处理（打不坏正常执行）。"""
+async def cancel_status(task_id: str) -> bool | None:
+    """Strict cancellation state for ready delivery: None means unverifiable."""
     try:
         if not redis_client:
-            return False
+            return None
         return bool(await redis_client.get(_cancel_key(task_id)))
-    except Exception as e:
-        logger.debug("is_cancel_requested failed (task=%s): %s", log_safe(task_id), log_safe(e))
-        return False
+    except Exception:
+        return None
+
+
+async def is_cancel_requested(task_id: str) -> bool:
+    """查询取消旗；普通执行通道故障按"未取消"处理（打不坏正常执行）。"""
+    return bool(await cancel_status(task_id))
 
 
 async def clear_cancel_flag(task_id: str) -> None:
@@ -322,22 +326,24 @@ def final_packet_from_snapshot(raw: Any):
         raise FinalCheckpointError("final_checkpoint_plan_missing")
     terminal_statuses = {"completed", "failed", "skipped"}
     for step in plan_data["steps"]:
-        if not isinstance(step, dict) or step.get("status") not in terminal_statuses:
+        if (
+            not isinstance(step, dict)
+            or not isinstance(step.get("id"), str)
+            or not isinstance(step.get("description"), str)
+            or step.get("status") not in terminal_statuses
+            or not isinstance(step.get("result"), (str, type(None)))
+            or not isinstance(step.get("evidence_schema", "legacy"), str)
+        ):
             raise FinalCheckpointError("final_checkpoint_step_not_terminal")
+        if step.get("local_synthesis") is not None:
+            _validate_stored_text(
+                step["local_synthesis"], "final_checkpoint_local_synthesis_invalid"
+            )
         evidence = step.get("evidence", [])
         if not isinstance(evidence, list):
             raise FinalCheckpointError("final_checkpoint_evidence_invalid")
         for record in evidence:
-            if not isinstance(record, dict):
-                raise FinalCheckpointError("final_checkpoint_evidence_invalid")
-            if (
-                not isinstance(record.get("tool_call_id"), str)
-                or not isinstance(record.get("content"), str)
-                or not isinstance(record.get("status"), str)
-                or not isinstance(record.get("sources", []), list)
-                or not isinstance(record.get("evidence", []), list)
-            ):
-                raise FinalCheckpointError("final_checkpoint_evidence_invalid")
+            _validate_tool_evidence(record)
 
     input_data = raw.get("final_input")
     if not isinstance(input_data, dict):
@@ -345,20 +351,21 @@ def final_packet_from_snapshot(raw: Any):
     if (
         not isinstance(input_data.get("query"), str)
         or not isinstance(input_data.get("context", ""), str)
-        or not isinstance(input_data.get("history", []), list)
-        or not isinstance(input_data.get("base_messages", []), list)
         or not isinstance(input_data.get("direct", False), bool)
     ):
         raise FinalCheckpointError("final_checkpoint_input_invalid")
+    _validate_message_list(
+        input_data.get("history", []), "final_checkpoint_input_invalid", history=True
+    )
+    _validate_message_list(input_data.get("base_messages", []), "final_checkpoint_input_invalid")
     if phase == "review_pending":
         if not isinstance(raw.get("final_draft"), str) or not raw["final_draft"].strip():
             raise FinalCheckpointError("final_checkpoint_draft_missing")
-        if not isinstance(raw.get("final_messages"), list):
-            raise FinalCheckpointError("final_checkpoint_messages_missing")
-    if phase == "ready" and (
-        not isinstance(raw.get("final_answer"), str) or not raw["final_answer"].strip()
-    ):
-        raise FinalCheckpointError("final_checkpoint_answer_missing")
+        _validate_message_list(raw.get("final_messages"), "final_checkpoint_messages_invalid")
+    if phase == "ready":
+        if not isinstance(raw.get("final_answer"), str) or not raw["final_answer"].strip():
+            raise FinalCheckpointError("final_checkpoint_answer_missing")
+        _validate_message_list(raw.get("final_messages", []), "final_checkpoint_messages_invalid")
 
     try:
         from app.agent.final_synthesis import FinalInputPacket
@@ -378,6 +385,83 @@ def final_packet_from_snapshot(raw: Any):
     if final_input_hash(packet) != raw.get("final_input_hash"):
         raise FinalCheckpointError("final_checkpoint_input_hash_mismatch")
     return phase, packet, plan
+
+
+def _is_schema_int(value: Any) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
+def _validate_stored_text(value: Any, error_code: str) -> None:
+    if not isinstance(value, dict) or not isinstance(value.get("content"), str):
+        raise FinalCheckpointError(error_code)
+    content = value["content"]
+    original_length = value.get("original_length")
+    stored_length = value.get("stored_length")
+    if (
+        not _is_schema_int(original_length)
+        or not _is_schema_int(stored_length)
+        or original_length < 0
+        or stored_length < 0
+        or original_length < stored_length
+        or stored_length != len(content)
+        or not isinstance(value.get("truncated"), bool)
+    ):
+        raise FinalCheckpointError(error_code)
+
+
+def _validate_message_list(value: Any, error_code: str, *, history: bool = False) -> None:
+    if not isinstance(value, list):
+        raise FinalCheckpointError(error_code)
+    allowed = {"user", "assistant"} if history else {"system", "user", "assistant"}
+    for message in value:
+        if (
+            not isinstance(message, dict)
+            or message.get("role") not in allowed
+            or not isinstance(message.get("content"), str)
+        ):
+            raise FinalCheckpointError(error_code)
+
+
+def _validate_tool_evidence(record: Any) -> None:
+    if not isinstance(record, dict) or not isinstance(record.get("schema"), str):
+        raise FinalCheckpointError("final_checkpoint_evidence_invalid")
+    if (
+        not isinstance(record.get("step_id"), str)
+        or not _is_schema_int(record.get("attempt"))
+        or not isinstance(record.get("tool_call_id"), str)
+        or not record["tool_call_id"]
+        or not isinstance(record.get("tool"), str)
+        or not isinstance(record.get("status"), str)
+    ):
+        raise FinalCheckpointError("final_checkpoint_evidence_invalid")
+    _validate_stored_text(record, "final_checkpoint_evidence_invalid")
+    error = record.get("error")
+    if error is not None and (
+        not isinstance(error, dict)
+        or not isinstance(error.get("code"), str)
+        or not isinstance(error.get("message"), str)
+    ):
+        raise FinalCheckpointError("final_checkpoint_evidence_invalid")
+    sources = record.get("sources")
+    evidence = record.get("evidence")
+    if not isinstance(sources, list) or not isinstance(evidence, list):
+        raise FinalCheckpointError("final_checkpoint_evidence_invalid")
+    source_indexes: set[int] = set()
+    for source in sources:
+        if not isinstance(source, dict) or not _is_schema_int(source.get("index")):
+            raise FinalCheckpointError("final_checkpoint_evidence_invalid")
+        source_indexes.add(source["index"])
+    call_id = record["tool_call_id"]
+    for item in evidence:
+        if (
+            not isinstance(item, dict)
+            or not _is_schema_int(item.get("index"))
+            or not isinstance(item.get("content"), str)
+            or not isinstance(item.get("key"), str)
+            or item["index"] not in source_indexes
+            or item["key"] != f"{call_id}#{item['index']}"
+        ):
+            raise FinalCheckpointError("final_checkpoint_evidence_invalid")
 
 
 # ── 写路径 ───────────────────────────────────────────────────────────────────

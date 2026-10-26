@@ -820,7 +820,11 @@ class RPCService:
         async for event in events:
             last_type = (
                 "error"
-                if event.type == "done" and getattr(event, "task_state", "") == "failed"
+                if event.type == "error"
+                or (
+                    event.type == "done"
+                    and (getattr(event, "task_state", "") == "failed" or answers.blocked)
+                )
                 else event.type
             )
             answers.add(event)

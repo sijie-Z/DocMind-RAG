@@ -122,6 +122,12 @@ class WebhookDeliveryError(RuntimeError):
     """投递处理失败（消息已脱敏，可安全写入 *_deliveries.error*）。"""
 
 
+class WebhookDeliveryTerminalError(WebhookDeliveryError):
+    """取消/暂停终态：不得成功投递，也不得再次自动重试。"""
+
+    retry = False
+
+
 # ── 时间 ─────────────────────────────────────────────────────────────
 
 
@@ -594,6 +600,15 @@ class WebhookService:
                 raise WebhookDeliveryError(
                     f"agent 返回 error 事件: {getattr(event, 'content', '')}"
                 )
+        if answers.task_state in (
+            "cancelled",
+            "paused",
+            "waiting_approval",
+            "waiting_plan_approval",
+        ):
+            raise WebhookDeliveryTerminalError("agent 已取消或暂停，停止本次投递且不重试")
+        if answers.blocked or answers.task_state == "failed":
+            raise WebhookDeliveryError("agent 执行失败，不投递 assistant 正文")
         return answers.answer
 
     async def _load_reuse_history(
@@ -727,6 +742,7 @@ class WebhookService:
         error: str,
         *,
         expected_status: WebhookDeliveryStatus = WebhookDeliveryStatus.PROCESSING,
+        retry: bool = True,
     ) -> bool:
         """失败写回（token fenced）：只有仍持有租约的 worker 才能改状态/排重试。
 
@@ -750,7 +766,7 @@ class WebhookService:
             now = _utcnow()
             max_attempts = max(1, int(settings.WEBHOOK_MAX_ATTEMPTS))
             next_attempt_at = None
-            if delivery.attempts < max_attempts:
+            if retry and delivery.attempts < max_attempts:
                 # 2^attempts * 30s（attempts 在领取时已 +1）：首次失败 60s 后重试。
                 next_attempt_at = now + timedelta(
                     seconds=(2 ** max(1, delivery.attempts)) * RETRY_BASE_SECONDS
@@ -876,7 +892,11 @@ class WebhookService:
                 log_safe(exc),
             )
             if await self._mark_failed(
-                factory, delivery_id, processing_token, f"{type(exc).__name__}: {exc}"
+                factory,
+                delivery_id,
+                processing_token,
+                f"{type(exc).__name__}: {exc}",
+                retry=getattr(exc, "retry", True),
             ):
                 # 只有仍持有租约的失败才写审计；被 fence 掉的旧 worker 不污染。
                 await audit_service.log_activity(

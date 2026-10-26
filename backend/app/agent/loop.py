@@ -470,6 +470,31 @@ class PERAgentLoop:
                 ):
                     yield end_event
                 return
+            if final_resume_phase == "ready":
+                if not task_id:
+                    cancel_state = None
+                else:
+                    cancel_state = await checkpoint.cancel_status(task_id)
+                    if cancel_state is False and self.cancel_check is not None:
+                        try:
+                            cancel_state = bool(await self.cancel_check())
+                        except Exception:
+                            cancel_state = None
+                if cancel_state is not False:
+                    self.run_failed = True
+                    self.run_failure = (
+                        "final_checkpoint_cancelled"
+                        if cancel_state
+                        else "final_cancel_status_unavailable"
+                    )
+                    yield AgentEvent(
+                        type="error", content="ready 答案已取消或取消状态无法验证，拒绝交付"
+                    )
+                    async for end_event in self._emit_turn_end(
+                        "failed", task_id=task_id, session_id=session_id
+                    ):
+                        yield end_event
+                    return
             if final_resume_phase != "collecting":
                 self._final_ready_from_resume = final_resume_phase == "ready"
                 ctx = ExecutionContext.from_checkpoint_dict(resume["ctx"])
@@ -1933,12 +1958,14 @@ class PERAgentLoop:
         session_id: str | None,
     ) -> AsyncGenerator[AgentEvent, None]:
         """Use the existing terminal cancellation contract at final-phase gates."""
+        rollback_required = False
         if (
             self.final_state_live is not None
             and self.final_state_live.get("phase") == "ready"
             and not self._final_ready_from_resume
             and not self.final_delivery_started
         ):
+            rollback_required = True
             # A ready write may have completed just before cancellation was
             # observed.  It is not deliverable yet: roll back to review_pending
             # and remove final_answer before writing the cancelled snapshot.
@@ -1946,8 +1973,25 @@ class PERAgentLoop:
             self.final_state_live.pop("answer", None)
             if self.checkpoint_live is not None:
                 self.checkpoint_live["final_state"] = self.final_state_live
+        if task_id:
+            await checkpoint.request_cancel(task_id)
         yield cancel_event
-        await self._save_checkpoint("cancelled")
+        rollback_saved = await self._save_checkpoint("cancelled")
+        if rollback_required and not rollback_saved:
+            # The stale persisted ready snapshot must not become deliverable.
+            # Cancellation itself remains the controlled terminal state; the
+            # independent cancel flag/task row is now the delivery guard.
+            self.run_cancelled = True
+            self.run_failure = "final_cancel_rollback_write_failed"
+            yield AgentEvent(
+                type="error",
+                content="ready 回滚保存失败，已禁止旧答案交付",
+            )
+            async for end_event in self._emit_turn_end(
+                "cancelled", task_id=task_id, session_id=session_id
+            ):
+                yield end_event
+            return
         self.run_cancelled = True
         async for end_event in self._emit_turn_end(
             "cancelled", task_id=task_id, session_id=session_id

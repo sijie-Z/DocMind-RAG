@@ -468,6 +468,26 @@ class AgentService:
             organization_id=organization_id,
         )
         if checkpoint.is_ready_final_snapshot(payload):
+            cancel_state = await checkpoint.cancel_status(task_id)
+            if cancel_state is not False or task.status in (
+                TaskStatus.CANCELLED,
+                TaskStatus.ABANDONED,
+                TaskStatus.REJECTED,
+            ):
+                raise checkpoint.TaskNotResumableError(
+                    "ready 答案当前不可交付（已取消或取消状态无法验证）",
+                    detail={
+                        "task_id": task_id,
+                        "state": "cancelled" if cancel_state else "cancel_unavailable",
+                    },
+                )
+            try:
+                checkpoint.final_packet_from_snapshot(payload)
+            except checkpoint.FinalCheckpointError as exc:
+                raise checkpoint.TaskNotResumableError(
+                    "最终 checkpoint 无法通过 ready 完整性校验",
+                    detail={"task_id": task_id, "state": "invalid_final_checkpoint"},
+                ) from exc
             # Ready resume is a read-only delivery replay: no lease, state
             # transition, planner, executor or LLM call is necessary.
             return task, payload

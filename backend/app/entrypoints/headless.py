@@ -77,6 +77,22 @@ async def _run_chat(query: str, user_id: int, org_id: int) -> int:
         print(log_safe(exc), file=sys.stderr)
         return 1
 
+    if answers.blocked:
+        status = answers.task_state
+        public_status = {
+            "paused": "paused",
+            "waiting_approval": "paused",
+            "waiting_plan_approval": "paused",
+            "cancelled": "cancelled",
+        }.get(status, "failed")
+        print(
+            json.dumps(
+                {"task_id": task_id, "status": public_status, "answer": ""},
+                ensure_ascii=True,
+            )
+        )
+        return 1
+
     print(
         json.dumps(
             {"task_id": task_id, "status": "completed", "answer": answers.answer},
