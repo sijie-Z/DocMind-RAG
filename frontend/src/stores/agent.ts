@@ -362,6 +362,14 @@ export const useAgentStore = defineStore('agent', () => {
           // 体验第四波 计时：done 落终态时间（审批暂停也会写上——恢复续跑时
           // loading 再起、最终 done 覆盖为真实总用时）
           msg.endedAt = Date.now()
+          if (
+            event.final_answer !== undefined &&
+            event.task_state !== 'failed' &&
+            event.task_state !== 'cancelled'
+          ) {
+            // 权威终帧幂等覆盖，不与流中 chunk/局部诊断重复拼接。
+            msg.content = event.final_answer
+          }
           if (event.message_id) {
             msg.messageId = event.message_id
             // issue #476：落库回执即边界 id——实时运行完的 assistant 消息也能
@@ -378,6 +386,10 @@ export const useAgentStore = defineStore('agent', () => {
           taskState.value = 'waiting_plan_approval'
         } else if (event.task_state === 'cancelled') {
           taskState.value = 'cancelled'
+          pendingApproval.value = null
+          pendingPlanApproval.value = null
+        } else if (event.task_state === 'failed') {
+          taskState.value = 'failed'
           pendingApproval.value = null
           pendingPlanApproval.value = null
         } else {

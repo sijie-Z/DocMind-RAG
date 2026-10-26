@@ -53,6 +53,7 @@ from sqlalchemy import and_, case, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.agent.events import FinalAnswerAccumulator
 from app.core.config import settings
 from app.core.database import AsyncSessionLocal
 from app.core.log_safety import log_safe
@@ -575,9 +576,10 @@ class WebhookService:
         session_id: str,
         prompt: str,
         history: list[dict[str, str]] | None = None,
+        answers: FinalAnswerAccumulator | None = None,
     ) -> str:
-        """直接调用 ``AgentService.chat``（禁止 HTTP 自调用），拼接 chunk。"""
-        chunks: list[str] = []
+        """直接调用 ``AgentService.chat``（禁止 HTTP 自调用），使用权威答案。"""
+        answers = answers or FinalAnswerAccumulator()
         async for event in agent.chat(
             query=prompt,
             history=list(history or []),
@@ -587,13 +589,12 @@ class WebhookService:
             config=None,
         ):
             event_type = getattr(event, "type", None)
-            if event_type == "chunk":
-                chunks.append(getattr(event, "content", "") or "")
-            elif event_type == "error":
+            answers.add(event)
+            if event_type == "error":
                 raise WebhookDeliveryError(
                     f"agent 返回 error 事件: {getattr(event, 'content', '')}"
                 )
-        return "".join(chunks)
+        return answers.answer
 
     async def _load_reuse_history(
         self,
@@ -865,7 +866,8 @@ class WebhookService:
 
         try:
             prompt = render_prompt(rule, payload, delivery_id)
-            answer = await self._run_chat(agent, rule, session_id, prompt, history)
+            answers = FinalAnswerAccumulator()
+            answer = await self._run_chat(agent, rule, session_id, prompt, history, answers=answers)
         except Exception as exc:
             logger.warning(
                 "webhook 投递处理失败（delivery=%s rule=%s）: %s",
@@ -903,6 +905,7 @@ class WebhookService:
                 organization_id=rule.org_id,
                 assistant_response=answer,
                 session_factory=factory,
+                agent_task_id=answers.task_id or None,
             )
         except Exception as exc:
             # 行已标记 succeeded 后消息落库失败：补偿回可重试 failed，避免

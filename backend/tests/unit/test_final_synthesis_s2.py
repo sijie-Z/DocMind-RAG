@@ -693,7 +693,7 @@ async def test_all_failed_loop_skips_final_provider_and_preserves_failure_termin
     assert not any(event.type == "chunk" for event in events)
     assert loop.run_failed is True
     assert "工具模式执行全败" in (loop.run_failure or "")
-    assert loop.memory.interactions == [("q", "")]
+    assert loop.memory.interactions == []
     assert any(event.type == "done" for event in events)
 
 
@@ -793,7 +793,7 @@ async def test_final_provider_error_or_empty_response_emits_no_chunk():
 
         assert not any(event.type == "chunk" for event in events)
         assert loop.run_failed is True
-        assert loop.memory.interactions == [("q", "")]
+        assert loop.memory.interactions == []
 
 
 @pytest.mark.asyncio

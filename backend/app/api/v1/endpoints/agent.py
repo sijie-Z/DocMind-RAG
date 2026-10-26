@@ -42,7 +42,7 @@ from app.agent.commands import (
     resolve_session_scope_for_command,
 )
 from app.agent.config import DEFAULT_DISABLED_TOOLS, AgentConfig
-from app.agent.events import AgentEvent
+from app.agent.events import AgentEvent, FinalAnswerAccumulator
 from app.agent.registry import tool_registry
 from app.agent.replay.engine import ReplayEngine
 from app.agent.service import agent_service, notify_task_terminal
@@ -394,7 +394,7 @@ async def agent_chat(
                     history = loaded_history
 
             # Run agent
-            final_answer = ""
+            answers = FinalAnswerAccumulator()
             async for event in agent_service.chat(
                 query=body.query,
                 history=history,
@@ -410,8 +410,7 @@ async def agent_chat(
                 sse_data = public_agent_event_data(event)
                 emitter.bind(getattr(event, "task_id", None))
                 yield await emitter.emit(event.type, sse_data)
-                if event.type == "chunk":
-                    final_answer += event.content
+                answers.add(event)
 
             # Save interaction to session (user query + assistant response)
             # HITL：暂停（approval_required）/取消（run_cancelled）不是"完成"——
@@ -433,9 +432,13 @@ async def agent_chat(
                         current_user.id,
                         body.query,
                         effective_org_id,
-                        final_answer,
+                        answers.answer,
                         bypass_org=bool(getattr(current_user, "is_superuser", False)),
+                        agent_task_id=answers.task_id or None,
+                        create_if_missing=True,
                     )
+                    if answers.answer and assistant_message_id is None:
+                        save_error = "session_save_rejected"
                 except Exception as save_exc:
                     # issue #301 批 D（#22）：落库失败不再静默。回答已流给用户，
                     # 但必须显式告知（warning 事件 + done.saved=false + ERROR 日志）：
@@ -496,6 +499,19 @@ async def agent_chat(
             done_data["task_state"] = "waiting_plan_approval"
         elif last_event_type == "run_cancelled":
             done_data["task_state"] = "cancelled"
+        if answers.task_state and last_event_type not in (
+            "approval_required",
+            "plan_approval_required",
+            "run_cancelled",
+        ):
+            done_data["task_state"] = answers.task_state
+        if (
+            answers.terminal_answer
+            and answers.task_state != "failed"
+            and last_event_type
+            not in ("approval_required", "plan_approval_required", "run_cancelled", "error")
+        ):
+            done_data["final_answer"] = answers.terminal_answer
         yield await emitter.emit("done", done_data)
 
     return _sse_response(event_stream())
@@ -661,12 +677,11 @@ async def resume_agent_task(
         organization_id=effective_org_id,
     )
     session_id = (payload or {}).get("session_id") or getattr(task, "session_id", None)
-    # 崩溃前已流给用户的部分不回放（最小版边界），但收尾落库要拼成完整回复。
-    prefix = (payload or {}).get("partial_output") or ""
+    # final_answer 优先级由统一累加器处理；legacy partial 仅用于旧 v1。
+    answers = FinalAnswerAccumulator(payload)
     fallback_config = await _fallback_resume_config(current_user.id)
 
     async def event_stream():
-        final_answer = prefix
         assistant_message_id = None
         save_error: str | None = None
         last_event_type = ""
@@ -684,8 +699,7 @@ async def resume_agent_task(
                 sse_data = public_agent_event_data(event)
                 emitter.bind(getattr(event, "task_id", None))
                 yield await emitter.emit(event.type, sse_data)
-                if event.type == "chunk":
-                    final_answer += event.content
+                answers.add(event)
 
             # 收尾补写会话（与 /chat 同口径）。能走到这里说明原流从未完成落库
             # （任务可恢复 ⇒ chat 的正常收尾分支没跑过），不存在重复写入窗口。
@@ -705,9 +719,12 @@ async def resume_agent_task(
                         current_user.id,
                         task.query,
                         effective_org_id,
-                        final_answer,
+                        answers.answer,
                         bypass_org=bool(getattr(current_user, "is_superuser", False)),
+                        agent_task_id=task_id,
                     )
+                    if answers.answer and assistant_message_id is None:
+                        save_error = "session_save_rejected"
                 except Exception as save_exc:
                     # issue #301 批 D（#22）：与 /chat 同口径——落库失败显式告知。
                     save_error = log_safe(save_exc)
@@ -760,6 +777,19 @@ async def resume_agent_task(
             done_data["task_state"] = "waiting_plan_approval"
         elif last_event_type == "run_cancelled":
             done_data["task_state"] = "cancelled"
+        if answers.task_state and last_event_type not in (
+            "approval_required",
+            "plan_approval_required",
+            "run_cancelled",
+        ):
+            done_data["task_state"] = answers.task_state
+        if (
+            answers.terminal_answer
+            and answers.task_state != "failed"
+            and last_event_type
+            not in ("approval_required", "plan_approval_required", "run_cancelled", "error")
+        ):
+            done_data["final_answer"] = answers.terminal_answer
         yield await emitter.emit("done", done_data)
 
     return _sse_response(event_stream())
@@ -827,8 +857,8 @@ async def decide_agent_task_approval(
         note=body.note,
     )
     session_id = (payload or {}).get("session_id") or getattr(task, "session_id", None)
-    # 崩溃前已流给用户的部分不回放（最小版边界），但收尾落库要拼成完整回复。
-    prefix = (payload or {}).get("partial_output") or ""
+    # final_answer 优先级由统一累加器处理；legacy partial 仅用于旧 v1。
+    answers = FinalAnswerAccumulator(payload)
     fallback_config = await _fallback_resume_config(current_user.id)
     logger.info(
         "审批应答 (task=%s, decision=%s, tool=%s, by=%s)",
@@ -839,7 +869,6 @@ async def decide_agent_task_approval(
     )
 
     async def event_stream():
-        final_answer = prefix
         assistant_message_id = None
         save_error: str | None = None
         last_event_type = ""
@@ -856,8 +885,7 @@ async def decide_agent_task_approval(
                 sse_data = public_agent_event_data(event)
                 emitter.bind(getattr(event, "task_id", None))
                 yield await emitter.emit(event.type, sse_data)
-                if event.type == "chunk":
-                    final_answer += event.content
+                answers.add(event)
 
             # 会话补写：只在 run 真正完成时（再次暂停/取消不写半成品，同 /chat 口径）。
             if session_id and last_event_type not in (
@@ -871,9 +899,12 @@ async def decide_agent_task_approval(
                         current_user.id,
                         task.query,
                         effective_org_id,
-                        final_answer,
+                        answers.answer,
                         bypass_org=bool(getattr(current_user, "is_superuser", False)),
+                        agent_task_id=task_id,
                     )
+                    if answers.answer and assistant_message_id is None:
+                        save_error = "session_save_rejected"
                 except Exception as save_exc:
                     save_error = log_safe(save_exc)
                     logger.error(
@@ -929,6 +960,19 @@ async def decide_agent_task_approval(
             done_data["task_state"] = "waiting_plan_approval"
         elif last_event_type == "run_cancelled":
             done_data["task_state"] = "cancelled"
+        if answers.task_state and last_event_type not in (
+            "approval_required",
+            "plan_approval_required",
+            "run_cancelled",
+        ):
+            done_data["task_state"] = answers.task_state
+        if (
+            answers.terminal_answer
+            and answers.task_state != "failed"
+            and last_event_type
+            not in ("approval_required", "plan_approval_required", "run_cancelled", "error")
+        ):
+            done_data["final_answer"] = answers.terminal_answer
         yield await emitter.emit("done", done_data)
 
     return _sse_response(event_stream())
@@ -1048,11 +1092,10 @@ async def decide_agent_task_plan_approval(
         }
 
     session_id = (payload or {}).get("session_id") or getattr(task, "session_id", None)
-    prefix = (payload or {}).get("partial_output") or ""
+    answers = FinalAnswerAccumulator(payload)
     fallback_config = await _fallback_resume_config(current_user.id)
 
     async def event_stream():
-        final_answer = prefix
         assistant_message_id = None
         save_error: str | None = None
         last_event_type = ""
@@ -1069,8 +1112,7 @@ async def decide_agent_task_plan_approval(
                 sse_data = public_agent_event_data(event)
                 emitter.bind(getattr(event, "task_id", None))
                 yield await emitter.emit(event.type, sse_data)
-                if event.type == "chunk":
-                    final_answer += event.content
+                answers.add(event)
 
             # 会话补写：只在 run 真正完成时（再次暂停/取消不写半成品，同 /chat 口径）。
             if session_id and last_event_type not in (
@@ -1084,9 +1126,12 @@ async def decide_agent_task_plan_approval(
                         current_user.id,
                         task.query,
                         effective_org_id,
-                        final_answer,
+                        answers.answer,
                         bypass_org=bool(getattr(current_user, "is_superuser", False)),
+                        agent_task_id=task_id,
                     )
+                    if answers.answer and assistant_message_id is None:
+                        save_error = "session_save_rejected"
                 except Exception as save_exc:
                     save_error = log_safe(save_exc)
                     logger.error(
@@ -1141,6 +1186,19 @@ async def decide_agent_task_plan_approval(
             done_data["task_state"] = "waiting_plan_approval"
         elif last_event_type == "run_cancelled":
             done_data["task_state"] = "cancelled"
+        if answers.task_state and last_event_type not in (
+            "approval_required",
+            "plan_approval_required",
+            "run_cancelled",
+        ):
+            done_data["task_state"] = answers.task_state
+        if (
+            answers.terminal_answer
+            and answers.task_state != "failed"
+            and last_event_type
+            not in ("approval_required", "plan_approval_required", "run_cancelled", "error")
+        ):
+            done_data["final_answer"] = answers.terminal_answer
         yield await emitter.emit("done", done_data)
 
     return _sse_response(event_stream())

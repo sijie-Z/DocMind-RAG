@@ -413,6 +413,21 @@ def _clone_snapshot(
     ctx = snapshot.get("ctx")
     if isinstance(ctx, dict):
         ctx["task_id"] = cloned_task_id
+        if snapshot.get("answer_contract") == "single_final/v1":
+            artifacts = ctx.get("artifacts")
+            if isinstance(artifacts, dict):
+                artifacts.pop("review", None)
+                artifacts.pop("final_synthesis", None)
+    if (
+        snapshot.get("answer_contract") == "single_final/v1"
+        and snapshot.get("final_phase") != "collecting"
+    ):
+        # Evidence and final input survive a fork; the parent's draft/delivery
+        # never does.  The child re-enters synthesis without replaying tools.
+        snapshot["final_phase"] = "synthesis_pending"
+        snapshot["partial_output"] = ""
+        for key in ("final_answer", "final_draft", "final_messages"):
+            snapshot.pop(key, None)
     run_state = snapshot.get("run")
     if not isinstance(run_state, dict):
         run_state = {}

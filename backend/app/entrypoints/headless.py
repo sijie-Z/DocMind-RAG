@@ -51,10 +51,11 @@ def run(args: argparse.Namespace) -> int:
 
 
 async def _run_chat(query: str, user_id: int, org_id: int) -> int:
+    from app.agent.events import FinalAnswerAccumulator
     from app.agent.service import agent_service
 
     task_id = ""
-    chunks: list[str] = []
+    answers = FinalAnswerAccumulator()
     try:
         async for event in agent_service.chat(
             query=query,
@@ -68,9 +69,8 @@ async def _run_chat(query: str, user_id: int, org_id: int) -> int:
             event_task_id = getattr(event, "task_id", "")
             if event_task_id:
                 task_id = event_task_id
-            if event.type == "chunk":
-                chunks.append(event.content or "")
-            elif event.type == "error":
+            answers.add(event)
+            if event.type == "error":
                 print(log_safe(event.content or "agent error"), file=sys.stderr)
                 return 1
     except Exception as exc:  # noqa: BLE001 - headless 必须把失败如实映射为 exit 1
@@ -79,7 +79,7 @@ async def _run_chat(query: str, user_id: int, org_id: int) -> int:
 
     print(
         json.dumps(
-            {"task_id": task_id, "status": "completed", "answer": "".join(chunks)},
+            {"task_id": task_id, "status": "completed", "answer": answers.answer},
             ensure_ascii=True,
         )
     )

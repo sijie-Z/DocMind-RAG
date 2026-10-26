@@ -53,6 +53,7 @@ from pydantic import BaseModel, Field
 
 import app.agent.service  # noqa: F401 — register tools
 from app.agent.config import AgentConfig
+from app.agent.events import FinalAnswerAccumulator
 from app.agent.loop import PERAgentLoop
 from app.core.step_runner import StepRunner
 from app.core.trace_logger import AgentTracer, TraceExporter
@@ -252,7 +253,7 @@ async def run_agent(
 
     plan_steps: list[dict] = []
     tool_calls: list[dict] = []
-    chunks: list[str] = []
+    answers = FinalAnswerAccumulator()
     errors: list[dict] = []
     step_errors: list[dict] = []
     start = time.perf_counter()
@@ -263,6 +264,7 @@ async def run_agent(
 
     async def run_agent_loop():
         async for event in agent.run(query):
+            answers.add(event)
             if event.type == "plan_start":
                 pass
             elif event.type == "plan_step":
@@ -334,8 +336,6 @@ async def run_agent(
                 if tool_calls:
                     tool_calls[-1]["status"] = "error"
                     tool_calls[-1]["result"] = event.content[:200]
-            elif event.type == "chunk":
-                chunks.append(event.content)
         tracer.end_phase("execution")
         return True
 
@@ -344,7 +344,7 @@ async def run_agent(
 
     duration = time.perf_counter() - start
 
-    if not result.success and not chunks:
+    if not result.success and not answers.answer:
         errors.append(
             {
                 "step_id": request_id,
@@ -355,7 +355,7 @@ async def run_agent(
         )
         answer = f"[System error: {result.error}]"
     else:
-        answer = "".join(chunks) or "(no answer)"
+        answer = answers.answer or "(no answer)"
         errors = step_errors
 
     # Coverage scoring

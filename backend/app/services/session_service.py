@@ -18,6 +18,7 @@ import uuid
 from typing import NamedTuple
 
 from sqlalchemy import func, or_, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import AsyncSessionLocal
@@ -179,6 +180,8 @@ async def save_session_interaction(
     *,
     session_factory=None,
     bypass_org: bool = False,
+    agent_task_id: str | None = None,
+    create_if_missing: bool | None = None,
 ) -> str | None:
     """Save the user query and assistant response as messages in the session.
 
@@ -228,6 +231,14 @@ async def save_session_interaction(
                         f"not owned by user {user_id}"
                     )
                     return None
+                if create_if_missing is False or (create_if_missing is None and agent_task_id):
+                    # Task/resume completion is an append operation, not an implicit
+                    # session constructor.  A deleted/missing session must not be
+                    # recreated with fabricated lineage by a late finalization.
+                    logger.warning(
+                        "Refusing task-scoped save into missing session %s", log_safe(session_id)
+                    )
+                    return None
                 new_session = ChatSession(
                     id=session_id,
                     user_id=user_id,
@@ -257,19 +268,39 @@ async def save_session_interaction(
                 # 只补空值，绝不改写已记录的非空组织。
                 existing.organization_id = organization_id
 
-            # issue #476：会话内单调 seq（唯一约束 (session_id, seq)）。先分配
-            # user 的序号；assistant 再分配一次——issue #499 起计数器落在
-            # chat_sessions.next_message_seq 上，两次分配让计数器与实际最大 seq
-            # 保持一致（不再用 base_seq + 1 手工推算）。
-            base_seq = await next_message_seq(session, session_id)
-            user_msg = ChatMessage(
-                id=str(uuid.uuid4()),
-                session_id=session_id,
-                seq=base_seq,
-                content=query,
-                message_type=MessageType.USER,
-            )
-            session.add(user_msg)
+            task_messages: dict[MessageType, ChatMessage] = {}
+            if agent_task_id:
+                rows = await session.execute(
+                    select(ChatMessage)
+                    .where(
+                        ChatMessage.session_id == session_id,
+                        ChatMessage.agent_task_id == agent_task_id,
+                        ChatMessage.message_type.in_([MessageType.USER, MessageType.ASSISTANT]),
+                    )
+                    .with_for_update()
+                )
+                task_messages = {message.message_type: message for message in rows.scalars().all()}
+                existing_assistant = task_messages.get(MessageType.ASSISTANT)
+                if existing_assistant is not None:
+                    # Sequential/concurrent replay reads the authority row and never
+                    # allocates another seq, even if the caller supplies new text.
+                    await session.commit()
+                    return existing_assistant.id
+                if task_messages.get(MessageType.USER) is not None and not assistant_response:
+                    await session.commit()
+                    return None
+
+            # 只有缺失的消息才分配 seq：失败可只有 user，resume 只补 assistant。
+            if MessageType.USER not in task_messages:
+                user_msg = ChatMessage(
+                    id=str(uuid.uuid4()),
+                    session_id=session_id,
+                    seq=await next_message_seq(session, session_id),
+                    content=query,
+                    message_type=MessageType.USER,
+                    agent_task_id=agent_task_id,
+                )
+                session.add(user_msg)
 
             assistant_msg_id = None
             if assistant_response:
@@ -280,6 +311,7 @@ async def save_session_interaction(
                     seq=await next_message_seq(session, session_id),
                     content=assistant_response,
                     message_type=MessageType.ASSISTANT,
+                    agent_task_id=agent_task_id,
                 )
                 session.add(assistant_msg)
 
@@ -292,6 +324,58 @@ async def save_session_interaction(
 
             await session.commit()
             return assistant_msg_id
+    except IntegrityError:
+        # A concurrent writer won the task uniqueness race.  Read its committed
+        # authority rows; if it only wrote USER, this call may still补 assistant.
+        if not agent_task_id:
+            raise
+        async with factory() as session:
+            rows = await session.execute(
+                select(ChatMessage).where(
+                    ChatMessage.session_id == session_id,
+                    ChatMessage.agent_task_id == agent_task_id,
+                    ChatMessage.message_type.in_([MessageType.USER, MessageType.ASSISTANT]),
+                )
+            )
+            task_messages = {message.message_type: message for message in rows.scalars().all()}
+            assistant = task_messages.get(MessageType.ASSISTANT)
+            if assistant is not None:
+                await session.commit()
+                return assistant.id
+            user = task_messages.get(MessageType.USER)
+            if user is not None and not assistant_response:
+                await session.commit()
+                return None
+            if user is not None and assistant_response:
+                try:
+                    assistant_msg_id = str(uuid.uuid4())
+                    session.add(
+                        ChatMessage(
+                            id=assistant_msg_id,
+                            session_id=session_id,
+                            seq=await next_message_seq(session, session_id),
+                            content=assistant_response,
+                            message_type=MessageType.ASSISTANT,
+                            agent_task_id=agent_task_id,
+                        )
+                    )
+                    await session.commit()
+                    return assistant_msg_id
+                except IntegrityError:
+                    await session.rollback()
+                    assistant = (
+                        await session.execute(
+                            select(ChatMessage).where(
+                                ChatMessage.session_id == session_id,
+                                ChatMessage.agent_task_id == agent_task_id,
+                                ChatMessage.message_type == MessageType.ASSISTANT,
+                            )
+                        )
+                    ).scalar_one_or_none()
+                    if assistant is not None:
+                        await session.commit()
+                        return assistant.id
+            raise
     except AuthorizationError:
         # T4：跨组织写入的明确拒绝（已记 warning），不按落库失败重复记 ERROR。
         raise
@@ -328,6 +412,37 @@ async def get_latest_task_id(db: AsyncSession, session_id: str) -> str | None:
     )
     result = await db.execute(stmt)
     return result.scalar_one_or_none()
+
+
+async def get_latest_ready_final_task_id(db: AsyncSession, session_id: str) -> str | None:
+    """Return the newest ready single_final task for read-only delivery resume."""
+    from app.agent import checkpoint
+
+    task_ids = (
+        (
+            await db.execute(
+                select(AgentTask.id)
+                .where(
+                    AgentTask.session_id == session_id,
+                    AgentTask.status == TaskStatus.COMPLETED,
+                )
+                .order_by(AgentTask.created_at.desc())
+                .limit(20)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    for task_id in task_ids:
+        try:
+            snapshot = (
+                await db.execute(select(AgentTask.context_snapshot).where(AgentTask.id == task_id))
+            ).scalar_one_or_none()
+        except (TypeError, ValueError):
+            continue
+        if checkpoint.is_ready_final_snapshot(snapshot):
+            return task_id
+    return None
 
 
 async def resolve_session_id(db: AsyncSession, task_id: str) -> str | None:

@@ -727,7 +727,7 @@ async def test_loop_normalizes_legacy_executor_chunks_without_final_answer_leak(
     assert len(payloads) == 1
     assert payloads[0]["result"] == "local-A-local-B"
     assert payloads[0]["legacy_chunk_normalized"] is True
-    assert loop.memory.interactions == [("原始问题", "")]
+    assert loop.memory.interactions == []
     assert any(event.type == "done" for event in events)
 
 

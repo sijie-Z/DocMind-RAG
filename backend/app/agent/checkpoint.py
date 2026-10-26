@@ -21,6 +21,9 @@
 
 from __future__ import annotations
 
+import copy
+import hashlib
+import json
 import logging
 import uuid
 from datetime import datetime, timedelta
@@ -60,6 +63,14 @@ HISTORY_CAP = 50
 
 
 # ── 领域异常（AppError 子类：Part 2 的 HTTP 面据此映射 404/409）──────────────
+
+
+ANSWER_CONTRACT_SINGLE_FINAL = "single_final/v1"
+FINAL_PHASES = frozenset({"collecting", "synthesis_pending", "review_pending", "ready", "failed"})
+
+
+class FinalCheckpointError(ValueError):
+    """A final-phase snapshot is unsafe to resume and must not replan or replay tools."""
 
 
 class TaskNotFoundError(NotFoundError):
@@ -208,6 +219,7 @@ def build_envelope(
     config: Any = None,
     run_state: dict | None = None,
     session_id: str = "",
+    final_state: dict | None = None,
 ) -> dict[str, Any]:
     """组装 v1 快照信封（纯函数，便于单测往返）。
 
@@ -215,7 +227,7 @@ def build_envelope(
     （= to_dict() + artifacts/current_step_id），plan → Plan.to_checkpoint_dict()
     （= _save_plan 的 payload + result/error_context/retry_count）。
     """
-    return {
+    envelope = {
         "v": CHECKPOINT_VERSION,
         "session_id": session_id or "",
         "ctx": ctx.to_checkpoint_dict() if ctx is not None else None,
@@ -226,6 +238,20 @@ def build_envelope(
         "partial_output": (partial_output or "")[:PARTIAL_OUTPUT_CAP],
         "updated_by": trigger,
     }
+    if final_state is not None:
+        envelope["answer_contract"] = ANSWER_CONTRACT_SINGLE_FINAL
+        envelope["final_phase"] = final_state.get("phase")
+        for source_key, target_key in (
+            ("input", "final_input"),
+            ("input_hash", "final_input_hash"),
+            ("draft", "final_draft"),
+            ("messages", "final_messages"),
+            ("answer", "final_answer"),
+        ):
+            value = final_state.get(source_key)
+            if value is not None:
+                envelope[target_key] = copy.deepcopy(value)
+    return envelope
 
 
 def parse_snapshot(raw: Any) -> dict[str, Any] | None:
@@ -245,6 +271,113 @@ def parse_snapshot(raw: Any) -> dict[str, Any] | None:
     if plan is not None and not isinstance(plan, dict):
         return None
     return raw
+
+
+def is_final_snapshot(raw: Any) -> bool:
+    return isinstance(raw, dict) and bool(raw.get("answer_contract"))
+
+
+def is_ready_final_snapshot(raw: Any) -> bool:
+    return (
+        isinstance(raw, dict)
+        and raw.get("answer_contract") == ANSWER_CONTRACT_SINGLE_FINAL
+        and raw.get("final_phase") == "ready"
+    )
+
+
+def final_input_hash(packet: Any) -> str:
+    """Hash the complete authoritative final input, not just the last step."""
+    payload = {
+        "query": packet.query,
+        "plan_id": packet.plan_id,
+        "goal": packet.goal,
+        "steps": packet.steps,
+        "context": packet.context,
+        "history": packet.history,
+        "direct": packet.direct,
+        "base_messages": packet.base_messages,
+        "legacy": packet.legacy,
+        "degraded": packet.degraded,
+    }
+    canonical = json.dumps(payload, ensure_ascii=False, sort_keys=True, default=str)
+    return "sha256:" + hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def final_packet_from_snapshot(raw: Any):
+    """Validate and rebuild a final packet without ever falling back to planning."""
+    if not isinstance(raw, dict) or raw.get("answer_contract") != ANSWER_CONTRACT_SINGLE_FINAL:
+        raise FinalCheckpointError("final_checkpoint_contract_invalid")
+    if raw.get("v") != CHECKPOINT_VERSION or not isinstance(raw.get("ctx"), dict):
+        raise FinalCheckpointError("final_checkpoint_envelope_invalid")
+    phase = raw.get("final_phase")
+    if phase not in FINAL_PHASES:
+        raise FinalCheckpointError("final_checkpoint_phase_invalid")
+    if phase == "collecting":
+        return phase, None, None
+    if phase == "failed":
+        raise FinalCheckpointError("final_checkpoint_not_recoverable")
+
+    plan_data = raw.get("plan")
+    if not isinstance(plan_data, dict) or not isinstance(plan_data.get("steps"), list):
+        raise FinalCheckpointError("final_checkpoint_plan_missing")
+    terminal_statuses = {"completed", "failed", "skipped"}
+    for step in plan_data["steps"]:
+        if not isinstance(step, dict) or step.get("status") not in terminal_statuses:
+            raise FinalCheckpointError("final_checkpoint_step_not_terminal")
+        evidence = step.get("evidence", [])
+        if not isinstance(evidence, list):
+            raise FinalCheckpointError("final_checkpoint_evidence_invalid")
+        for record in evidence:
+            if not isinstance(record, dict):
+                raise FinalCheckpointError("final_checkpoint_evidence_invalid")
+            if (
+                not isinstance(record.get("tool_call_id"), str)
+                or not isinstance(record.get("content"), str)
+                or not isinstance(record.get("status"), str)
+                or not isinstance(record.get("sources", []), list)
+                or not isinstance(record.get("evidence", []), list)
+            ):
+                raise FinalCheckpointError("final_checkpoint_evidence_invalid")
+
+    input_data = raw.get("final_input")
+    if not isinstance(input_data, dict):
+        raise FinalCheckpointError("final_checkpoint_input_missing")
+    if (
+        not isinstance(input_data.get("query"), str)
+        or not isinstance(input_data.get("context", ""), str)
+        or not isinstance(input_data.get("history", []), list)
+        or not isinstance(input_data.get("base_messages", []), list)
+        or not isinstance(input_data.get("direct", False), bool)
+    ):
+        raise FinalCheckpointError("final_checkpoint_input_invalid")
+    if phase == "review_pending":
+        if not isinstance(raw.get("final_draft"), str) or not raw["final_draft"].strip():
+            raise FinalCheckpointError("final_checkpoint_draft_missing")
+        if not isinstance(raw.get("final_messages"), list):
+            raise FinalCheckpointError("final_checkpoint_messages_missing")
+    if phase == "ready" and (
+        not isinstance(raw.get("final_answer"), str) or not raw["final_answer"].strip()
+    ):
+        raise FinalCheckpointError("final_checkpoint_answer_missing")
+
+    try:
+        from app.agent.final_synthesis import FinalInputPacket
+        from app.agent.planner import Plan
+
+        plan = Plan.from_checkpoint_dict(plan_data)
+        packet = FinalInputPacket.from_plan(
+            input_data["query"],
+            plan,
+            context=input_data.get("context", ""),
+            history=input_data.get("history", []),
+            direct=input_data.get("direct", False),
+            base_messages=input_data.get("base_messages", []),
+        )
+    except Exception as exc:
+        raise FinalCheckpointError("final_checkpoint_shape_invalid") from exc
+    if final_input_hash(packet) != raw.get("final_input_hash"):
+        raise FinalCheckpointError("final_checkpoint_input_hash_mismatch")
+    return phase, packet, plan
 
 
 # ── 写路径 ───────────────────────────────────────────────────────────────────
@@ -299,6 +432,7 @@ async def save_checkpoint(
     config: Any = None,
     run_state: dict | None = None,
     session_id: str = "",
+    final_state: dict | None = None,
 ) -> bool:
     """单条 UPDATE 落一次快照：context_snapshot + 派生的进度列。
 
@@ -320,6 +454,7 @@ async def save_checkpoint(
             config=config,
             run_state=run_state,
             session_id=session_id,
+            final_state=final_state,
         )
         async with AsyncSessionLocal() as db:
             task = await _load_task_row(db, task_id)
@@ -365,6 +500,7 @@ async def save_from_live(*, task_id: str | None, live: dict | None, trigger: str
         config=live.get("config"),
         run_state=live.get("run_state"),
         session_id=live.get("session_id", ""),
+        final_state=live.get("final_state"),
     )
 
 
@@ -1154,12 +1290,17 @@ async def load_for_resume(
             )
     payload: dict[str, Any] | None = None
     if raw_snapshot is not None:
-        payload = parse_snapshot(raw_snapshot)
-        if payload is None:
-            logger.warning(
-                "checkpoint 快照损坏/版本不符（task=%s）：resume 安全降级为从规划阶段重跑",
-                log_safe(task_id),
-            )
+        if is_final_snapshot(raw_snapshot):
+            # Final-phase damage must reach the fail-closed validator.  Treating
+            # it as "no checkpoint" would replay completed tools during replanning.
+            payload = raw_snapshot
+        else:
+            payload = parse_snapshot(raw_snapshot)
+            if payload is None:
+                logger.warning(
+                    "checkpoint 快照损坏/版本不符（task=%s）：resume 安全降级为从规划阶段重跑",
+                    log_safe(task_id),
+                )
     return task, payload
 
 

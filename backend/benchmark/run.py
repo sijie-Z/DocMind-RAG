@@ -26,6 +26,7 @@ from pathlib import Path
 # Ensure backend is importable
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from app.agent.events import FinalAnswerAccumulator
 from benchmark.scorer import (
     BenchmarkReport,
     QuestionResult,
@@ -38,10 +39,12 @@ logger = logging.getLogger(__name__)
 
 # ── Langfuse trace helper ────────────────────────────────────────────
 
+
 def _get_langfuse():
     """Lazy Langfuse init for trace tracking."""
     try:
         from app.agent.observability import get_langfuse
+
         return get_langfuse()
     except Exception:
         return None
@@ -56,10 +59,14 @@ def _get_org_id() -> int:
 
         from app.core.database import AsyncSessionLocal
         from app.models.organization import Organization
+
         async def _fetch():
             async with AsyncSessionLocal() as db:
-                org = (await db.execute(select(Organization).where(Organization.name == "Default"))).scalar_one_or_none()
+                org = (
+                    await db.execute(select(Organization).where(Organization.name == "Default"))
+                ).scalar_one_or_none()
                 return org.id if org else 1
+
         return asyncio.run(_fetch())
     except Exception:
         return 1
@@ -83,6 +90,7 @@ def _create_question_trace(lf, question_id: str, mode: str):
 
 # ── Baseline (RAG only) ─────────────────────────────────────────────
 
+
 async def _run_baseline(question: dict, org_id: int = 3, lf=None) -> QuestionResult:
     """Run a single question in RAG-only mode."""
     from app.core.config import settings
@@ -96,10 +104,14 @@ async def _run_baseline(question: dict, org_id: int = 3, lf=None) -> QuestionRes
     pipeline = get_rag_pipeline()
     if not pipeline or not pipeline.openai_client:
         return QuestionResult(
-            id=qid, category=question.get("subcategory", question.get("category", "unknown")),
-            question=query, difficulty=question["difficulty"],
-            answer="Error: LLM not configured", duration=0,
-            trace_id=trace_id, trace_url=trace_url,
+            id=qid,
+            category=question.get("subcategory", question.get("category", "unknown")),
+            question=query,
+            difficulty=question["difficulty"],
+            answer="Error: LLM not configured",
+            duration=0,
+            trace_id=trace_id,
+            trace_url=trace_url,
         )
 
     start = time.perf_counter()
@@ -109,7 +121,9 @@ async def _run_baseline(question: dict, org_id: int = 3, lf=None) -> QuestionRes
         # pipeline 返回 (results, debug_info) 元组，必须解包（同 issue #219）——
         # 不解包时 docs[:5] 迭代出的是「列表」和 None，d.get 会 AttributeError。
         docs, _ = await pipeline.search_knowledge_base(
-            query=query, organization_id=org_id, top_k=5,
+            query=query,
+            organization_id=org_id,
+            top_k=5,
         )
 
         # 2. Build context
@@ -127,7 +141,10 @@ async def _run_baseline(question: dict, org_id: int = 3, lf=None) -> QuestionRes
             prompt = f"回答以下问题：{query}"
 
         messages = [
-            {"role": "system", "content": "你是一个知识库问答助手。请基于提供的文档内容回答，如果文档中没有相关信息，请如实说明。"},
+            {
+                "role": "system",
+                "content": "你是一个知识库问答助手。请基于提供的文档内容回答，如果文档中没有相关信息，请如实说明。",
+            },
             {"role": "user", "content": prompt},
         ]
         response = await pipeline.openai_client.chat.completions.create(
@@ -145,10 +162,14 @@ async def _run_baseline(question: dict, org_id: int = 3, lf=None) -> QuestionRes
         duration = time.perf_counter() - start
 
     result = QuestionResult(
-        id=qid, category=question.get("subcategory", question.get("category", "unknown")),
-        question=query, difficulty=question["difficulty"],
-        answer=answer, duration=duration,
-        trace_id=trace_id, trace_url=trace_url,
+        id=qid,
+        category=question.get("subcategory", question.get("category", "unknown")),
+        question=query,
+        difficulty=question["difficulty"],
+        answer=answer,
+        duration=duration,
+        trace_id=trace_id,
+        trace_url=trace_url,
     )
     result.score(question.get("expected_keywords", []))
     return result
@@ -156,8 +177,15 @@ async def _run_baseline(question: dict, org_id: int = 3, lf=None) -> QuestionRes
 
 # ── Agent mode (PER) ────────────────────────────────────────────────
 
-async def _run_agent(question: dict, org_id: int = 3, lf=None, enable_experience: bool = True,
-                      execution_mode: str = "dag", planning_mode: str = "normal") -> QuestionResult:
+
+async def _run_agent(
+    question: dict,
+    org_id: int = 3,
+    lf=None,
+    enable_experience: bool = True,
+    execution_mode: str = "dag",
+    planning_mode: str = "normal",
+) -> QuestionResult:
     """Run a single question with the full PER agent."""
     from app.agent.config import AgentConfig
     from app.agent.loop import PERAgentLoop
@@ -171,10 +199,14 @@ async def _run_agent(question: dict, org_id: int = 3, lf=None, enable_experience
     client = agent_service.client
     if not client:
         return QuestionResult(
-            id=qid, category=question.get("subcategory", question.get("category", "unknown")),
-            question=query, difficulty=question["difficulty"],
-            answer="Error: LLM not configured", duration=0,
-            trace_id=trace_id, trace_url=trace_url,
+            id=qid,
+            category=question.get("subcategory", question.get("category", "unknown")),
+            question=query,
+            difficulty=question["difficulty"],
+            answer="Error: LLM not configured",
+            duration=0,
+            trace_id=trace_id,
+            trace_url=trace_url,
         )
 
     config = AgentConfig(
@@ -199,41 +231,47 @@ async def _run_agent(question: dict, org_id: int = 3, lf=None, enable_experience
     )
 
     start = time.perf_counter()
-    answer_parts: list[str] = []
+    answers = FinalAnswerAccumulator()
     step_count = 0
     tool_failures = 0
     replay_task_id = ""
 
     try:
         async for event in agent.run(query):
-            if event.type == "chunk":
-                answer_parts.append(event.content)
-            elif event.type == "tool_error":
+            answers.add(event)
+            if event.type == "tool_error":
                 tool_failures += 1
             elif event.type == "plan_step":
                 step_count += 1
             elif event.type == "execution_context":
                 # Capture task_id for replay
-                replay_task_id = event.content.get("task_id", "") if isinstance(event.content, dict) else ""
+                replay_task_id = (
+                    event.content.get("task_id", "") if isinstance(event.content, dict) else ""
+                )
     except Exception as e:
-        answer_parts.append(f"\n[Error: {e}]")
+        answers.chunks.append(f"\n[Error: {e}]")
 
     duration = time.perf_counter() - start
-    answer = "".join(answer_parts) or "(no answer)"
+    answer = answers.answer or "(no answer)"
 
     result = QuestionResult(
-        id=qid, category=question.get("subcategory", question.get("category", "unknown")),
-        question=query, difficulty=question["difficulty"],
-        answer=answer, duration=duration,
+        id=qid,
+        category=question.get("subcategory", question.get("category", "unknown")),
+        question=query,
+        difficulty=question["difficulty"],
+        answer=answer,
+        duration=duration,
         step_count=step_count,
         tool_failures=tool_failures,
-        trace_id=trace_id, trace_url=trace_url,
+        trace_id=trace_id,
+        trace_url=trace_url,
     )
     result.score(question.get("expected_keywords", []))
     # ── Save replay data locally (benchmark persistence) ──
     if replay_task_id:
         try:
             from app.agent.replay.engine import REPLAY_DIR, ReplayEngine
+
             ctx = await ReplayEngine().load(replay_task_id)
             if ctx:
                 path = REPLAY_DIR / f"{replay_task_id}.json"
@@ -248,6 +286,7 @@ async def _run_agent(question: dict, org_id: int = 3, lf=None, enable_experience
 
 # ── Runner ──────────────────────────────────────────────────────────
 
+
 async def _get_org_id() -> int:
     """Get the actual default organization ID from the database."""
     try:
@@ -255,17 +294,24 @@ async def _get_org_id() -> int:
 
         from app.core.database import AsyncSessionLocal
         from app.models.organization import Organization
+
         async with AsyncSessionLocal() as db:
-            org = (await db.execute(select(Organization).where(Organization.name == "Default"))).scalar_one_or_none()
+            org = (
+                await db.execute(select(Organization).where(Organization.name == "Default"))
+            ).scalar_one_or_none()
             return org.id if org else 1
     except Exception:
         return 1
 
 
-async def run_benchmark(questions_path: str, mode: str, output: str | None = None,
-                        enable_experience: bool = True,
-                        execution_mode: str = "dag",
-                        planning_mode: str = "normal") -> BenchmarkReport:
+async def run_benchmark(
+    questions_path: str,
+    mode: str,
+    output: str | None = None,
+    enable_experience: bool = True,
+    execution_mode: str = "dag",
+    planning_mode: str = "normal",
+) -> BenchmarkReport:
     """Load questions, run all, produce report, save cases.
 
     Args:
@@ -304,7 +350,14 @@ async def run_benchmark(questions_path: str, mode: str, output: str | None = Non
 
         t0 = time.perf_counter()
         if mode == "agent":
-            result = await _run_agent(q, org_id=org_id, lf=lf, enable_experience=enable_experience, execution_mode=execution_mode, planning_mode=planning_mode)
+            result = await _run_agent(
+                q,
+                org_id=org_id,
+                lf=lf,
+                enable_experience=enable_experience,
+                execution_mode=execution_mode,
+                planning_mode=planning_mode,
+            )
         else:
             result = await _run_baseline(q, org_id=org_id, lf=lf)
         elapsed = time.perf_counter() - t0
@@ -359,22 +412,38 @@ def compare_reports(baseline_path: str, agent_path: str) -> None:
 
 def main():
     parser = argparse.ArgumentParser(description="DocMind Benchmark Runner")
-    parser.add_argument("--questions", default="benchmark/questions/v2.json",
-                        help="题目 JSON 文件路径")
-    parser.add_argument("--mode", choices=["baseline", "agent"], default="agent",
-                        help="运行模式")
-    parser.add_argument("--execution-mode", choices=["dag", "serial"], default="dag",
-                        help="执行器模式: dag (依赖感知+并行) / serial (顺序执行)")
-    parser.add_argument("--planning-mode", choices=["coarse", "normal", "fine"], default="normal",
-                        help="规划粒度: coarse (一步) / normal (适中) / fine (细粒度)")
-    parser.add_argument("--output", default=None,
-                        help="输出 JSON 路径 (默认: benchmark/results/{mode}_v1.json)")
-    parser.add_argument("--compare", nargs=2, metavar=("BASELINE", "AGENT"),
-                        help="对比两份报告")
-    parser.add_argument("--experience", action="store_true", default=True,
-                        help="启用 Experience Memory (默认: true)")
-    parser.add_argument("--no-experience", action="store_false", dest="experience",
-                        help="禁用 Experience Memory (A/B baseline)")
+    parser.add_argument(
+        "--questions", default="benchmark/questions/v2.json", help="题目 JSON 文件路径"
+    )
+    parser.add_argument("--mode", choices=["baseline", "agent"], default="agent", help="运行模式")
+    parser.add_argument(
+        "--execution-mode",
+        choices=["dag", "serial"],
+        default="dag",
+        help="执行器模式: dag (依赖感知+并行) / serial (顺序执行)",
+    )
+    parser.add_argument(
+        "--planning-mode",
+        choices=["coarse", "normal", "fine"],
+        default="normal",
+        help="规划粒度: coarse (一步) / normal (适中) / fine (细粒度)",
+    )
+    parser.add_argument(
+        "--output", default=None, help="输出 JSON 路径 (默认: benchmark/results/{mode}_v1.json)"
+    )
+    parser.add_argument("--compare", nargs=2, metavar=("BASELINE", "AGENT"), help="对比两份报告")
+    parser.add_argument(
+        "--experience",
+        action="store_true",
+        default=True,
+        help="启用 Experience Memory (默认: true)",
+    )
+    parser.add_argument(
+        "--no-experience",
+        action="store_false",
+        dest="experience",
+        help="禁用 Experience Memory (A/B baseline)",
+    )
     args = parser.parse_args()
 
     if args.compare:
@@ -382,15 +451,25 @@ def main():
         return
 
     exp_label = "with_experience" if args.experience else "no_experience"
-    mode_label = f"{args.mode}_{args.execution_mode}_{args.planning_mode}" if args.mode == "agent" else args.mode
+    mode_label = (
+        f"{args.mode}_{args.execution_mode}_{args.planning_mode}"
+        if args.mode == "agent"
+        else args.mode
+    )
     output = args.output or f"benchmark/results/{mode_label}_{exp_label}.json"
     print(f"\n  Execution Mode: {args.execution_mode}")
     print(f"  Planning Mode: {args.planning_mode}")
     print(f"  Experience Memory: {'启用' if args.experience else '禁用'}")
-    asyncio.run(run_benchmark(args.questions, args.mode, output,
-                              enable_experience=args.experience,
-                              execution_mode=args.execution_mode,
-                              planning_mode=args.planning_mode))
+    asyncio.run(
+        run_benchmark(
+            args.questions,
+            args.mode,
+            output,
+            enable_experience=args.experience,
+            execution_mode=args.execution_mode,
+            planning_mode=args.planning_mode,
+        )
+    )
 
 
 if __name__ == "__main__":

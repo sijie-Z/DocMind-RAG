@@ -159,6 +159,14 @@ class ChatMessage(Base):
         # issue #476：会话内单调序号 + 唯一约束——fork 的边界语义（seq <= 边界）
         # 与复制时的重排都依赖它；并发的同会话写入由 (session_id, seq) 兜底。
         UniqueConstraint("session_id", "seq", name="uq_chat_messages_session_seq"),
+        # single_final/v1：同一 agent task 的 user/assistant 各自最多一条。
+        # agent_task_id 为 NULL 的旧行和旧调用方不受唯一性限制。
+        UniqueConstraint(
+            "session_id",
+            "agent_task_id",
+            "message_type",
+            name="uq_chat_messages_session_task_type",
+        ),
     )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, index=True)
@@ -172,6 +180,10 @@ class ChatMessage(Base):
     # 消息内容
     content: Mapped[str] = mapped_column(_MESSAGE_TEXT, comment="消息内容")
     message_type: Mapped[MessageType] = mapped_column(Enum(MessageType), comment="消息类型")
+    # 可空任务幂等键；NULL 不参与 (session_id, agent_task_id, message_type) 唯一约束。
+    agent_task_id: Mapped[str | None] = mapped_column(
+        String(36), comment="Agent 任务幂等键（旧消息/非任务调用为 NULL）"
+    )
 
     # 元数据
     meta_data: Mapped[Any | None] = mapped_column(JSON, comment="额外元数据")

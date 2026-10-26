@@ -467,6 +467,10 @@ class AgentService:
             user_id=user_id,
             organization_id=organization_id,
         )
+        if checkpoint.is_ready_final_snapshot(payload):
+            # Ready resume is a read-only delivery replay: no lease, state
+            # transition, planner, executor or LLM call is necessary.
+            return task, payload
         if task.is_terminal:
             raise checkpoint.TaskNotResumableError(
                 f"任务已处于终态 {task.status.value}，不可恢复",
