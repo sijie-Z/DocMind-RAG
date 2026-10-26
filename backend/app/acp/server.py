@@ -1154,6 +1154,9 @@ class AcpServer:
         task = await self._load_task_safe(task_id)
         if task is None:
             return
+        delivery_state = await checkpoint.read_final_delivery_state(task_id)
+        if delivery_state is not False:
+            return
         if task.status in (
             TaskStatus.WAITING_APPROVAL,
             TaskStatus.WAITING_PLAN_APPROVAL,

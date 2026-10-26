@@ -25,6 +25,7 @@ import copy
 import hashlib
 import json
 import logging
+import math
 import uuid
 from datetime import datetime, timedelta
 from typing import Any
@@ -307,6 +308,118 @@ def final_input_hash(packet: Any) -> str:
     return "sha256:" + hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
+def _is_schema_number(value: Any) -> bool:
+    return isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value)
+
+
+def _validate_ctx_snapshot(ctx: dict[str, Any]) -> None:
+    for key in ("query", "goal", "plan_summary", "task_id", "document_context", "current_step_id"):
+        if key in ctx and not isinstance(ctx[key], (str, type(None))):
+            raise FinalCheckpointError("final_checkpoint_ctx_invalid")
+    if "total_tokens" in ctx and (
+        not _is_schema_int(ctx["total_tokens"]) or ctx["total_tokens"] < 0
+    ):
+        raise FinalCheckpointError("final_checkpoint_ctx_invalid")
+    for key in ("progress", "duration_ms", "start_time"):
+        if key in ctx and ctx[key] is not None and not _is_schema_number(ctx[key]):
+            raise FinalCheckpointError("final_checkpoint_ctx_invalid")
+    if "artifacts" in ctx and not isinstance(ctx["artifacts"], dict):
+        raise FinalCheckpointError("final_checkpoint_ctx_invalid")
+    artifacts = ctx.get("artifacts") or {}
+    if "iterations_used" in artifacts and not _is_schema_int(artifacts["iterations_used"]):
+        raise FinalCheckpointError("final_checkpoint_ctx_invalid")
+    quality_gate = artifacts.get("quality_gate")
+    if quality_gate is not None:
+        if not isinstance(quality_gate, dict) or not isinstance(
+            quality_gate.get("fatal_issues", []), list
+        ):
+            raise FinalCheckpointError("final_checkpoint_ctx_invalid")
+        if any(not isinstance(item, str) for item in quality_gate.get("fatal_issues", [])):
+            raise FinalCheckpointError("final_checkpoint_ctx_invalid")
+    review = artifacts.get("review")
+    if review is not None:
+        if not isinstance(review, dict) or not isinstance(
+            review.get("recommendation"), (str, type(None))
+        ):
+            raise FinalCheckpointError("final_checkpoint_ctx_invalid")
+        for key in ("issue_count", "high_severity_count"):
+            if key in review and not _is_schema_int(review[key]):
+                raise FinalCheckpointError("final_checkpoint_ctx_invalid")
+    synthesis = artifacts.get("final_synthesis")
+    if synthesis is not None:
+        if not isinstance(synthesis, dict) or not isinstance(synthesis.get("status"), str):
+            raise FinalCheckpointError("final_checkpoint_ctx_invalid")
+        if "error" in synthesis and not isinstance(synthesis["error"], (str, type(None))):
+            raise FinalCheckpointError("final_checkpoint_ctx_invalid")
+        for key in ("tokens", "included", "truncated", "omitted"):
+            if key in synthesis and not _is_schema_int(synthesis[key]):
+                raise FinalCheckpointError("final_checkpoint_ctx_invalid")
+        if "latency_ms" in synthesis and not _is_schema_number(synthesis["latency_ms"]):
+            raise FinalCheckpointError("final_checkpoint_ctx_invalid")
+        for key in ("legacy", "degraded"):
+            if key in synthesis and not isinstance(synthesis[key], bool):
+                raise FinalCheckpointError("final_checkpoint_ctx_invalid")
+
+    if "failures" in ctx and (
+        not isinstance(ctx["failures"], list)
+        or any(not isinstance(item, str) for item in ctx["failures"])
+    ):
+        raise FinalCheckpointError("final_checkpoint_ctx_invalid")
+    if "steps" in ctx and not isinstance(ctx["steps"], list):
+        raise FinalCheckpointError("final_checkpoint_ctx_invalid")
+    for step in ctx.get("steps") or []:
+        if not isinstance(step, dict):
+            raise FinalCheckpointError("final_checkpoint_ctx_invalid")
+        for key in ("step_id", "description", "status"):
+            if key in step and not isinstance(step[key], str):
+                raise FinalCheckpointError("final_checkpoint_ctx_invalid")
+        for key in ("tool_used", "result_summary", "error"):
+            if key in step and not isinstance(step[key], (str, type(None))):
+                raise FinalCheckpointError("final_checkpoint_ctx_invalid")
+        for key in ("started_at", "duration_ms", "tokens_used", "finished_at"):
+            if key in step and step[key] is not None and not _is_schema_number(step[key]):
+                raise FinalCheckpointError("final_checkpoint_ctx_invalid")
+    if "findings" in ctx and not isinstance(ctx["findings"], list):
+        raise FinalCheckpointError("final_checkpoint_ctx_invalid")
+    for finding in ctx.get("findings") or []:
+        if not isinstance(finding, dict):
+            raise FinalCheckpointError("final_checkpoint_ctx_invalid")
+        for key in ("source_step", "content", "confidence"):
+            if key in finding and not isinstance(finding[key], str):
+                raise FinalCheckpointError("final_checkpoint_ctx_invalid")
+        if "source_tool" in finding and not isinstance(finding["source_tool"], (str, type(None))):
+            raise FinalCheckpointError("final_checkpoint_ctx_invalid")
+    if "decisions" in ctx and not isinstance(ctx["decisions"], list):
+        raise FinalCheckpointError("final_checkpoint_ctx_invalid")
+    for decision in ctx.get("decisions") or []:
+        if not isinstance(decision, dict):
+            raise FinalCheckpointError("final_checkpoint_ctx_invalid")
+        for key in ("phase", "action", "reasoning"):
+            if key in decision and not isinstance(decision[key], str):
+                raise FinalCheckpointError("final_checkpoint_ctx_invalid")
+        if "ts" in decision and not _is_schema_number(decision["ts"]):
+            raise FinalCheckpointError("final_checkpoint_ctx_invalid")
+        if "triggered_by" in decision and not isinstance(
+            decision["triggered_by"], (str, type(None))
+        ):
+            raise FinalCheckpointError("final_checkpoint_ctx_invalid")
+
+
+def _validate_plan_header(plan_data: dict[str, Any]) -> None:
+    if (
+        not isinstance(plan_data.get("id"), str)
+        or not plan_data["id"]
+        or not isinstance(plan_data.get("goal"), str)
+        or not isinstance(plan_data.get("reasoning", ""), str)
+    ):
+        raise FinalCheckpointError("final_checkpoint_plan_invalid")
+    for key in ("completed_steps", "failed_steps"):
+        if key in plan_data and not _is_schema_int(plan_data[key]):
+            raise FinalCheckpointError("final_checkpoint_plan_invalid")
+    if "created_at" in plan_data and not _is_schema_number(plan_data["created_at"]):
+        raise FinalCheckpointError("final_checkpoint_plan_invalid")
+
+
 def final_packet_from_snapshot(raw: Any):
     """Validate and rebuild a final packet without ever falling back to planning."""
     if not isinstance(raw, dict) or raw.get("answer_contract") != ANSWER_CONTRACT_SINGLE_FINAL:
@@ -324,6 +437,8 @@ def final_packet_from_snapshot(raw: Any):
     plan_data = raw.get("plan")
     if not isinstance(plan_data, dict) or not isinstance(plan_data.get("steps"), list):
         raise FinalCheckpointError("final_checkpoint_plan_missing")
+    _validate_ctx_snapshot(raw["ctx"])
+    _validate_plan_header(plan_data)
     terminal_statuses = {"completed", "failed", "skipped"}
     for step in plan_data["steps"]:
         if (
@@ -333,6 +448,24 @@ def final_packet_from_snapshot(raw: Any):
             or step.get("status") not in terminal_statuses
             or not isinstance(step.get("result"), (str, type(None)))
             or not isinstance(step.get("evidence_schema", "legacy"), str)
+        ):
+            raise FinalCheckpointError("final_checkpoint_step_not_terminal")
+        if (
+            not isinstance(step.get("dependencies", []), list)
+            or any(not isinstance(dep, str) for dep in step.get("dependencies", []))
+            or not isinstance(step.get("tool_hint"), (str, type(None)))
+            or not isinstance(step.get("error_context"), (str, type(None)))
+            or not _is_schema_int(step.get("retry_count", 0))
+            or not isinstance(step.get("parallel_group"), (int, type(None)))
+            or isinstance(step.get("parallel_group"), bool)
+            or not isinstance(step.get("risk_level", "low"), str)
+            or not isinstance(step.get("retry_strategy", "auto_retry"), str)
+            or not isinstance(step.get("fallback_tool"), (str, type(None)))
+        ):
+            raise FinalCheckpointError("final_checkpoint_step_not_terminal")
+        if step.get("fallback_chain") is not None and (
+            not isinstance(step["fallback_chain"], list)
+            or any(not isinstance(item, str) for item in step["fallback_chain"])
         ):
             raise FinalCheckpointError("final_checkpoint_step_not_terminal")
         if step.get("local_synthesis") is not None:
@@ -462,6 +595,27 @@ def _validate_tool_evidence(record: Any) -> None:
             or item["key"] != f"{call_id}#{item['index']}"
         ):
             raise FinalCheckpointError("final_checkpoint_evidence_invalid")
+
+
+async def read_final_delivery_state(task_id: str) -> bool | None:
+    """Read back whether a valid ready answer is durably committed.
+
+    True = committed; False = definitely not committed; None = unknown storage
+    outcome.  Unknown is never treated as permission to fail or cancel a commit.
+    """
+    try:
+        async with AsyncSessionLocal() as db:
+            raw = (
+                await db.execute(select(AgentTask.context_snapshot).where(AgentTask.id == task_id))
+            ).scalar_one_or_none()
+        if not is_ready_final_snapshot(raw):
+            return False
+        final_packet_from_snapshot(raw)
+        return True
+    except FinalCheckpointError:
+        return False
+    except Exception:
+        return None
 
 
 # ── 写路径 ───────────────────────────────────────────────────────────────────
@@ -704,6 +858,18 @@ async def converge_disconnected(
         async with AsyncSessionLocal() as db:
             task = await _load_task_row(db, task_id)
             if task is None:
+                return False
+            delivery_state = await read_final_delivery_state(task_id)
+            if delivery_state is True:
+                if task.status == TaskStatus.COMPLETED:
+                    return True
+                task.transition(TaskStatus.COMPLETED)
+                await db.commit()
+                await tool_ledger.synthesize_terminal(task_id, reason="interrupt")
+                return True
+            if delivery_state is None:
+                # Unknown final write outcome: preserve a recoverable RUNNING
+                # state instead of stranding a possibly committed answer.
                 return False
             if task.status not in _DISCONNECT_CONVERGE_FROM:
                 return False

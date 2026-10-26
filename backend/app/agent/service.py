@@ -231,6 +231,26 @@ async def notify_task_terminal(
         )
 
 
+def _is_final_ready_live(agent: PERAgentLoop) -> bool:
+    state = getattr(agent, "final_state_live", None)
+    return isinstance(state, dict) and state.get("phase") == "ready"
+
+
+def _validate_ready_delivery(task: AgentTask, payload: dict[str, Any]) -> None:
+    if task.status not in (TaskStatus.RUNNING, TaskStatus.COMPLETED):
+        raise checkpoint.TaskNotResumableError(
+            "ready 答案在当前任务状态下不可交付",
+            detail={"task_id": task.id, "state": task.status.value},
+        )
+    try:
+        checkpoint.final_packet_from_snapshot(payload)
+    except checkpoint.FinalCheckpointError as exc:
+        raise checkpoint.TaskNotResumableError(
+            "最终 checkpoint 无法通过 ready 完整性校验",
+            detail={"task_id": task.id, "state": "invalid_final_checkpoint"},
+        ) from exc
+
+
 class AgentService:
     """High-level agent interface with session management."""
 
@@ -418,12 +438,16 @@ class AgentService:
                 # HITL：审批暂停绝不置终态（状态已在暂停点置 waiting_approval，
                 # 人类应答经 approval 端点续跑）；协作式取消收敛为 CANCELLED。
                 # B：计划审批暂停（waiting_plan_approval）同语义——等人类决策。
-                if getattr(agent, "paused_for_approval", False) or getattr(
-                    agent, "paused_for_plan_approval", False
+                if (
+                    getattr(agent, "paused_for_approval", False)
+                    or getattr(agent, "paused_for_plan_approval", False)
+                    or getattr(agent, "paused_for_final_commit", False)
                 ):
                     pass
                 elif getattr(agent, "run_cancelled", False):
-                    cancel_event = await self._finalize_task_cancelled(task_id)
+                    cancel_event = await self._finalize_task_cancelled(
+                        task_id, final_ready=_is_final_ready_live(agent)
+                    )
                     if cancel_event is not None:
                         cancel_event.task_id = task_id
                         if request_id:
@@ -434,6 +458,7 @@ class AgentService:
                         task_id,
                         failed_run=bool(getattr(agent, "run_failed", False)),
                         failure_text=getattr(agent, "run_failure", None),
+                        final_ready=_is_final_ready_live(agent),
                     )
                     if finalize_event is not None:
                         finalize_event.task_id = task_id
@@ -468,26 +493,7 @@ class AgentService:
             organization_id=organization_id,
         )
         if checkpoint.is_ready_final_snapshot(payload):
-            cancel_state = await checkpoint.cancel_status(task_id)
-            if cancel_state is not False or task.status in (
-                TaskStatus.CANCELLED,
-                TaskStatus.ABANDONED,
-                TaskStatus.REJECTED,
-            ):
-                raise checkpoint.TaskNotResumableError(
-                    "ready 答案当前不可交付（已取消或取消状态无法验证）",
-                    detail={
-                        "task_id": task_id,
-                        "state": "cancelled" if cancel_state else "cancel_unavailable",
-                    },
-                )
-            try:
-                checkpoint.final_packet_from_snapshot(payload)
-            except checkpoint.FinalCheckpointError as exc:
-                raise checkpoint.TaskNotResumableError(
-                    "最终 checkpoint 无法通过 ready 完整性校验",
-                    detail={"task_id": task_id, "state": "invalid_final_checkpoint"},
-                ) from exc
+            _validate_ready_delivery(task, payload)
             # Ready resume is a read-only delivery replay: no lease, state
             # transition, planner, executor or LLM call is necessary.
             return task, payload
@@ -567,6 +573,9 @@ class AgentService:
             query = task.query
             agent_config = config or AgentConfig()
             session_id = None
+
+        if checkpoint.is_ready_final_snapshot(payload):
+            _validate_ready_delivery(task, payload)
 
         agent = PERAgentLoop(
             openai_client=self.client,
@@ -678,18 +687,25 @@ class AgentService:
         async def _save_then_release() -> None:
             """受保护收尾单元：同一任务里按序执行 save → converge → release
             （不可拆——拆分会让"取消落点"决定收敛/归还是否开始，见方法注释）。"""
-            try:
-                await checkpoint.save_from_live(
-                    task_id=task_id,
-                    live=agent.checkpoint_live if agent is not None else None,
-                    trigger="on_disconnect",
-                )
-            except Exception as e:
-                logger.warning(
-                    "checkpoint on_disconnect failed (task=%s): %s",
-                    log_safe(task_id),
-                    log_safe(e),
-                )
+            if agent is not None and agent.paused_for_final_commit:
+                committed = await checkpoint.read_final_delivery_state(task_id)
+                if committed is not True:
+                    if release_lease:
+                        await checkpoint.release_task(task_id)
+                    return
+            else:
+                try:
+                    await checkpoint.save_from_live(
+                        task_id=task_id,
+                        live=agent.checkpoint_live if agent is not None else None,
+                        trigger="on_disconnect",
+                    )
+                except Exception as e:
+                    logger.warning(
+                        "checkpoint on_disconnect failed (task=%s): %s",
+                        log_safe(task_id),
+                        log_safe(e),
+                    )
             # 状态收敛兜底（第四波实机缺陷修复）：流已死 = 运行已死——不收理会
             # 永停"进行中"（见 converge_disconnected 长注释）。放进同一受保护
             # 单元：取消落点不得决定收敛是否发生（#300/F1 纪律同源）。
@@ -750,6 +766,16 @@ class AgentService:
             logger.warning(
                 "checkpoint on_error save failed (task=%s): %s", log_safe(task_id), log_safe(e)
             )
+        committed = _is_final_ready_live(agent) and await checkpoint.read_final_delivery_state(
+            task_id
+        )
+        if committed is True:
+            ok = await checkpoint.mark_terminal(task_id, TaskStatus.COMPLETED)
+            if ok:
+                await notify_task_terminal(task_id, TaskStatus.COMPLETED)
+            return
+        if agent is not None and agent.paused_for_final_commit:
+            return
         failure_text = f"{type(exc).__name__}: {exc}"
         ok = await checkpoint.mark_terminal(
             task_id,
@@ -766,6 +792,7 @@ class AgentService:
         *,
         failed_run: bool,
         failure_text: str | None = None,
+        final_ready: bool = False,
     ) -> AgentEvent | None:
         """run 正常结束后置任务终态，并**消费** mark_terminal 的返回值
         （issue #301 批 A #10/#11；此前返回值被丢弃——DB 写失败时任务永远
@@ -778,6 +805,11 @@ class AgentService:
           并返回一条如实告知客户端的事件（调用方盖章 task_id 后补发）；成功时
           返回 None（零扰动，成功路径旧行为不变）。
         """
+        if final_ready and await checkpoint.read_final_delivery_state(task_id) is True:
+            ok = await checkpoint.mark_terminal(task_id, TaskStatus.COMPLETED)
+            if ok:
+                await notify_task_terminal(task_id, TaskStatus.COMPLETED)
+            return None
         if failed_run:
             ok = await checkpoint.mark_terminal(
                 task_id,
@@ -813,10 +845,14 @@ class AgentService:
             )
         return AgentEvent(type="error", content=content)
 
-    async def _finalize_task_cancelled(self, task_id: str) -> AgentEvent | None:
+    async def _finalize_task_cancelled(
+        self, task_id: str, *, final_ready: bool = False
+    ) -> AgentEvent | None:
         """取消收敛：置 CANCELLED 终态（**诚实终态**：不伪装 completed）；
         写失败同样消费返回值并响亮留痕（#301 批 A 同纪律）。
         终态落库成功 → 站内通知（best-effort 旁路）。"""
+        if final_ready and await checkpoint.read_final_delivery_state(task_id) is True:
+            return None
         ok = await checkpoint.mark_terminal(
             task_id,
             TaskStatus.CANCELLED,

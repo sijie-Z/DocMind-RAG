@@ -1221,6 +1221,19 @@ async def cancel_agent_task(
         user_id=current_user.id,
         organization_id=effective_org_id,
     )
+    delivery_state = await checkpoint.read_final_delivery_state(task_id)
+    if delivery_state is None:
+        raise ServiceUnavailableError("最终提交状态未知，不能确认取消是否生效")
+    if task.status in (TaskStatus.RUNNING, TaskStatus.COMPLETED) and delivery_state:
+        return {
+            "success": True,
+            "data": {
+                "task_id": task_id,
+                "state": task.status.value,
+                "cancel_requested": False,
+                "message": "final_ready 已提交，迟到取消不生效",
+            },
+        }
     if task.status == TaskStatus.CANCELLED:
         return {
             "success": True,

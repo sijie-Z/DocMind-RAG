@@ -100,6 +100,12 @@ async def cancel_task_and_wait(
     from app.agent import checkpoint
     from app.models.agent_task import TaskStatus
 
+    delivery_state = await checkpoint.read_final_delivery_state(task_id)
+    if delivery_state is True:
+        return False
+    if delivery_state is None:
+        raise RedisUnavailableError("最终提交状态未知，无法确认取消是否生效")
+
     if not await checkpoint.request_cancel(task_id):
         raise RedisUnavailableError("Redis 不可用，无法取消")
 
