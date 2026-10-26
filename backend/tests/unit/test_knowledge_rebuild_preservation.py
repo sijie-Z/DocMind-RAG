@@ -56,6 +56,8 @@ class FakeES:
         self.docs = {"old-es-id": old_source}
         self.delete_calls = []
         self.bulk_calls = []
+        self.count_calls = []
+        self.count_faults = {}
         self.delete_fault = None
         self.indices = self
 
@@ -96,6 +98,10 @@ class FakeES:
         }
 
     async def count(self, *, index, query):
+        call_index = len(self.count_calls)
+        self.count_calls.append(deepcopy(query))
+        if call_index in self.count_faults:
+            return deepcopy(self.count_faults[call_index])
         return {"count": sum(_matches(source, query) for source in self.docs.values())}
 
     async def refresh(self, *, index):
@@ -205,6 +211,15 @@ def _wire_parse_and_embedding(monkeypatch, processor):
 
     monkeypatch.setattr(processor.parser, "parse_document", parse_ok)
     monkeypatch.setattr(processor, "_get_embeddings", embed_ok)
+
+
+async def _prepare_rebuild(session_factory, fake_es, monkeypatch, *, bulk_limit=None):
+    await _seed_indexed_version(session_factory)
+    job_id = await _submit_rebuild(session_factory, monkeypatch)
+    processor = _make_processor(monkeypatch)
+    _wire_bulk(monkeypatch, fake_es, limit=bulk_limit)
+    _wire_parse_and_embedding(monkeypatch, processor)
+    return job_id, processor
 
 
 async def _search_texts(fake_es):
@@ -458,3 +473,128 @@ async def test_delete_faults_never_report_success_or_mix_versions(
     assert fake_es.bulk_calls == [], "an unconfirmed delete must not be followed by bulk"
     expected_es = [OLD_TEXT] if fault in {"exception", "partial"} else []
     assert texts == expected_es
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("fault", "response"),
+    [
+        (
+            "shard_failure_details",
+            {"count": 0, "_shards": {"failed": 0, "failures": [{"reason": "partial"}]}},
+        ),
+        ("failures", {"count": 0, "failures": [{"reason": "partial"}]}),
+        ("timeout", {"count": 0, "timed_out": True}),
+        ("false", False),
+        ("empty", {}),
+        ("missing_count", {"_shards": {"failed": 0}}),
+        ("invalid_count", {"count": "0"}),
+        ("invalid_shards", {"count": 0, "_shards": {"failed": "0"}}),
+    ],
+)
+async def test_pre_bulk_count_response_must_be_trustworthy(
+    session_factory, fake_es, monkeypatch, fault, response
+):
+    """An unconfirmed pre-bulk count must fail before any bulk write."""
+    job_id, processor = await _prepare_rebuild(session_factory, fake_es, monkeypatch)
+    fake_es.count_faults[0] = response
+
+    result = await processor.process(DOC_ID, job_id)
+
+    doc, job, chunks = await _load_state(session_factory, job_id)
+    texts = await _search_texts(fake_es)
+    assert result is False, f"pre-bulk {fault} was reported as success; ES texts={texts}"
+    assert doc.status == DocumentStatus.FAILED
+    assert doc.parse_error
+    assert job.status == KnowledgeJobStatus.FAILED
+    assert job.error_message == doc.parse_error
+    assert [row.chunk_text for row in chunks] == [chunk["chunk_text"] for chunk in NEW_CHUNKS]
+    assert fake_es.bulk_calls == []
+    assert len(fake_es.count_calls) == 1
+    assert texts == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("fault", "response"),
+    [
+        (
+            "shard_failure_details",
+            {"count": 2, "_shards": {"failed": 0, "failures": [{"reason": "partial"}]}},
+        ),
+        ("failures", {"count": 2, "failures": [{"reason": "partial"}]}),
+        ("timeout", {"count": 2, "timed_out": True}),
+        ("false", False),
+        ("empty", {}),
+        ("missing_count", {"_shards": {"failed": 0}}),
+        ("invalid_count", {"count": "2"}),
+    ],
+)
+async def test_final_count_response_must_be_trustworthy(
+    session_factory, fake_es, monkeypatch, fault, response
+):
+    """The first final count uses the same strict parser as the pre-bulk count."""
+    job_id, processor = await _prepare_rebuild(session_factory, fake_es, monkeypatch)
+    fake_es.count_faults[1] = response
+
+    result = await processor.process(DOC_ID, job_id)
+
+    doc, job, chunks = await _load_state(session_factory, job_id)
+    texts = await _search_texts(fake_es)
+    assert result is False, f"final {fault} was reported as success; ES texts={texts}"
+    assert doc.status == DocumentStatus.FAILED
+    assert doc.parse_error
+    assert job.status == KnowledgeJobStatus.FAILED
+    assert job.error_message == doc.parse_error
+    assert [row.chunk_text for row in chunks] == [chunk["chunk_text"] for chunk in NEW_CHUNKS]
+    assert len(fake_es.bulk_calls) == 1
+    assert len(fake_es.count_calls) == 2
+    assert texts == [chunk["chunk_text"] for chunk in NEW_CHUNKS]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("count_index", [0, 1, 2])
+async def test_every_final_count_rejects_failed_shards(
+    session_factory, fake_es, monkeypatch, count_index
+):
+    """Total, embedding, and organization count responses are all fail-closed."""
+    job_id, processor = await _prepare_rebuild(session_factory, fake_es, monkeypatch)
+    fake_es.count_faults[1 + count_index] = {
+        "count": 2,
+        "_shards": {"failed": 1},
+    }
+
+    result = await processor.process(DOC_ID, job_id)
+
+    doc, job, _ = await _load_state(session_factory, job_id)
+    assert result is False
+    assert doc.status == DocumentStatus.FAILED
+    assert "failed_shards=1" in doc.parse_error
+    assert job.status == KnowledgeJobStatus.FAILED
+    assert "failed_shards=1" in job.error_message
+    assert len(fake_es.bulk_calls) == 1
+    assert len(fake_es.count_calls) == 2 + count_index
+
+
+@pytest.mark.asyncio
+async def test_partial_pre_bulk_count_zero_cannot_mask_mixed_versions(
+    session_factory, fake_es, monkeypatch
+):
+    """R3 review: old 1 + new 1 has the expected total but must never succeed."""
+    job_id, processor = await _prepare_rebuild(session_factory, fake_es, monkeypatch, bulk_limit=1)
+    fake_es.delete_fault = "partial"
+    fake_es.count_faults[0] = {"count": 0, "_shards": {"failed": 1}}
+
+    result = await processor.process(DOC_ID, job_id)
+
+    doc, job, chunks = await _load_state(session_factory, job_id)
+    texts = await _search_texts(fake_es)
+    assert result is False, f"partial count masked mixed versions; ES texts={texts}"
+    assert doc.status == DocumentStatus.FAILED
+    assert "failed_shards=1" in doc.parse_error
+    assert job.status == KnowledgeJobStatus.FAILED
+    assert "failed_shards=1" in job.error_message
+    assert [row.chunk_text for row in chunks] == [chunk["chunk_text"] for chunk in NEW_CHUNKS]
+    assert fake_es.bulk_calls == []
+    assert len(fake_es.count_calls) == 1
+    assert texts == [OLD_TEXT]

@@ -25,6 +25,7 @@ from app.models.document import Document, DocumentChunk, DocumentStatus
 from app.models.knowledge_job import KnowledgeJobStatus, KnowledgeProcessingJob
 from app.services.clause_refs import extract_clause_fields
 from app.services.document_parser import document_service
+from app.services.document_status import require_count_response
 from app.services.document_status import verify_indexed as _verify_indexed
 from app.services.embedding_service import embedding_service
 
@@ -531,12 +532,10 @@ class DocumentProcessor:
             index=settings.ELASTICSEARCH_INDEX_NAME,
             query={"term": {"document_id": doc.id}},
         )
-        try:
-            remaining = int(remaining_response.get("count"))
-        except (AttributeError, TypeError, ValueError) as e:
-            raise RuntimeError(
-                f"ES delete verification failed for document {doc.id}: unreadable count"
-            ) from e
+        remaining = require_count_response(
+            remaining_response,
+            context=f"ES delete verification for document {doc.id}",
+        )
         if remaining:
             raise RuntimeError(
                 f"ES delete verification failed for document {doc.id}: "
