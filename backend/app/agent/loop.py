@@ -209,6 +209,7 @@ class PERAgentLoop:
         self.checkpoint_live: dict[str, Any] | None = None
         self.final_state_live: dict[str, Any] | None = None
         self._final_commit_persisted: bool = False
+        self.final_delivery_started: bool = False
 
         # 运行级失败标志（issue #301 批 A #11）：无工具模式下直接回答的 LLM
         # 调用失败 = 本次 run 零产出，service 收尾据此置 FAILED 而不是
@@ -439,6 +440,7 @@ class PERAgentLoop:
         self.pending_approval = None
         self.run_cancelled = False
         self._final_commit_persisted = False
+        self.final_delivery_started = False
 
         final_resume_phase: str | None = None
         final_resume_packet: FinalInputPacket | None = None
@@ -1614,6 +1616,7 @@ class PERAgentLoop:
                 return
             if final_result is not None and final_result.ok:
                 yield AgentEvent(type="chunk", content=final_output)
+                self.final_delivery_started = True
                 cancel_event = await self._cancel_event()
                 if cancel_event is not None:
                     async for event in self._converge_cancelled(

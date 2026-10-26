@@ -7,6 +7,7 @@ import copy
 import sqlite3
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 from alembic.config import Config
@@ -289,6 +290,136 @@ def test_final_checkpoint_fork_clears_delivery_but_preserves_evidence():
     assert "final_answer" not in cloned
     assert "final_draft" not in cloned
     assert "final_messages" not in cloned
+
+
+@pytest.mark.asyncio
+async def test_agent_save_wrapper_forwards_task_arguments_without_kwargs(monkeypatch):
+    captured = {}
+
+    async def explicit_save(
+        session_id,
+        user_id,
+        query,
+        organization_id,
+        assistant_response="",
+        *,
+        session_factory,
+        bypass_org=False,
+        agent_task_id=None,
+        create_if_missing=None,
+    ):
+        captured.update(
+            session_id=session_id,
+            user_id=user_id,
+            query=query,
+            organization_id=organization_id,
+            assistant_response=assistant_response,
+            session_factory=session_factory,
+            bypass_org=bypass_org,
+            agent_task_id=agent_task_id,
+            create_if_missing=create_if_missing,
+        )
+        return "assistant-id"
+
+    monkeypatch.setattr(
+        "app.api.v1.endpoints.agent.save_session_interaction",
+        explicit_save,
+    )
+    from app.api.v1.endpoints.agent import _save_session_interaction
+
+    result = await _save_session_interaction(
+        "session-wrapper",
+        7,
+        "q",
+        1,
+        "answer",
+        bypass_org=True,
+        agent_task_id="task-wrapper",
+        create_if_missing=True,
+    )
+
+    assert result == "assistant-id"
+    assert captured["bypass_org"] is True
+    assert captured["agent_task_id"] == "task-wrapper"
+    assert captured["create_if_missing"] is True
+    assert captured["session_factory"] is not None
+
+
+@pytest.mark.asyncio
+async def test_agent_chat_asgi_persists_one_message_pair(db_factory, monkeypatch):
+    from httpx import ASGITransport, AsyncClient
+
+    import app.core.sse as sse_module
+    from app.agent.config import AgentConfig
+    from app.agent.events import AgentEvent
+    from app.agent.service import agent_service
+    from app.core.database import get_db
+    from app.core.security import get_current_user
+    from app.main import app
+
+    async def fake_chat(**_kwargs):
+        yield AgentEvent(type="chunk", content="AUTHORITATIVE", task_id="task-asgi")
+        yield AgentEvent(
+            type="done",
+            final_answer="AUTHORITATIVE",
+            task_state="completed",
+            task_id="task-asgi",
+        )
+
+    async def no_saved_config(*_args, **_kwargs):
+        return None
+
+    async def override_db():
+        async with db_factory() as session:
+            yield session
+
+    user = SimpleNamespace(
+        id=7,
+        organization_id=1,
+        is_active=True,
+        is_superuser=False,
+        token_organization_id=None,
+    )
+    monkeypatch.setattr(agent_service, "chat", fake_chat)
+    monkeypatch.setattr(AgentConfig, "load_from_redis", no_saved_config)
+    monkeypatch.setattr(AgentConfig, "save_to_redis", AsyncMock())
+    monkeypatch.setattr(
+        "app.api.v1.endpoints.agent._load_session_messages", AsyncMock(return_value=[])
+    )
+    monkeypatch.setattr(
+        "app.api.v1.endpoints.agent.require_organization", AsyncMock(return_value=1)
+    )
+    monkeypatch.setattr("app.api.v1.endpoints.agent.AsyncSessionLocal", db_factory)
+    monkeypatch.setattr(sse_module, "redis_client", None)
+    app.dependency_overrides[get_current_user] = lambda: user
+    app.dependency_overrides[get_db] = override_db
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://asgi.test") as client:
+        response = await client.post(
+            "/api/v1/agent/chat",
+            json={
+                "query": "q",
+                "session_id": "asgi-session",
+                "history": [],
+                "enable_tools": False,
+                "enable_planning": False,
+                "enable_reflection": False,
+                "enable_memory": False,
+                "enable_thinking": False,
+            },
+        )
+    assert response.status_code == 200, response.text
+    assert "AUTHORITATIVE" in response.text
+
+    messages = await _messages(db_factory, "asgi-session")
+    assert len(messages) == 2
+    assert {message.message_type for message in messages} == {
+        MessageType.USER,
+        MessageType.ASSISTANT,
+    }
+    assert all(message.agent_task_id == "task-asgi" for message in messages)
+    assert messages[-1].content == "AUTHORITATIVE"
 
 
 def test_agent_task_message_migration_single_head_sqlite_roundtrip(tmp_path, monkeypatch):

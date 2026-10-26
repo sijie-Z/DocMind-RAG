@@ -1191,8 +1191,14 @@ class AcpServer:
         """
         if not task_id:
             return False
+        from app.agent import checkpoint
         from app.models.agent_task import TaskStatus
 
+        delivery_state = await checkpoint.read_final_delivery_state(task_id)
+        if delivery_state is True:
+            return True
+        if delivery_state is None:
+            raise RPCError(JSONRPC_INTERNAL_ERROR, "最终提交状态未知，无法确认取消")
         task = await self._load_task_safe(task_id)
         return task is not None and task.is_terminal and task.status != TaskStatus.CANCELLED
 
@@ -1210,6 +1216,13 @@ class AcpServer:
             task_id = await self._latest_task_id(state.session_id)
         if not task_id:
             return
+        from app.agent import checkpoint
+
+        delivery_state = await checkpoint.read_final_delivery_state(task_id)
+        if delivery_state is True:
+            return
+        if delivery_state is None:
+            raise RPCError(JSONRPC_INTERNAL_ERROR, "最终提交状态未知，无法确认取消")
         task = await self._load_task_safe(task_id)
         if task is None or task.is_terminal:
             return

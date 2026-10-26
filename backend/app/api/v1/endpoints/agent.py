@@ -1923,6 +1923,8 @@ async def _save_session_interaction(
     assistant_response: str = "",
     *,
     bypass_org: bool = False,
+    agent_task_id: str | None = None,
+    create_if_missing: bool | None = None,
 ) -> str | None:
     """兼容包装：实现已提升为 app.services.session_service.save_session_interaction。
 
@@ -1939,4 +1941,6 @@ async def _save_session_interaction(
         assistant_response,
         session_factory=AsyncSessionLocal,
         bypass_org=bypass_org,
+        agent_task_id=agent_task_id,
+        create_if_missing=create_if_missing,
     )

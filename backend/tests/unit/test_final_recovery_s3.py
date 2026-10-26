@@ -551,6 +551,107 @@ async def test_public_cancel_and_rpc_cancel_wait_are_noop_after_ready(monkeypatc
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("readback", [True, False, None])
+@pytest.mark.parametrize("persisted", [True, False])
+@pytest.mark.parametrize("paused", [True, False])
+async def test_checkpoint_error_readback_matrix(readback, persisted, paused, monkeypatch):
+    agent = SimpleNamespace(
+        final_state_live={"phase": "ready"},
+        checkpoint_live=None,
+        paused_for_final_commit=paused,
+        _final_commit_persisted=persisted,
+        final_delivery_started=False,
+    )
+    monkeypatch.setattr(
+        checkpoint,
+        "read_final_delivery_state",
+        AsyncMock(return_value=readback),
+    )
+    save_from_live = AsyncMock()
+    mark_terminal = AsyncMock(return_value=True)
+    notify = AsyncMock()
+    monkeypatch.setattr(checkpoint, "save_from_live", save_from_live)
+    monkeypatch.setattr(checkpoint, "mark_terminal", mark_terminal)
+    monkeypatch.setattr("app.agent.service.notify_task_terminal", notify)
+    service = AgentService()
+
+    await service._checkpoint_error("task-matrix", agent, RuntimeError("late error"))
+
+    if readback is True:
+        assert save_from_live.await_count == 0
+        assert mark_terminal.await_args.args[1] == TaskStatus.COMPLETED
+        assert notify.await_args.args[1] == TaskStatus.COMPLETED
+    elif readback is None and (persisted or paused):
+        assert save_from_live.await_count == 0
+        assert mark_terminal.await_count == 0
+        assert notify.await_count == 0
+    else:
+        assert save_from_live.await_count == 1
+        assert mark_terminal.await_args.args[1] == TaskStatus.FAILED
+        assert notify.await_args.args[1] == TaskStatus.FAILED
+
+
+@pytest.mark.asyncio
+async def test_confirmed_commit_readback_unknown_after_chunk_completes_without_live_write(
+    monkeypatch,
+):
+    agent = SimpleNamespace(
+        final_state_live={"phase": "ready"},
+        checkpoint_live=None,
+        paused_for_final_commit=False,
+        _final_commit_persisted=True,
+        final_delivery_started=True,
+    )
+    monkeypatch.setattr(
+        checkpoint,
+        "read_final_delivery_state",
+        AsyncMock(return_value=None),
+    )
+    save_from_live = AsyncMock()
+    mark_terminal = AsyncMock(return_value=True)
+    notify = AsyncMock()
+    monkeypatch.setattr(checkpoint, "save_from_live", save_from_live)
+    monkeypatch.setattr(checkpoint, "mark_terminal", mark_terminal)
+    monkeypatch.setattr("app.agent.service.notify_task_terminal", notify)
+    service = AgentService()
+
+    await service._checkpoint_error("task-after-chunk", agent, RuntimeError("late error"))
+
+    assert save_from_live.await_count == 0
+    assert mark_terminal.await_args.args[1] == TaskStatus.COMPLETED
+    assert notify.await_args.args[1] == TaskStatus.COMPLETED
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("ready_state", [True, False, None])
+async def test_acp_cancel_cleanup_honors_durable_ready(ready_state, monkeypatch):
+    from app.acp.server import AcpServer
+    from app.rpc.dispatcher import RPCError
+
+    task = SimpleNamespace(id="task-acp-ready", status=TaskStatus.RUNNING, is_terminal=False)
+    server = object.__new__(AcpServer)
+    server._load_task_safe = AsyncMock(return_value=task)
+    server._mark_task_cancelled = AsyncMock(return_value=True)
+    monkeypatch.setattr(
+        checkpoint,
+        "read_final_delivery_state",
+        AsyncMock(return_value=ready_state),
+    )
+    state = SimpleNamespace(active_task_id=task.id, session_id="session-acp")
+
+    if ready_state is None:
+        with pytest.raises(RPCError):
+            await server._cancel_lost_race(task.id)
+        with pytest.raises(RPCError):
+            await server._ensure_task_cancelled(state)
+    else:
+        lost_race = await server._cancel_lost_race(task.id)
+        await server._ensure_task_cancelled(state)
+        assert lost_race is ready_state
+    assert server._mark_task_cancelled.await_count == (0 if ready_state is not False else 1)
+
+
+@pytest.mark.asyncio
 async def test_legacy_v1_completed_steps_do_not_replay_and_partial_is_not_final(monkeypatch):
     _capture_snapshots(monkeypatch)
     step = PlanStep(

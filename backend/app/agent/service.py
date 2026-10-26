@@ -753,15 +753,26 @@ class AgentService:
         """
         if not task_id:
             return
-        committed = _is_final_ready_live(agent) and await checkpoint.read_final_delivery_state(
-            task_id
-        )
-        if committed is True:
+        readback = await checkpoint.read_final_delivery_state(task_id)
+        confirmed_commit = _is_final_ready_live(agent)
+        if readback is True:
             ok = await checkpoint.mark_terminal(task_id, TaskStatus.COMPLETED)
             if ok:
                 await notify_task_terminal(task_id, TaskStatus.COMPLETED)
             return
-        if agent is not None and agent.paused_for_final_commit:
+        if readback is None and (
+            confirmed_commit or (agent is not None and agent.paused_for_final_commit)
+        ):
+            if (
+                confirmed_commit
+                and not agent.paused_for_final_commit
+                and getattr(agent, "final_delivery_started", False)
+            ):
+                ok = await checkpoint.mark_terminal(task_id, TaskStatus.COMPLETED)
+                if ok:
+                    await notify_task_terminal(task_id, TaskStatus.COMPLETED)
+            # Confirmed commit + readback jitter, or unknown final write outcome:
+            # do not manufacture FAILED/CANCELLED or overwrite the live snapshot.
             return
         try:
             await asyncio.shield(
