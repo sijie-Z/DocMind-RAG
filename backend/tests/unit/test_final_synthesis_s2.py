@@ -17,6 +17,7 @@ from app.agent import executor as executor_module
 from app.agent import llm_call_log
 from app.agent import registry as registry_module
 from app.agent.config import AgentConfig
+from app.agent.context import estimate_messages_tokens
 from app.agent.events import AgentEvent
 from app.agent.exec_context import ExecutionContext
 from app.agent.executor import Executor
@@ -312,7 +313,9 @@ async def test_same_source_index_across_tool_calls_does_not_collide():
 @pytest.mark.asyncio
 async def test_final_usage_jsonl_and_run_report_accounting(monkeypatch):
     records: list[dict[str, Any]] = []
-    monkeypatch.setattr(llm_call_log, "append_llm_call_record", lambda record: records.append(record))
+    monkeypatch.setattr(
+        llm_call_log, "append_llm_call_record", lambda record: records.append(record)
+    )
     ctx = ExecutionContext(query="q", task_id="task-final", request_id="req-final")
     ctx.total_tokens = 7
     plan = _plan(("completed",))
@@ -599,9 +602,7 @@ async def test_real_executor_serial_and_dag_feed_evidence_to_one_final_chunk(
     assert provider.main_calls == 2
     assert provider.local_calls == 2
     assert sorted(handler_calls) == ["一", "二"]
-    prompt = "\n".join(
-        str(message["content"]) for message in provider.final_calls[0]["messages"]
-    )
+    prompt = "\n".join(str(message["content"]) for message in provider.final_calls[0]["messages"])
     assert "真实 Executor 的原始 query" in prompt
     assert "call-1#20" in prompt and "call-2#20" in prompt
     assert "一：第20条，2小时与30分钟" in prompt
@@ -716,9 +717,7 @@ async def test_real_final_reviewer_uses_draft_and_same_prompt_without_rewriting_
     review_json = json.dumps(
         {
             "overall_assessment": "不可信",
-            "issues_found": [
-                {"severity": "high", "description": "问题", "suggestion": "建议"}
-            ],
+            "issues_found": [{"severity": "high", "description": "问题", "suggestion": "建议"}],
             "key_strengths": [],
             "recommendation": "reject",
         },
@@ -774,7 +773,10 @@ async def test_tool_less_direct_answer_reuses_final_stage():
     loop.memory = _Memory()
     loop._write_experiences = AsyncMock()
 
-    events = [event async for event in loop.run("直接原始问题", history=[{"role": "user", "content": "历史"}])]
+    events = [
+        event
+        async for event in loop.run("直接原始问题", history=[{"role": "user", "content": "历史"}])
+    ]
     chunks = [event.content for event in events if event.type == "chunk"]
 
     assert chunks == ["无工具也经过 final 阶段"]
@@ -792,6 +794,173 @@ async def test_final_provider_error_or_empty_response_emits_no_chunk():
         assert not any(event.type == "chunk" for event in events)
         assert loop.run_failed is True
         assert loop.memory.interactions == [("q", "")]
+
+
+@pytest.mark.asyncio
+async def test_real_reviewer_explicit_pass_is_not_reported_as_error():
+    synthesis_provider = _FakeProvider("最终正文")
+    review_provider = _FakeProvider('{"issues_found": [], "recommendation": "pass"}')
+    loop = _loop(synthesis_provider, statuses=("completed",), reflection=True)
+    loop._reviewer = Reviewer(review_provider, loop.config)
+
+    events = [event async for event in loop.run("q")]
+    chunks = [event.content for event in events if event.type == "chunk"]
+    report = next(event.content for event in events if event.type == "run_report")
+
+    assert chunks == ["最终正文"]
+    assert len(review_provider.calls) == 1
+    assert "review_recommendation: pass" in report
+    assert "clean_success: True" in report
+    assert not any(
+        event.type == "thinking" and "对抗审查未完成" in event.content for event in events
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("tools_enabled", [True, False], ids=["tools", "tool-less"])
+async def test_unified_prompt_preserves_legacy_system_docs_personality_and_order(tools_enabled):
+    provider = _FakeProvider("保留上下文的最终答案")
+    config = _config(
+        enable_tools=tools_enabled,
+        enable_planning=tools_enabled,
+        system_prompt_override="OVERRIDE-MARKER",
+        personality="precise",
+    )
+    loop = PERAgentLoop(provider, config, organization_id=1, user_id=0)
+    loop.memory = _Memory()
+    loop._write_experiences = AsyncMock()
+    if tools_enabled:
+        loop._planner = _Planner(("completed",))
+        loop._executor = _Executor(loop.memory, ("completed",))
+    history = [
+        {"role": "user", "content": "HISTORY-USER-MARKER"},
+        {"role": "assistant", "content": "HISTORY-ASSISTANT-MARKER"},
+    ]
+    docs = [{"filename": "facts.txt", "prompt_text": "UNIQUE-DOC-FACT"}]
+
+    events = [
+        event
+        async for event in loop.run(
+            "summarize",
+            history=history,
+            context_docs=docs,
+        )
+    ]
+    messages = provider.calls[0]["messages"]
+    system = messages[0]["content"]
+
+    assert [event.content for event in events if event.type == "chunk"] == ["保留上下文的最终答案"]
+    assert [message["role"] for message in messages] == ["system", "user", "assistant", "user"]
+    assert "OVERRIDE-MARKER" in system
+    assert "UNIQUE-DOC-FACT" in system
+    assert "准确、简洁、直接" in system
+    assert "最终答案综合器" in system
+    assert "你是 DocMind 智能助手" not in system
+    assert messages[1]["content"] == "HISTORY-USER-MARKER"
+    assert messages[2]["content"] == "HISTORY-ASSISTANT-MARKER"
+    assert "summarize" in messages[-1]["content"]
+    if tools_enabled:
+        assert "call-plan-1-s1#20" in messages[-1]["content"]
+
+
+@pytest.mark.asyncio
+async def test_footer_is_reserved_before_evidence_budgeting_and_degraded_matches():
+    plan = _plan(("completed",))
+    plan.steps[0].evidence_schema = "docmind.step_evidence/v1"
+    plan.steps[0].evidence = [_tool_evidence("call-A", (20, "x" * 1000))]
+    packet = FinalInputPacket.from_plan("q", plan)
+    measuring = FinalSynthesizer(_FakeProvider(), _config())
+    fixed_tokens = estimate_messages_tokens(measuring._fixed_messages(packet))
+    budget = fixed_tokens + 100
+    provider = _FakeProvider("answer")
+
+    result = await FinalSynthesizer(
+        provider,
+        _config(),
+        evidence_char_budget=100_000,
+        prompt_token_budget=budget,
+    ).synthesize(packet)
+
+    assert result.status == "completed"
+    assert len(provider.calls) == 1
+    assert estimate_messages_tokens(result.messages) <= budget
+    assert result.truncated + result.omitted > 0
+    assert result.degraded is True
+    footer = (
+        f"included={result.included}; truncated={result.truncated}; "
+        f"omitted={result.omitted}; legacy={result.legacy}; degraded={result.degraded}"
+    )
+    assert footer in result.messages[-1]["content"]
+    ctx = ExecutionContext(query="q")
+    ctx.artifacts["final_synthesis"] = result.as_artifact()
+    report = build_run_report(ctx, result.content)
+    assert report["final_synthesis"]["degraded"] is True
+    assert report["final_synthesis"]["truncated"] == result.truncated
+    assert report["final_synthesis"]["omitted"] == result.omitted
+
+
+@pytest.mark.asyncio
+async def test_cancel_inside_final_provider_skips_reviewer_chunk_and_done():
+    provider = _FakeProvider("late answer")
+    reviewer = _Reviewer("pass", [])
+    loop = _loop(provider, statuses=("completed",), reflection=True, reviewer=reviewer)
+    cancel_requested = False
+
+    async def cancel_check() -> bool:
+        return cancel_requested
+
+    original_create = provider.chat.completions.create
+
+    async def create_and_cancel(**kwargs):
+        nonlocal cancel_requested
+        response = await original_create(**kwargs)
+        cancel_requested = True
+        return response
+
+    provider.chat.completions.create = create_and_cancel
+    loop.cancel_check = cancel_check
+
+    events = [event async for event in loop.run("q")]
+
+    assert not any(event.type == "chunk" for event in events)
+    assert not any(event.type == "done" for event in events)
+    assert any(event.type == "run_cancelled" for event in events)
+    assert loop.run_cancelled is True
+    assert loop.run_failed is False
+    assert reviewer.calls == []
+    assert loop.memory.interactions == []
+
+
+@pytest.mark.asyncio
+async def test_cancel_inside_reviewer_skips_chunk_and_successful_done():
+    provider = _FakeProvider("reviewed too late")
+    reviewer = _Reviewer("pass", [])
+    loop = _loop(provider, statuses=("completed",), reflection=True, reviewer=reviewer)
+    cancel_requested = False
+
+    async def cancel_check() -> bool:
+        return cancel_requested
+
+    original_review = reviewer.review_final
+
+    async def review_and_cancel(*args, **kwargs):
+        nonlocal cancel_requested
+        result = await original_review(*args, **kwargs)
+        cancel_requested = True
+        return result
+
+    reviewer.review_final = review_and_cancel
+    loop.cancel_check = cancel_check
+
+    events = [event async for event in loop.run("q")]
+
+    assert len(reviewer.calls) == 1
+    assert not any(event.type == "chunk" for event in events)
+    assert not any(event.type == "done" for event in events)
+    assert any(event.type == "run_cancelled" for event in events)
+    assert loop.run_cancelled is True
+    assert loop.run_failed is False
+    assert loop.memory.interactions == []
 
 
 def test_unified_final_flag_default_remains_false():

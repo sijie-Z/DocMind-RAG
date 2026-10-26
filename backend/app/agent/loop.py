@@ -966,7 +966,9 @@ class PERAgentLoop:
                             yield AgentEvent(type="chunk", content=content)
                             pass_output = content
                             if self.checkpoint_live is not None:
-                                self.checkpoint_live["partial_output"] = partial_prefix + pass_output
+                                self.checkpoint_live["partial_output"] = (
+                                    partial_prefix + pass_output
+                                )
                     except Exception as e:
                         # issue #301（批 A #11）：直接回答失败不得伪装成 COMPLETED。
                         if call_attempted and not llm_recorded:
@@ -1239,13 +1241,10 @@ class PERAgentLoop:
         # 取消的 run 不该再为它花钱）。
         cancel_event = await self._cancel_event()
         if cancel_event is not None:
-            yield cancel_event
-            await self._save_checkpoint("cancelled")
-            self.run_cancelled = True
-            async for end_event in self._emit_turn_end(
-                "cancelled", task_id=task_id, session_id=session_id
+            async for event in self._converge_cancelled(
+                cancel_event, task_id=task_id, session_id=session_id
             ):
-                yield end_event
+                yield event
             return
 
         final_result: FinalSynthesisResult | None = None
@@ -1257,6 +1256,7 @@ class PERAgentLoop:
                 context=memory_context,
                 history=history if direct_unified else None,
                 direct=direct_unified,
+                base_messages=self._build_messages(query, history, context_docs, memory_context),
             )
             all_failed = (
                 self.config.enable_tools
@@ -1275,6 +1275,14 @@ class PERAgentLoop:
                 final_output = ""
             else:
                 final_result = await self.final_synthesizer.synthesize(final_packet, ctx=ctx)
+                ctx.artifacts["final_synthesis"] = final_result.as_artifact()
+                cancel_event = await self._cancel_event()
+                if cancel_event is not None:
+                    async for event in self._converge_cancelled(
+                        cancel_event, task_id=task_id, session_id=session_id
+                    ):
+                        yield event
+                    return
                 final_output = final_result.content if final_result.ok else ""
                 if not final_result.ok:
                     self.run_failed = True
@@ -1313,14 +1321,21 @@ class PERAgentLoop:
                     ctx=ctx,
                     synthesis_messages=final_result.messages,
                 )
+                cancel_event = await self._cancel_event()
+                if cancel_event is not None:
+                    async for event in self._converge_cancelled(
+                        cancel_event, task_id=task_id, session_id=session_id
+                    ):
+                        yield event
+                    return
             else:
                 review = await self.reviewer.review(plan, results, ctx=ctx)
             issues = review.get("issues_found", [])
             high_issues = [i for i in issues if i.get("severity") == "high"]
             # §5c：消费 recommendation（此前全仓零读取者）。取值收敛到
             # pass/revise/reject/error；issue #301 #9 起 "error"（审查未完成、
-            # 无结论）不得被并进 pass —— 无结论 ≠ 通过。其余未识别值仍按
-            # pass 处理（不制造噪音：模型写"通过"等表述时应视为通过）。
+            # 无结论）不得被并进 pass。legacy 的其余未识别值仍按 pass 处理；
+            # unified 只接受显式 pass/revise/reject/error，未知 verdict 如实记 error。
             raw_recommendation = str(review.get("recommendation") or "pass").strip().lower()
             if raw_recommendation.startswith("reject"):
                 recommendation = "reject"
@@ -1331,8 +1346,12 @@ class PERAgentLoop:
                 "unavailable",
             ):
                 recommendation = "error"
+            elif raw_recommendation.startswith("pass"):
+                recommendation = "pass"
+            elif unified:
+                recommendation = "error"
             else:
-                recommendation = "error" if unified else "pass"
+                recommendation = "pass"
             # 结构化记录：run report 读取；SSE 侧另经 decision 携带。
             ctx.artifacts["review"] = {
                 "recommendation": recommendation,
@@ -1412,8 +1431,16 @@ class PERAgentLoop:
 
         # Exactly one assistant chunk, emitted only after final-draft review.
         # No execution_step_result/local chunk is ever reused as final text.
-        if unified and final_result is not None and final_result.ok:
-            yield AgentEvent(type="chunk", content=final_output)
+        if unified:
+            cancel_event = await self._cancel_event()
+            if cancel_event is not None:
+                async for event in self._converge_cancelled(
+                    cancel_event, task_id=task_id, session_id=session_id
+                ):
+                    yield event
+                return
+            if final_result is not None and final_result.ok:
+                yield AgentEvent(type="chunk", content=final_output)
 
         # ── Phase 4: Store + Finalize ─────────────────────────────────────
         await self.memory.record_interaction(query, final_output)
@@ -1468,6 +1495,15 @@ class PERAgentLoop:
             f"Output: {len(final_output)} chars",
             extra={"task_id": log_safe(ctx.task_id)},
         )
+
+        if unified:
+            cancel_event = await self._cancel_event()
+            if cancel_event is not None:
+                async for event in self._converge_cancelled(
+                    cancel_event, task_id=task_id, session_id=session_id
+                ):
+                    yield event
+                return
 
         # ── Hooks（issue #474）：agent/turn_end —— 轮次结束（serial 观察）────
         async for end_event in self._emit_turn_end(
@@ -1609,6 +1645,22 @@ class PERAgentLoop:
             content="任务已被用户取消",
             task_id=self._checkpoint_task_id or "",
         )
+
+    async def _converge_cancelled(
+        self,
+        cancel_event: AgentEvent,
+        *,
+        task_id: str | None,
+        session_id: str | None,
+    ) -> AsyncGenerator[AgentEvent, None]:
+        """Use the existing terminal cancellation contract at final-phase gates."""
+        yield cancel_event
+        await self._save_checkpoint("cancelled")
+        self.run_cancelled = True
+        async for end_event in self._emit_turn_end(
+            "cancelled", task_id=task_id, session_id=session_id
+        ):
+            yield end_event
 
     async def _on_approval_required(self, request: approval.ApprovalRequest) -> str:
         """审批暂停回调（执行器在暂停点调用）：持久化整份暂停状态。

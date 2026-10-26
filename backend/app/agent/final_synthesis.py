@@ -61,6 +61,7 @@ class FinalInputPacket:
     steps: list[dict[str, Any]] = field(default_factory=list)
     context: str = ""
     history: list[dict[str, str]] = field(default_factory=list)
+    base_messages: list[dict[str, Any]] = field(default_factory=list)
     direct: bool = False
     legacy: bool = False
     degraded: bool = False
@@ -74,6 +75,7 @@ class FinalInputPacket:
         context: str = "",
         history: list[dict[str, str]] | None = None,
         direct: bool = False,
+        base_messages: list[dict[str, Any]] | None = None,
     ) -> FinalInputPacket:
         """Capture the stable plan without reading checkpoints or replaying tools."""
         steps: list[dict[str, Any]] = []
@@ -121,6 +123,7 @@ class FinalInputPacket:
             steps=steps,
             context=context or "",
             history=clean_history,
+            base_messages=copy.deepcopy(base_messages or []),
             direct=direct,
             legacy=legacy,
             degraded=degraded,
@@ -229,38 +232,75 @@ class FinalSynthesizer:
         entries = self._evidence_entries(packet)
         fixed_messages = self._fixed_messages(packet)
         fixed_tokens = estimate_messages_tokens(fixed_messages)
+        overflow_degraded = packet.degraded or bool(entries)
         if fixed_tokens > self.prompt_token_budget:
             return FinalSynthesisResult(
                 status="final_context_overflow",
                 error="final_context_overflow",
                 omitted=len(entries),
+                degraded=overflow_degraded,
+                legacy=packet.legacy,
                 messages=fixed_messages,
-                **base,
             )
 
-        evidence_text, included, truncated, omitted = self._fit_evidence(
-            entries,
-            remaining_chars=self.evidence_char_budget,
-            remaining_tokens=self.prompt_token_budget - fixed_tokens,
+        def footer(included: int, truncated: int, omitted: int, degraded: bool) -> str:
+            return (
+                "\n## 证据预算账目（仅供你理解覆盖范围，不要在正文中复述）\n"
+                f"included={included}; truncated={truncated}; omitted={omitted}; "
+                f"legacy={packet.legacy}; degraded={degraded}\n"
+            )
+
+        def with_evidence(evidence_text: str, footer_text: str) -> list[dict[str, str]]:
+            messages = copy.deepcopy(fixed_messages)
+            messages[-1]["content"] += evidence_text + footer_text
+            return messages
+
+        # Reserve a valid all-omitted footer before fitting any evidence.  If
+        # even this prompt cannot fit, overflow is genuine; otherwise a legal
+        # final prompt exists and must reach the provider without local fallback.
+        empty_degraded = packet.degraded or bool(entries)
+        empty_messages = with_evidence(
+            "",
+            footer(0, 0, len(entries), empty_degraded),
         )
-        degraded = packet.degraded or truncated > 0 or omitted > 0
-        messages = copy.deepcopy(fixed_messages)
-        messages[-1]["content"] += evidence_text
-        messages[-1]["content"] += (
-            "\n## 证据预算账目（仅供你理解覆盖范围，不要在正文中复述）\n"
-            f"included={included}; truncated={truncated}; omitted={omitted}; "
-            f"legacy={packet.legacy}; degraded={degraded}\n"
-        )
-        # Accounting text is part of the real provider prompt, so enforce the
-        # token budget again after adding it rather than assuming it is free.
-        if estimate_messages_tokens(messages) > self.prompt_token_budget:
+        empty_tokens = estimate_messages_tokens(empty_messages)
+        if empty_tokens > self.prompt_token_budget:
             return FinalSynthesisResult(
                 status="final_context_overflow",
                 error="final_context_overflow",
                 omitted=len(entries),
-                messages=messages,
-                **base,
+                degraded=empty_degraded,
+                legacy=packet.legacy,
+                messages=empty_messages,
             )
+
+        remaining_tokens = max(0, self.prompt_token_budget - empty_tokens)
+        for _ in range(8):
+            evidence_text, included, truncated, omitted = self._fit_evidence(
+                entries,
+                remaining_chars=self.evidence_char_budget,
+                remaining_tokens=remaining_tokens,
+            )
+            degraded = packet.degraded or truncated > 0 or omitted > 0
+            messages = with_evidence(
+                evidence_text,
+                footer(included, truncated, omitted, degraded),
+            )
+            actual_tokens = estimate_messages_tokens(messages)
+            if actual_tokens <= self.prompt_token_budget:
+                break
+            overflow = actual_tokens - self.prompt_token_budget
+            remaining_tokens = max(0, remaining_tokens - max(1, overflow))
+        else:
+            # Tokenization at the evidence/footer boundary can invalidate a
+            # candidate.  The pre-measured all-omitted form remains a valid,
+            # deterministic result with matching accounting, not an overflow.
+            evidence_text = ""
+            included = 0
+            truncated = 0
+            omitted = len(entries)
+            degraded = empty_degraded
+            messages = empty_messages
 
         model = self.config.get_deep_model()
         try:
@@ -320,13 +360,16 @@ class FinalSynthesizer:
         )
 
     def _fixed_messages(self, packet: FinalInputPacket) -> list[dict[str, str]]:
-        lines = [
-            "## 原始用户请求（完整、未截断）",
-            packet.query,
-            "",
-            f"## 稳定计划\nplan_id={packet.plan_id}; goal={packet.goal}; direct={packet.direct}",
-            "## 全部步骤终态（固定账目，不得省略失败或 skipped）",
-        ]
+        has_base_messages = bool(packet.base_messages)
+        lines: list[str] = []
+        if not has_base_messages:
+            lines.extend(["## 原始用户请求（完整、未截断）", packet.query, ""])
+        lines.extend(
+            [
+                f"## 稳定计划\nplan_id={packet.plan_id}; goal={packet.goal}; direct={packet.direct}",
+                "## 全部步骤终态（固定账目，不得省略失败或 skipped）",
+            ]
+        )
         if packet.steps:
             for step in packet.steps:
                 lines.append(
@@ -337,6 +380,26 @@ class FinalSynthesizer:
                     lines.append(f"  error={step['error']}")
         else:
             lines.append("- direct=true; 无工具执行步骤")
+        lines.extend(["", "## 最终 attempt 结果与结构化证据（按原计划顺序）"])
+
+        if has_base_messages:
+            # _build_messages is the authority for override, memory/RAG context,
+            # personality, history and current-query ordering.  Append rather
+            # than replacing its system prompt or manufacturing a simpler one.
+            messages = copy.deepcopy(packet.base_messages)
+            if messages and messages[0].get("role") == "system":
+                current_system = str(messages[0].get("content", ""))
+                messages[0]["content"] = f"{current_system}\n\n{FINAL_SYSTEM_PROMPT}"
+            else:
+                messages.insert(0, {"role": "system", "content": FINAL_SYSTEM_PROMPT})
+            if not messages or messages[-1].get("role") != "user":
+                messages.append({"role": "user", "content": packet.query})
+            current_query = str(messages[-1].get("content", ""))
+            if current_query != packet.query:
+                lines = ["## 原始用户请求（完整、未截断）", packet.query, ""] + lines
+            messages[-1]["content"] = f"{current_query}\n\n" + "\n".join(lines) + "\n"
+            return messages
+
         if packet.history:
             lines.extend(
                 [
@@ -353,7 +416,6 @@ class FinalSynthesizer:
                     packet.context,
                 ]
             )
-        lines.extend(["", "## 最终 attempt 结果与结构化证据（按原计划顺序）"])
         return [
             {"role": "system", "content": FINAL_SYSTEM_PROMPT},
             {"role": "user", "content": "\n".join(lines) + "\n"},
@@ -447,7 +509,11 @@ class FinalSynthesizer:
                 tool = str(record.get("tool") or "")
                 record_status = str(record.get("status") or status)
                 raw = record.get("content")
-                raw_text = raw if isinstance(raw, str) else json.dumps(raw, ensure_ascii=False, default=str)
+                raw_text = (
+                    raw
+                    if isinstance(raw, str)
+                    else json.dumps(raw, ensure_ascii=False, default=str)
+                )
                 sources = [s for s in (record.get("sources") or []) if isinstance(s, dict)]
                 structured = record.get("evidence")
                 structured = structured if isinstance(structured, list) else []
