@@ -46,7 +46,7 @@ from app.rag.retriever import (
     apply_doc_cap,
     clause_lookup_doc_cap,
 )
-from app.rag.source_provenance import filter_original_results
+from app.rag.source_provenance import filter_original_results, original_text_of
 
 logger = logging.getLogger(__name__)
 
@@ -719,6 +719,10 @@ class RAGPipeline:
                 )
                 context_mask_mapping.update(m)
                 item["prompt_text"] = masked
+                if original_text_of(item) is not None:
+                    # 与压缩同契约：仅本次 prompt 的本地 O 副本接受掩码派生值，
+                    # 最终 getter 不得重新读回未掩码的原始 O。
+                    item["original_text"] = masked
                 if item.get("text") is not None:
                     item["text"] = masked
 

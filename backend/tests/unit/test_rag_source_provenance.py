@@ -25,7 +25,7 @@ from app.core.elasticsearch import (
 )
 from app.models.document import DocumentChunk
 from app.rag.cache import RetrievalCache, SemanticCache
-from app.rag.context_compressor import get_prompt_text
+from app.rag.context_compressor import compress_context_list, get_prompt_text
 from app.rag.pipeline import RAGPipeline
 from app.rag.reranker import _hit_passage
 from app.rag.retriever import HybridRetriever, _keyword_arm_terms
@@ -869,3 +869,132 @@ def test_s2_r2_semantic_cache_namespace_includes_provenance_mode():
     assert compat_index != strict_index
     assert SemanticCache.for_retrieval(COMPAT).prefix == compat_prefix
     assert SemanticCache.for_retrieval(STRICT).prefix == strict_prefix
+
+
+# ── R3：prompt 处理副本保留压缩/掩码派生值，来源与 cache 保持原始 O ──────
+
+R3_PHONE_ORIGINAL = "第3条 审计留痕\n联系人手机号 13812345678，审计日志保留期限为五年。"
+
+
+def _r3_dual_result(original, prompt_state="enhanced"):
+    enhanced = f"【文档背景：银河公司于2099年颁布】\n\n{original}"
+    result = _s2_result()
+    result.update(
+        {
+            "original_text": original,
+            "retrieval_text": enhanced,
+            "text": enhanced,
+            "content": enhanced,
+            "prompt_text": original,
+            "snippet": enhanced,
+        }
+    )
+    if prompt_state == "missing":
+        result.pop("prompt_text", None)
+    elif prompt_state == "empty":
+        result["prompt_text"] = ""
+    else:
+        result["prompt_text"] = enhanced
+    return result
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("prompt_state", ["missing", "empty", "enhanced"])
+async def test_s2_r3_pii_masking_updates_only_prompt_local_copy(monkeypatch, prompt_state):
+    source = _r3_dual_result(R3_PHONE_ORIGINAL, prompt_state)
+    source_before = deepcopy(source)
+    captured = []
+    mask_sink = {}
+    monkeypatch.setattr(settings, "RAG_SOURCE_PROVENANCE_MODE", STRICT)
+    monkeypatch.setattr(settings, "ENABLE_PII_MASKING", True)
+    pipeline = RAGPipeline(openai_client=_S2FakeClient(captured))
+
+    _ = [
+        chunk
+        async for chunk in pipeline.chat_stream(
+            S2_QUERY,
+            [source],
+            enable_compression=False,
+            enable_masking=True,
+            mask_mapping_sink=mask_sink,
+        )
+    ]
+
+    prompt = captured[0]["messages"][-1]["content"]
+    assert "13812345678" not in prompt
+    assert "[PHONE_" in prompt
+    assert "银河公司" not in prompt
+    assert "13812345678" in mask_sink.values()
+    assert source == source_before, "prompt 掩码不得就地改写原始来源对象"
+
+    source_card = build_sources_list([source], query=S2_QUERY)[0]
+    assert source_card["content"] == HybridRetriever._build_snippet(R3_PHONE_ORIGINAL, S2_QUERY)
+    assert "银河公司" not in source_card["content"]
+
+
+def test_s2_r3_compression_preserves_processed_o_and_multi_document_budget():
+    filler = "系统部署说明与无关背景。" * 45
+    originals = [
+        filler + "审计日志保留期限为五年。",
+        "另一份制度的前言。" + filler + "审计日志保留期限为五年。",
+    ]
+    sources = [_r3_dual_result(original) for original in originals]
+    sources_before = deepcopy(sources)
+
+    compressed = compress_context_list(sources, S2_QUERY, max_context_chars=400)
+    processed = [get_prompt_text(item) for item in compressed]
+
+    assert len(compressed) == 2
+    assert all(0 < len(text) <= 200 for text in processed)
+    assert sum(len(text) for text in processed) <= 400
+    for item, text, original in zip(compressed, processed, originals, strict=True):
+        assert len(text) < len(original)
+        assert item["prompt_text"] == text
+        assert item["original_text"] == text, "getter 必须读到压缩后的本地 O"
+    assert sources == sources_before, "压缩不得就地改写原始来源对象"
+
+    for source, original in zip(sources, originals, strict=True):
+        snippet = build_sources_list([source], query=S2_QUERY)[0]["content"]
+        assert snippet == HybridRetriever._build_snippet(original, S2_QUERY)
+
+
+@pytest.mark.asyncio
+async def test_s2_r3_cache_never_persists_prompt_processing_copy(monkeypatch):
+    monkeypatch.setattr(settings, "RAG_SOURCE_PROVENANCE_MODE", STRICT)
+    monkeypatch.setattr(settings, "ENABLE_PII_MASKING", True)
+    long_original = ("审计日志保留期限。" * 500) + R3_PHONE_ORIGINAL
+    source = _r3_dual_result(long_original)
+    source_before = deepcopy(source)
+    captured = []
+    pipeline = RAGPipeline(openai_client=_S2FakeClient(captured))
+    pipeline.cache = SimpleNamespace(get=AsyncMock(return_value=None), set=AsyncMock())
+    pipeline.semantic_cache = SimpleNamespace(
+        enabled=True,
+        get=AsyncMock(return_value={"sources": [source]}),
+        set=AsyncMock(),
+    )
+    pipeline.get_embedding = AsyncMock(return_value=[0.1, 0.2])
+
+    results, _ = await pipeline.search_knowledge_base(S2_QUERY, 1, top_k=1)
+    pipeline.cache.set.assert_awaited_once()
+    cached_item = pipeline.cache.set.await_args.args[3][0]
+    cached_before = deepcopy(cached_item)
+    assert cached_item["original_text"] == long_original
+    assert "is_compressed" not in cached_item
+    assert "original_length" not in cached_item
+
+    _ = [
+        chunk
+        async for chunk in pipeline.chat_stream(
+            S2_QUERY,
+            results,
+            enable_compression=True,
+            enable_masking=True,
+        )
+    ]
+
+    assert cached_item == cached_before, "cache 不得写入压缩/掩码后的 prompt 本地副本"
+    assert cached_item["original_text"] == long_original
+    assert "13812345678" in cached_item["original_text"]
+    assert source == source_before
+    pipeline.semantic_cache.set.assert_not_called()
