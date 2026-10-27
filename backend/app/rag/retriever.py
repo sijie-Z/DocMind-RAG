@@ -23,6 +23,13 @@ from app.rag.query_processor import (
     rewrite_query_candidates,
     rewrite_query_llm,
 )
+from app.rag.source_provenance import (
+    LEGACY_UNVERIFIED,
+    PARSER_ORIGINAL,
+    normalize_mode,
+    normalize_result_for_evidence,
+    original_text_of,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -342,6 +349,8 @@ def apply_doc_cap(hits: list[dict], doc_cap: int | None) -> list[dict]:
 # #188 打通的顶层字段；chunk_id / chunk_index 供稳定标识与调试展示。
 _HIT_SOURCE_FIELDS = [
     "content",
+    "original_text",
+    "text_provenance",
     "filename",
     "organization_id",
     "document_id",
@@ -880,10 +889,13 @@ class HybridRetriever:
         rerank 前的完整候选集（帽移到 rerank 之后，见 ``apply_doc_cap``）。
         默认值 2 保持未接线 rerank 的旧调用方（eval runner / 单测）行为不变。
 
-        issue #186 输出契约：每条结果同时携带
-        - `prompt_text` / `text` / `content`：完整 chunk 正文（LLM 输入的唯一来源，
-          由 `context_compressor.get_prompt_text` 读取，压缩器在全文上工作）；
-        - `snippet`：展示用短片段（UI/debug），不得回流进提示词。
+        issue #186 / PR2 输出契约：每条结果同时携带
+        - `retrieval_text` / `text` / `content`：E，继续供 rerank、overlap、质量过滤、
+          hash/dedup 与 legacy 调用方使用；
+        - `original_text` + `text_provenance`：只有真实 O 才标 parser_original；
+        - `prompt_text`：双字段文档只含 O；legacy compat 可回退 E 并显式标 unverified，
+          strict 则留空并交由 pipeline 做结构化拒绝；
+        - `snippet`：与 prompt 同一 O/provenance 来源，不得回流进提示词。
         #188 输出契约：透传索引侧结构化字段 ``section_title`` / ``clause_no`` /
         ``section_no`` / ``chunk_index``（旧索引缺字段时为 None/[]）。
         #197 输出契约：透传顶层 ``page_number``（PDF 页码；非 PDF / 旧索引为 None）。
@@ -897,6 +909,7 @@ class HybridRetriever:
         documents = []
         if top_k <= 0:
             return documents
+        provenance_mode = normalize_mode(settings.RAG_SOURCE_PROVENANCE_MODE)
         seen_docs: dict[str, int] = {}
         # #188：定义目标条号/章节的块是本类查询的**目标本身**——词面质量闸门
         # （overlap 档）不得把它误杀。裸「第5条」这类查询的提取术语为空
@@ -922,11 +935,14 @@ class HybridRetriever:
 
         for hit in fused_hits:
             source = hit.get("_source", {})
+            # E remains the sole input to overlap/filter/hash/rerank. O is used only
+            # for prompt/display after all scoring inputs have been preserved.
             text = (source.get("content") or "").strip()
             if not text:
                 continue
 
-            snippet = self._build_snippet(text, query)
+            original_text = original_text_of(source)
+            text_provenance = PARSER_ORIGINAL if original_text is not None else LEGACY_UNVERIFIED
             overlap = self._compute_overlap(
                 f"{source.get('filename', '')} {text[:1600]}", query_terms
             )
@@ -1008,36 +1024,40 @@ class HybridRetriever:
                 chunk_id = f"{doc_id or 'unknown'}:{text_hash}"
 
             documents.append(
-                {
-                    "text": text,
-                    "content": text,
-                    # issue #186：提示词正文单一来源。snippet 只是展示片段，
-                    # 不再参与任何提示词组装（见 context_compressor.get_prompt_text）。
-                    "prompt_text": text,
-                    "filename": source.get("filename", "未知"),
-                    "chunk_id": chunk_id,
-                    # issue #185：rank_score 是批内 min-max 相对分（排序/序位用）；
-                    # score 保留为同值别名（workflow 阈值/agent 载荷沿用既有语义）。
-                    # 绝对相关度 relevance_score 由 pipeline rerank 后写入。
-                    "score": round(final_score, 4),
-                    "rank_score": round(final_score, 4),
-                    "raw_score": fused_score,
-                    "snippet": snippet,
-                    "document_id": source.get("document_id"),
-                    # #188：结构化条款字段透传（旧索引缺字段时为 None/[]）
-                    "section_title": source.get("section_title"),
-                    "clause_no": source.get("clause_no") or [],
-                    "section_no": source.get("section_no") or [],
-                    "chunk_index": source.get("chunk_index"),
-                    # #197：PDF 页码透传（非 PDF / 旧索引为 None）
-                    "page_number": source.get("page_number"),
-                    "mmr_score": float(hit.get("_mmr_score", 0)),
-                    "overlap_score": overlap,
-                    "has_keyword": has_kw,
-                    "has_vector": has_vec,
-                    "rewrite_hits": rewrite_hits,
-                    "fresh_factor": round(fresh_factor, 2),
-                }
+                normalize_result_for_evidence(
+                    {
+                        "text": text,
+                        "content": text,
+                        "retrieval_text": text,
+                        "original_text": original_text,
+                        "text_provenance": text_provenance,
+                        "filename": source.get("filename", "未知"),
+                        "chunk_id": chunk_id,
+                        # issue #185：rank_score 是批内 min-max 相对分（排序/序位用）；
+                        # score 保留为同值别名（workflow 阈值/agent 载荷沿用既有语义）。
+                        # 绝对相关度 relevance_score 由 pipeline rerank 后写入。
+                        "score": round(final_score, 4),
+                        "rank_score": round(final_score, 4),
+                        "raw_score": fused_score,
+                        "document_id": source.get("document_id"),
+                        # #188：结构化条款字段透传（旧索引缺字段时为 None/[]）
+                        "section_title": source.get("section_title"),
+                        "clause_no": source.get("clause_no") or [],
+                        "section_no": source.get("section_no") or [],
+                        "chunk_index": source.get("chunk_index"),
+                        # #197：PDF 页码透传（非 PDF / 旧索引为 None）
+                        "page_number": source.get("page_number"),
+                        "mmr_score": float(hit.get("_mmr_score", 0)),
+                        "overlap_score": overlap,
+                        "has_keyword": has_kw,
+                        "has_vector": has_vec,
+                        "rewrite_hits": rewrite_hits,
+                        "fresh_factor": round(fresh_factor, 2),
+                    },
+                    query=query,
+                    mode=provenance_mode,
+                    snippet_builder=self._build_snippet,
+                )
             )
             if len(documents) >= top_k:
                 break

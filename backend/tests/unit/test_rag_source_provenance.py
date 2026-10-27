@@ -1,13 +1,14 @@
-"""PR1：只增加 original/retrieval 双正文持久化，不切换任何消费者。"""
+"""RAG 原文溯源：PR1 双正文持久化 + PR2 检索/证据与 cache 分离。"""
 
 from __future__ import annotations
 
+import hashlib
 import importlib.util
 import sqlite3
 from copy import deepcopy
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from alembic.config import Config
@@ -24,6 +25,24 @@ from app.core.elasticsearch import (
 )
 from app.models.document import DocumentChunk
 from app.rag.cache import RetrievalCache, SemanticCache
+from app.rag.context_compressor import compress_context_list, get_prompt_text
+from app.rag.pipeline import RAGPipeline
+from app.rag.reranker import _hit_passage
+from app.rag.retriever import HybridRetriever, _keyword_arm_terms
+from app.rag.source_provenance import (
+    COMPAT,
+    LEGACY_UNVERIFIED,
+    PARSER_ORIGINAL,
+    STRICT,
+    SourceProvenanceUnavailableError,
+    filter_original_results,
+    normalize_source_metadata,
+)
+from app.services.chat_service import (
+    _cached_answer_provenance_blocked,
+    _provenance_error_event,
+    build_sources_list,
+)
 from app.services.clause_refs import extract_clause_fields
 from app.worker.doc_processor import DocumentProcessor
 
@@ -407,3 +426,575 @@ def test_018_migration_single_head_nullable_data_and_constraints_roundtrip(tmp_p
     assert "original_text" in _columns(db_path)
     assert _legacy_chunk_snapshot(db_path) == before
     assert _constraints(db_path) == constraints
+
+
+# ── PR2：E 只检索，O 只作证据；legacy/cache 必须诚实分离 ──────────────────
+
+S2_QUERY = "审计日志保留期限"
+
+
+def _s2_hit(*, original=True, chunk_id=""):
+    source = {
+        "content": ENHANCED,
+        "filename": "policy.md",
+        "document_id": "doc-1",
+    }
+    if original:
+        source.update(
+            {
+                "original_text": ORIGINAL,
+                "text_provenance": PARSER_ORIGINAL,
+            }
+        )
+    return {
+        "_id": chunk_id,
+        "_score": 1.0,
+        "has_keyword": True,
+        "has_vector": True,
+        "_source": source,
+    }
+
+
+def _s2_result(*, original=True):
+    return HybridRetriever()._post_process(S2_QUERY, [_s2_hit(original=original)], top_k=1)[0]
+
+
+def _s2_filter(results, *, mode):
+    return filter_original_results(
+        results,
+        mode=mode,
+        query=S2_QUERY,
+        snippet_builder=HybridRetriever._build_snippet,
+    )
+
+
+class _S2FakeCompletions:
+    def __init__(self, captured):
+        self.captured = captured
+
+    async def create(self, **kwargs):
+        self.captured.append(kwargs)
+
+        async def _stream():
+            yield SimpleNamespace(choices=[SimpleNamespace(delta=SimpleNamespace(content="回答"))])
+
+        return _stream()
+
+
+class _S2FakeClient:
+    def __init__(self, captured):
+        self.chat = SimpleNamespace(completions=_S2FakeCompletions(captured))
+
+    def with_options(self, **_kwargs):
+        return self
+
+
+def test_s2_dual_fields_keep_scoring_on_e_and_prompt_snippet_on_o(monkeypatch):
+    monkeypatch.setattr(settings, "RAG_SOURCE_PROVENANCE_MODE", COMPAT)
+    result = _s2_result()
+
+    assert result["retrieval_text"] == ENHANCED
+    assert result["content"] == ENHANCED
+    assert result["text"] == ENHANCED
+    assert result["original_text"] == ORIGINAL
+    assert result["text_provenance"] == PARSER_ORIGINAL
+    assert result["prompt_text"] == ORIGINAL
+    assert result["snippet"] == HybridRetriever._build_snippet(ORIGINAL, S2_QUERY)
+    assert "银河公司" not in result["snippet"]
+    assert "五年" in result["snippet"]
+
+    expected_hash = hashlib.sha1(ENHANCED.encode("utf-8"), usedforsecurity=False).hexdigest()[:16]
+    assert result["chunk_id"] == f"doc-1:{expected_hash}"
+    expected_overlap = HybridRetriever._compute_overlap(
+        f"policy.md {ENHANCED[:1600]}", _keyword_arm_terms(S2_QUERY)
+    )
+    assert result["overlap_score"] == pytest.approx(expected_overlap)
+    assert _hit_passage(result) == f"文件:policy.md\n{ENHANCED}"
+
+
+def test_s2_legacy_compat_and_strict_differ_only_in_evidence_not_score(monkeypatch):
+    monkeypatch.setattr(settings, "RAG_SOURCE_PROVENANCE_MODE", COMPAT)
+    compat = _s2_result(original=False)
+    monkeypatch.setattr(settings, "RAG_SOURCE_PROVENANCE_MODE", STRICT)
+    strict = _s2_result(original=False)
+
+    for key in (
+        "score",
+        "rank_score",
+        "raw_score",
+        "overlap_score",
+        "chunk_id",
+        "has_keyword",
+        "has_vector",
+        "fresh_factor",
+    ):
+        assert strict[key] == compat[key]
+    assert compat["original_text"] is None
+    assert compat["text_provenance"] == LEGACY_UNVERIFIED
+    assert compat["prompt_text"] == ENHANCED
+    assert "银河公司" in compat["snippet"]
+
+    assert strict["original_text"] is None
+    assert strict["text_provenance"] == LEGACY_UNVERIFIED
+    assert strict["prompt_text"] == ""
+    assert strict["snippet"] == ""
+    assert strict["retrieval_text"] == ENHANCED
+
+
+def test_s2_strict_gate_filters_or_raises_never_returns_fake_empty():
+    clean = _s2_result()
+    legacy = _s2_result(original=False)
+
+    assert _s2_filter([clean, legacy], mode=STRICT) == [clean]
+    assert _s2_filter([], mode=STRICT) == []
+    assert _s2_filter([legacy], mode=COMPAT) == [legacy]
+
+    with pytest.raises(SourceProvenanceUnavailableError) as exc_info:
+        _s2_filter([legacy], mode=STRICT)
+    error = exc_info.value
+    assert error.code == "source_original_unavailable"
+    assert error.status == "needs_rebuild"
+    assert error.document_ids == ["doc-1"]
+    assert error.unverified_count == 1
+
+    historical = normalize_source_metadata({"documentId": "doc-old", "content": "mixed"})
+    assert historical["textProvenance"] == LEGACY_UNVERIFIED
+
+
+def test_s2_chat_sources_use_original_and_mark_legacy(monkeypatch):
+    clean = _s2_result()
+    legacy = _s2_result(original=False)
+
+    monkeypatch.setattr(settings, "RAG_SOURCE_PROVENANCE_MODE", COMPAT)
+    clean_source = build_sources_list([clean], query=S2_QUERY)[0]
+    assert clean_source["content"] == clean["snippet"]
+    assert clean_source["textProvenance"] == PARSER_ORIGINAL
+    assert clean_source["chunkId"] == clean["chunk_id"]
+    assert "银河公司" not in clean_source["content"]
+
+    legacy_source = build_sources_list([legacy], query=S2_QUERY)[0]
+    assert legacy_source["textProvenance"] == LEGACY_UNVERIFIED
+    assert "银河公司" in legacy_source["content"]
+
+    monkeypatch.setattr(settings, "RAG_SOURCE_PROVENANCE_MODE", STRICT)
+    assert build_sources_list([legacy], query=S2_QUERY)[0]["content"] == ""
+
+
+@pytest.mark.asyncio
+async def test_s2_chat_prompt_contains_original_not_generated_background(monkeypatch):
+    monkeypatch.setattr(settings, "RAG_SOURCE_PROVENANCE_MODE", COMPAT)
+    captured = []
+    pipeline = RAGPipeline(openai_client=_S2FakeClient(captured))
+    _ = [
+        chunk
+        async for chunk in pipeline.chat_stream(
+            S2_QUERY,
+            [_s2_result()],
+            enable_compression=False,
+            enable_masking=False,
+        )
+    ]
+
+    prompt = captured[0]["messages"][-1]["content"]
+    assert ORIGINAL in prompt
+    assert "银河公司" not in prompt
+    assert "2099" not in prompt
+
+
+@pytest.mark.asyncio
+async def test_s2_direct_chat_stream_cannot_bypass_strict(monkeypatch):
+    monkeypatch.setattr(settings, "RAG_SOURCE_PROVENANCE_MODE", STRICT)
+    captured = []
+    pipeline = RAGPipeline(openai_client=_S2FakeClient(captured))
+
+    with pytest.raises(SourceProvenanceUnavailableError):
+        _ = [
+            chunk
+            async for chunk in pipeline.chat_stream(
+                S2_QUERY,
+                [_s2_result(original=False)],
+                enable_compression=False,
+                enable_masking=False,
+            )
+        ]
+    assert captured == []
+
+
+@pytest.mark.asyncio
+async def test_s2_exact_cache_strict_gate_cannot_be_bypassed(monkeypatch):
+    monkeypatch.setattr(settings, "RAG_SOURCE_PROVENANCE_MODE", STRICT)
+    pipeline = RAGPipeline()
+    legacy = _s2_result(original=False)
+    clean = _s2_result()
+    pipeline.cache = SimpleNamespace(
+        get=AsyncMock(return_value=[legacy, clean]),
+        set=AsyncMock(),
+    )
+    pipeline.retriever = MagicMock()
+    pipeline.retriever.retrieve = AsyncMock()
+
+    results, _ = await pipeline.search_knowledge_base(S2_QUERY, 1, top_k=2)
+
+    assert results == [clean]
+    pipeline.retriever.retrieve.assert_not_called()
+
+    pipeline.cache.get = AsyncMock(return_value=[legacy])
+    with pytest.raises(SourceProvenanceUnavailableError):
+        await pipeline.search_knowledge_base(S2_QUERY, 1, top_k=1)
+    pipeline.cache.set.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_s2_semantic_cache_strict_gate_cannot_be_bypassed(monkeypatch):
+    monkeypatch.setattr(settings, "RAG_SOURCE_PROVENANCE_MODE", STRICT)
+    pipeline = RAGPipeline()
+    legacy = _s2_result(original=False)
+    pipeline.cache = SimpleNamespace(get=AsyncMock(return_value=None), set=AsyncMock())
+    pipeline.semantic_cache = SimpleNamespace(
+        enabled=True,
+        get=AsyncMock(return_value={"sources": [legacy]}),
+        set=AsyncMock(),
+    )
+    pipeline.get_embedding = AsyncMock(return_value=[0.1, 0.2])
+    pipeline.retriever = MagicMock()
+    pipeline.retriever.retrieve = AsyncMock()
+
+    with pytest.raises(SourceProvenanceUnavailableError):
+        await pipeline.search_knowledge_base(S2_QUERY, 1, top_k=1)
+
+    pipeline.cache.set.assert_not_called()
+    pipeline.semantic_cache.set.assert_not_called()
+    pipeline.retriever.retrieve.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_s2_fresh_results_strict_raises_needs_rebuild_not_normal_empty(monkeypatch):
+    monkeypatch.setattr(settings, "RAG_SOURCE_PROVENANCE_MODE", STRICT)
+    monkeypatch.setattr(settings, "RAG_ENABLE_RERANKER", False)
+    pipeline = RAGPipeline()
+    legacy = _s2_result(original=False)
+    pipeline.retriever.retrieve = AsyncMock(return_value=([legacy], [], None, []))
+
+    with pytest.raises(SourceProvenanceUnavailableError) as exc_info:
+        await pipeline.search_knowledge_base(
+            S2_QUERY,
+            1,
+            top_k=1,
+            document_ids=["doc-1"],
+            search_mode="hybrid",
+        )
+    assert exc_info.value.status == "needs_rebuild"
+
+
+def test_s2_answer_cache_strict_is_always_disabled(monkeypatch):
+    legacy_source = normalize_source_metadata({"documentId": "doc-old", "content": "mixed"})
+    original_source = normalize_source_metadata(
+        {"documentId": "doc-new", "textProvenance": PARSER_ORIGINAL}
+    )
+
+    monkeypatch.setattr(settings, "RAG_SOURCE_PROVENANCE_MODE", STRICT)
+    assert _cached_answer_provenance_blocked({"sources": [legacy_source]}) is True
+    assert _cached_answer_provenance_blocked({"sources": [legacy_source, original_source]})
+    assert _cached_answer_provenance_blocked({"sources": [original_source]}) is True
+    assert _cached_answer_provenance_blocked({"sources": []}) is True
+
+    monkeypatch.setattr(settings, "RAG_SOURCE_PROVENANCE_MODE", COMPAT)
+    assert _cached_answer_provenance_blocked({"sources": [legacy_source]}) is False
+
+
+def test_s2_provenance_error_is_structured_needs_rebuild_event():
+    error = SourceProvenanceUnavailableError(["doc-2", "doc-1"], unverified_count=2)
+    event = _provenance_error_event(error, "conversation-1")
+
+    assert event.type == "error"
+    assert event.conversation_id == "conversation-1"
+    assert "需要重建" in event.content
+    assert event.debug_data == {
+        "code": "source_original_unavailable",
+        "status": "needs_rebuild",
+        "document_ids": ["doc-1", "doc-2"],
+        "unverified_count": 2,
+    }
+
+
+# ── R2：预填证据/raw cache 不可信，模式切换不得共享结果子集 ─────────────
+
+
+def _s2_corrupt_original(prompt_state):
+    result = _s2_result()
+    if prompt_state == "missing":
+        result.pop("prompt_text", None)
+    elif prompt_state == "empty":
+        result["prompt_text"] = ""
+    else:
+        result["prompt_text"] = ENHANCED
+    result["snippet"] = ENHANCED
+    return result
+
+
+@pytest.mark.parametrize("prompt_state", ["missing", "empty", "enhanced"])
+def test_s2_r2_get_prompt_text_never_falls_back_to_e_for_original(prompt_state):
+    item = _s2_corrupt_original(prompt_state)
+
+    assert get_prompt_text(item) == ORIGINAL
+
+    item["original_text"] = None
+    assert get_prompt_text(item) == "", "original marker 缺 O 时也不得回退 E"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("prompt_state", ["missing", "empty", "enhanced"])
+async def test_s2_r2_direct_chat_stream_rebuilds_prompt_from_original(monkeypatch, prompt_state):
+    monkeypatch.setattr(settings, "RAG_SOURCE_PROVENANCE_MODE", STRICT)
+    captured = []
+    pipeline = RAGPipeline(openai_client=_S2FakeClient(captured))
+
+    _ = [
+        chunk
+        async for chunk in pipeline.chat_stream(
+            S2_QUERY,
+            [_s2_corrupt_original(prompt_state)],
+            enable_compression=False,
+            enable_masking=False,
+        )
+    ]
+
+    prompt = captured[0]["messages"][-1]["content"]
+    assert ORIGINAL in prompt
+    assert "银河公司" not in prompt
+    assert "2099" not in prompt
+
+
+def test_s2_r2_source_snippet_is_recomputed_from_original_with_same_query(monkeypatch):
+    monkeypatch.setattr(settings, "RAG_SOURCE_PROVENANCE_MODE", STRICT)
+    source = build_sources_list([_s2_corrupt_original("enhanced")], query=S2_QUERY)[0]
+
+    assert source["content"] == HybridRetriever._build_snippet(ORIGINAL, S2_QUERY)
+    assert source["textProvenance"] == PARSER_ORIGINAL
+    assert "银河公司" not in source["content"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("cache_kind", ["exact", "semantic"])
+async def test_s2_r2_raw_cache_is_normalized_before_evidence_use(monkeypatch, cache_kind):
+    monkeypatch.setattr(settings, "RAG_SOURCE_PROVENANCE_MODE", STRICT)
+    pipeline = RAGPipeline()
+    corrupted = _s2_corrupt_original("enhanced")
+    pipeline.retriever = MagicMock()
+    pipeline.retriever.retrieve = AsyncMock()
+
+    if cache_kind == "exact":
+        pipeline.cache = SimpleNamespace(
+            get=AsyncMock(return_value=[corrupted]),
+            set=AsyncMock(),
+        )
+    else:
+        pipeline.cache = SimpleNamespace(get=AsyncMock(return_value=None), set=AsyncMock())
+        pipeline.semantic_cache = SimpleNamespace(
+            enabled=True,
+            get=AsyncMock(return_value={"sources": [corrupted]}),
+            set=AsyncMock(),
+        )
+        pipeline.get_embedding = AsyncMock(return_value=[0.1, 0.2])
+
+    results, _ = await pipeline.search_knowledge_base(S2_QUERY, 1, top_k=1)
+
+    assert len(results) == 1
+    assert results[0]["prompt_text"] == ORIGINAL
+    assert results[0]["snippet"] == HybridRetriever._build_snippet(ORIGINAL, S2_QUERY)
+    assert results[0]["retrieval_text"] == ENHANCED
+    assert "银河公司" not in results[0]["snippet"]
+    pipeline.retriever.retrieve.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_s2_r2_strict_compat_exact_cache_roundtrip_preserves_full_candidates(monkeypatch):
+    monkeypatch.setattr("app.rag.cache._get_redis", lambda: None)
+    monkeypatch.setattr(settings, "RAG_ENABLE_CACHE", True)
+    monkeypatch.setattr(settings, "SEMANTIC_CACHE_RETRIEVAL_ENABLED", False)
+    monkeypatch.setattr(settings, "RAG_ENABLE_RERANKER", False)
+    pipeline = RAGPipeline()
+    pipeline.cache = RetrievalCache()
+    legacy = _s2_result(original=False)
+    clean = _s2_result()
+    legacy.update({"chunk_id": "legacy-chunk", "document_id": "doc-legacy"})
+    clean.update({"chunk_id": "clean-chunk", "document_id": "doc-clean"})
+    pipeline.retriever.retrieve = AsyncMock(return_value=([legacy, clean], [], None, []))
+    query = f"{S2_QUERY} r2-mode-isolation-unique"
+
+    monkeypatch.setattr(settings, "RAG_SOURCE_PROVENANCE_MODE", STRICT)
+    strict_results, _ = await pipeline.search_knowledge_base(
+        query, 987, top_k=5, search_mode="hybrid"
+    )
+    assert [item["chunk_id"] for item in strict_results] == ["clean-chunk"]
+    assert pipeline.retriever.retrieve.await_count == 1
+
+    pipeline.retriever.retrieve.reset_mock()
+    monkeypatch.setattr(settings, "RAG_SOURCE_PROVENANCE_MODE", COMPAT)
+    compat_results, _ = await pipeline.search_knowledge_base(
+        query, 987, top_k=5, search_mode="hybrid"
+    )
+    assert {item["chunk_id"] for item in compat_results} == {
+        "legacy-chunk",
+        "clean-chunk",
+    }
+    assert pipeline.retriever.retrieve.await_count == 1, (
+        "strict→compat 必须重新取得完整候选，不能命中 strict filtered 子集"
+    )
+
+    pipeline.retriever.retrieve.reset_mock()
+    monkeypatch.setattr(settings, "RAG_SOURCE_PROVENANCE_MODE", STRICT)
+    strict_again, _ = await pipeline.search_knowledge_base(
+        query, 987, top_k=5, search_mode="hybrid"
+    )
+    assert [item["chunk_id"] for item in strict_again] == ["clean-chunk"]
+    pipeline.retriever.retrieve.assert_not_called()
+
+    monkeypatch.setattr(settings, "RAG_SOURCE_PROVENANCE_MODE", COMPAT)
+    compat_again, _ = await pipeline.search_knowledge_base(
+        query, 987, top_k=5, search_mode="hybrid"
+    )
+    assert {item["chunk_id"] for item in compat_again} == {
+        "legacy-chunk",
+        "clean-chunk",
+    }
+    pipeline.retriever.retrieve.assert_not_called()
+
+
+def test_s2_r2_semantic_cache_namespace_includes_provenance_mode():
+    compat_prefix, compat_index = SemanticCache.retrieval_namespace(COMPAT)
+    strict_prefix, strict_index = SemanticCache.retrieval_namespace(STRICT)
+
+    assert compat_prefix != strict_prefix
+    assert compat_index != strict_index
+    assert SemanticCache.for_retrieval(COMPAT).prefix == compat_prefix
+    assert SemanticCache.for_retrieval(STRICT).prefix == strict_prefix
+
+
+# ── R3：prompt 处理副本保留压缩/掩码派生值，来源与 cache 保持原始 O ──────
+
+R3_PHONE_ORIGINAL = "第3条 审计留痕\n联系人手机号 13812345678，审计日志保留期限为五年。"
+
+
+def _r3_dual_result(original, prompt_state="enhanced"):
+    enhanced = f"【文档背景：银河公司于2099年颁布】\n\n{original}"
+    result = _s2_result()
+    result.update(
+        {
+            "original_text": original,
+            "retrieval_text": enhanced,
+            "text": enhanced,
+            "content": enhanced,
+            "prompt_text": original,
+            "snippet": enhanced,
+        }
+    )
+    if prompt_state == "missing":
+        result.pop("prompt_text", None)
+    elif prompt_state == "empty":
+        result["prompt_text"] = ""
+    else:
+        result["prompt_text"] = enhanced
+    return result
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("prompt_state", ["missing", "empty", "enhanced"])
+async def test_s2_r3_pii_masking_updates_only_prompt_local_copy(monkeypatch, prompt_state):
+    source = _r3_dual_result(R3_PHONE_ORIGINAL, prompt_state)
+    source_before = deepcopy(source)
+    captured = []
+    mask_sink = {}
+    monkeypatch.setattr(settings, "RAG_SOURCE_PROVENANCE_MODE", STRICT)
+    monkeypatch.setattr(settings, "ENABLE_PII_MASKING", True)
+    pipeline = RAGPipeline(openai_client=_S2FakeClient(captured))
+
+    _ = [
+        chunk
+        async for chunk in pipeline.chat_stream(
+            S2_QUERY,
+            [source],
+            enable_compression=False,
+            enable_masking=True,
+            mask_mapping_sink=mask_sink,
+        )
+    ]
+
+    prompt = captured[0]["messages"][-1]["content"]
+    assert "13812345678" not in prompt
+    assert "[PHONE_" in prompt
+    assert "银河公司" not in prompt
+    assert "13812345678" in mask_sink.values()
+    assert source == source_before, "prompt 掩码不得就地改写原始来源对象"
+
+    source_card = build_sources_list([source], query=S2_QUERY)[0]
+    assert source_card["content"] == HybridRetriever._build_snippet(R3_PHONE_ORIGINAL, S2_QUERY)
+    assert "银河公司" not in source_card["content"]
+
+
+def test_s2_r3_compression_preserves_processed_o_and_multi_document_budget():
+    filler = "系统部署说明与无关背景。" * 45
+    originals = [
+        filler + "审计日志保留期限为五年。",
+        "另一份制度的前言。" + filler + "审计日志保留期限为五年。",
+    ]
+    sources = [_r3_dual_result(original) for original in originals]
+    sources_before = deepcopy(sources)
+
+    compressed = compress_context_list(sources, S2_QUERY, max_context_chars=400)
+    processed = [get_prompt_text(item) for item in compressed]
+
+    assert len(compressed) == 2
+    assert all(0 < len(text) <= 200 for text in processed)
+    assert sum(len(text) for text in processed) <= 400
+    for item, text, original in zip(compressed, processed, originals, strict=True):
+        assert len(text) < len(original)
+        assert item["prompt_text"] == text
+        assert item["original_text"] == text, "getter 必须读到压缩后的本地 O"
+    assert sources == sources_before, "压缩不得就地改写原始来源对象"
+
+    for source, original in zip(sources, originals, strict=True):
+        snippet = build_sources_list([source], query=S2_QUERY)[0]["content"]
+        assert snippet == HybridRetriever._build_snippet(original, S2_QUERY)
+
+
+@pytest.mark.asyncio
+async def test_s2_r3_cache_never_persists_prompt_processing_copy(monkeypatch):
+    monkeypatch.setattr(settings, "RAG_SOURCE_PROVENANCE_MODE", STRICT)
+    monkeypatch.setattr(settings, "ENABLE_PII_MASKING", True)
+    long_original = ("审计日志保留期限。" * 500) + R3_PHONE_ORIGINAL
+    source = _r3_dual_result(long_original)
+    source_before = deepcopy(source)
+    captured = []
+    pipeline = RAGPipeline(openai_client=_S2FakeClient(captured))
+    pipeline.cache = SimpleNamespace(get=AsyncMock(return_value=None), set=AsyncMock())
+    pipeline.semantic_cache = SimpleNamespace(
+        enabled=True,
+        get=AsyncMock(return_value={"sources": [source]}),
+        set=AsyncMock(),
+    )
+    pipeline.get_embedding = AsyncMock(return_value=[0.1, 0.2])
+
+    results, _ = await pipeline.search_knowledge_base(S2_QUERY, 1, top_k=1)
+    pipeline.cache.set.assert_awaited_once()
+    cached_item = pipeline.cache.set.await_args.args[3][0]
+    cached_before = deepcopy(cached_item)
+    assert cached_item["original_text"] == long_original
+    assert "is_compressed" not in cached_item
+    assert "original_length" not in cached_item
+
+    _ = [
+        chunk
+        async for chunk in pipeline.chat_stream(
+            S2_QUERY,
+            results,
+            enable_compression=True,
+            enable_masking=True,
+        )
+    ]
+
+    assert cached_item == cached_before, "cache 不得写入压缩/掩码后的 prompt 本地副本"
+    assert cached_item["original_text"] == long_original
+    assert "13812345678" in cached_item["original_text"]
+    assert source == source_before
+    pipeline.semantic_cache.set.assert_not_called()

@@ -46,6 +46,7 @@ from app.rag.retriever import (
     apply_doc_cap,
     clause_lookup_doc_cap,
 )
+from app.rag.source_provenance import filter_original_results, original_text_of
 
 logger = logging.getLogger(__name__)
 
@@ -77,6 +78,16 @@ def _source_content(hit: dict[str, Any]) -> str:
 def _source_filename(hit: dict[str, Any]) -> str:
     """兜底读取原始 ES 命中的文件名（后处理结果已带 filename 键）。"""
     return (hit.get("_source") or {}).get("filename", "未知")
+
+
+def _gate_source_provenance(results: list[dict[str, Any]], *, query: str) -> list[dict[str, Any]]:
+    """Normalize evidence from O, then apply the same strict gate everywhere."""
+    return filter_original_results(
+        results,
+        mode=settings.RAG_SOURCE_PROVENANCE_MODE,
+        query=query,
+        snippet_builder=HybridRetriever._build_snippet,
+    )
 
 
 class RAGPipeline:
@@ -166,12 +177,25 @@ class RAGPipeline:
                 RAG_RETRIEVAL_UNAVAILABLE.labels(state="failed").inc()
                 raise RetrievalUnavailableError(f"知识库索引不可用，检索已拒绝：{index_error}")
 
+            # SemanticCache 是轻量命名空间配置；真实实例按本次 mode 选择，
+            # 测试替身/自定义实现保持原对象。避免 strict 子集写入 compat 域。
+            if isinstance(self.semantic_cache, SemanticCache):
+                self.semantic_cache = SemanticCache.for_retrieval(
+                    settings.RAG_SOURCE_PROVENANCE_MODE
+                )
+
             # Exact cache (skip for document-specific queries)
             if not document_ids:
                 cached = await self.cache.get(
-                    query, organization_id, top_k, search_mode=search_mode
+                    query,
+                    organization_id,
+                    top_k,
+                    search_mode=search_mode,
+                    provenance_mode=settings.RAG_SOURCE_PROVENANCE_MODE,
                 )
                 if cached is not None:
+                    # v2 cache still needs the same strict gate as a fresh result.
+                    cached = _gate_source_provenance(cached, query=query)
                     RAG_CACHE_HITS.labels(cache_type="exact").inc()
                     self.metrics.inc("cache_hit")
                     self.metrics.record_event("cache_hit", 1)
@@ -192,7 +216,13 @@ class RAGPipeline:
                         debug_info["cache"] = {
                             "cache_type": "exact",
                             "hit": True,
-                            **self.cache.describe_key(query, organization_id, top_k, search_mode),
+                            **self.cache.describe_key(
+                                query,
+                                organization_id,
+                                top_k,
+                                search_mode,
+                                provenance_mode=settings.RAG_SOURCE_PROVENANCE_MODE,
+                            ),
                         }
                     return cached, debug_info
                 RAG_CACHE_MISSES.inc()
@@ -231,6 +261,9 @@ class RAGPipeline:
                         hit_info=sem_meta,
                     )
                     if sem_cached:
+                        cached_sources = _gate_source_provenance(
+                            sem_cached.get("sources", []), query=query
+                        )
                         RAG_CACHE_HITS.labels(cache_type="semantic").inc()
                         self.metrics.inc("semantic_cache_hit")
                         self.metrics.inc("cache_hit")
@@ -241,19 +274,20 @@ class RAGPipeline:
                         RAG_RETRIEVAL_LATENCY.observe(time.perf_counter() - start)
                         self.metrics.inc("latency_count")
                         self.metrics.record_event("latency", elapsed)
-                        if not document_ids and sem_cached.get("sources"):
+                        if not document_ids and cached_sources:
                             await self.cache.set(
                                 query,
                                 organization_id,
                                 top_k,
-                                sem_cached["sources"],
+                                cached_sources,
                                 search_mode=search_mode,
+                                provenance_mode=settings.RAG_SOURCE_PROVENANCE_MODE,
                             )
                         if debug and debug_info is not None:
                             debug_info["cache_hit"] = True
                             debug_info["cache_type"] = "semantic"
                             debug_info["cache"] = dict(sem_meta or {})
-                        return sem_cached.get("sources", []), debug_info
+                        return cached_sources, debug_info
                     if debug and debug_info is not None:
                         # 未命中也要可解释：阈值内被条号/实体等价判定拒绝时，
                         # rejected_reason/similarity/cached_query 直接暴露原因。
@@ -518,6 +552,16 @@ class RAGPipeline:
                         f"{sq}: {type(e).__name__}: {e}" for sq, e in failures[:3]
                     ] + degraded_reasons[:3]
 
+            # 评分、重排、doc-cap/top-k 均已按 E 完成；strict 只在证据出口
+            # 过滤 legacy，绝不把「未迁移」伪装成正常空结果或写入 cache。
+            before_provenance_gate = len(result)
+            result = _gate_source_provenance(result, query=query)
+            if debug and debug_info is not None:
+                debug_info["source_provenance"] = {
+                    "mode": settings.RAG_SOURCE_PROVENANCE_MODE,
+                    "legacy_excluded": before_provenance_gate - len(result),
+                }
+
             # 缓存写入门控（issue #292）：只有「全臂正常 + 有结果」才可写入。
             # - 故障/降级：不写 —— 毒化路径必须断；
             # - 正常空结果：不写 —— 负缓存把「一次未命中」放大成 TTL 窗口内的持续
@@ -530,7 +574,14 @@ class RAGPipeline:
             cache_safe = not failures and not degraded_reasons and not rerank_degraded
             if not document_ids and result and cache_safe:
                 # issue #225 决策 7A：精确缓存键带模式段（None=自动路由，键与修前逐字节相同）。
-                await self.cache.set(query, organization_id, top_k, result, search_mode=search_mode)
+                await self.cache.set(
+                    query,
+                    organization_id,
+                    top_k,
+                    result,
+                    search_mode=search_mode,
+                    provenance_mode=settings.RAG_SOURCE_PROVENANCE_MODE,
+                )
             # 语义缓存写入与读侧同一原则：显式模式一律不写（`not search_mode` 守卫）。
             # 缺它时 vector/hybrid 臂回传的非空 qv 会经上面回填的 query_vector 让本
             # 条件变真——强制模式的结果会被写进组织级语义缓存，随后同 query 的自动
@@ -639,6 +690,8 @@ class RAGPipeline:
                 "LLM 服务未配置（未设置 DEEPSEEK_API_KEY 或启用本地模型），无法生成回答"
             )
 
+        # 防御性兜底：直接调用 chat_stream 时也不能绕开 strict provenance gate。
+        context = _gate_source_provenance(context, query=query)
         masking_enabled = enable_masking and getattr(settings, "ENABLE_PII_MASKING", False)
         from app.services.masking_service import masking_service
 
@@ -666,6 +719,10 @@ class RAGPipeline:
                 )
                 context_mask_mapping.update(m)
                 item["prompt_text"] = masked
+                if original_text_of(item) is not None:
+                    # 与压缩同契约：仅本次 prompt 的本地 O 副本接受掩码派生值，
+                    # 最终 getter 不得重新读回未掩码的原始 O。
+                    item["original_text"] = masked
                 if item.get("text") is not None:
                     item["text"] = masked
 

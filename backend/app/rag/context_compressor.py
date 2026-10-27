@@ -4,6 +4,7 @@ import re
 from typing import Any
 
 from app.rag.query_processor import extract_query_terms
+from app.rag.source_provenance import PARSER_ORIGINAL, original_text_of, provenance_of
 
 
 def get_prompt_text(item: dict[str, Any]) -> str:
@@ -13,10 +14,17 @@ def get_prompt_text(item: dict[str, Any]) -> str:
     `snippet`（展示用短片段）。修前各消费点写 `snippet or text`，snippet 非空
     即短路全文压缩器——`compress_context_list` 的产物从未进入提示词。
 
-    优先级：prompt_text → text → content → snippet（最后一级仅兼容不含正文键的
-    旧载荷 / 外部工具结果；prompt_text 存在的正常检索链路上 snippet 永远不会
-    被选中）。
+    PR2/R2：有真实 original_text 时永远直接返回 O，预填 prompt_text 无论是
+    空串、E 或其它内容都不得覆盖原文。marker 为 parser_original 但 O 缺失时
+    同样禁止回退 E；只有明确 legacy 载荷才保留旧的兼容 fallback。
+    PR2/R3：prompt 本地副本里的 original_text 可以是压缩/掩码后的 O 派生值；
+    原始来源对象仍保留完整 O，不由本 getter 或处理链就地改写。
     """
+    original = original_text_of(item)
+    if original is not None:
+        return original
+    if provenance_of(item) == PARSER_ORIGINAL:
+        return ""
     return (
         item.get("prompt_text")
         or item.get("text")
@@ -112,6 +120,10 @@ def compress_context_list(
         ctx_copy = dict(ctx)
         ctx_copy["original_length"] = original_len
         ctx_copy["prompt_text"] = compressed_text
+        if original_text_of(ctx) is not None:
+            # 只更新本次 prompt 的本地 O 副本；原始来源对象仍保留完整 O。
+            # 后续 get_prompt_text 因而读到压缩后的 O，而非重新膨胀成全文。
+            ctx_copy["original_text"] = compressed_text
         ctx_copy["text"] = compressed_text
         ctx_copy["is_compressed"] = len(compressed_text) < original_len
         compressed.append(ctx_copy)

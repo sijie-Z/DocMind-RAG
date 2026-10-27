@@ -77,11 +77,13 @@ def _resolve_llm_model() -> str:
 def _hit_text(hit: dict) -> str:
     """提取命中片段的正文文本。
 
-    修复（R1）：检索后处理结果（HybridRetriever._post_process）以 content/text
-    键携带正文，不含 _source；原始 ES 命中则以 _source.content/chunk_text 携带。
-    两种形态都要兼容，否则重排序器收到空文本、排序退化为任意顺序。
+    修复（R1/PR2）：优先读取显式 retrieval_text，确保 original_text 用于证据后
+    送审 passage 仍与旧 E 输入逐字一致。旧命中才回退 content/chunk_text/text；
+    原始 ES 命中则以 _source.content/chunk_text 携带。
     """
-    text = hit.get("content") or hit.get("chunk_text") or hit.get("text")
+    text = (
+        hit.get("retrieval_text") or hit.get("content") or hit.get("chunk_text") or hit.get("text")
+    )
     if text:
         return text
     src = hit.get("_source") or {}

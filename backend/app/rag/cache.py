@@ -17,6 +17,7 @@ from typing import Any
 
 from app.core.config import settings
 from app.rag.query_processor import extract_query_terms
+from app.rag.source_provenance import CACHE_SCHEMA_VERSION, COMPAT, STRICT, normalize_mode
 
 logger = logging.getLogger(__name__)
 
@@ -340,32 +341,66 @@ class RetrievalCache:
         self._memory = _get_shared_memory()
 
     def _key(
-        self, query: str, organization_id: int, top_k: int, search_mode: str | None = None
+        self,
+        query: str,
+        organization_id: int,
+        top_k: int,
+        search_mode: str | None = None,
+        *,
+        provenance_mode: str | None = None,
     ) -> str:
-        # issue #225 决策 7A：显式 search_mode 的结果按模式分域——显式模式与自动
-        # 路由互不可见（既不让覆盖请求命中/复用自动路由的结果，也防止显式模式的
-        # 结果被后续自动路由请求当作自己的结果返回）。search_mode=None 时键与
-        # 修前逐字节相同（org=…|topk=…|q=…），自动路由行为零变化。
+        # issue #225：search_mode 分域；R2 再以 schema + provenance mode 隔离
+        # compat 全集与 strict 子集。旧 v1/v2 key 不读，org 清理前缀不变。
         mode_seg = f"|mode={search_mode}" if search_mode else ""
-        return f"org={organization_id}|topk={top_k}{mode_seg}|q={query.strip().lower()}"
+        evidence_mode = normalize_mode(provenance_mode)
+        return (
+            f"org={organization_id}|topk={top_k}{mode_seg}"
+            f"|prov={CACHE_SCHEMA_VERSION}|prov_mode={evidence_mode}|q={query.strip().lower()}"
+        )
 
     def describe_key(
-        self, query: str, organization_id: int, top_k: int, search_mode: str | None = None
+        self,
+        query: str,
+        organization_id: int,
+        top_k: int,
+        search_mode: str | None = None,
+        *,
+        provenance_mode: str | None = None,
     ) -> dict[str, Any]:
         """issue #195：debug 用的键摘要（含分域信息，不含明文查询）。"""
         return {
-            "key_digest": _key_digest(self._key(query, organization_id, top_k, search_mode)),
+            "key_digest": _key_digest(
+                self._key(
+                    query,
+                    organization_id,
+                    top_k,
+                    search_mode,
+                    provenance_mode=provenance_mode,
+                )
+            ),
             "organization_id": organization_id,
             "top_k": top_k,
             "search_mode": search_mode,
         }
 
     async def get(
-        self, query: str, organization_id: int, top_k: int, search_mode: str | None = None
+        self,
+        query: str,
+        organization_id: int,
+        top_k: int,
+        search_mode: str | None = None,
+        *,
+        provenance_mode: str | None = None,
     ) -> list[dict[str, Any]] | None:
         if not settings.RAG_ENABLE_CACHE:
             return None
-        key = self._key(query, organization_id, top_k, search_mode)
+        key = self._key(
+            query,
+            organization_id,
+            top_k,
+            search_mode,
+            provenance_mode=provenance_mode,
+        )
         # Try Redis first
         try:
             rc = _get_redis()
@@ -392,10 +427,18 @@ class RetrievalCache:
         top_k: int,
         value: list[dict[str, Any]],
         search_mode: str | None = None,
+        *,
+        provenance_mode: str | None = None,
     ) -> None:
         if not settings.RAG_ENABLE_CACHE:
             return
-        key = self._key(query, organization_id, top_k, search_mode)
+        key = self._key(
+            query,
+            organization_id,
+            top_k,
+            search_mode,
+            provenance_mode=provenance_mode,
+        )
         # Try Redis
         try:
             rc = _get_redis()
@@ -436,14 +479,16 @@ class SemanticCache:
     在用户中断流式回答后返回空消息。
     """
 
-    # 检索专用命名空间（RAGPipeline 使用，见 for_retrieval）
-    RETRIEVAL_PREFIX = "rag:sem:retrieval:"
-    RETRIEVAL_INDEX_KEY = "rag:semantic_index:retrieval"
+    # R2：v3 检索 namespace 按 provenance mode 分域；回答缓存仅 compat 使用。
+    ANSWER_PREFIX = f"rag:sem:{CACHE_SCHEMA_VERSION}:{COMPAT}:"
+    ANSWER_INDEX_KEY = f"rag:semantic_index:{CACHE_SCHEMA_VERSION}:{COMPAT}"
+    RETRIEVAL_PREFIX = f"rag:sem:retrieval:{CACHE_SCHEMA_VERSION}:"
+    RETRIEVAL_INDEX_KEY = f"rag:semantic_index:retrieval:{CACHE_SCHEMA_VERSION}"
 
     def __init__(
         self,
-        prefix: str = "rag:sem:",
-        index_key: str = "rag:semantic_index",
+        prefix: str = ANSWER_PREFIX,
+        index_key: str = ANSWER_INDEX_KEY,
         *,
         namespace: str = "answer",
     ):
@@ -472,11 +517,20 @@ class SemanticCache:
         return bool(getattr(settings, setting_name, False))
 
     @classmethod
-    def for_retrieval(cls) -> "SemanticCache":
-        """构建检索专用实例（独立 key 空间，不与问答缓存互相命中）。"""
+    def retrieval_namespace(cls, provenance_mode: str | None = None) -> tuple[str, str]:
+        mode = normalize_mode(provenance_mode)
+        return (
+            f"{cls.RETRIEVAL_PREFIX}{mode}:",
+            f"{cls.RETRIEVAL_INDEX_KEY}:{mode}",
+        )
+
+    @classmethod
+    def for_retrieval(cls, provenance_mode: str | None = None) -> "SemanticCache":
+        """构建本次 provenance mode 独立的检索 cache；不与回答缓存互相命中。"""
+        prefix, index_key = cls.retrieval_namespace(provenance_mode)
         return cls(
-            prefix=cls.RETRIEVAL_PREFIX,
-            index_key=cls.RETRIEVAL_INDEX_KEY,
+            prefix=prefix,
+            index_key=index_key,
             namespace="retrieval",
         )
 
@@ -696,10 +750,10 @@ class SemanticCache:
             rc = _get_redis()
             if rc is None:
                 return
-            namespaces = {
-                self.prefix: self.index_key,
-                self.RETRIEVAL_PREFIX: self.RETRIEVAL_INDEX_KEY,
-            }
+            namespaces = {self.prefix: self.index_key}
+            for mode in (COMPAT, STRICT):
+                prefix, index_key = self.retrieval_namespace(mode)
+                namespaces[prefix] = index_key
             for prefix, index_key in namespaces.items():
                 cache_prefix = f"{prefix}org:{organization_id}:"
                 async for key in rc.scan_iter(match=f"{cache_prefix}*", count=100):
