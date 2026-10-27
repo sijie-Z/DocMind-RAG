@@ -182,6 +182,7 @@ async def save_session_interaction(
     bypass_org: bool = False,
     agent_task_id: str | None = None,
     create_if_missing: bool | None = None,
+    replace_existing_assistant: bool = False,
 ) -> str | None:
     """Save the user query and assistant response as messages in the session.
 
@@ -196,6 +197,11 @@ async def save_session_interaction(
 
     ``session_factory`` 仅作测试缝：默认使用 ``AsyncSessionLocal``；
     agent 端点会显式传入其模块级同名工厂，保持既有测试的 monkeypatch 兼容。
+
+    ``replace_existing_assistant`` 只供 resume/审批等**已成功的权威收尾**使用：
+    旧版本曾把 legacy 全败占位按 task 幂等键写成 assistant，随后真实恢复答案
+    会被回读路径永久吞掉。开启后同一 task 的既有 assistant 行原地更新为新正文
+    （保留 id/seq，不新增行）；默认关闭，普通重复保存仍保持只读幂等。
 
     Returns: the assistant message ID；None 表示"没有需要写的助手文本（空回复）"
     或"会话不属于调用者（显式拒绝，日志已记录）"。
@@ -282,6 +288,14 @@ async def save_session_interaction(
                 task_messages = {message.message_type: message for message in rows.scalars().all()}
                 existing_assistant = task_messages.get(MessageType.ASSISTANT)
                 if existing_assistant is not None:
+                    if (
+                        replace_existing_assistant
+                        and assistant_response
+                        and existing_assistant.content != assistant_response
+                    ):
+                        # Authoritative resumed answer replaces a stale failure
+                        # placeholder in place; id/seq stay stable for forks and UI.
+                        existing_assistant.content = assistant_response
                     # Sequential/concurrent replay reads the authority row and never
                     # allocates another seq, even if the caller supplies new text.
                     await session.commit()
@@ -340,6 +354,12 @@ async def save_session_interaction(
             task_messages = {message.message_type: message for message in rows.scalars().all()}
             assistant = task_messages.get(MessageType.ASSISTANT)
             if assistant is not None:
+                if (
+                    replace_existing_assistant
+                    and assistant_response
+                    and assistant.content != assistant_response
+                ):
+                    assistant.content = assistant_response
                 await session.commit()
                 return assistant.id
             user = task_messages.get(MessageType.USER)

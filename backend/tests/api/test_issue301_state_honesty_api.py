@@ -104,6 +104,18 @@ def _fake_chat(agent_mod):
             content="这是回答正文",
             to_sse_dict=lambda: {"type": "chunk", "content": "这是回答正文"},
         )
+        yield SimpleNamespace(
+            type="done",
+            content="",
+            task_id="task-state-honesty",
+            task_state="completed",
+            to_sse_dict=lambda: {
+                "type": "done",
+                "content": "",
+                "task_id": "task-state-honesty",
+                "task_state": "completed",
+            },
+        )
 
     return _chat
 

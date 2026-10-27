@@ -307,6 +307,7 @@ async def test_agent_save_wrapper_forwards_task_arguments_without_kwargs(monkeyp
         bypass_org=False,
         agent_task_id=None,
         create_if_missing=None,
+        replace_existing_assistant=False,
     ):
         captured.update(
             session_id=session_id,
@@ -318,6 +319,7 @@ async def test_agent_save_wrapper_forwards_task_arguments_without_kwargs(monkeyp
             bypass_org=bypass_org,
             agent_task_id=agent_task_id,
             create_if_missing=create_if_missing,
+            replace_existing_assistant=replace_existing_assistant,
         )
         return "assistant-id"
 
@@ -342,6 +344,7 @@ async def test_agent_save_wrapper_forwards_task_arguments_without_kwargs(monkeyp
     assert captured["bypass_org"] is True
     assert captured["agent_task_id"] == "task-wrapper"
     assert captured["create_if_missing"] is True
+    assert captured["replace_existing_assistant"] is False
     assert captured["session_factory"] is not None
 
 
