@@ -1,7 +1,7 @@
 /** Citation preview/download authentication and real modal behavior. */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import axios, { type AxiosRequestConfig, type AxiosResponse } from 'axios'
-import { defineComponent, h } from 'vue'
+import { defineComponent, h, nextTick } from 'vue'
 import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { createMemoryHistory, createRouter } from 'vue-router'
@@ -60,6 +60,8 @@ vi.mock('@/api/auth', async (importOriginal) => {
 })
 
 import ChatPage from '@/views/chat/index.vue'
+import DocumentPreviewModal from '../components/DocumentPreviewModal.vue'
+import { getConversationMessages } from '@/api/chat'
 import { useUserStore } from '@/stores/user'
 
 const SOURCE: KnowledgeSource = {
@@ -275,6 +277,18 @@ beforeEach(() => {
   switchOrganizationMock.mockImplementation(async (orgId: number) => ({
     data: { success: true, data: { organization_id: orgId, is_org_admin: false } },
   }))
+  vi.mocked(getConversationMessages).mockResolvedValue({
+    data: {
+      success: true,
+      data: {
+        id: 'conversation-b',
+        title: 'Conversation B',
+        messages: [],
+        created_at: '2026-10-27T00:00:00',
+        updated_at: '2026-10-27T00:00:00',
+      },
+    },
+  } as never)
   installAdapter()
   vi.spyOn(window, 'open').mockImplementation(() => null)
   for (const spy of Object.values(messageSpies)) spy.mockClear()
@@ -712,5 +726,82 @@ describe('independent R2 download boundary probes', () => {
     await flushPromises()
     expect(window.open).not.toHaveBeenCalled()
     expect(wrapper.find('[data-testid="download-error"]').attributes('role')).toBe('alert')
+  })
+})
+
+describe('download loading convergence across view changes', () => {
+  it.each([
+    { outcome: 'resolve' },
+    { outcome: 'reject' },
+  ])('conversation switch releases a pending download that later $outcome', async ({ outcome }) => {
+    let finishA!: () => void
+    downloadImplementation = (config) => new Promise<AxiosResponse>((resolve, reject) => {
+      finishA = () => {
+        if (outcome === 'resolve') {
+          resolve(response(config, {
+            success: true,
+            data: { downloadUrl: SIGNED_URL, filename: 'a.pdf', expiresIn: 3600 },
+          }))
+          return
+        }
+        try {
+          httpError(config, 500, { message: 'late A failure' })
+        } catch (error) {
+          reject(error)
+        }
+      }
+    })
+    const { wrapper, button, router } = await mountOpenPreview()
+    await button.trigger('click')
+    expect(button.attributes('disabled')).toBeDefined()
+
+    await router.push('/chat?conversation_id=conversation-b')
+    await flushPromises()
+    await flushPromises()
+
+    const switchedButton = wrapper.find('button[data-testid="download-document"]')
+    expect(switchedButton.attributes('disabled')).toBeUndefined()
+    expect(switchedButton.text()).toContain('下载文档')
+
+    finishA()
+    await flushPromises()
+    expect(window.open).not.toHaveBeenCalled()
+    expect(wrapper.find('[data-testid="download-error"]').exists()).toBe(false)
+
+    downloadImplementation = downloadSuccess
+    await switchedButton.trigger('click')
+    await flushPromises()
+    expect(vi.mocked(window.open).mock.calls.map((call) => call[0])).toEqual([SIGNED_URL])
+    expect(switchedButton.attributes('disabled')).toBeUndefined()
+  })
+
+  it('closing the modal releases a pending download without opening it later', async () => {
+    let finishA!: () => void
+    downloadImplementation = (config) => new Promise<AxiosResponse>((resolve) => {
+      finishA = () => resolve(response(config, {
+        success: true,
+        data: { downloadUrl: SIGNED_URL, filename: 'a.pdf', expiresIn: 3600 },
+      }))
+    })
+    const { wrapper, button } = await mountOpenPreview()
+    await button.trigger('click')
+    const modal = wrapper.findComponent(DocumentPreviewModal)
+    modal.vm.$emit('update:show', false)
+    await nextTick()
+    await flushPromises()
+
+    expect(modal.props('downloadLoading')).toBe(false)
+    finishA()
+    await flushPromises()
+    expect(window.open).not.toHaveBeenCalled()
+    expect(wrapper.find('[data-testid="download-error"]').exists()).toBe(false)
+
+    wrapper.findComponent(MsgStub).vm.$emit('openSource', SOURCE_B)
+    await flushPromises()
+    await flushPromises()
+    const buttonB = wrapper.find('button[data-testid="download-document"]')
+    await buttonB.trigger('click')
+    await flushPromises()
+    expect(vi.mocked(window.open).mock.calls.map((call) => call[0])).toEqual([SIGNED_URL_B])
   })
 })

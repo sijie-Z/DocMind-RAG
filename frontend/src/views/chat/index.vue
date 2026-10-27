@@ -217,6 +217,8 @@ const {
 
 const advanceConversationGeneration = () => {
   conversationGeneration += 1
+  // 过期下载结果不得写回，但本视图 loading/error 必须随 generation 一同收敛。
+  resetDownloadState()
   // 路由代次变化时，旧列表响应必须丢弃；仅在确有在途请求时补最新请求。
   if (isListLoading.value) void fetchConversations()
   return getConversationOwner()
@@ -434,7 +436,6 @@ const toggleSidebar = () => appStore.toggleSidebar()
 const resetConversationView = (reconnect = false) => {
   advanceConversationGeneration()
   resetSendState()
-  resetDownloadState()
   messages.value = []
   isLoadingHistory.value = false
   msgLoadError.value = false
@@ -604,6 +605,11 @@ const resetDownloadState = () => {
   downloadError.value = ''
 }
 
+watch(showPreviewModal, (open) => {
+  // 关闭弹窗也是视图离开点；旧 Promise 结果不得再打开或回写。
+  if (!open) resetDownloadState()
+})
+
 const handleDownload = async (fileId?: string) => {
   if (!fileId || downloadLoading.value) return
   const requestSeq = ++downloadRequestSeq
@@ -631,7 +637,8 @@ const handleDownload = async (fileId?: string) => {
     ))
     downloadError.value = (serverMessage as string | undefined) || t('chat.downloadFailed')
   } finally {
-    if (ownsRequest()) downloadLoading.value = false
+    // loading 只属于当前请求槽；owner 仅决定是否写结果/开窗。
+    if (requestSeq === downloadRequestSeq) downloadLoading.value = false
   }
 }
 
