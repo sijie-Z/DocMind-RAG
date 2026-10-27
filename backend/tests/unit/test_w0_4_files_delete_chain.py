@@ -63,6 +63,7 @@ class _RecordingSession:
         self.deletes = []
         self.commit_count = 0
         self.deletes_before_commit = None
+        self.events = []
 
     async def __aenter__(self):
         return self
@@ -83,14 +84,38 @@ class _RecordingSession:
     async def commit(self):
         self.commit_count += 1
         self.deletes_before_commit = len(self.deletes)
+        self.events.append("commit")
 
 
 class _FakeES:
+    """严格删除响应 + refresh 回读 count==0 的内存替身。"""
+
     def __init__(self):
         self.delete_calls = []
+        self.count_calls = []
+        self.refresh_calls = []
+        self.indices = self
 
     async def delete_by_query(self, **kwargs):
         self.delete_calls.append(kwargs)
+        return {
+            "deleted": 0,
+            "failures": [],
+            "timed_out": False,
+            "_shards": {"failed": 0, "failures": []},
+        }
+
+    async def count(self, **kwargs):
+        self.count_calls.append(kwargs)
+        return {
+            "count": 0,
+            "failures": [],
+            "timed_out": False,
+            "_shards": {"failed": 0, "failures": []},
+        }
+
+    async def refresh(self, **kwargs):
+        self.refresh_calls.append(kwargs)
 
 
 def _recording_cache(records):
@@ -120,10 +145,14 @@ async def test_unified_chain_cleans_children_es_and_caches_in_order(monkeypatch)
     monkeypatch.setattr(ks_mod, "get_elasticsearch", AsyncMock(return_value=fake_es))
     monkeypatch.setattr(cache_mod, "RetrievalCache", _recording_cache(retrieval_clears))
     monkeypatch.setattr(cache_mod, "SemanticCache", _recording_cache(semantic_clears))
-    delete_file = AsyncMock(return_value=True)
+    delete_file = AsyncMock(
+        side_effect=lambda path: session.events.append(("file_delete", path)) or True
+    )
     monkeypatch.setattr(svc.file_upload_service, "delete_file", delete_file)
 
-    assert await svc.delete_knowledge_thoroughly(DOC_ID, ORG_ID) is True
+    outcome = await svc.delete_knowledge_thoroughly(DOC_ID, ORG_ID)
+    assert outcome.success is True
+    assert outcome.file_cleanup_pending is False
 
     # 1. 查文档时就带上 org 过滤（入参 org 真的被消费，而不是只传给缓存）
     assert len(session.statements) >= 1
@@ -169,6 +198,11 @@ async def test_unified_chain_cleans_children_es_and_caches_in_order(monkeypatch)
 
     # 6. 物理对象删除使用文档行里的原始 file_path
     delete_file.assert_awaited_once_with("7/shared-object.pdf")
+    # 6b. P2-3：物理对象删除必须发生在 DB commit 之后 —— commit 失败回滚时
+    # 文件必须仍然存在（不可逆副作用不得先于 fail-closed 的提交点）。
+    assert session.events.index("commit") < session.events.index(
+        ("file_delete", "7/shared-object.pdf")
+    )
 
 
 @pytest.mark.asyncio
@@ -191,7 +225,9 @@ async def test_unified_chain_keeps_minio_object_shared_by_other_documents(monkey
     delete_file = AsyncMock(return_value=True)
     monkeypatch.setattr(svc.file_upload_service, "delete_file", delete_file)
 
-    assert await svc.delete_knowledge_thoroughly(DOC_ID, ORG_ID) is True
+    outcome = await svc.delete_knowledge_thoroughly(DOC_ID, ORG_ID)
+    assert outcome.success is True
+    assert outcome.file_cleanup_pending is False
 
     delete_file.assert_not_awaited()
     # DB 侧照常删干净

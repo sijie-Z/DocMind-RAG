@@ -108,7 +108,7 @@ class _FakeES:
         self.indices = self
 
     async def delete_by_query(self, **_kwargs):
-        return {"deleted": 0, "failures": []}
+        return {"deleted": 0, "failures": [], "timed_out": False}
 
     async def count(self, **_kwargs):
         return {"count": 0}

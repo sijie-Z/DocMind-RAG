@@ -217,20 +217,32 @@ async def delete_document(
         doc = await get_document_for_user(db, current_user, document_id)
         # knowledge_service.delete_knowledge 内部即 delete_knowledge_thoroughly
         # —— 与 DELETE /api/v1/knowledge/document/{id} 完全同一条链路。
-        # 返回 False 的分支当前不可达（service 只会返回 True 或抛 AppError），
-        # 但保留对返回值的消费，避免将来出现 False 时响应谎报成功。
-        success = await knowledge_service.delete_knowledge(document_id, doc.organization_id)
+        # 返回 falsy 的分支当前不可达（service 只会返回成功 outcome 或抛 AppError），
+        # 但保留对返回值的消费，避免将来出现失败时响应谎报成功。
+        outcome = await knowledge_service.delete_knowledge(document_id, doc.organization_id)
+        success = bool(outcome)
+        cleanup_pending = success and bool(getattr(outcome, "file_cleanup_pending", False))
 
         if success:
+            detail = f"用户删除了文档 {document_id}"
+            if cleanup_pending:
+                # P2-3：物理对象清理未完成时不得声称全部清理完成。
+                detail += "（文件清理待重试 file_cleanup_pending）"
             await audit_service.log_activity(
                 user_id=current_user.id,
                 action="delete_file",
                 target_type="document",
                 target_id=document_id,
-                detail=f"用户删除了文档 {document_id}",
+                detail=detail,
                 request=request,
             )
-        return FileDeleteResponse(success=success, message="删除成功" if success else "删除失败")
+        if not success:
+            message = "删除失败"
+        elif cleanup_pending:
+            message = "删除成功，文件清理待重试"
+        else:
+            message = "删除成功"
+        return FileDeleteResponse(success=success, message=message)
     except AppError:
         raise
     except Exception as e:

@@ -188,6 +188,30 @@ class TestUploadIdentitySanitizer:
 # ── delete_file ─────────────────────────────────────────────────────
 
 
+class _S3ErrorLike(Exception):
+    def __init__(self, code: str):
+        super().__init__(code)
+        self.code = code
+
+
+class _BareStatusError(Exception):
+    """没有对象级 code、只有 HTTP 状态码的错误（路由/网关故障形态）。"""
+
+    def __init__(self, status: int):
+        super().__init__(f"HTTP {status}")
+        self.response = MagicMock(status=status)
+
+
+_STAT_PROOF_CASES = [
+    (_S3ErrorLike("NoSuchKey"), True, "nosuchkey"),
+    (_S3ErrorLike("NoSuchObject"), True, "nosuchobject"),
+    (_S3ErrorLike("NoSuchBucket"), False, "nosuchbucket"),
+    (_S3ErrorLike("NotFound"), False, "notfound-code"),
+    (_BareStatusError(404), False, "bare-404"),
+    (RuntimeError("stat unavailable"), False, "network-error"),
+]
+
+
 class TestDeleteFile:
     @pytest.mark.asyncio
     @patch("app.services.file_service.minio_client")
@@ -207,7 +231,12 @@ class TestDeleteFile:
     @pytest.mark.asyncio
     @patch("app.services.file_service.minio_client")
     @patch("app.services.file_service.Path")
-    async def test_handles_minio_failure_gracefully(self, mock_path_cls, mock_minio, svc):
+    async def test_reports_minio_failure_without_local_copy(self, mock_path_cls, mock_minio, svc):
+        """MinIO 删除失败且无本地文件可删 → False（调用方标记 cleanup_pending）。
+
+        修复前这里恒返回 True：注释假设「文件可能只在本地」，但生产对象都在
+        MinIO —— 吞掉失败会让删除接口谎报清理完成。
+        """
         mock_minio.remove_object.side_effect = Exception("connection refused")
         mock_path_instance = MagicMock()
         mock_path_instance.is_absolute.return_value = True
@@ -215,8 +244,100 @@ class TestDeleteFile:
         mock_path_cls.return_value = mock_path_instance
 
         result = await svc.delete_file("some/path.pdf")
-        # Should still return True even if MinIO fails (file might be local only)
+        assert result is False
+
+    @pytest.mark.asyncio
+    @patch("app.services.file_service.minio_client")
+    @patch("app.services.file_service.Path")
+    async def test_minio_failure_with_local_copy_removed_still_pending(
+        self, mock_path_cls, mock_minio, svc
+    ):
+        """R2 评审回归：MinIO 报错时本地副本删掉也不能直接算清理完成。
+
+        stat 无法证明远端对象不存在（连接错误）→ 保守返回 False，调用方据此
+        标记 file_cleanup_pending。修复前 ``minio_removed or local_removed``
+        会把这种半清理谎报成完全成功。
+        """
+        mock_minio.remove_object.side_effect = Exception("connection refused")
+        mock_minio.stat_object.side_effect = Exception("stat unavailable")
+        mock_path_instance = MagicMock()
+        mock_path_instance.is_absolute.return_value = False
+        mock_path_instance.exists.return_value = True
+        mock_path_instance.is_file.return_value = True
+        mock_path_cls.return_value = mock_path_instance
+
+        with patch("app.services.file_service.os"):
+            result = await svc.delete_file("1/doc.pdf")
+
+        assert result is False
+        mock_minio.stat_object.assert_called_once_with("1/doc.pdf")
+
+    @pytest.mark.asyncio
+    @patch("app.services.file_service.minio_client")
+    @patch("app.services.file_service.Path")
+    async def test_minio_failure_with_remote_object_present_is_pending(
+        self, mock_path_cls, mock_minio, svc
+    ):
+        """stat 证明远端对象仍存在 → 即使本地副本已删也必须 pending。"""
+        mock_minio.remove_object.side_effect = Exception("connection refused")
+        mock_minio.stat_object.return_value = object()
+        mock_path_instance = MagicMock()
+        mock_path_instance.is_absolute.return_value = False
+        mock_path_instance.exists.return_value = True
+        mock_path_instance.is_file.return_value = True
+        mock_path_cls.return_value = mock_path_instance
+
+        with patch("app.services.file_service.os"):
+            result = await svc.delete_file("1/doc.pdf")
+
+        assert result is False
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("stat_error", "expected"),
+        [(error, expected) for error, expected, _name in _STAT_PROOF_CASES],
+        ids=[name for _error, _expected, name in _STAT_PROOF_CASES],
+    )
+    @patch("app.services.file_service.minio_client")
+    @patch("app.services.file_service.Path")
+    async def test_minio_failure_stat_proof_matrix(
+        self, mock_path_cls, mock_minio, svc, stat_error, expected
+    ):
+        """R3 stat 四态回归：仅对象级 NoSuchKey/NoSuchObject 可判清理完成。
+
+        NoSuchBucket（桶不存在）、NotFound、裸 HTTP 404（路由/网关）、网络异常、
+        对象仍存在都不能证明「这个对象已删」—— 一律 False → file_cleanup_pending。
+        """
+        mock_minio.remove_object.side_effect = Exception("connection refused")
+        mock_minio.stat_object.side_effect = stat_error
+        mock_path_instance = MagicMock()
+        mock_path_instance.is_absolute.return_value = False
+        mock_path_instance.exists.return_value = True
+        mock_path_instance.is_file.return_value = True
+        mock_path_cls.return_value = mock_path_instance
+
+        with patch("app.services.file_service.os"):
+            result = await svc.delete_file("1/doc.pdf")
+
+        assert result is expected
+
+    @pytest.mark.asyncio
+    @patch("app.services.file_service.minio_client")
+    @patch("app.services.file_service.Path")
+    async def test_local_only_absolute_path_preserved(self, mock_path_cls, mock_minio, svc):
+        """纯本地文件（绝对路径）无远端对象：MinIO 报错不影响既有语义。"""
+        mock_minio.remove_object.side_effect = Exception("invalid object name")
+        mock_path_instance = MagicMock()
+        mock_path_instance.is_absolute.return_value = True
+        mock_path_instance.exists.return_value = True
+        mock_path_instance.is_file.return_value = True
+        mock_path_cls.return_value = mock_path_instance
+
+        with patch("app.services.file_service.os"):
+            result = await svc.delete_file("D:/uploads/local-only.pdf")
+
         assert result is True
+        mock_minio.stat_object.assert_not_called()
 
     @pytest.mark.asyncio
     @patch("app.services.file_service.minio_client")

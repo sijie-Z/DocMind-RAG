@@ -163,7 +163,7 @@ class TestDocumentProcessorWritesTopLevelFields:
 
         class _FakeES:
             async def delete_by_query(self, **kwargs):
-                return {"deleted": 0, "failures": []}
+                return {"deleted": 0, "failures": [], "timed_out": False}
 
             async def count(self, **kwargs):
                 return {"count": 0}

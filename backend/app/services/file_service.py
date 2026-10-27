@@ -9,7 +9,7 @@ import math
 import os
 import uuid
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from fastapi import HTTPException, UploadFile
 from sqlalchemy import and_, func, select
@@ -21,7 +21,43 @@ from app.exceptions import AppError, ValidationError
 from app.models.document import Document, DocumentStatus, DocumentType
 from app.services.document_parser import DocumentParser
 
+if TYPE_CHECKING:
+    from app.services.knowledge_service import DeleteOutcome
+
 logger = logging.getLogger(__name__)
+
+# 仅**对象级**「对象不存在」错误码可证明远端无残留。NoSuchBucket / 裸 404 /
+# NotFound 也可能是桶、路由或存储故障，不能据此判定对象已删除。
+_MISSING_OBJECT_S3_CODES = frozenset({"NoSuchKey", "NoSuchObject"})
+
+
+def _minio_object_missing(object_name: str) -> bool:
+    """Return True only when a MinIO stat proves *this object* is absent.
+
+    A failed ``remove_object`` must not be treated as "probably deleted": if the
+    object still exists remotely, reporting cleanup success loses the only signal
+    that a retry is needed. Only explicit object-level ``NoSuchKey``/
+    ``NoSuchObject`` codes count as proof. ``NoSuchBucket``, ``NotFound``, a bare
+    HTTP 404, network errors and any other stat failure can equally indicate a
+    bucket/route/storage outage, so they all keep the caller in pending state.
+    """
+    try:
+        minio_client.stat_object(object_name)
+    except Exception as e:
+        code = getattr(e, "code", None)
+        if code in _MISSING_OBJECT_S3_CODES:
+            return True
+        logger.warning(
+            "MinIO 删除报错后无法证明对象不存在（stat 失败，code=%r）: %s: %s: %s",
+            code,
+            object_name,
+            type(e).__name__,
+            e,
+        )
+        return False
+    logger.error("MinIO 删除报错但 stat 表明对象仍存在，不能判定清理完成: %s", object_name)
+    return False
+
 
 # 持有后台任务引用，避免 asyncio 在任务完成前将其当作垃圾回收
 _background_tasks: set[asyncio.Task] = set()
@@ -219,12 +255,23 @@ class FileUploadService:
         """
         从存储中删除文件 (支持 MinIO 和 本地文件)
 
+        返回「是否已确认清理完成」。MinIO 删除报错时**不能**因为本地副本删除
+        成功就返回 True：必须先通过 stat 证明远端对象确实不存在（仅接受对象级
+        ``NoSuchKey`` / ``NoSuchObject``；``NoSuchBucket``、``NotFound``、裸
+        404、网络异常一律视为未证明），否则返回 False 让调用方标记
+        ``file_cleanup_pending``。唯一例外是纯本地文件（绝对路径，不是 MinIO
+        对象名）——删除本地副本即完成，保留既有语义。
+
         Args:
             file_path: 文件路径或对象名称
 
         Returns:
-            是否删除成功
+            是否已确认清理完成（远端与本地均无残留，或纯本地文件已删除）
         """
+        path_is_absolute = Path(file_path).is_absolute()
+        object_name = None
+        minio_removed = False
+        minio_error: Exception | None = None
         try:
             # 1. 尝试从 MinIO 删除
             try:
@@ -234,20 +281,45 @@ class FileUploadService:
                 object_name = normalize_object_name(file_path)
 
                 minio_client.remove_object(object_name)
+                minio_removed = True
                 logger.info(f"已从 MinIO 删除文件: {object_name}")
             except Exception as e:
+                minio_error = e
                 logger.warning(f"从 MinIO 删除文件失败 (可能文件不存在): {str(e)}")
 
             # 2. 尝试从本地文件系统删除 (如果存在)
+            local_removed = False
             local_path = Path(file_path)
-            if not local_path.is_absolute():
+            if not path_is_absolute:
                 local_path = Path(settings.UPLOAD_DIR) / file_path
 
             if local_path.exists() and local_path.is_file():
                 os.remove(local_path)
+                local_removed = True
                 logger.info(f"已从本地文件系统删除文件: {local_path}")
 
-            return True
+            if minio_removed:
+                return True
+            if path_is_absolute and local_removed:
+                # 纯本地文件：绝对路径不是 MinIO 对象名，无远端对象可清理。
+                return True
+            if minio_error is not None:
+                if local_removed and object_name and _minio_object_missing(object_name):
+                    logger.info(
+                        "MinIO 删除报错，但 stat 证明远端对象不存在；本地副本已删除，"
+                        "按清理完成处理: %s",
+                        object_name,
+                    )
+                    return True
+                logger.error(
+                    "文件清理未完成（MinIO 删除失败，远端状态未证明）: %s: %s: %s",
+                    file_path,
+                    type(minio_error).__name__,
+                    minio_error,
+                )
+                return False
+            # 理论不可达：remove 既未成功也未抛错 —— 无证据，保守失败。
+            return False
         except Exception as e:
             logger.error(f"删除文件失败: {str(e)}")
             return False
@@ -841,7 +913,9 @@ class FileUploadService:
             logger.error(f"获取文档列表失败: {str(e)}")
             raise HTTPException(status_code=500, detail=f"获取文档列表失败: {str(e)}")
 
-    async def delete_document(self, document_id: str, organization_id: str, user_id: str) -> bool:
+    async def delete_document(
+        self, document_id: str, organization_id: str, user_id: str
+    ) -> "DeleteOutcome":
         """删除文档（兼容包装 —— 已并入 knowledge 统一删除链路，#416）。
 
         旧实现只删 ``documents`` 主表：MySQL 下会被 ``document_tags`` /

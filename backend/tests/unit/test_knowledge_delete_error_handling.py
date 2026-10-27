@@ -70,7 +70,9 @@ async def test_delete_missing_document_is_idempotent_success(monkeypatch):
     """文档不存在按幂等成功返回 True —— 绝不能变成异常/500。"""
     monkeypatch.setattr(ks_mod, "AsyncSessionLocal", _MissingDocSession)
 
-    assert await _svc().delete_knowledge_thoroughly("missing") is True
+    result = await _svc().delete_knowledge_thoroughly("missing")
+    assert result.success is True
+    assert result.file_cleanup_pending is False
 
 
 # ── batch：单条失败不中断，原因逐条收集 ──────────────────────────────────────

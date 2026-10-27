@@ -3,6 +3,7 @@
 """
 
 import logging
+from dataclasses import dataclass
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
@@ -11,16 +12,38 @@ from sqlalchemy import and_, delete, func, select
 from app.core.config import settings
 from app.core.database import AsyncSessionLocal
 from app.core.elasticsearch import get_elasticsearch
+from app.core.log_safety import log_safe
 from app.exceptions import AppError, ServiceUnavailableError
 from app.models.document import Document, DocumentChunk, DocumentStatus, DocumentTag
 from app.models.knowledge_job import KnowledgeProcessingJob
 from app.rag.errors import RetrievalUnavailableError
+from app.services.document_status import (
+    require_count_response,
+    require_delete_by_query_response,
+)
 from app.services.file_service import FileUploadService
 
 if TYPE_CHECKING:
     from app.worker.doc_processor import DeferredOutcome
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class DeleteOutcome:
+    """彻底删除的结果。
+
+    ``success`` 为 True 表示文档已从数据库与索引中删除（或本就不存在）。
+    ``file_cleanup_pending`` 为 True 表示物理存储对象删除失败、需要重试 ——
+    响应与审计必须如实透出，不得把「DB/ES 已删、文件残留」说成完全清理成功。
+    对象本身仍按 truthiness 兼容旧调用方（成功即真值）。
+    """
+
+    success: bool
+    file_cleanup_pending: bool = False
+
+    def __bool__(self) -> bool:
+        return self.success
 
 
 def _coerce_organization_id(organization_id: str | int | None) -> int:
@@ -215,12 +238,26 @@ class KnowledgeService:
                 "last_updated": datetime.now().isoformat(),
             }
 
-    async def delete_knowledge(self, document_id: str, organization_id: int | None = None) -> bool:
+    async def delete_knowledge(
+        self, document_id: str, organization_id: int | None = None
+    ) -> DeleteOutcome:
         """兼容旧接口的删除方法"""
         return await self.delete_knowledge_thoroughly(document_id, organization_id)
 
     async def delete_es_by_document_id(self, document_id: str) -> bool:
-        """仅从 ES 中删除该文档的所有 chunk；明确失败时返回 False。"""
+        """仅从 ES 中删除该文档的所有 chunk；未证明删除完成时返回 False。
+
+        契约（P1-1，与 worker 替换链共用 ``document_status`` 的严格解析）：
+        - ``delete_by_query`` 响应必须严格成功：falsy/None、``failures``、
+          ``_shards.failures``、``_shards.failed>0``、``timed_out``、非法/缺失
+          关键元数据（``deleted``/``failures``/``timed_out``）任一出现都不得
+          当作成功（空响应 != 删除成功）。``_shards`` 在 ES 的 delete_by_query
+          响应中不保证出现，缺失时由随后的 refresh+count 回读兜底；
+        - 删除后显式 refresh 并回读 ``count(document_id)==0``；回读失败或仍有
+          chunk 时同样返回 False —— 只有「可见删除」才允许放行 DB 删除。
+
+        返回 False 时调用方必须保留 DB 行、不得删除物理文件、不得报成功/写成功审计。
+        """
         try:
             client = await get_elasticsearch()
             response = await client.delete_by_query(
@@ -228,11 +265,31 @@ class KnowledgeService:
                 query={"term": {"document_id": document_id}},
                 refresh=True,
             )
-            failures = response.get("failures", []) if response is not None else []
-            if failures:
-                logger.error(f"从 ES 按 document_id 删除返回 failures: {failures}")
+            deleted = require_delete_by_query_response(
+                response, context=f"ES delete for document {document_id}"
+            )
+
+            # 即使响应看似成功，也必须显式 refresh 后回读确认删除可见；否则
+            # 「timed_out 后台继续删」或部分 shard 删除都可能留下旧 chunk。
+            await client.indices.refresh(index=self.index_name)
+            count_response = await client.count(
+                index=self.index_name,
+                query={"term": {"document_id": document_id}},
+            )
+            remaining = require_count_response(
+                count_response,
+                context=f"ES delete verification for document {document_id}",
+            )
+            if remaining:
+                logger.error(
+                    f"从 ES 删除 document_id={log_safe(document_id)} 后回读仍有 {remaining} 条 chunk，"
+                    "拒绝放行数据库删除"
+                )
                 return False
-            logger.info(f"已从 ES 删除 document_id={document_id} 的索引")
+            logger.info(
+                f"已从 ES 删除 document_id={log_safe(document_id)} 的索引"
+                f"（响应 deleted={deleted}，回读 count=0）"
+            )
             return True
         except Exception as e:
             logger.error(f"从 ES 按 document_id 删除失败: {str(e)}")
@@ -240,12 +297,26 @@ class KnowledgeService:
 
     async def delete_knowledge_thoroughly(
         self, document_id: str, organization_id: int | None = None
-    ) -> bool:
+    ) -> DeleteOutcome:
         """彻底删除文档（含所有引用 documents.id 的子表行，清单见 _DOCUMENT_CHILD_MODELS）。
 
-        成功返回 True；文档本就不存在也返回 True（幂等删除语义，与旧行为一致）。
-        失败抛 `AppError` 并携带原始原因 —— 不再 `return False` 把失败原因吞掉
-        （issue #174：调用方只能报「删除失败」，真正的原因只留在服务端日志里）。
+        成功返回 ``DeleteOutcome``（真值）；文档本就不存在也返回成功（幂等删除语义，
+        与旧行为一致）。失败抛 `AppError` 并携带原始原因 —— 不再 `return False`
+        把失败原因吞掉（issue #174：调用方只能报「删除失败」，真正的原因只留在
+        服务端日志里）。
+
+        不可逆顺序（P1-1 / P2-3）：
+        1. 先确认 ES 已可见删除（严格响应 + refresh 回读 count==0），否则立即中止：
+           DB 行保留、物理文件不动、不写成功审计；
+        2. DB 子表与主表删除并提交；
+        3. 提交后才 best-effort 删除 MinIO 对象；失败时不回滚删除（文档已不可检索），
+           但以 ``file_cleanup_pending=True`` 如实透出，调用方不得声称全部清理完成。
+
+        已知剩余边界：ES 删除确认后若 DB commit 失败，文档行会随事务回滚保留，
+        而索引已删 —— 该文档暂时不可检索但可下载；重试删除会再次执行
+        （ES 对已清零的文档是幂等成功）并收敛。本流程**不是**跨 DB/ES/MinIO 的
+        分布式原子操作；文件清理失败只能以 ``file_cleanup_pending`` 显式暴露，
+        调用方不得据此宣称三者一致。
         """
         try:
             logger.info(f"🧹 正在彻底清理文档: {document_id}")
@@ -258,9 +329,14 @@ class KnowledgeService:
                 if not doc:
                     # 幂等：目标状态（无此文档）已达成。直接删除不存在的文档是成功而非失败
                     # —— 直接调用方（批量删除按原始 id 列表）不应把它计成错误。
-                    return True
+                    # 跨 org 的 id 在这里同样落空：无副作用，不会泄漏或误删他人文档。
+                    return DeleteOutcome(success=True)
 
-                if doc.file_path:
+                # 先判定物理对象是否该删（共享引用保护），但**推迟到 DB commit 之后**
+                # 才真正删除 —— fail-closed 的中止点之前不得有不可逆副作用（P2-3）。
+                file_path = doc.file_path
+                should_delete_file = False
+                if file_path:
                     # md5 去重上传会跨文档共享同一 MinIO 对象（对象名
                     # `{org}/{md5}.{ext}`，见 documents.upload）——删除前检查是否
                     # 还有其他文档引用同一 file_path；有引用则只删 DB 记录，
@@ -275,18 +351,16 @@ class KnowledgeService:
                     )
                     other_refs = refs_result.scalar() or 0
                     if other_refs == 0:
-                        try:
-                            await self.file_upload_service.delete_file(doc.file_path)
-                        except Exception as e:
-                            logger.warning(f"从MinIO删除文件失败: {str(e)}")
+                        should_delete_file = True
                     else:
                         logger.info(
                             f"文档 {document_id} 的存储对象仍被 {other_refs} 个其他文档"
                             "引用，跳过物理删除"
                         )
 
-                # ES 未明确成功时不得删除 DB 记录；调用方可在故障恢复后重试。
-                # helper 会把 ES 异常和响应中的非空 failures 统一转成 False。
+                # ES 未明确成功时不得删除 DB 记录，也不得触碰物理对象；调用方可在
+                # 故障恢复后重试。helper 会把 ES 异常、异常响应形态与回读非零
+                # 统一转成 False。
                 if not await self.delete_es_by_document_id(document_id):
                     raise ServiceUnavailableError("Elasticsearch 索引删除失败，文档未删除，请重试")
 
@@ -297,12 +371,31 @@ class KnowledgeService:
                 await session.execute(delete(Document).where(Document.id == document_id))
                 await session.commit()
 
+                # DB 已提交、文档已不可见 —— 此时才 best-effort 删除物理对象。
+                # 失败不回滚（否则会重新暴露已删索引的半状态），但必须如实标记
+                # cleanup_pending，让响应/审计可重试、不谎报完全清理。
+                file_cleanup_pending = False
+                if should_delete_file and file_path:
+                    try:
+                        removed = await self.file_upload_service.delete_file(file_path)
+                    except Exception as e:
+                        removed = False
+                        logger.warning(f"删除存储对象时抛出异常: {type(e).__name__}: {e}")
+                    if not removed:
+                        file_cleanup_pending = True
+                        logger.error(
+                            "[DELETE] 文档已从数据库/索引删除，但存储对象清理未完成 "
+                            "file_cleanup_pending document_id=%s file_path=%s",
+                            log_safe(document_id),
+                            log_safe(file_path),
+                        )
+
                 # 删除文档后按组织清空 RAG 缓存，避免旧缓存仍被命中
                 from app.rag.cache import RetrievalCache, SemanticCache
 
                 await RetrievalCache().clear_for_org(doc.organization_id)
                 await SemanticCache().clear_for_org(doc.organization_id)
-                return True
+                return DeleteOutcome(success=True, file_cleanup_pending=file_cleanup_pending)
         except AppError:
             raise
         except Exception as e:
@@ -319,24 +412,36 @@ class KnowledgeService:
         此前 `delete_knowledge_thoroughly` 返回 False 时只把该条计为「失败」，
         失败原因无处可见；现在服务层抛带原因的 AppError，这里按条捕获并放进
         `errors`，其余文档继续删。
+
+        单条成功但物理对象清理失败时，该文档仍算删除成功，但 id 会进入
+        `file_cleanup_pending_ids`，`message` 也如实说明 —— 不把「文件残留」
+        伪装成完全清理完成。
         """
         success_count = 0
         errors: list[dict[str, str]] = []
+        cleanup_pending_ids: list[str] = []
         for doc_id in document_ids:
             try:
-                await self.delete_knowledge_thoroughly(doc_id, organization_id)
+                outcome = await self.delete_knowledge_thoroughly(doc_id, organization_id)
                 success_count += 1
+                if getattr(outcome, "file_cleanup_pending", False):
+                    cleanup_pending_ids.append(doc_id)
             except AppError as e:
                 errors.append({"document_id": doc_id, "reason": e.message})
         fail_count = len(errors)
+        message = f"成功删除 {success_count} 个文档，失败 {fail_count} 个"
+        if cleanup_pending_ids:
+            message += f"，其中 {len(cleanup_pending_ids)} 个文档的文件清理待重试"
         result: dict[str, Any] = {
             "success": True,
             "success_count": success_count,
             "fail_count": fail_count,
-            "message": f"成功删除 {success_count} 个文档，失败 {fail_count} 个",
+            "message": message,
         }
         if errors:
             result["errors"] = errors
+        if cleanup_pending_ids:
+            result["file_cleanup_pending_ids"] = cleanup_pending_ids
         return result
 
 
