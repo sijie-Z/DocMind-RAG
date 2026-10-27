@@ -5,7 +5,7 @@ import hashlib
 import json
 import logging
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from fastapi import APIRouter, Depends, File, Form, UploadFile, status
 from fastapi.responses import RedirectResponse
@@ -15,7 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.core.database import get_db
 from app.core.kafka_client import kafka_producer
-from app.core.minio_client import minio_client
+from app.core.minio_client import minio_client, normalize_object_name
 from app.core.security import (
     get_current_user,
     get_document_for_user,
@@ -28,9 +28,13 @@ from app.models.document import Document, DocumentStatus, DocumentType
 from app.models.knowledge_job import KnowledgeJobStatus, KnowledgeProcessingJob
 from app.models.rbac import PermissionType
 from app.models.user import User
+from app.schemas.knowledge import DocumentDownloadUrl, DocumentDownloadUrlResponse
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
+
+# 与既有 MinIO 默认一致的一小时短签名；新旧下载入口共用，避免过期语义漂移。
+DOCUMENT_DOWNLOAD_URL_EXPIRES = timedelta(hours=1)
 
 # 持有后台任务引用，避免 asyncio 在任务完成前将其当作垃圾回收
 _background_tasks: set[asyncio.Task] = set()
@@ -447,6 +451,46 @@ async def get_document_full_content(
         raise AppError("获取文档内容失败")
 
 
+async def _get_document_download_url(
+    db: AsyncSession,
+    current_user: User,
+    document_id: str,
+) -> tuple[Document, str]:
+    """在同一辅助内完成文档授权与短签名，防止新旧入口权限漂移。"""
+    doc = await get_document_for_user(db, current_user, document_id)
+    url = minio_client.get_presigned_url(
+        normalize_object_name(doc.file_path),
+        expires=DOCUMENT_DOWNLOAD_URL_EXPIRES,
+    )
+    return doc, url
+
+
+@router.get(
+    "/{document_id}/download-url",
+    response_model=DocumentDownloadUrlResponse,
+    dependencies=[Depends(require_scope("knowledge:read"))],
+)
+async def get_document_download_url(
+    document_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    try:
+        doc, url = await _get_document_download_url(db, current_user, document_id)
+        return DocumentDownloadUrlResponse(
+            data=DocumentDownloadUrl(
+                downloadUrl=url,
+                filename=doc.filename,
+                expiresIn=int(DOCUMENT_DOWNLOAD_URL_EXPIRES.total_seconds()),
+            )
+        )
+    except (NotFoundError, AuthorizationError):
+        raise
+    except Exception as e:
+        logger.error(f"Get document download URL failed: {str(e)}")
+        raise AppError("获取下载链接失败")
+
+
 @router.get("/{document_id}/download", dependencies=[Depends(require_scope("knowledge:read"))])
 async def download_document(
     document_id: str,
@@ -454,11 +498,7 @@ async def download_document(
     current_user: User = Depends(get_current_user),
 ):
     try:
-        doc = await get_document_for_user(db, current_user, document_id)
-
-        from app.core.minio_client import normalize_object_name
-
-        url = minio_client.get_presigned_url(normalize_object_name(doc.file_path))
+        _doc, url = await _get_document_download_url(db, current_user, document_id)
         return RedirectResponse(url=url)
     except (NotFoundError, AuthorizationError):
         raise

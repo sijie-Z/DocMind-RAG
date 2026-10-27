@@ -274,6 +274,8 @@ export default {
     contentSummary: 'Content Summary',
     noContent: 'No Content',
     downloadDocument: 'Download Document',
+    downloadPreparing: 'Preparing download…',
+    downloadFailed: 'Download failed. Please try again.',
     // Feedback
     // File analysis
     analyzeFiles: 'Please analyze the uploaded {n} file(s)',

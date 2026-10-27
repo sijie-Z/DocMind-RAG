@@ -68,6 +68,12 @@ export interface DocumentContent {
   suggested_tags?: string[]
 }
 
+export interface DocumentDownloadUrl {
+  downloadUrl: string
+  filename: string
+  expiresIn: number
+}
+
 /**
  * 页面自理错误的静默请求选项（E14/D1）：
  * 带 `X-Silent-Error: 1` 时响应拦截器不再弹全局 toast，错误文案由调用方
@@ -105,6 +111,13 @@ export const getDocumentContent = async (
   options?: SilentRequestOptions
 ): Promise<AxiosResponse<{ data: DocumentContent }>> => {
   return request.get(`/documents/${id}/content`, options?.silent ? SILENT_HEADERS : undefined)
+}
+
+export const getDocumentDownloadUrl = async (
+  id: string,
+  options?: SilentRequestOptions
+): Promise<AxiosResponse<{ data: DocumentDownloadUrl }>> => {
+  return request.get(`/documents/${id}/download-url`, options?.silent ? SILENT_HEADERS : undefined)
 }
 
 export const uploadKnowledgeBase = async (

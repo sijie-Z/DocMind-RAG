@@ -4,6 +4,8 @@
     :loading="previewLoading"
     :doc="previewDoc"
     :content="previewContent"
+    :download-loading="downloadLoading"
+    :download-error="downloadError"
     @download="handleDownload"
   />
 
@@ -148,13 +150,14 @@ import { CloudUploadOutline, AlertCircleOutline, ArrowBackOutline } from '@vicon
 import { getConversationMessages, clearConversationMessages } from '@/api/chat'
 import { getOrganizationSettings } from '@/api/organization'
 import type { Conversation } from '@/api/conversation'
-import { getDocumentDetail, getDocumentContent } from '@/api/knowledge'
-import type { DocumentContent, DocumentDetail } from '@/api/knowledge'
+import { getDocumentDetail, getDocumentContent, getDocumentDownloadUrl } from '@/api/knowledge'
+import type { DocumentContent, DocumentDetail, DocumentDownloadUrl } from '@/api/knowledge'
 import type { ChatMessage, KnowledgeSource } from '@/types/chat'
 import { getToken } from '@/utils/auth'
 
 import { ChatSidebar, ChatMessages, ChatInput, ChatHeader, DocumentPreviewModal, DebugPanel } from './components'
 import { citationRank } from './utils/citations'
+import { parseTrustedDownloadUrl } from './utils/downloadUrl'
 import { useChatAttachments, useChatMessages, useChatSessions, useChatConnection, useChatSend } from './composables'
 
 const message = useDedupedMessage()
@@ -183,6 +186,7 @@ const ownsConversationOwner = (owner: string, expectedRouteId?: string) => (
 onBeforeUnmount(() => {
   conversationViewActive = false
   conversationGeneration += 1
+  resetDownloadState()
 })
 
 const chatMessagesRef = ref()
@@ -430,6 +434,7 @@ const toggleSidebar = () => appStore.toggleSidebar()
 const resetConversationView = (reconnect = false) => {
   advanceConversationGeneration()
   resetSendState()
+  resetDownloadState()
   messages.value = []
   isLoadingHistory.value = false
   msgLoadError.value = false
@@ -443,7 +448,9 @@ const resetConversationView = (reconnect = false) => {
 
 const resetConversationForIdentity = () => {
   // 不推进页面 generation：身份失效由同一 owner 中的 identityEpoch 独立判别。
+  const hadPendingDownload = downloadLoading.value
   resetSendState()
+  resetDownloadState()
   messages.value = []
   conversations.value = []
   attachedFiles.value = []
@@ -455,7 +462,12 @@ const resetConversationForIdentity = () => {
   const owner = getConversationOwner()
   // #549 在 login 提交 B userInfo 前先递增 epoch；B 请求等身份提交完成后再发。
   void nextTick(() => {
-    if (!ownsConversationOwner(owner) || !userStore.isLoggedIn) return
+    if (!ownsConversationOwner(owner)) return
+    if (!userStore.isLoggedIn) {
+      // 认证失败的 pending 下载由当前身份重置如实收口，旧 Promise 本身不得写回。
+      if (hadPendingDownload) downloadError.value = t('chat.downloadFailed')
+      return
+    }
     if (!useSSE.value) void connectWebSocket()
     void fetchConversations()
   })
@@ -582,10 +594,45 @@ const previewDoc = ref<{
   suggested_tags?: string[]
 } | undefined>(undefined)
 const previewContent = ref('')
+const downloadLoading = ref(false)
+const downloadError = ref('')
+let downloadRequestSeq = 0
 
-const handleDownload = (fileId?: string) => {
-  if (!fileId) return
-  window.open(`${import.meta.env.VITE_API_URL || ''}/api/v1/documents/${fileId}/download`, '_blank')
+const resetDownloadState = () => {
+  downloadRequestSeq += 1
+  downloadLoading.value = false
+  downloadError.value = ''
+}
+
+const handleDownload = async (fileId?: string) => {
+  if (!fileId || downloadLoading.value) return
+  const requestSeq = ++downloadRequestSeq
+  const owner = getConversationOwner()
+  const ownsRequest = () => requestSeq === downloadRequestSeq && ownsConversationOwner(owner)
+  downloadLoading.value = true
+  downloadError.value = ''
+  try {
+    const res = await getDocumentDownloadUrl(fileId, { silent: true })
+    if (!ownsRequest()) return
+    const payload = (res.data as { data?: DocumentDownloadUrl } | undefined)?.data
+    if (!payload?.downloadUrl || !Number.isFinite(payload.expiresIn) || payload.expiresIn <= 0) {
+      throw new Error('invalid download URL response')
+    }
+    const trustedUrl = parseTrustedDownloadUrl(payload.downloadUrl)
+    if (!trustedUrl) throw new Error('untrusted download URL')
+    // 只打开通过校验的原始预签名 URL，不追加 JWT，也不记录完整签名 URL。
+    window.open(trustedUrl, '_blank', 'noopener,noreferrer')
+  } catch (error) {
+    if (!ownsRequest()) return
+    const data = (error as { response?: { data?: { detail?: unknown; message?: unknown } } })
+      .response?.data
+    const serverMessage = [data?.detail, data?.message].find((value) => (
+      typeof value === 'string' && value.length > 0
+    ))
+    downloadError.value = (serverMessage as string | undefined) || t('chat.downloadFailed')
+  } finally {
+    if (ownsRequest()) downloadLoading.value = false
+  }
 }
 
 const getConnectionStatusText = (status?: string) => {
@@ -609,6 +656,7 @@ const handleOpenSource = async (source: KnowledgeSource) => {
   const docId = source?.documentId
   if (docId === undefined || docId === null || docId === '') return
   const id = String(docId)
+  resetDownloadState()
   showPreviewModal.value = true
   previewLoading.value = true
   previewDoc.value = { id, filename: source.filename }

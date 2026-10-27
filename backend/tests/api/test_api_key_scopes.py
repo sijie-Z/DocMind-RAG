@@ -59,6 +59,7 @@ SCOPED_GET_PATHS = [
     "/api/v1/knowledge/graph",
     DOCUMENT,
     f"{DOCUMENT}/content",
+    f"{DOCUMENT}/download-url",
     f"{DOCUMENT}/download",
 ]
 
