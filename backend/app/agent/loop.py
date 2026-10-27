@@ -1755,11 +1755,13 @@ class PERAgentLoop:
             and not self.run_failed
             and not self.run_cancelled
         )
+        # 终态必须对 legacy / unified 一致诚实：run 级全败不得被空串伪装成
+        # completed（否则前端默认完成、端点还会把失败占位落成 assistant）。
         yield AgentEvent(
             type="done",
             plan_progress=1.0,
             final_answer=final_output if final_succeeded else "",
-            task_state=("failed" if self.run_failed else "completed") if unified else "",
+            task_state="failed" if self.run_failed else "completed",
         )
 
     # ── Checkpoint（issue #201 最小版）────────────────────────────────────

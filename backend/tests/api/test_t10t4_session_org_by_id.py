@@ -641,7 +641,12 @@ class TestAgentHistoryLoadOrgScope:
             yield SimpleNamespace(
                 type="done",
                 content="",
-                to_sse_dict=lambda: {"type": "done", "content": ""},
+                task_state="completed",
+                to_sse_dict=lambda: {
+                    "type": "done",
+                    "content": "",
+                    "task_state": "completed",
+                },
             )
 
         monkeypatch.setattr(agent_service, "chat", _chat)

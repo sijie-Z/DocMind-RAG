@@ -935,6 +935,18 @@ class TestAgentChatSessionOrgSymmetry:
                 content="好的",
                 to_sse_dict=lambda: {"type": "chunk", "content": "好的"},
             )
+            yield SimpleNamespace(
+                type="done",
+                content="",
+                task_id="task-org-symmetry",
+                task_state="completed",
+                to_sse_dict=lambda: {
+                    "type": "done",
+                    "content": "",
+                    "task_id": "task-org-symmetry",
+                    "task_state": "completed",
+                },
+            )
 
         fake_db = _CaptureDbSession()
         monkeypatch.setattr(agent_mod, "AsyncSessionLocal", lambda: _AsyncCtx(fake_db))

@@ -1261,7 +1261,13 @@ class AcpServer:
         return config
 
     async def _save_interaction(
-        self, session_id: str, query: str, answer: str, agent_task_id: str | None = None
+        self,
+        session_id: str,
+        query: str,
+        answer: str,
+        agent_task_id: str | None = None,
+        *,
+        replace_existing_assistant: bool = False,
     ) -> None:
         from app.services.session_service import save_session_interaction
 
@@ -1275,6 +1281,7 @@ class AcpServer:
                 session_factory=self._db_factory,
                 bypass_org=self.is_superuser,
                 agent_task_id=agent_task_id,
+                replace_existing_assistant=replace_existing_assistant,
             )
         except Exception:  # noqa: BLE001 - 落库失败如实记日志，不打断协议流
             logger.error("ACP save interaction failed (session=%s)", session_id, exc_info=True)
@@ -1302,7 +1309,11 @@ class AcpServer:
                     query = await self._task_query(task_id)
                     if query:
                         await self._save_interaction(
-                            state.session_id, query, "".join(answer), state.active_task_id
+                            state.session_id,
+                            query,
+                            "".join(answer),
+                            state.active_task_id,
+                            replace_existing_assistant=True,
                         )
             except RPCError as exc:
                 logger.warning("ACP session/resume run failed: %s", exc.message)

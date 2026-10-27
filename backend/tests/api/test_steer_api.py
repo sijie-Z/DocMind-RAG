@@ -335,7 +335,7 @@ async def test_full_ring_steer_during_waiting_approval_merges_into_resume(
                 applied = [p for p in p2 if p.get("type") == "steer_applied"]
                 assert applied and applied[0]["content"] == STEER
                 assert any(p.get("type") == "tool_result" for p in p2)
-                assert p2[-1].get("type") == "done" and "task_state" not in p2[-1]
+                assert p2[-1].get("type") == "done" and p2[-1].get("task_state") == "completed"
 
                 # 恢复执行里新发的 LLM 调用（审批重跑步骤）携带指导
                 new_prompts = [m[0]["content"] for m in captured[n_calls_before:]]

@@ -257,7 +257,7 @@ async def test_pause_then_approve_executes(db_factory, fake_redis, monkeypatch, 
         assert any(p.get("type") == "tool_result" for p in p2)
         done2 = p2[-1]
         assert done2["type"] == "done" and done2.get("decision") == "approve"
-        assert "task_state" not in done2
+        assert done2.get("task_state") == "completed"
         assert spy.await_count == 2, "两步各执行一次工具"
 
     g2 = await client.get(f"/api/v1/agent/tasks/{tid}")

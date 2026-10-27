@@ -716,6 +716,10 @@ async def resume_agent_task(
                         answers.answer,
                         bypass_org=bool(getattr(current_user, "is_superuser", False)),
                         agent_task_id=task_id,
+                        # Resume/approval completion is the authoritative answer
+                        # for this task: correct a stale failure-derived assistant
+                        # row left by older legacy builds without adding a row.
+                        replace_existing_assistant=True,
                     )
                     if answers.answer and assistant_message_id is None:
                         save_error = "session_save_rejected"
@@ -894,6 +898,10 @@ async def decide_agent_task_approval(
                         answers.answer,
                         bypass_org=bool(getattr(current_user, "is_superuser", False)),
                         agent_task_id=task_id,
+                        # Resume/approval completion is the authoritative answer
+                        # for this task: correct a stale failure-derived assistant
+                        # row left by older legacy builds without adding a row.
+                        replace_existing_assistant=True,
                     )
                     if answers.answer and assistant_message_id is None:
                         save_error = "session_save_rejected"
@@ -1119,6 +1127,10 @@ async def decide_agent_task_plan_approval(
                         answers.answer,
                         bypass_org=bool(getattr(current_user, "is_superuser", False)),
                         agent_task_id=task_id,
+                        # Resume/approval completion is the authoritative answer
+                        # for this task: correct a stale failure-derived assistant
+                        # row left by older legacy builds without adding a row.
+                        replace_existing_assistant=True,
                     )
                     if answers.answer and assistant_message_id is None:
                         save_error = "session_save_rejected"
@@ -1907,12 +1919,12 @@ async def _load_session_messages(
 
 
 def _final_save_allowed(last_event_type: str, answers: FinalAnswerAccumulator) -> bool:
-    return (
-        last_event_type
-        not in ("approval_required", "run_cancelled", "plan_approval_required", "error")
-        and not answers.blocked
-        and answers.task_state != "failed"
-    )
+    """Only an explicit successful terminal frame may persist an assistant row.
+
+    A truncated stream, a missing task_state, cancellation/pause/error, or a
+    run-level failure must never be promoted to a replayable answer.
+    """
+    return last_event_type == "done" and answers.task_state == "completed" and not answers.blocked
 
 
 async def _save_session_interaction(
@@ -1925,6 +1937,7 @@ async def _save_session_interaction(
     bypass_org: bool = False,
     agent_task_id: str | None = None,
     create_if_missing: bool | None = None,
+    replace_existing_assistant: bool = False,
 ) -> str | None:
     """兼容包装：实现已提升为 app.services.session_service.save_session_interaction。
 
@@ -1943,4 +1956,5 @@ async def _save_session_interaction(
         bypass_org=bypass_org,
         agent_task_id=agent_task_id,
         create_if_missing=create_if_missing,
+        replace_existing_assistant=replace_existing_assistant,
     )

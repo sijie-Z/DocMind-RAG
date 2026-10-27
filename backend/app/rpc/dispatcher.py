@@ -795,7 +795,13 @@ class RPCService:
         }.get(last_type, "done")
 
     async def _save_interaction(
-        self, session_id: str, prompt: str, answer: str, agent_task_id: str | None = None
+        self,
+        session_id: str,
+        prompt: str,
+        answer: str,
+        agent_task_id: str | None = None,
+        *,
+        replace_existing_assistant: bool = False,
     ) -> None:
         from app.services.session_service import save_session_interaction
 
@@ -809,6 +815,7 @@ class RPCService:
                 session_factory=self._db_factory,
                 bypass_org=self.is_superuser,
                 agent_task_id=agent_task_id,
+                replace_existing_assistant=replace_existing_assistant,
             )
         except Exception:  # noqa: BLE001 - 落库失败如实记日志，不打断 RPC 流
             logger.error("RPC save interaction failed (session=%s)", session_id, exc_info=True)
@@ -956,7 +963,13 @@ class RPCService:
                 async with self._db_factory() as db:
                     task = await checkpoint._load_task_row(db, task_id)
                 if task is not None:
-                    await self._save_interaction(session_id, task.query, answer, task_id)
+                    await self._save_interaction(
+                        session_id,
+                        task.query,
+                        answer,
+                        task_id,
+                        replace_existing_assistant=True,
+                    )
             await self._notify_status(session_id, self._status_for(last_type))
         except asyncio.CancelledError:
             await self._notify_status(session_id, "cancelled")

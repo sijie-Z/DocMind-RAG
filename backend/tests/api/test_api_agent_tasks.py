@@ -217,6 +217,7 @@ def test_resume_saves_session_interaction_with_prefix(client, auth, monkeypatch)
 
     async def _fake_resume(task_id, user_id, *, config=None, claim=True, request_id=None):
         yield AgentEvent(type="chunk", content="后半")
+        yield AgentEvent(type="done", task_id=task_id, task_state="completed")
 
     async def _save(session_id, user_id, query, organization_id, assistant_response="", **kwargs):
         saved.update(

@@ -217,7 +217,7 @@ async def test_full_ring_pause_then_approve_recovers_and_completes(
         assert not any(p["type"] == "approval_required" for p in p2)
         done2 = p2[-1]
         assert done2["type"] == "done" and done2.get("decision") == "approve"
-        assert "task_state" not in done2, "正常完成不盖暂停/取消章"
+        assert done2.get("task_state") == "completed", "正常完成必须显式盖章成功终态"
 
         assert spy.await_count == 1
         assert spy.await_args.args[0] == _TASK_KW
