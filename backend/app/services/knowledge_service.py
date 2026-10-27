@@ -249,7 +249,9 @@ class KnowledgeService:
         契约（P1-1，与 worker 替换链共用 ``document_status`` 的严格解析）：
         - ``delete_by_query`` 响应必须严格成功：falsy/None、``failures``、
           ``_shards.failures``、``_shards.failed>0``、``timed_out``、非法/缺失
-          元数据任一出现都不得当作成功（空响应 != 删除成功）；
+          关键元数据（``deleted``/``failures``/``timed_out``）任一出现都不得
+          当作成功（空响应 != 删除成功）。``_shards`` 在 ES 的 delete_by_query
+          响应中不保证出现，缺失时由随后的 refresh+count 回读兜底；
         - 删除后显式 refresh 并回读 ``count(document_id)==0``；回读失败或仍有
           chunk 时同样返回 False —— 只有「可见删除」才允许放行 DB 删除。
 

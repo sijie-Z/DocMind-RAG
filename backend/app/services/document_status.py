@@ -37,19 +37,29 @@ def require_delete_by_query_response(response, *, context: str) -> int:
     - malformed metadata (wrong types, negative numbers, unreadable mappings) is a
       failure — a response is not "probably fine" just because it parses.
 
-    ``deleted`` is required; absent optional shard/timeout fields are treated the
-    same way as in ``require_count_response`` (empty/zero), which keeps the two
-    parsers aligned. Real Elasticsearch always returns them.
+    Required fields: ``deleted``, ``failures`` and ``timed_out``. Elasticsearch's
+    delete-by-query response always contains all three, so a response missing any
+    of them is truncated/malformed and must not pass ("all missing metadata
+    fails"). ``_shards`` is the one deliberate exception: the canonical
+    delete-by-query response does not always include it, so its absence is
+    tolerated; when present, any failed shard or shard-failure detail rejects the
+    response. This narrow tolerance is only safe because every caller pairs the
+    parser with an explicit refresh + ``count(document_id) == 0`` readback — the
+    readback is the final proof that deletion is visible, not the shard summary.
     """
     if not response:
         raise RuntimeError(f"{context}: empty/false response")
     try:
         deleted = response["deleted"]
-        failures = response.get("failures", [])
-        shards = response.get("_shards", {})
-        shard_failures = shards.get("failures", [])
-        failed_shards = shards.get("failed", 0)
-        timed_out = response.get("timed_out", False)
+        failures = response["failures"]
+        timed_out = response["timed_out"]
+        shards = response.get("_shards")
+        if shards is None:
+            shard_failures = []
+            failed_shards = 0
+        else:
+            shard_failures = shards.get("failures", [])
+            failed_shards = shards.get("failed", 0)
     except (AttributeError, KeyError, IndexError, TypeError, ValueError) as e:
         raise RuntimeError(f"{context}: missing or invalid delete response") from e
 

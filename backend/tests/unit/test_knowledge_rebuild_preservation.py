@@ -74,16 +74,21 @@ class FakeES:
         if self.delete_fault == "false":
             return False
         if self.delete_fault == "failures":
-            return {"failures": [{"cause": "injected shard failure"}], "deleted": deleted}
+            return {
+                "failures": [{"cause": "injected shard failure"}],
+                "deleted": deleted,
+                "timed_out": False,
+            }
         if self.delete_fault == "shard_failures":
             return {
                 "failures": [],
                 "deleted": deleted,
+                "timed_out": False,
                 "_shards": {"total": 2, "successful": 1, "failed": 1},
             }
         if self.delete_fault == "timed_out":
             return {"failures": [], "deleted": deleted, "timed_out": True}
-        return {"failures": [], "deleted": deleted}
+        return {"failures": [], "deleted": deleted, "timed_out": False}
 
     async def search(self, *, index, query):
         sources = [source for source in self.docs.values() if _matches(source, query)]

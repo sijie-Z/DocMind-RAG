@@ -28,6 +28,7 @@ from app.exceptions import AppError, ServiceUnavailableError
 from app.models.document import Document, DocumentChunk, DocumentStatus, DocumentTag, DocumentType
 from app.models.knowledge_job import KnowledgeProcessingJob
 from app.rag.cache import RetrievalCache, SemanticCache
+from app.services.document_status import require_delete_by_query_response
 
 ORG_ID = 1
 OLD_CONTENT = "政策：已删除的机密条款"
@@ -81,6 +82,37 @@ def _strict_count(count):
         "timed_out": False,
         "_shards": {"total": 1, "successful": 1, "failed": 0, "failures": []},
     }
+
+
+def test_delete_response_without_shards_is_accepted_with_readback_proof():
+    """ES delete_by_query 规范响应可能不含 ``_shards``。
+
+    该宽容是显式契约：缺 ``_shards`` 时仍要求 ``deleted``/``failures``/
+    ``timed_out`` 齐全，并由调用方 refresh + count==0 回读作为删除可见的最终
+    证明（见 helper docstring）。
+    """
+    assert (
+        require_delete_by_query_response(
+            {"deleted": 0, "failures": [], "timed_out": False}, context="test"
+        )
+        == 0
+    )
+
+
+@pytest.mark.parametrize(
+    "response",
+    [
+        {"deleted": 0, "failures": []},  # 缺 timed_out
+        {"deleted": 0, "timed_out": False},  # 缺 failures
+        {"deleted": 0},  # 缺 failures + timed_out
+        {"failures": [], "timed_out": False},  # 缺 deleted
+        {"deleted": 0, "failures": [], "timed_out": False, "_shards": {"failed": 1}},
+    ],
+)
+def test_delete_response_missing_or_failing_required_metadata_rejected(response):
+    """缺失关键元数据（deleted/failures/timed_out）或 shard 失败必须拒绝。"""
+    with pytest.raises(RuntimeError):
+        require_delete_by_query_response(response, context="test")
 
 
 class _FakeES:
@@ -451,6 +483,65 @@ async def test_file_cleanup_failure_reports_pending_honestly(
     # DB/ES 的删除是已提交事实，不得因文件失败回滚或谎报未删除
     assert delete_harness.state.commits == ["commit"]
     assert fake_es.chunks == {}
+    assert await _database_state(delete_harness.factory, document_id) == {
+        "documents": 0,
+        "chunks": 0,
+        "jobs": 0,
+    }
+
+
+@pytest.mark.asyncio
+async def test_minio_failure_with_local_copy_removed_still_reports_pending(
+    delete_harness, monkeypatch, tmp_path
+):
+    """R2 评审回归：MinIO 报错 + 本地副本删除成功，不得谎报完全清理。
+
+    走真实 ``FileUploadService.delete_file``（不替换 service 方法）：
+    ``remove_object`` 抛连接错误、本地相对路径文件被删除、``stat_object`` 也
+    无法证明远端对象不存在 → delete_file 返回 False → 知识删除链必须标记
+    ``file_cleanup_pending``，审计不得声称完全清理。
+    """
+    import app.services.file_service as fs_mod
+    from app.core.config import settings as app_settings
+
+    document_id = "doc-minio-local"
+    relative_path = f"{ORG_ID}/{document_id}.pdf"
+    local_file = tmp_path / relative_path
+    local_file.parent.mkdir(parents=True)
+    local_file.write_bytes(b"%PDF-1.4 fake")
+    monkeypatch.setattr(app_settings, "UPLOAD_DIR", str(tmp_path))
+
+    class _FailingMinio:
+        def remove_object(self, *_args, **_kwargs):
+            raise RuntimeError("minio connection refused")
+
+        def stat_object(self, *_args, **_kwargs):
+            raise RuntimeError("minio stat unavailable")
+
+    monkeypatch.setattr(fs_mod, "minio_client", _FailingMinio())
+
+    await _seed_document(delete_harness.factory, document_id, file_path=relative_path)
+    fake_es = _FakeES([_es_chunk(document_id)])
+    _wire_es(monkeypatch, fake_es)
+    service = ks_mod.KnowledgeService()
+    knowledge_api, audit = _wire_single_endpoint(monkeypatch, service, document_id)
+
+    response = await knowledge_api.delete_knowledge_document(
+        document_id,
+        current_user=SimpleNamespace(id=1),
+        db=SimpleNamespace(),
+    )
+
+    assert response == {
+        "success": True,
+        "message": "删除成功，文件清理待重试",
+        "file_cleanup_pending": True,
+    }
+    assert not local_file.exists(), "本地副本应已被删除（但远端状态未证明）"
+    audit.assert_awaited_once()
+    detail = audit.await_args.kwargs["detail"]
+    assert "file_cleanup_pending" in detail
+    assert "完全清理" not in detail
     assert await _database_state(delete_harness.factory, document_id) == {
         "documents": 0,
         "chunks": 0,

@@ -225,6 +225,94 @@ class TestDeleteFile:
     @pytest.mark.asyncio
     @patch("app.services.file_service.minio_client")
     @patch("app.services.file_service.Path")
+    async def test_minio_failure_with_local_copy_removed_still_pending(
+        self, mock_path_cls, mock_minio, svc
+    ):
+        """R2 评审回归：MinIO 报错时本地副本删掉也不能直接算清理完成。
+
+        stat 无法证明远端对象不存在（连接错误）→ 保守返回 False，调用方据此
+        标记 file_cleanup_pending。修复前 ``minio_removed or local_removed``
+        会把这种半清理谎报成完全成功。
+        """
+        mock_minio.remove_object.side_effect = Exception("connection refused")
+        mock_minio.stat_object.side_effect = Exception("stat unavailable")
+        mock_path_instance = MagicMock()
+        mock_path_instance.is_absolute.return_value = False
+        mock_path_instance.exists.return_value = True
+        mock_path_instance.is_file.return_value = True
+        mock_path_cls.return_value = mock_path_instance
+
+        with patch("app.services.file_service.os"):
+            result = await svc.delete_file("1/doc.pdf")
+
+        assert result is False
+        mock_minio.stat_object.assert_called_once_with("1/doc.pdf")
+
+    @pytest.mark.asyncio
+    @patch("app.services.file_service.minio_client")
+    @patch("app.services.file_service.Path")
+    async def test_minio_failure_with_remote_object_present_is_pending(
+        self, mock_path_cls, mock_minio, svc
+    ):
+        """stat 证明远端对象仍存在 → 即使本地副本已删也必须 pending。"""
+        mock_minio.remove_object.side_effect = Exception("connection refused")
+        mock_minio.stat_object.return_value = object()
+        mock_path_instance = MagicMock()
+        mock_path_instance.is_absolute.return_value = False
+        mock_path_instance.exists.return_value = True
+        mock_path_instance.is_file.return_value = True
+        mock_path_cls.return_value = mock_path_instance
+
+        with patch("app.services.file_service.os"):
+            result = await svc.delete_file("1/doc.pdf")
+
+        assert result is False
+
+    @pytest.mark.asyncio
+    @patch("app.services.file_service.minio_client")
+    @patch("app.services.file_service.Path")
+    async def test_minio_failure_with_stat_proven_absent_is_success(
+        self, mock_path_cls, mock_minio, svc
+    ):
+        """stat 明确返回 NoSuchKey（远端确实不存在）才允许算清理完成。"""
+
+        class _MissingObject(Exception):
+            code = "NoSuchKey"
+
+        mock_minio.remove_object.side_effect = Exception("connection refused")
+        mock_minio.stat_object.side_effect = _MissingObject("not found")
+        mock_path_instance = MagicMock()
+        mock_path_instance.is_absolute.return_value = False
+        mock_path_instance.exists.return_value = True
+        mock_path_instance.is_file.return_value = True
+        mock_path_cls.return_value = mock_path_instance
+
+        with patch("app.services.file_service.os"):
+            result = await svc.delete_file("1/doc.pdf")
+
+        assert result is True
+
+    @pytest.mark.asyncio
+    @patch("app.services.file_service.minio_client")
+    @patch("app.services.file_service.Path")
+    async def test_local_only_absolute_path_preserved(self, mock_path_cls, mock_minio, svc):
+        """纯本地文件（绝对路径）无远端对象：MinIO 报错不影响既有语义。"""
+        mock_minio.remove_object.side_effect = Exception("invalid object name")
+        mock_path_instance = MagicMock()
+        mock_path_instance.is_absolute.return_value = True
+        mock_path_instance.exists.return_value = True
+        mock_path_instance.is_file.return_value = True
+        mock_path_cls.return_value = mock_path_instance
+
+        with patch("app.services.file_service.os"):
+            result = await svc.delete_file("D:/uploads/local-only.pdf")
+
+        assert result is True
+        mock_minio.stat_object.assert_not_called()
+
+    @pytest.mark.asyncio
+    @patch("app.services.file_service.minio_client")
+    @patch("app.services.file_service.Path")
     async def test_extracts_object_name_from_url(self, mock_path_cls, mock_minio, svc):
         mock_path_instance = MagicMock()
         mock_path_instance.is_absolute.return_value = True
