@@ -99,6 +99,7 @@ def _extract_agent_sources(tool_result: str, sources: list[dict]) -> None:
     解析，供滚动升级期间旧格式输出使用。DEPRECATED — 下一个 minor 移除。
     """
     from app.agent.core_tools import SEARCH_RESULTS_PAYLOAD_KIND
+    from app.rag.source_provenance import provenance_of
 
     try:
         payload = json.loads(tool_result)
@@ -129,6 +130,8 @@ def _extract_agent_sources(tool_result: str, sources: list[dict]) -> None:
                         "rank": len(sources) + 1,
                         "content": "",
                         "documentId": str(item.get("documentId") or ""),
+                        "chunkId": str(item.get("chunkId") or ""),
+                        "textProvenance": provenance_of(item),
                     }
                 )
         return
@@ -151,6 +154,8 @@ def _extract_agent_sources(tool_result: str, sources: list[dict]) -> None:
                     "rank": len(sources) + 1,
                     "content": "",
                     "documentId": "",
+                    "chunkId": "",
+                    "textProvenance": provenance_of({}),
                 }
             )
 

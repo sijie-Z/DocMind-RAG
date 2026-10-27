@@ -38,6 +38,7 @@ from app.agent.exec_context import ExecutionContext
 from app.agent.loop import PERAgentLoop
 from app.agent.planner import Plan, PlanStep
 from app.agent.service import AgentService, build_referenced_document_context
+from app.core.config import settings
 from app.core.database import Base
 from app.core.elasticsearch import ElasticsearchTools
 from app.models.document import Document, DocumentType
@@ -68,11 +69,51 @@ class _FakePipeline:
         if self.fail:
             raise RuntimeError("ES 不可用（替身）")
         results = [
-            {"document_id": did, "text": t, "snippet": t[:50], "score": 0.9}
+            {
+                "document_id": did,
+                "text": t,
+                "prompt_text": t,
+                "original_text": t,
+                "text_provenance": "parser_original",
+                "snippet": t[:50],
+                "score": 0.9,
+            }
             for did in (document_ids or [])
             for t in self.texts.get(did, [])
         ]
         return results, None
+
+
+class _FixedPipeline:
+    def __init__(self, results: list[dict]):
+        self.results = results
+
+    async def search_knowledge_base(self, *_args, **_kwargs):
+        return [dict(item) for item in self.results], None
+
+
+LEGACY_TEXT = "银河公司2099年颁布；审计保留十年。legacy E"
+ORIGINAL_TEXT = "审计日志保留期限为五年。"
+
+
+def _hybrid_chunk(*, original: bool) -> dict:
+    chunk = {
+        "document_id": "d1",
+        "text": LEGACY_TEXT if not original else ORIGINAL_TEXT,
+        "prompt_text": LEGACY_TEXT if not original else ORIGINAL_TEXT,
+        "snippet": LEGACY_TEXT if not original else ORIGINAL_TEXT,
+        "score": 0.9,
+    }
+    if original:
+        chunk.update({"original_text": ORIGINAL_TEXT, "text_provenance": "parser_original"})
+    return chunk
+
+
+def _es_chunk(*, original: bool) -> dict:
+    chunk = {"content": LEGACY_TEXT if not original else ORIGINAL_TEXT}
+    if original:
+        chunk.update({"original_text": ORIGINAL_TEXT, "text_provenance": "parser_original"})
+    return {"_source": chunk}
 
 
 class _FakeMemory:
@@ -271,8 +312,20 @@ class TestBuildReferencedDocumentContext:
                 return_value={
                     "hits": {
                         "hits": [
-                            {"_source": {"content": "# Contributing to DocMind\n欢迎贡献……"}},
-                            {"_source": {"content": "行为准则：Contributor Covenant……"}},
+                            {
+                                "_source": {
+                                    "content": "# Contributing to DocMind\n欢迎贡献……",
+                                    "original_text": "# Contributing to DocMind\n欢迎贡献……",
+                                    "text_provenance": "parser_original",
+                                }
+                            },
+                            {
+                                "_source": {
+                                    "content": "行为准则：Contributor Covenant……",
+                                    "original_text": "行为准则：Contributor Covenant……",
+                                    "text_provenance": "parser_original",
+                                }
+                            },
                         ]
                     }
                 }
@@ -290,6 +343,60 @@ class TestBuildReferencedDocumentContext:
         assert ctx is not None and "欢迎贡献" in ctx, "正文必须经直读进入上下文"
         assert warnings == [], "直读成功 = 无降级，不得外发误导性警告"
         assert pipe.calls, "query 检索仍应先执行（相关分块优先，直读是兜底）"
+
+    @pytest.mark.parametrize("mixed", [False, True])
+    async def test_compat_hybrid_legacy_provenance_is_visible(
+        self, doc_factory, monkeypatch, mixed
+    ):
+        await _add_doc(doc_factory, "d7")
+        monkeypatch.setattr(settings, "RAG_SOURCE_PROVENANCE_MODE", "compat")
+        chunks = [_hybrid_chunk(original=False)]
+        if mixed:
+            chunks.append(_hybrid_chunk(original=True))
+        pipe = _FixedPipeline(chunks)
+
+        ctx, warnings = await build_referenced_document_context(["d7"], "q", 1, pipeline=pipe)
+
+        parser_count = 1 if mixed else 0
+        assert ctx is not None
+        assert f"[legacy_unverified] {LEGACY_TEXT}" in ctx
+        assert f"来源状态：parser_original={parser_count}，legacy_unverified=1" in ctx
+        assert "parser_original=2" not in ctx, "混合结果不得整体标成 original"
+        if mixed:
+            assert f"[parser_original] {ORIGINAL_TEXT}" in ctx
+        assert len(warnings) == 1
+        assert "1 个 legacy_unverified 片段" in warnings[0]
+        assert LEGACY_TEXT not in warnings[0], "warning 不得泄漏正文"
+
+    @pytest.mark.parametrize("mixed", [False, True])
+    async def test_compat_direct_fallback_legacy_provenance_is_visible(
+        self, doc_factory, monkeypatch, mixed
+    ):
+        await _add_doc(doc_factory, "d8")
+        monkeypatch.setattr(settings, "RAG_SOURCE_PROVENANCE_MODE", "compat")
+        hits = [_es_chunk(original=False)]
+        if mixed:
+            hits.append(_es_chunk(original=True))
+        monkeypatch.setattr(
+            ElasticsearchTools,
+            "search_documents",
+            AsyncMock(return_value={"hits": {"hits": hits}}),
+        )
+
+        ctx, warnings = await build_referenced_document_context(
+            ["d8"], "q", 1, pipeline=_FixedPipeline([])
+        )
+
+        parser_count = 1 if mixed else 0
+        assert ctx is not None
+        assert f"[legacy_unverified] {LEGACY_TEXT}" in ctx
+        assert f"来源状态：parser_original={parser_count}，legacy_unverified=1" in ctx
+        assert "parser_original=2" not in ctx, "混合结果不得整体标成 original"
+        if mixed:
+            assert f"[parser_original] {ORIGINAL_TEXT}" in ctx
+        assert len(warnings) == 1
+        assert "1 个 legacy_unverified 片段" in warnings[0]
+        assert LEGACY_TEXT not in warnings[0], "warning 不得泄漏正文"
 
     async def test_direct_read_also_empty_keeps_description_fallback_with_warning(
         self,

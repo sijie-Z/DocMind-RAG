@@ -177,6 +177,8 @@ class AttemptOutcome:
                 ):
                     indexed_evidence[index] = content
         evidence = []
+        from app.rag.source_provenance import provenance_of
+
         for source in sources:
             index = source.get("index")
             if not isinstance(index, int) or isinstance(index, bool):
@@ -188,6 +190,8 @@ class AttemptOutcome:
                     "key": f"{call_id}#{index}",
                     "index": index,
                     "content": indexed_evidence[index],
+                    "textProvenance": provenance_of(source),
+                    "chunkId": source.get("chunkId") or "",
                 }
             )
         return sources, evidence
