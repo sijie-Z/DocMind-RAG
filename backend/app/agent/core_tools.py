@@ -21,6 +21,13 @@ from app.agent.registry import (
 from app.agent.run_context import RunContext
 from app.agent.usage import ctx_from_run_context, record_llm_call_error, record_llm_usage
 from app.core.config import ai as ai_config
+from app.core.config import settings
+from app.rag.source_provenance import (
+    LEGACY_UNVERIFIED,
+    SourceProvenanceUnavailableError,
+    filter_original_results,
+    provenance_of,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -51,20 +58,46 @@ SEARCH_RESULTS_PAYLOAD_KIND = "docmind.search_results/v1"
 _AGENT_SEARCH_TOTAL_EVIDENCE_MAX_CHARS = 8000
 
 
+def _provenance_failure(error: SourceProvenanceUnavailableError) -> ToolResult:
+    """Use the existing ToolErrorType while preserving machine-readable provenance state."""
+    return ToolResult.fail(
+        code="invalid_configuration",
+        message=str(error),
+        raw=error.as_dict(),
+    )
+
+
+def _original_hits(hits: list[dict], *, query: str) -> list[dict]:
+    """Apply the shared O gate while retaining full text for direct Agent readers."""
+    return filter_original_results(
+        hits,
+        query=query,
+        mode=settings.RAG_SOURCE_PROVENANCE_MODE,
+        snippet_builder=lambda text, _query: text,
+    )
+
+
+def _entry_parts(entry: tuple) -> list:
+    """Support new seven-field entries and legacy five-field entries honestly."""
+    parts = list(entry)
+    if len(parts) == 5:
+        parts.extend([LEGACY_UNVERIFIED, ""])
+    if len(parts) != 7:
+        raise ValueError("检索 entry 必须为5或7个字段")
+    return parts
+
+
 def _build_search_payload(
-    entries: list[tuple[float, float | None, str, str, str]],
+    entries: list[tuple],
     *,
     include_evidence: bool = False,
 ) -> str:
-    """把 (score, relevance, filename, document_id, snippet) 列表打包为结构化 JSON 信封。
+    """Pack score/relevance/filename/document/text/provenance/chunk into a JSON envelope.
 
-    两个检索工具（search_knowledge_base / vector_search）共用此出口；正文里
-    的任何内容都只能落在 ``content`` 字符串内部，无法伪造 ``sources`` 项。
-
-    issue #185 分数契约：``score`` 是相对排序分（rank），``relevanceScore`` 是
-    重排绝对分（可能为 None，绝不拿 rank 分冒充）；前端来源卡片据此区分
-    「排序序位」与「重排分」。
+    Legacy five-field entries remain accepted and are marked legacy_unverified.
+    Text stays inside content/evidence strings and can never forge source metadata.
     """
+    normalized_entries = [_entry_parts(entry) for entry in entries]
     sources = [
         {
             "index": index,
@@ -72,16 +105,30 @@ def _build_search_payload(
             "relevanceScore": relevance_score,
             "filename": filename,
             "documentId": document_id or "",
+            "textProvenance": text_provenance,
+            "chunkId": chunk_id or "",
         }
-        for index, (score, relevance_score, filename, document_id, _snippet) in enumerate(
-            entries, 1
-        )
+        for index, (
+            score,
+            relevance_score,
+            filename,
+            document_id,
+            _snippet,
+            text_provenance,
+            chunk_id,
+        ) in enumerate(normalized_entries, 1)
     ]
     content = "\n\n".join(
         f"[{index}] ({score:.2f}) {filename}\n{snippet}"
-        for index, (score, _relevance_score, filename, _document_id, snippet) in enumerate(
-            entries, 1
-        )
+        for index, (
+            score,
+            _relevance_score,
+            filename,
+            _document_id,
+            snippet,
+            _text_provenance,
+            _chunk_id,
+        ) in enumerate(normalized_entries, 1)
     )
     payload: dict[str, Any] = {
         "kind": SEARCH_RESULTS_PAYLOAD_KIND,
@@ -98,7 +145,9 @@ def _build_search_payload(
                 _filename,
                 _document_id,
                 snippet,
-            ) in enumerate(entries, 1)
+                _text_provenance,
+                _chunk_id,
+            ) in enumerate(normalized_entries, 1)
         ]
     return json.dumps(payload, ensure_ascii=False)
 
@@ -174,6 +223,8 @@ async def search_knowledge_base(
             document_ids=document_ids,
             search_mode="hybrid",
         )
+    except SourceProvenanceUnavailableError as e:
+        return _provenance_failure(e)
     except RetrievalUnavailableError as e:
         # issue #292：检索故障不得伪装成「没有相关内容」——返回结构化失败，
         # 走 executor 的 tool_error / run_report failures 通道（SSE 发 tool_error，
@@ -218,6 +269,8 @@ async def search_knowledge_base(
                 filename,
                 doc.get("document_id", ""),
                 snippet,
+                provenance_of(doc),
+                doc.get("chunk_id") or "",
             )
         )
     return _build_search_payload(
@@ -264,26 +317,47 @@ async def _vector_search_impl(
                 },
             }
         },
-        "_source": ["content", "filename", "document_id"],
+        "_source": [
+            "content",
+            "original_text",
+            "text_provenance",
+            "filename",
+            "document_id",
+            "chunk_id",
+        ],
     }
     res = await ElasticsearchTools.search_documents(es_query)
     hits = res.get("hits", {}).get("hits", [])
     if not hits:
         return "No semantically similar documents found."
 
+    candidates = [
+        {
+            **(hit.get("_source") or {}),
+            "_score": hit.get("_score"),
+            "_id": hit.get("_id"),
+        }
+        for hit in hits
+    ]
+    try:
+        original_hits = _original_hits(candidates, query=query)
+    except SourceProvenanceUnavailableError as e:
+        return _provenance_failure(e)
+
     entries = []
-    for hit in hits:
-        src = hit.get("_source", {})
+    for src in original_hits:
         entries.append(
             (
-                float(hit.get("_score") or 0.0),
+                float(src.get("_score") or 0.0),
                 # 纯向量臂的分数是 ES script_score（cosine+1），与重排分不同尺度；
                 # 不冒充 relevance，来源卡片按序位展示。
                 None,
                 src.get("filename", "?"),
                 src.get("document_id", ""),
                 # issue #186：300 字上限按语义句抽取，不硬切 chunk 头部。
-                compress(src.get("content") or "", query, max_chars=300),
+                compress(src.get("prompt_text") or "", query, max_chars=300),
+                provenance_of(src),
+                src.get("chunk_id") or src.get("_id") or "",
             )
         )
     return _build_search_payload(
@@ -390,15 +464,22 @@ async def _summarize_document_impl(
             }
         },
         "sort": [{"chunk_index": {"order": "asc"}}],
-        "_source": ["content", "filename"],
+        "_source": ["content", "original_text", "text_provenance", "filename"],
     }
     res = await ElasticsearchTools.search_documents(es_query)
     hits = res.get("hits", {}).get("hits", [])
     if not hits:
         return f"Document {document_id} not found in index."
 
-    full_text = "\n".join(h.get("_source", {}).get("content", "") for h in hits)
-    filename = hits[0].get("_source", {}).get("filename", "Unknown")
+    try:
+        original_chunks = _original_hits(
+            [h.get("_source") or {} for h in hits],
+            query="",
+        )
+    except SourceProvenanceUnavailableError as e:
+        return _provenance_failure(e)
+    full_text = "\n".join(chunk.get("prompt_text") or "" for chunk in original_chunks)
+    filename = original_chunks[0].get("filename", "Unknown") if original_chunks else "Unknown"
 
     # Use LLM to summarize
     pipeline = get_rag_pipeline()
@@ -630,7 +711,7 @@ async def extract_insights(
             }
         },
         "sort": [{"chunk_index": {"order": "asc"}}],
-        "_source": ["content", "filename", "section_title"],
+        "_source": ["content", "original_text", "text_provenance", "filename", "section_title"],
     }
     res = await ElasticsearchTools.search_documents(es_query)
     hits = res.get("hits", {}).get("hits", [])
@@ -643,8 +724,15 @@ async def extract_insights(
             message=f"Document {document_id} not found in index.",
         )
 
-    filename = hits[0].get("_source", {}).get("filename", "Unknown")
-    full_text = "\n".join(h.get("_source", {}).get("content", "") for h in hits)
+    try:
+        original_chunks = _original_hits(
+            [h.get("_source") or {} for h in hits],
+            query="",
+        )
+    except SourceProvenanceUnavailableError as e:
+        return _provenance_failure(e)
+    filename = original_chunks[0].get("filename", "Unknown") if original_chunks else "Unknown"
+    full_text = "\n".join(chunk.get("prompt_text") or "" for chunk in original_chunks)
     text_sample = full_text[:8000]
 
     pipeline = get_rag_pipeline()
@@ -826,7 +914,14 @@ async def cross_document_analysis(
                     ]
                 }
             },
-            "_source": ["content", "filename", "upload_time", "document_id"],
+            "_source": [
+                "content",
+                "original_text",
+                "text_provenance",
+                "filename",
+                "upload_time",
+                "document_id",
+            ],
         }
         try:
             res = await ElasticsearchTools.search_documents(es_query)
@@ -843,23 +938,51 @@ async def cross_document_analysis(
                             ]
                         }
                     },
-                    "_source": ["content", "filename", "upload_time", "document_id"],
+                    "_source": [
+                        "content",
+                        "original_text",
+                        "text_provenance",
+                        "filename",
+                        "upload_time",
+                        "document_id",
+                    ],
                 }
                 res = await ElasticsearchTools.search_documents(fallback_query)
                 hits = res.get("hits", {}).get("hits", [])
             if hits:
-                text = " ".join(h.get("_source", {}).get("content", "")[:500] for h in hits[:10])
-                real_id = hits[0].get("_source", {}).get("document_id", doc_id)
+                original_chunks = _original_hits(
+                    [h.get("_source") or {} for h in hits],
+                    query=analysis_type,
+                )
+                text = " ".join(
+                    (chunk.get("prompt_text") or "")[:500] for chunk in original_chunks[:10]
+                )
+                real_id = (
+                    original_chunks[0].get("document_id", doc_id)
+                    if original_chunks
+                    else hits[0].get("_source", {}).get("document_id", doc_id)
+                )
                 docs_data.append(
                     {
                         "id": real_id,
-                        "filename": hits[0].get("_source", {}).get("filename", doc_id),
+                        "filename": (
+                            original_chunks[0].get("filename", doc_id)
+                            if original_chunks
+                            else hits[0].get("_source", {}).get("filename", doc_id)
+                        ),
                         "text": text[:3000],
-                        "chunks": len(hits),
+                        "chunks": len(original_chunks),
+                        "textProvenance": (
+                            provenance_of(original_chunks[0])
+                            if original_chunks
+                            else LEGACY_UNVERIFIED
+                        ),
                     }
                 )
             else:
                 docs_data.append({"id": doc_id, "filename": "Not found", "text": "", "chunks": 0})
+        except SourceProvenanceUnavailableError as e:
+            return _provenance_failure(e)
         except Exception as e:
             docs_data.append({"id": doc_id, "filename": f"Error: {e}", "text": "", "chunks": 0})
 

@@ -23,10 +23,18 @@ from app.agent.config import AgentConfig
 from app.agent.events import AgentEvent
 from app.agent.loop import PERAgentLoop
 from app.agent.memory_bridge import AgentMemoryBridge
+from app.core.config import settings
 from app.core.database import AsyncSessionLocal
 from app.core.log_safety import log_safe
 from app.core.request_id import get_request_id
 from app.models.agent_task import AgentTask, TaskStatus
+from app.rag.retriever import HybridRetriever
+from app.rag.source_provenance import (
+    SourceProvenanceUnavailableError,
+    filter_original_results,
+    normalize_result_for_evidence,
+    provenance_of,
+)
 from app.services.notification_service import create_notification
 
 logger = logging.getLogger(__name__)
@@ -104,6 +112,7 @@ async def build_referenced_document_context(
         title = doc.title or doc.filename or did
         excerpt = ""
         retrieval_note: str | None = None
+        provenance_error: SourceProvenanceUnavailableError | None = None
         if pipeline is not None:
             try:
                 from app.rag.context_compressor import get_prompt_text
@@ -118,13 +127,16 @@ async def build_referenced_document_context(
                 # snippet 仅作最后兜底。
                 excerpts = [get_prompt_text(r).strip() for r in results[:3]]
                 excerpt = "\n".join(e for e in excerpts if e).strip()
+            except SourceProvenanceUnavailableError as e:
+                provenance_error = e
+                retrieval_note = f"引用文档「{title}」原文尚未迁移，需要重建"
             except Exception as e:
                 logger.warning("引用文档检索失败 %s: %s", did, log_safe(e))
                 retrieval_note = f"引用文档「{title}」内容检索失败"
         else:
             retrieval_note = f"引用文档「{title}」摘要服务不可用"
 
-        if not excerpt:
+        if not excerpt and provenance_error is None:
             # 直读兜底（第四波实机缺陷修复）：用户显式引用了该文档——正文该按
             # document_id 直取，不该押注在 query 检索命中上（"总结这份文档"类
             # 元问题与正文零词汇重叠，质量门会全数滤掉 → 修前只注入标题，实机
@@ -146,16 +158,29 @@ async def build_referenced_document_context(
                             }
                         },
                         "sort": [{"chunk_index": {"order": "asc"}}],
-                        "_source": ["content"],
+                        "_source": ["content", "original_text", "text_provenance"],
                     }
                 )
+                original_chunks = filter_original_results(
+                    [h.get("_source") or {} for h in es_res.get("hits", {}).get("hits", [])],
+                    query=query,
+                    mode=settings.RAG_SOURCE_PROVENANCE_MODE,
+                    snippet_builder=lambda text, _query: text,
+                )
                 excerpt = "\n".join(
-                    (h.get("_source", {}).get("content") or "").strip()
-                    for h in es_res.get("hits", {}).get("hits", [])
+                    (chunk.get("prompt_text") or "").strip() for chunk in original_chunks
                 ).strip()
+            except SourceProvenanceUnavailableError as e:
+                provenance_error = e
+                retrieval_note = f"引用文档「{title}」原文尚未迁移，需要重建"
             except Exception as e:
                 logger.warning("引用文档直读失败 %s: %s", did, log_safe(e))
 
+        if not excerpt and provenance_error is not None:
+            warnings.append(
+                f"引用文档「{title}」原文尚未迁移，需要重建；strict 模式不会把检索增强文本当作原文"
+            )
+            continue
         if not excerpt:
             excerpt = (doc.description or "").strip()
             # 两条检索路径（query 检索 + 直读）都没拿到正文才降级外发警告；
@@ -915,6 +940,13 @@ class AgentService:
                 organization_id=organization_id,
                 top_k=top_k,
             )
+        except SourceProvenanceUnavailableError as e:
+            yield {
+                "type": "error",
+                "content": str(e),
+                "debug_data": e.as_dict(),
+            }
+            return
         except RetrievalUnavailableError as e:
             # issue #292：检索故障不得静默当「没有上下文」——如实告知用户 +
             # 观测留痕（指标/日志），随后不带知识库上下文继续跑 PER 环。
@@ -931,15 +963,27 @@ class AgentService:
             }
 
         if context_docs:
+            normalized_sources = [
+                normalize_result_for_evidence(
+                    doc,
+                    query=query,
+                    mode=settings.RAG_SOURCE_PROVENANCE_MODE,
+                    snippet_builder=HybridRetriever._build_snippet,
+                )
+                for doc in context_docs
+            ]
             yield {
                 "type": "context",
                 "sources": [
                     {
-                        "filename": d.get("filename", "Unknown"),
-                        "score": d.get("score", 0),
-                        "snippet": d.get("snippet", "")[:200],
+                        "filename": doc.get("filename", "Unknown"),
+                        "score": doc.get("score", 0),
+                        "snippet": doc.get("snippet", "")[:200],
+                        "documentId": doc.get("document_id") or "",
+                        "chunkId": doc.get("chunk_id") or "",
+                        "textProvenance": provenance_of(doc),
                     }
-                    for d in context_docs
+                    for doc in normalized_sources
                 ],
             }
 

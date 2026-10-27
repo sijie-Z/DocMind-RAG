@@ -121,5 +121,7 @@ def test_legacy_plaintext_format_still_parsed_for_one_minor():
             "rank": 1,
             "content": "",
             "documentId": "",
+            "chunkId": "",
+            "textProvenance": "legacy_unverified",
         }
     ]
