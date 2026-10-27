@@ -207,7 +207,12 @@ class TestDeleteFile:
     @pytest.mark.asyncio
     @patch("app.services.file_service.minio_client")
     @patch("app.services.file_service.Path")
-    async def test_handles_minio_failure_gracefully(self, mock_path_cls, mock_minio, svc):
+    async def test_reports_minio_failure_without_local_copy(self, mock_path_cls, mock_minio, svc):
+        """MinIO 删除失败且无本地文件可删 → False（调用方标记 cleanup_pending）。
+
+        修复前这里恒返回 True：注释假设「文件可能只在本地」，但生产对象都在
+        MinIO —— 吞掉失败会让删除接口谎报清理完成。
+        """
         mock_minio.remove_object.side_effect = Exception("connection refused")
         mock_path_instance = MagicMock()
         mock_path_instance.is_absolute.return_value = True
@@ -215,8 +220,7 @@ class TestDeleteFile:
         mock_path_cls.return_value = mock_path_instance
 
         result = await svc.delete_file("some/path.pdf")
-        # Should still return True even if MinIO fails (file might be local only)
-        assert result is True
+        assert result is False
 
     @pytest.mark.asyncio
     @patch("app.services.file_service.minio_client")

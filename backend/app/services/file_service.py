@@ -9,7 +9,7 @@ import math
 import os
 import uuid
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from fastapi import HTTPException, UploadFile
 from sqlalchemy import and_, func, select
@@ -20,6 +20,9 @@ from app.core.minio_client import minio_client
 from app.exceptions import AppError, ValidationError
 from app.models.document import Document, DocumentStatus, DocumentType
 from app.services.document_parser import DocumentParser
+
+if TYPE_CHECKING:
+    from app.services.knowledge_service import DeleteOutcome
 
 logger = logging.getLogger(__name__)
 
@@ -219,12 +222,19 @@ class FileUploadService:
         """
         从存储中删除文件 (支持 MinIO 和 本地文件)
 
+        返回「是否已确认删除」：MinIO 删除失败且本地也没有可删除的文件时返回
+        False。此前无论 MinIO 成败都返回 True（注释假设「文件可能只在本地」），
+        但生产对象都存在 MinIO —— 吞掉失败会让删除接口谎报清理完成。调用方
+        （knowledge 删除链）据此标记 ``file_cleanup_pending``。
+
         Args:
             file_path: 文件路径或对象名称
 
         Returns:
-            是否删除成功
+            是否已确认从至少一个存储位置删除
         """
+        minio_removed = False
+        minio_error: Exception | None = None
         try:
             # 1. 尝试从 MinIO 删除
             try:
@@ -234,19 +244,31 @@ class FileUploadService:
                 object_name = normalize_object_name(file_path)
 
                 minio_client.remove_object(object_name)
+                minio_removed = True
                 logger.info(f"已从 MinIO 删除文件: {object_name}")
             except Exception as e:
+                minio_error = e
                 logger.warning(f"从 MinIO 删除文件失败 (可能文件不存在): {str(e)}")
 
             # 2. 尝试从本地文件系统删除 (如果存在)
+            local_removed = False
             local_path = Path(file_path)
             if not local_path.is_absolute():
                 local_path = Path(settings.UPLOAD_DIR) / file_path
 
             if local_path.exists() and local_path.is_file():
                 os.remove(local_path)
+                local_removed = True
                 logger.info(f"已从本地文件系统删除文件: {local_path}")
 
+            if minio_removed or local_removed:
+                return True
+            if minio_error is not None:
+                logger.error(
+                    f"文件清理未完成（MinIO 删除失败且无本地文件可删）: {file_path}: "
+                    f"{type(minio_error).__name__}: {minio_error}"
+                )
+                return False
             return True
         except Exception as e:
             logger.error(f"删除文件失败: {str(e)}")
@@ -841,7 +863,9 @@ class FileUploadService:
             logger.error(f"获取文档列表失败: {str(e)}")
             raise HTTPException(status_code=500, detail=f"获取文档列表失败: {str(e)}")
 
-    async def delete_document(self, document_id: str, organization_id: str, user_id: str) -> bool:
+    async def delete_document(
+        self, document_id: str, organization_id: str, user_id: str
+    ) -> "DeleteOutcome":
         """删除文档（兼容包装 —— 已并入 knowledge 统一删除链路，#416）。
 
         旧实现只删 ``documents`` 主表：MySQL 下会被 ``document_tags`` /

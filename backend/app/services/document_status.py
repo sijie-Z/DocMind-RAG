@@ -24,6 +24,51 @@ from app.models.document import Document, DocumentStatus
 logger = logging.getLogger(__name__)
 
 
+def require_delete_by_query_response(response, *, context: str) -> int:
+    """Return the deleted count only when a ``delete_by_query`` response is trustworthy.
+
+    Same strictness contract as :func:`require_count_response`, shared by every
+    ``delete_by_query`` caller (document deletion chain and worker replacement)
+    so the two paths cannot drift apart again:
+
+    - falsy/``None``/``False``/``{}`` responses are failures;
+    - ``failures`` / ``_shards.failures`` / ``_shards.failed > 0`` / ``timed_out``
+      are failures even if ``deleted`` looks plausible;
+    - malformed metadata (wrong types, negative numbers, unreadable mappings) is a
+      failure — a response is not "probably fine" just because it parses.
+
+    ``deleted`` is required; absent optional shard/timeout fields are treated the
+    same way as in ``require_count_response`` (empty/zero), which keeps the two
+    parsers aligned. Real Elasticsearch always returns them.
+    """
+    if not response:
+        raise RuntimeError(f"{context}: empty/false response")
+    try:
+        deleted = response["deleted"]
+        failures = response.get("failures", [])
+        shards = response.get("_shards", {})
+        shard_failures = shards.get("failures", [])
+        failed_shards = shards.get("failed", 0)
+        timed_out = response.get("timed_out", False)
+    except (AttributeError, KeyError, IndexError, TypeError, ValueError) as e:
+        raise RuntimeError(f"{context}: missing or invalid delete response") from e
+
+    if not isinstance(failures, list) or not isinstance(shard_failures, list):
+        raise RuntimeError(f"{context}: invalid failure details")
+    if not isinstance(timed_out, bool):
+        raise RuntimeError(f"{context}: invalid timed_out={timed_out!r}")
+    if isinstance(failed_shards, bool) or not isinstance(failed_shards, int) or failed_shards < 0:
+        raise RuntimeError(f"{context}: invalid failed_shards={failed_shards!r}")
+    if isinstance(deleted, bool) or not isinstance(deleted, int) or deleted < 0:
+        raise RuntimeError(f"{context}: invalid deleted={deleted!r}")
+    if failures or shard_failures or failed_shards or timed_out:
+        raise RuntimeError(
+            f"{context}: failures={failures!r}, shard_failures={shard_failures!r}, "
+            f"failed_shards={failed_shards}, timed_out={timed_out}"
+        )
+    return deleted
+
+
 def require_count_response(response, *, context: str) -> int:
     """Return a non-negative ES count only when the response is fully trustworthy.
 

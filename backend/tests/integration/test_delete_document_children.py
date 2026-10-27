@@ -262,7 +262,9 @@ async def test_delete_clears_all_three_child_tables(seeded_document):
         "knowledge_processing_jobs": 1,
     }, f"种子不符（测试自身问题，非被测代码）: {before}"
 
-    assert await ks_mod.knowledge_service.delete_knowledge_thoroughly(doc_id, org_id) is True
+    outcome = await ks_mod.knowledge_service.delete_knowledge_thoroughly(doc_id, org_id)
+    assert outcome.success is True
+    assert outcome.file_cleanup_pending is False
 
     after = await _counts(doc_id)
     assert after == {
@@ -314,8 +316,29 @@ def _pinned_externals(monkeypatch):
         return None
 
     class _FakeES:
+        """严格删除契约：delete_by_query 成功响应 + refresh/回读 count==0。"""
+
+        def __init__(self):
+            self.indices = self
+
         async def delete_by_query(self, **_kwargs):
-            return {"deleted": 0, "failures": []}
+            return {
+                "deleted": 0,
+                "failures": [],
+                "timed_out": False,
+                "_shards": {"failed": 0, "failures": []},
+            }
+
+        async def count(self, **_kwargs):
+            return {
+                "count": 0,
+                "failures": [],
+                "timed_out": False,
+                "_shards": {"failed": 0, "failures": []},
+            }
+
+        async def refresh(self, **_kwargs):
+            pass
 
     monkeypatch.setattr(es_module._holder, "initialize", _noop_initialize)
     monkeypatch.setattr(es_module._holder, "_client", _FakeES())

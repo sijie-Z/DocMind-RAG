@@ -26,7 +26,10 @@ from app.models.document import Document, DocumentChunk, DocumentStatus
 from app.models.knowledge_job import KnowledgeJobStatus, KnowledgeProcessingJob
 from app.services.clause_refs import extract_clause_fields
 from app.services.document_parser import document_service
-from app.services.document_status import require_count_response
+from app.services.document_status import (
+    require_count_response,
+    require_delete_by_query_response,
+)
 from app.services.document_status import verify_indexed as _verify_indexed
 from app.services.embedding_service import embedding_service
 
@@ -522,30 +525,16 @@ class DocumentProcessor:
         client = await get_elasticsearch()
         # delete 开始后的失败不在本阶段旧版保留承诺内。响应没有异常并不
         # 等于删除成功：false/空响应、shard failures、超时都必须 fail closed。
+        # 严格解析与知识库删除链共用同一实现（document_status），避免再次漂移。
         doc._es_delete_started = True
         delete_response = await client.delete_by_query(
             index=settings.ELASTICSEARCH_INDEX_NAME,
             query={"term": {"document_id": doc.id}},
             refresh=True,
         )
-        if not delete_response:
-            raise RuntimeError(f"ES delete failed for document {doc.id}: empty/false response")
-        try:
-            failures = delete_response.get("failures") or []
-            shards = delete_response.get("_shards") or {}
-            shard_failures = shards.get("failures") or []
-            failed_shards = int(shards.get("failed", 0) or 0)
-            timed_out = bool(delete_response.get("timed_out", False))
-        except (AttributeError, TypeError, ValueError) as e:
-            raise RuntimeError(
-                f"ES delete failed for document {doc.id}: unreadable response"
-            ) from e
-        if failures or shard_failures or failed_shards or timed_out:
-            raise RuntimeError(
-                f"ES delete failed for document {doc.id}: failures={failures!r}, "
-                f"shard_failures={shard_failures!r}, failed_shards={failed_shards}, "
-                f"timed_out={timed_out}"
-            )
+        require_delete_by_query_response(
+            delete_response, context=f"ES delete failed for document {doc.id}"
+        )
 
         # 即使响应看似成功，也必须在 bulk 前回读确认旧 chunk 已清零；否则
         # 「部分删除 + 部分 bulk」可能碰巧达到预期总数并混入旧版。

@@ -771,20 +771,36 @@ async def delete_knowledge_document(
         doc = await get_document_for_user(db, current_user, document_id)
 
         # 3. 调用 service 彻底删除。
-        # service 成功返回 True / 抛带原始原因的 AppError（issue #174）——
+        # service 成功返回 DeleteOutcome / 抛带原始原因的 AppError（issue #174）——
         # 失败原因经由下面的 AppError 放行分支原样到 500 响应体，不再被吞成
         # 笼统的「删除失败」。文档不存在在 get_document_for_user 处已 404。
-        await knowledge_service.delete_knowledge(document_id, doc.organization_id)
+        outcome = await knowledge_service.delete_knowledge(document_id, doc.organization_id)
+        success = bool(outcome)
+        if not success:
+            # service 当前只会返回成功 outcome 或抛错；保留兜底，避免将来出现
+            # 失败返回值时端点谎报成功。
+            raise ServiceUnavailableError("文档删除未完成，请重试")
+        cleanup_pending = bool(getattr(outcome, "file_cleanup_pending", False))
 
+        detail = f"删除知识库文档: {doc.filename}"
+        if cleanup_pending:
+            # P2-3：DB/ES 已删但物理对象残留时如实留痕，不声称全部清理完成。
+            detail += "（文件清理待重试 file_cleanup_pending）"
         await audit_service.log_activity(
             user_id=current_user.id,
             action="delete_document",
             target_type="document",
             target_id=str(document_id),
-            detail=f"删除知识库文档: {doc.filename}",
+            detail=detail,
             db=db,
         )
 
+        if cleanup_pending:
+            return {
+                "success": True,
+                "message": "删除成功，文件清理待重试",
+                "file_cleanup_pending": True,
+            }
         return {"success": True, "message": "删除成功"}
 
     except (AppError, NotFoundError, ValidationError, AuthorizationError, ConflictError):
@@ -822,12 +838,17 @@ async def batch_delete_documents(
             document_id for document_id in request.document_ids if document_id not in failed_ids
         ]
         if deleted_ids:
+            detail = f"批量成功删除 {len(deleted_ids)} 个知识库文档"
+            pending_ids = results.get("file_cleanup_pending_ids") or []
+            if pending_ids:
+                # P2-3：批量里个别文件清理未完成时必须如实留痕。
+                detail += f"（{len(pending_ids)} 个文档的文件清理待重试 file_cleanup_pending）"
             await audit_service.log_activity(
                 user_id=current_user.id,
                 action="delete_document",
                 target_type="document",
                 target_id=",".join(deleted_ids),
-                detail=f"批量成功删除 {len(deleted_ids)} 个知识库文档",
+                detail=detail,
                 db=db,
             )
 

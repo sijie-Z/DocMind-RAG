@@ -1,9 +1,14 @@
-"""ES 索引删除失败时，文档删除必须 fail-closed。
+"""ES 索引删除失败时，文档删除必须 fail-closed（P1-1 / P2-3）。
 
 使用真实 service/endpoint、内存 SQLite、fake ES 和真实 HybridRetriever：
-- ES 异常、helper False、响应含 failures 时保留 DB 行和 job，不 commit、不记成功审计；
+- ES 异常、falsy/空响应、timeout、shard 失败、显式 failures、非法元数据、
+  refresh/回读失败或回读 count>0 时：保留 DB 行和 job，不 commit、不删文件、
+  不记成功审计；
 - batch 按文档分别统计，且成功审计不包含失败项；
-- 只有 ES 明确成功才删 DB，删除后真实 retriever 不再返回旧 chunk；
+- 只有 ES 严格成功 + refresh 回读 count==0 才删 DB，删除后真实 retriever 不再
+  返回旧 chunk；
+- 物理文件删除在 DB commit 之后 best-effort 执行；失败时响应/审计如实写
+  ``file_cleanup_pending``，不谎报完全清理；共享 file_path 的其他文档受保护；
 - 没有旧 chunk 时 deleted=0 仍是成功，不把幂等删除误判为故障。
 
 不连接真实 MySQL/ES/Redis/MinIO，也不删除任何真实数据。
@@ -19,13 +24,30 @@ from sqlalchemy.pool import StaticPool
 
 import app.services.knowledge_service as ks_mod
 from app.core.database import Base
-from app.exceptions import ServiceUnavailableError
+from app.exceptions import AppError, ServiceUnavailableError
 from app.models.document import Document, DocumentChunk, DocumentStatus, DocumentTag, DocumentType
 from app.models.knowledge_job import KnowledgeProcessingJob
 from app.rag.cache import RetrievalCache, SemanticCache
 
 ORG_ID = 1
 OLD_CONTENT = "政策：已删除的机密条款"
+
+# delete_by_query 的失败形态矩阵：前 9 个是响应本身异常（严格解析必须拒绝），
+# 后 3 个是响应看似成功但 refresh 回读证明删除不可见/回读不可信。
+ES_FAILURE_MODES = [
+    "exception",
+    "none",
+    "false",
+    "empty",
+    "timed_out",
+    "shard_failed",
+    "shard_failures",
+    "response_failures",
+    "bad_deleted",
+    "partial",
+    "count_failure",
+    "refresh_failure",
+]
 
 
 def _es_chunk(document_id):
@@ -41,8 +63,33 @@ def _es_chunk(document_id):
     }
 
 
+def _strict_delete_meta(**overrides):
+    response = {
+        "deleted": 0,
+        "failures": [],
+        "timed_out": False,
+        "_shards": {"total": 1, "successful": 1, "failed": 0, "failures": []},
+    }
+    response.update(overrides)
+    return response
+
+
+def _strict_count(count):
+    return {
+        "count": count,
+        "failures": [],
+        "timed_out": False,
+        "_shards": {"total": 1, "successful": 1, "failed": 0, "failures": []},
+    }
+
+
 class _FakeES:
-    """模拟 deferred refresh：删除先落入存储，refresh=True 才改变搜索快照。"""
+    """模拟 deferred refresh：删除先落入存储，refresh=True 才改变搜索快照。
+
+    ``failure_by_document`` 支持的注入形态见 ``ES_FAILURE_MODES``。正常/partial
+    会走完 delete_by_query；partial 故意不删旧 chunk、却返回成功响应，用于证明
+    「响应成功 ≠ 删除可见」必须由 refresh 回读兜住。
+    """
 
     def __init__(self, chunks=(), failure_by_document=None):
         self.chunks = {chunk["_id"]: chunk for chunk in chunks}
@@ -50,6 +97,16 @@ class _FakeES:
         self.failure_by_document = failure_by_document or {}
         self.delete_calls = []
         self.deleted_counts = []
+        self.count_calls = []
+        self.refresh_calls = []
+        self._refresh_failures = set()
+        self.indices = self
+
+    async def refresh(self, **kwargs):
+        self.refresh_calls.append(kwargs)
+        self.chunks = dict(self._stored_chunks)
+        if self._refresh_failures:
+            raise RuntimeError("injected ES refresh failure")
 
     async def delete_by_query(self, **kwargs):
         self.delete_calls.append(kwargs)
@@ -57,21 +114,47 @@ class _FakeES:
         failure = self.failure_by_document.get(document_id)
         if failure == "exception":
             raise RuntimeError("injected ES delete outage")
+        if failure == "none":
+            return None
+        if failure == "false":
+            return False
+        if failure == "empty":
+            return {}
+        if failure == "timed_out":
+            return _strict_delete_meta(timed_out=True)
+        if failure == "shard_failed":
+            return _strict_delete_meta(_shards={"failed": 1, "failures": []})
+        if failure == "shard_failures":
+            return _strict_delete_meta(_shards={"failed": 0, "failures": [{"reason": "injected"}]})
         if failure == "response_failures":
-            self.deleted_counts.append(0)
-            return {"deleted": 0, "failures": [{"cause": "injected shard failure"}]}
+            return _strict_delete_meta(failures=[{"cause": "injected shard failure"}])
+        if failure == "bad_deleted":
+            return _strict_delete_meta(deleted="not-an-int")
 
         before = len(self._stored_chunks)
-        self._stored_chunks = {
-            chunk_id: chunk
-            for chunk_id, chunk in self._stored_chunks.items()
-            if chunk["_source"]["document_id"] != document_id
-        }
+        if failure != "partial":
+            self._stored_chunks = {
+                chunk_id: chunk
+                for chunk_id, chunk in self._stored_chunks.items()
+                if chunk["_source"]["document_id"] != document_id
+            }
         deleted = before - len(self._stored_chunks)
         self.deleted_counts.append(deleted)
         if kwargs.get("refresh") is True:
             self.chunks = dict(self._stored_chunks)
-        return {"deleted": deleted, "failures": []}
+        if failure == "refresh_failure":
+            self._refresh_failures.add(document_id)
+        return _strict_delete_meta(deleted=deleted)
+
+    async def count(self, **kwargs):
+        self.count_calls.append(kwargs)
+        document_id = kwargs["query"]["term"]["document_id"]
+        if self.failure_by_document.get(document_id) == "count_failure":
+            return {"count": 0, "failures": [], "timed_out": True, "_shards": {"failed": 0}}
+        visible = sum(
+            1 for chunk in self.chunks.values() if chunk["_source"]["document_id"] == document_id
+        )
+        return _strict_count(visible)
 
     async def search(self, **_kwargs):
         return {"hits": {"hits": list(self.chunks.values())}}
@@ -90,14 +173,19 @@ async def delete_harness(monkeypatch):
         await conn.run_sync(lambda sync_conn: Base.metadata.create_all(sync_conn, tables=tables))
 
     factory = async_sessionmaker(engine, expire_on_commit=False)
-    commits = []
+    state = SimpleNamespace(commits=[], events=[], fail_commits=0)
 
     def tracking_factory():
         session = factory()
         real_commit = session.commit
 
         async def tracked_commit():
-            commits.append("commit")
+            if state.fail_commits > 0:
+                state.fail_commits -= 1
+                state.events.append("commit_failed")
+                raise RuntimeError("injected db commit failure")
+            state.commits.append("commit")
+            state.events.append("commit")
             await real_commit()
 
         session.commit = tracked_commit
@@ -111,21 +199,21 @@ async def delete_harness(monkeypatch):
 
     yield SimpleNamespace(
         factory=factory,
-        commits=commits,
+        state=state,
         retrieval_clear=retrieval_clear,
         semantic_clear=semantic_clear,
     )
     await engine.dispose()
 
 
-async def _seed_document(factory, document_id):
+async def _seed_document(factory, document_id, *, file_path=""):
     async with factory() as session:
         session.add_all(
             [
                 Document(
                     id=document_id,
                     filename=f"{document_id}.txt",
-                    file_path="",
+                    file_path=file_path,
                     file_size=len(OLD_CONTENT),
                     file_type=DocumentType.TXT,
                     status=DocumentStatus.INDEXED,
@@ -201,17 +289,33 @@ def _wire_batch_endpoint(monkeypatch, service):
     return knowledge_api, audit
 
 
+def _wire_file_delete(service, events, *, result=True):
+    """替换物理删除实现并记录事件（用于顺序断言与失败注入）。"""
+
+    async def _delete_file(file_path):
+        events.append(("file_delete", file_path))
+        if isinstance(result, Exception):
+            raise result
+        return result
+
+    mock = AsyncMock(side_effect=_delete_file)
+    service.file_upload_service.delete_file = mock
+    return mock
+
+
 @pytest.mark.asyncio
-@pytest.mark.parametrize("failure", ["exception", "helper_false", "response_failures"])
+@pytest.mark.parametrize("failure", [*ES_FAILURE_MODES, "helper_false"])
 async def test_es_delete_failure_preserves_db_and_blocks_success(
     delete_harness, monkeypatch, failure
 ):
     document_id = f"doc-{failure}"
-    await _seed_document(delete_harness.factory, document_id)
+    file_path = f"{ORG_ID}/{document_id}.pdf"
+    await _seed_document(delete_harness.factory, document_id, file_path=file_path)
     failure_by_document = {} if failure == "helper_false" else {document_id: failure}
     fake_es = _FakeES([_es_chunk(document_id)], failure_by_document)
     _wire_es(monkeypatch, fake_es)
     service = ks_mod.KnowledgeService()
+    delete_file = _wire_file_delete(service, delete_harness.state.events)
     if failure == "helper_false":
         monkeypatch.setattr(service, "delete_es_by_document_id", AsyncMock(return_value=False))
     knowledge_api, audit = _wire_single_endpoint(monkeypatch, service, document_id)
@@ -225,25 +329,31 @@ async def test_es_delete_failure_preserves_db_and_blocks_success(
 
     assert exc_info.value.status_code == 503
     assert "请重试" in exc_info.value.message
-    assert delete_harness.commits == []
+    assert delete_harness.state.commits == []
+    assert delete_harness.state.events == []  # 无 commit、无文件删除
     assert await _database_state(delete_harness.factory, document_id) == {
         "documents": 1,
         "chunks": 1,
         "jobs": 1,
     }
-    assert list(fake_es.chunks) == [f"{document_id}-old-chunk"]
+    delete_file.assert_not_awaited()
     audit.assert_not_awaited()
     delete_harness.retrieval_clear.assert_not_awaited()
     delete_harness.semantic_clear.assert_not_awaited()
+    if failure not in {"count_failure", "refresh_failure"}:
+        # 删除未被证明可见：旧 chunk 必须仍可检索（P1-1 用户场景）。
+        assert list(fake_es.chunks) == [f"{document_id}-old-chunk"]
 
 
 @pytest.mark.asyncio
 async def test_successful_delete_removes_old_chunk_from_real_retriever(delete_harness, monkeypatch):
     document_id = "doc-deleted"
-    await _seed_document(delete_harness.factory, document_id)
+    file_path = f"{ORG_ID}/{document_id}.pdf"
+    await _seed_document(delete_harness.factory, document_id, file_path=file_path)
     fake_es = _FakeES([_es_chunk(document_id)])
     _wire_es(monkeypatch, fake_es)
     service = ks_mod.KnowledgeService()
+    delete_file = _wire_file_delete(service, delete_harness.state.events)
     knowledge_api, audit = _wire_single_endpoint(monkeypatch, service, document_id)
 
     from app.core.config import settings
@@ -266,7 +376,17 @@ async def test_successful_delete_removes_old_chunk_from_real_retriever(delete_ha
     assert after == []
     assert fake_es.delete_calls[0]["refresh"] is True
     assert fake_es.deleted_counts == [1]
-    assert delete_harness.commits == ["commit"]
+    # 删除后必须显式 refresh + 回读 count(document_id)==0 才放行 DB 删除
+    assert fake_es.refresh_calls, "delete 后必须显式 refresh"
+    assert fake_es.count_calls and fake_es.count_calls[0]["query"] == {
+        "term": {"document_id": document_id}
+    }
+    assert delete_harness.state.commits == ["commit"]
+    delete_file.assert_awaited_once_with(file_path)
+    # P2-3：物理删除必须发生在 DB commit 之后。
+    assert delete_harness.state.events.index("commit") < delete_harness.state.events.index(
+        ("file_delete", file_path)
+    )
     assert await _database_state(delete_harness.factory, document_id) == {
         "documents": 0,
         "chunks": 0,
@@ -282,16 +402,157 @@ async def test_successful_delete_allows_zero_es_chunks(delete_harness, monkeypat
     _wire_es(monkeypatch, fake_es)
     service = ks_mod.KnowledgeService()
 
-    assert await service.delete_es_by_document_id(document_id) is True
-    assert await service.delete_knowledge_thoroughly(document_id, ORG_ID) is True
+    first = await service.delete_es_by_document_id(document_id)
+    assert first is True
+    outcome = await service.delete_knowledge_thoroughly(document_id, ORG_ID)
+    assert outcome.success is True
+    assert outcome.file_cleanup_pending is False
 
     assert fake_es.deleted_counts == [0, 0]
-    assert delete_harness.commits == ["commit"]
+    assert len(fake_es.count_calls) == 2
+    assert len(fake_es.refresh_calls) == 2
+    assert delete_harness.state.commits == ["commit"]
     assert await _database_state(delete_harness.factory, document_id) == {
         "documents": 0,
         "chunks": 0,
         "jobs": 0,
     }
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("delete_result", [False, RuntimeError("minio down")])
+async def test_file_cleanup_failure_reports_pending_honestly(
+    delete_harness, monkeypatch, delete_result
+):
+    """DB/ES 删除已提交后文件清理失败：删除仍成功，但必须如实标记待清理。"""
+    document_id = "doc-file-fail"
+    file_path = f"{ORG_ID}/{document_id}.pdf"
+    await _seed_document(delete_harness.factory, document_id, file_path=file_path)
+    fake_es = _FakeES([_es_chunk(document_id)])
+    _wire_es(monkeypatch, fake_es)
+    service = ks_mod.KnowledgeService()
+    delete_file = _wire_file_delete(service, delete_harness.state.events, result=delete_result)
+    knowledge_api, audit = _wire_single_endpoint(monkeypatch, service, document_id)
+
+    response = await knowledge_api.delete_knowledge_document(
+        document_id,
+        current_user=SimpleNamespace(id=1),
+        db=SimpleNamespace(),
+    )
+
+    assert response == {
+        "success": True,
+        "message": "删除成功，文件清理待重试",
+        "file_cleanup_pending": True,
+    }
+    delete_file.assert_awaited_once_with(file_path)
+    audit.assert_awaited_once()
+    assert "file_cleanup_pending" in audit.await_args.kwargs["detail"]
+    # DB/ES 的删除是已提交事实，不得因文件失败回滚或谎报未删除
+    assert delete_harness.state.commits == ["commit"]
+    assert fake_es.chunks == {}
+    assert await _database_state(delete_harness.factory, document_id) == {
+        "documents": 0,
+        "chunks": 0,
+        "jobs": 0,
+    }
+
+
+@pytest.mark.asyncio
+async def test_shared_file_path_is_not_deleted(delete_harness, monkeypatch):
+    """md5 去重共享对象：仍有其他文档引用同一 file_path 时不得物理删除。"""
+    shared_path = f"{ORG_ID}/shared-md5.pdf"
+    target_id, other_id = "doc-shared-a", "doc-shared-b"
+    await _seed_document(delete_harness.factory, target_id, file_path=shared_path)
+    await _seed_document(delete_harness.factory, other_id, file_path=shared_path)
+    fake_es = _FakeES([_es_chunk(target_id)])
+    _wire_es(monkeypatch, fake_es)
+    service = ks_mod.KnowledgeService()
+    delete_file = _wire_file_delete(service, delete_harness.state.events)
+
+    outcome = await service.delete_knowledge_thoroughly(target_id, ORG_ID)
+
+    assert outcome.success is True
+    assert outcome.file_cleanup_pending is False
+    delete_file.assert_not_awaited()
+    assert await _database_state(delete_harness.factory, target_id) == {
+        "documents": 0,
+        "chunks": 0,
+        "jobs": 0,
+    }
+    assert await _database_state(delete_harness.factory, other_id) == {
+        "documents": 1,
+        "chunks": 1,
+        "jobs": 1,
+    }
+
+
+@pytest.mark.asyncio
+async def test_cross_org_delete_is_side_effect_free(delete_harness, monkeypatch):
+    """带 org 过滤的删除对跨 org 的 document_id 是幂等成功且零副作用。"""
+    document_id = "doc-other-org"
+    await _seed_document(
+        delete_harness.factory, document_id, file_path=f"{ORG_ID}/{document_id}.pdf"
+    )
+    fake_es = _FakeES([_es_chunk(document_id)])
+    _wire_es(monkeypatch, fake_es)
+    service = ks_mod.KnowledgeService()
+    delete_file = _wire_file_delete(service, delete_harness.state.events)
+
+    outcome = await service.delete_knowledge_thoroughly(document_id, ORG_ID + 1)
+
+    assert outcome.success is True  # 幂等：目标 org 下本就不存在
+    assert fake_es.delete_calls == []
+    delete_file.assert_not_awaited()
+    assert delete_harness.state.commits == []
+    assert await _database_state(delete_harness.factory, document_id) == {
+        "documents": 1,
+        "chunks": 1,
+        "jobs": 1,
+    }
+
+
+@pytest.mark.asyncio
+async def test_db_commit_failure_keeps_file_and_retry_converges(delete_harness, monkeypatch):
+    """DB commit 失败：文件必须仍在（反向半删除），重试可收敛。
+
+    已知剩余边界（任务书要求如实测试）：ES 删除已确认后 DB commit 失败，文档行
+    随事务回滚保留，而索引已删 —— 文档暂不可检索但可下载；重试删除时 ES 对已
+    清零文档幂等成功，DB 与文件清理随后完成。
+    """
+    document_id = "doc-commit-fail"
+    file_path = f"{ORG_ID}/{document_id}.pdf"
+    await _seed_document(delete_harness.factory, document_id, file_path=file_path)
+    fake_es = _FakeES([_es_chunk(document_id)])
+    _wire_es(monkeypatch, fake_es)
+    service = ks_mod.KnowledgeService()
+    delete_file = _wire_file_delete(service, delete_harness.state.events)
+
+    delete_harness.state.fail_commits = 1
+    with pytest.raises(AppError) as exc_info:
+        await service.delete_knowledge_thoroughly(document_id, ORG_ID)
+
+    assert "injected db commit failure" in exc_info.value.message
+    delete_file.assert_not_awaited()
+    assert await _database_state(delete_harness.factory, document_id) == {
+        "documents": 1,
+        "chunks": 1,
+        "jobs": 1,
+    }
+    assert fake_es.chunks == {}, "已知边界：ES 已删而 DB 行仍在"
+    assert delete_harness.state.commits == []
+
+    outcome = await service.delete_knowledge_thoroughly(document_id, ORG_ID)
+
+    assert outcome.success is True
+    assert outcome.file_cleanup_pending is False
+    delete_file.assert_awaited_once_with(file_path)
+    assert await _database_state(delete_harness.factory, document_id) == {
+        "documents": 0,
+        "chunks": 0,
+        "jobs": 0,
+    }
+    assert delete_harness.state.commits == ["commit"]
 
 
 @pytest.mark.asyncio
@@ -318,7 +579,8 @@ async def test_batch_separates_failures_and_audits_only_successes(delete_harness
     assert len(result["errors"]) == 1
     assert result["errors"][0]["document_id"] == bad_id
     assert "请重试" in result["errors"][0]["reason"]
-    assert delete_harness.commits == ["commit"]
+    assert "file_cleanup_pending_ids" not in result
+    assert delete_harness.state.commits == ["commit"]
     assert await _database_state(delete_harness.factory, ok_id) == {
         "documents": 0,
         "chunks": 0,
@@ -332,6 +594,46 @@ async def test_batch_separates_failures_and_audits_only_successes(delete_harness
     audit.assert_awaited_once()
     assert audit.await_args.kwargs["target_id"] == ok_id
     assert "1 个" in audit.await_args.kwargs["detail"]
+
+
+@pytest.mark.asyncio
+async def test_batch_reports_file_cleanup_pending_ids(delete_harness, monkeypatch):
+    """批量中单条文件清理失败：仍计删除成功，但结果/审计如实标记待清理。"""
+    ok_id, pending_id = "doc-batch-ok", "doc-batch-pending"
+    await _seed_document(delete_harness.factory, ok_id, file_path=f"{ORG_ID}/{ok_id}.pdf")
+    await _seed_document(delete_harness.factory, pending_id, file_path=f"{ORG_ID}/{pending_id}.pdf")
+    fake_es = _FakeES([_es_chunk(ok_id), _es_chunk(pending_id)])
+    _wire_es(monkeypatch, fake_es)
+    service = ks_mod.KnowledgeService()
+    events = delete_harness.state.events
+
+    async def _delete_file(file_path):
+        events.append(("file_delete", file_path))
+        return file_path != f"{ORG_ID}/{pending_id}.pdf"
+
+    monkeypatch.setattr(
+        service.file_upload_service, "delete_file", AsyncMock(side_effect=_delete_file)
+    )
+    knowledge_api, audit = _wire_batch_endpoint(monkeypatch, service)
+
+    result = await knowledge_api.batch_delete_documents(
+        request=SimpleNamespace(document_ids=[ok_id, pending_id], organization_id=ORG_ID),
+        current_user=SimpleNamespace(id=1, is_superuser=True),
+        db=SimpleNamespace(),
+    )
+
+    assert result["success_count"] == 2
+    assert result["fail_count"] == 0
+    assert result["file_cleanup_pending_ids"] == [pending_id]
+    assert "文件清理待重试" in result["message"]
+    audit.assert_awaited_once()
+    assert "file_cleanup_pending" in audit.await_args.kwargs["detail"]
+    for doc_id in (ok_id, pending_id):
+        assert await _database_state(delete_harness.factory, doc_id) == {
+            "documents": 0,
+            "chunks": 0,
+            "jobs": 0,
+        }
 
 
 @pytest.mark.asyncio
@@ -352,7 +654,7 @@ async def test_batch_all_failures_write_no_success_audit(delete_harness, monkeyp
     assert result["success_count"] == 0
     assert result["fail_count"] == 1
     assert result["errors"][0]["document_id"] == document_id
-    assert delete_harness.commits == []
+    assert delete_harness.state.commits == []
     assert await _database_state(delete_harness.factory, document_id) == {
         "documents": 1,
         "chunks": 1,
