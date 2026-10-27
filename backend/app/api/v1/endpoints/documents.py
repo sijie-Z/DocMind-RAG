@@ -319,7 +319,11 @@ async def upload_document(
 @router.get(
     "/{document_id}",
     response_model=dict,
-    dependencies=[Depends(require_scope("knowledge:read"))],
+    # issue #496 读路径 scope 在前；RBAC 补在 scope 之后（与上传/知识库列表同口径）。
+    dependencies=[
+        Depends(require_scope("knowledge:read")),
+        Depends(permission_required([PermissionType.DOCUMENT_READ])),
+    ],
 )
 async def get_document_status(
     document_id: str,
@@ -389,7 +393,10 @@ async def get_document_status(
 @router.get(
     "/{document_id}/content",
     response_model=dict,
-    dependencies=[Depends(require_scope("knowledge:read"))],
+    dependencies=[
+        Depends(require_scope("knowledge:read")),
+        Depends(permission_required([PermissionType.DOCUMENT_READ])),
+    ],
 )
 async def get_document_full_content(
     document_id: str,
@@ -468,7 +475,10 @@ async def _get_document_download_url(
 @router.get(
     "/{document_id}/download-url",
     response_model=DocumentDownloadUrlResponse,
-    dependencies=[Depends(require_scope("knowledge:read"))],
+    dependencies=[
+        Depends(require_scope("knowledge:read")),
+        Depends(permission_required([PermissionType.DOCUMENT_READ])),
+    ],
 )
 async def get_document_download_url(
     document_id: str,
@@ -491,7 +501,13 @@ async def get_document_download_url(
         raise AppError("获取下载链接失败")
 
 
-@router.get("/{document_id}/download", dependencies=[Depends(require_scope("knowledge:read"))])
+@router.get(
+    "/{document_id}/download",
+    dependencies=[
+        Depends(require_scope("knowledge:read")),
+        Depends(permission_required([PermissionType.DOCUMENT_READ])),
+    ],
+)
 async def download_document(
     document_id: str,
     db: AsyncSession = Depends(get_db),

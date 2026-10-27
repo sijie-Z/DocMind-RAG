@@ -317,6 +317,12 @@ class TestOrgLessCallersForbidden:
 class TestCrossOrgAdminCannotReadDocuments:
     """租户管理员（role=admin）不再绕过文档的组织隔离。"""
 
+    @pytest.fixture(autouse=True)
+    def _permissions_ok(self):
+        """权限一律放行，确保 403 来自组织守卫而非权限解析失败。"""
+        with _allow_all_permissions():
+            yield
+
     def test_cross_org_admin_document_read_forbidden(self, client):
         user = _make_user(role="admin", organization_id=2)
         doc = MagicMock()
