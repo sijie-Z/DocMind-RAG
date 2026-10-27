@@ -134,7 +134,7 @@ function authorizationOf(config: AxiosRequestConfig): string | undefined {
 }
 
 function installAdapter() {
-  request.defaults.adapter = (async (config) => {
+  request.defaults.adapter = (async (config: AxiosRequestConfig) => {
     const url = config.url ?? ''
     seen.push({ url, authorization: authorizationOf(config) })
     if (url === '/documents/doc-7') {
