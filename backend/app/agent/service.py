@@ -28,8 +28,11 @@ from app.core.database import AsyncSessionLocal
 from app.core.log_safety import log_safe
 from app.core.request_id import get_request_id
 from app.models.agent_task import AgentTask, TaskStatus
+from app.rag.context_compressor import get_prompt_text
 from app.rag.retriever import HybridRetriever
 from app.rag.source_provenance import (
+    LEGACY_UNVERIFIED,
+    PARSER_ORIGINAL,
     SourceProvenanceUnavailableError,
     filter_original_results,
     normalize_result_for_evidence,
@@ -47,6 +50,20 @@ import app.agent.tools  # noqa: F401 — tools package (20 non-hidden)
 
 MAX_REFERENCED_DOCS = 10
 MAX_EXCERPT_CHARS = 700
+
+
+def _format_referenced_chunks(chunks: list[dict]) -> tuple[str, dict[str, int]]:
+    """Keep per-chunk provenance visible and return explicit parser/legacy counts."""
+    counts = {PARSER_ORIGINAL: 0, LEGACY_UNVERIFIED: 0}
+    parts: list[str] = []
+    for chunk in chunks:
+        text = get_prompt_text(chunk).strip()
+        if not text:
+            continue
+        provenance = provenance_of(chunk)
+        counts[provenance] += 1
+        parts.append(f"[{provenance}] {text}")
+    return "\n".join(parts), counts
 
 
 async def build_referenced_document_context(
@@ -113,20 +130,16 @@ async def build_referenced_document_context(
         excerpt = ""
         retrieval_note: str | None = None
         provenance_error: SourceProvenanceUnavailableError | None = None
+        provenance_counts = {PARSER_ORIGINAL: 0, LEGACY_UNVERIFIED: 0}
         if pipeline is not None:
             try:
-                from app.rag.context_compressor import get_prompt_text
-
                 results, _ = await pipeline.search_knowledge_base(
                     query,
                     organization_id,
                     top_k=3,
                     document_ids=[did],
                 )
-                # issue #186：引用文档摘要与提示词同源（prompt_text → text → …），
-                # snippet 仅作最后兜底。
-                excerpts = [get_prompt_text(r).strip() for r in results[:3]]
-                excerpt = "\n".join(e for e in excerpts if e).strip()
+                excerpt, provenance_counts = _format_referenced_chunks(results[:3])
             except SourceProvenanceUnavailableError as e:
                 provenance_error = e
                 retrieval_note = f"引用文档「{title}」原文尚未迁移，需要重建"
@@ -167,9 +180,7 @@ async def build_referenced_document_context(
                     mode=settings.RAG_SOURCE_PROVENANCE_MODE,
                     snippet_builder=lambda text, _query: text,
                 )
-                excerpt = "\n".join(
-                    (chunk.get("prompt_text") or "").strip() for chunk in original_chunks
-                ).strip()
+                excerpt, provenance_counts = _format_referenced_chunks(original_chunks)
             except SourceProvenanceUnavailableError as e:
                 provenance_error = e
                 retrieval_note = f"引用文档「{title}」原文尚未迁移，需要重建"
@@ -193,7 +204,30 @@ async def build_referenced_document_context(
             )
         if len(excerpt) > MAX_EXCERPT_CHARS:
             excerpt = excerpt[:MAX_EXCERPT_CHARS] + "…"
-        entries.append({"id": did, "title": title, "excerpt": excerpt})
+        parser_count = provenance_counts[PARSER_ORIGINAL]
+        legacy_count = provenance_counts[LEGACY_UNVERIFIED]
+        if legacy_count:
+            warnings.append(
+                f"引用文档「{title}」含 {legacy_count} 个 legacy_unverified 片段"
+                f"（共 {parser_count + legacy_count} 个引用片段）；"
+                "compat 模式保留了检索增强文本，未标为原文"
+            )
+        if parser_count and legacy_count:
+            overall_provenance = "mixed"
+        elif parser_count:
+            overall_provenance = PARSER_ORIGINAL
+        else:
+            overall_provenance = LEGACY_UNVERIFIED
+        entries.append(
+            {
+                "id": did,
+                "title": title,
+                "excerpt": excerpt,
+                "parser_original_count": parser_count,
+                "legacy_unverified_count": legacy_count,
+                "textProvenance": overall_provenance,
+            }
+        )
 
     if not entries:
         return None, warnings
@@ -202,6 +236,12 @@ async def build_referenced_document_context(
     for i, e in enumerate(entries, 1):
         lines.append(f"### [{i}] {e['title']}（document_id: {e['id']}）")
         if e["excerpt"]:
+            if e["parser_original_count"] + e["legacy_unverified_count"]:
+                lines.append(
+                    "来源状态："
+                    f"parser_original={e['parser_original_count']}，"
+                    f"legacy_unverified={e['legacy_unverified_count']}"
+                )
             lines.append(e["excerpt"])
     return "\n".join(lines), warnings
 
