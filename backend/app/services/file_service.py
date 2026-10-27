@@ -26,28 +26,30 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# MinIO/S3 明确表示「对象不存在」的错误码：只有这些才允许把 remove 失败
-# 降级为「远端已无残留」，且仍需配合本地副本删除成功。
-_MISSING_OBJECT_S3_CODES = frozenset({"NoSuchKey", "NoSuchObject", "NoSuchBucket", "NotFound"})
+# 仅**对象级**「对象不存在」错误码可证明远端无残留。NoSuchBucket / 裸 404 /
+# NotFound 也可能是桶、路由或存储故障，不能据此判定对象已删除。
+_MISSING_OBJECT_S3_CODES = frozenset({"NoSuchKey", "NoSuchObject"})
 
 
 def _minio_object_missing(object_name: str) -> bool:
-    """Return True only when a MinIO stat proves the remote object is absent.
+    """Return True only when a MinIO stat proves *this object* is absent.
 
     A failed ``remove_object`` must not be treated as "probably deleted": if the
     object still exists remotely, reporting cleanup success loses the only signal
-    that a retry is needed. stat is consulted only after a remove error; any stat
-    failure other than a definitive not-found keeps the caller in pending state.
+    that a retry is needed. Only explicit object-level ``NoSuchKey``/
+    ``NoSuchObject`` codes count as proof. ``NoSuchBucket``, ``NotFound``, a bare
+    HTTP 404, network errors and any other stat failure can equally indicate a
+    bucket/route/storage outage, so they all keep the caller in pending state.
     """
     try:
         minio_client.stat_object(object_name)
     except Exception as e:
         code = getattr(e, "code", None)
-        status = getattr(getattr(e, "response", None), "status", None)
-        if code in _MISSING_OBJECT_S3_CODES or status == 404:
+        if code in _MISSING_OBJECT_S3_CODES:
             return True
         logger.warning(
-            "MinIO 删除报错后无法证明对象不存在（stat 失败）: %s: %s: %s",
+            "MinIO 删除报错后无法证明对象不存在（stat 失败，code=%r）: %s: %s: %s",
+            code,
             object_name,
             type(e).__name__,
             e,
@@ -254,10 +256,11 @@ class FileUploadService:
         从存储中删除文件 (支持 MinIO 和 本地文件)
 
         返回「是否已确认清理完成」。MinIO 删除报错时**不能**因为本地副本删除
-        成功就返回 True：必须先证明远端对象确实不存在（stat 返回 NoSuchKey /
-        NoSuchBucket 等），否则返回 False 让调用方标记 ``file_cleanup_pending``。
-        唯一例外是纯本地文件（绝对路径，不是 MinIO 对象名）——删除本地副本即
-        完成，保留既有语义。
+        成功就返回 True：必须先通过 stat 证明远端对象确实不存在（仅接受对象级
+        ``NoSuchKey`` / ``NoSuchObject``；``NoSuchBucket``、``NotFound``、裸
+        404、网络异常一律视为未证明），否则返回 False 让调用方标记
+        ``file_cleanup_pending``。唯一例外是纯本地文件（绝对路径，不是 MinIO
+        对象名）——删除本地副本即完成，保留既有语义。
 
         Args:
             file_path: 文件路径或对象名称

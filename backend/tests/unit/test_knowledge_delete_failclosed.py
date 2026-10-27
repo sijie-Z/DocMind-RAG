@@ -491,14 +491,18 @@ async def test_file_cleanup_failure_reports_pending_honestly(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "stat_mode", ["network_error", "no_such_bucket", "bare_404", "object_present"]
+)
 async def test_minio_failure_with_local_copy_removed_still_reports_pending(
-    delete_harness, monkeypatch, tmp_path
+    delete_harness, monkeypatch, tmp_path, stat_mode
 ):
-    """R2 评审回归：MinIO 报错 + 本地副本删除成功，不得谎报完全清理。
+    """R2/R3 评审回归：MinIO 报错 + 本地副本删除成功，不得谎报完全清理。
 
     走真实 ``FileUploadService.delete_file``（不替换 service 方法）：
-    ``remove_object`` 抛连接错误、本地相对路径文件被删除、``stat_object`` 也
-    无法证明远端对象不存在 → delete_file 返回 False → 知识删除链必须标记
+    ``remove_object`` 抛连接错误、本地相对路径文件被删除；stat 要么本身失败
+    （网络异常 / NoSuchBucket / 裸 404），要么证明对象仍存在 —— 这些都不能
+    证明「这个对象已删」→ delete_file 返回 False → 知识删除链必须标记
     ``file_cleanup_pending``，审计不得声称完全清理。
     """
     import app.services.file_service as fs_mod
@@ -516,7 +520,14 @@ async def test_minio_failure_with_local_copy_removed_still_reports_pending(
             raise RuntimeError("minio connection refused")
 
         def stat_object(self, *_args, **_kwargs):
-            raise RuntimeError("minio stat unavailable")
+            if stat_mode == "object_present":
+                return object()
+            exc = RuntimeError(f"stat unavailable ({stat_mode})")
+            if stat_mode == "no_such_bucket":
+                exc.code = "NoSuchBucket"
+            elif stat_mode == "bare_404":
+                exc.response = SimpleNamespace(status=404)
+            raise exc
 
     monkeypatch.setattr(fs_mod, "minio_client", _FailingMinio())
 
