@@ -12,6 +12,7 @@ from sqlalchemy import and_, delete, func, select
 from app.core.config import settings
 from app.core.database import AsyncSessionLocal
 from app.core.elasticsearch import get_elasticsearch
+from app.core.log_safety import log_safe
 from app.exceptions import AppError, ServiceUnavailableError
 from app.models.document import Document, DocumentChunk, DocumentStatus, DocumentTag
 from app.models.knowledge_job import KnowledgeProcessingJob
@@ -281,12 +282,13 @@ class KnowledgeService:
             )
             if remaining:
                 logger.error(
-                    f"从 ES 删除 document_id={document_id} 后回读仍有 {remaining} 条 chunk，"
+                    f"从 ES 删除 document_id={log_safe(document_id)} 后回读仍有 {remaining} 条 chunk，"
                     "拒绝放行数据库删除"
                 )
                 return False
             logger.info(
-                f"已从 ES 删除 document_id={document_id} 的索引（响应 deleted={deleted}，回读 count=0）"
+                f"已从 ES 删除 document_id={log_safe(document_id)} 的索引"
+                f"（响应 deleted={deleted}，回读 count=0）"
             )
             return True
         except Exception as e:
@@ -384,8 +386,8 @@ class KnowledgeService:
                         logger.error(
                             "[DELETE] 文档已从数据库/索引删除，但存储对象清理未完成 "
                             "file_cleanup_pending document_id=%s file_path=%s",
-                            document_id,
-                            file_path,
+                            log_safe(document_id),
+                            log_safe(file_path),
                         )
 
                 # 删除文档后按组织清空 RAG 缓存，避免旧缓存仍被命中
