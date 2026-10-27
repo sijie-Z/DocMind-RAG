@@ -9,7 +9,9 @@ from fastapi.testclient import TestClient
 from app.core.database import get_db
 from app.core.security import get_current_user
 from app.models.document import Document
+from app.models.rbac import PermissionType
 from app.models.user import User
+from app.services.permission_service import permission_service
 
 
 @pytest.fixture
@@ -17,6 +19,18 @@ def client():
     from app.main import app
 
     return TestClient(app)
+
+
+@pytest.fixture
+def _grant_document_read(monkeypatch):
+    """文档读取端点已挂 ``DOCUMENT_READ`` RBAC；本模块的 DB/主体都是 MagicMock，
+    没有真实角色表可供 ``permission_service`` 解析。这里只授予 document:read，
+    让组织归属 / 存在性断言仍由真实端点逻辑产生。"""
+
+    async def _permissions(db, user, organization_id=None):  # noqa: ANN001
+        return {PermissionType.DOCUMENT_READ.value}
+
+    monkeypatch.setattr(permission_service, "get_user_permissions", _permissions)
 
 
 class _AsyncCtxMgr:
@@ -243,7 +257,7 @@ class TestDocumentUpload:
 
 
 class TestDocumentGet:
-    def test_get_document_found(self, client: TestClient):
+    def test_get_document_found(self, client: TestClient, _grant_document_read):
         """存在的文档应返回文档详情。"""
         from app.main import app
 
@@ -271,7 +285,7 @@ class TestDocumentGet:
             app.dependency_overrides.pop(get_db, None)
             app.dependency_overrides.pop(get_current_user, None)
 
-    def test_get_document_not_found(self, client: TestClient):
+    def test_get_document_not_found(self, client: TestClient, _grant_document_read):
         """不存在的文档应返回 404。"""
         from app.main import app
 
@@ -295,7 +309,7 @@ class TestDocumentGet:
             app.dependency_overrides.pop(get_db, None)
             app.dependency_overrides.pop(get_current_user, None)
 
-    def test_get_document_unauthorized_org(self, client: TestClient):
+    def test_get_document_unauthorized_org(self, client: TestClient, _grant_document_read):
         """不同组织用户无权查看文档。"""
         from app.main import app
 
@@ -330,7 +344,7 @@ class TestDocumentGet:
 
 
 class TestDocumentContent:
-    def test_get_content_success(self, client: TestClient):
+    def test_get_content_success(self, client: TestClient, _grant_document_read):
         """文档内容应返回全文。"""
         from app.main import app
 
