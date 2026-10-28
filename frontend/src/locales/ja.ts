@@ -302,6 +302,7 @@ export default {
     roleUser: 'ユーザー',
     roleAssistant: 'アシスタント',
     sourceDoc: 'ドキュメント',
+    sourceLegacyWarning: 'この出典にはパーサー原文がありません。スニペットにはシステム生成の背景要約が含まれる可能性があり、原文の証拠として扱えません。',
     msgLoadFailed: '履歴メッセージの読み込みに失敗しました',
     promptFilled: 'プロンプトを入力欄に挿入しました。確認してから送信してください',
     // ISS-3：warning 事件兜底文案（后端 content 缺失时；此前缺键会静默回退 zh）

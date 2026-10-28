@@ -71,6 +71,11 @@ export interface KnowledgeSource {
   freshFactor?: number
   /** issue #197：PDF 来源页码（后端 build_sources_list 真返回）；非 PDF 为 null */
   pageNumber?: number | null
+  /**
+   * PR4：来源片段溯源。parser_original 才表示 content 来自解析器原文；
+   * legacy_unverified/缺失一律按不可信展示（来源卡弹层提示）。
+   */
+  textProvenance?: 'parser_original' | 'legacy_unverified'
   cited?: boolean
   /** T4（第二轮 §7.2④）：示例对话的写死来源（假分数）逐条标注，前端渲染「演示数据」角标 */
   demo?: boolean

@@ -199,6 +199,13 @@
                         <div class="text-xs text-gray-500 dark:text-gray-400 leading-relaxed line-clamp-6">
                           {{ source.content || t('chat.noPreview') }}
                         </div>
+                        <div
+                          v-if="source.content && source.textProvenance !== 'parser_original'"
+                          data-testid="source-provenance-warning"
+                          class="mt-1 text-[10px] text-amber-700 dark:text-amber-400"
+                        >
+                          {{ t('chat.sourceLegacyWarning') }}
+                        </div>
                         <!-- issue #197：PDF 来源展示页码（后端 pageNumber 真值；非 PDF 不渲染） -->
                         <div
                           v-if="typeof source.pageNumber === 'number'"

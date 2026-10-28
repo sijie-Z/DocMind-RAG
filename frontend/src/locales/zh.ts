@@ -336,6 +336,7 @@ export default {
     roleUser: '用户',
     roleAssistant: '助手',
     sourceDoc: '文档',
+    sourceLegacyWarning: '该来源缺少解析器原文，片段可能包含系统生成的背景摘要，不能作为原文证据。',
     // Error banner
     msgLoadFailed: '加载历史消息失败',
     // E14/P2：提示词「应用到对话」只填入输入框（B3 后已无 systemPrompt 通道），

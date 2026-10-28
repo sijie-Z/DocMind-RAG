@@ -3,7 +3,8 @@
  *
  * 真值（backend/app/services/chat_service.py build_sources_list）：
  * 来源对象键为 {filename, relevanceScore, rankScore, rank, content, documentId,
- * hasKeyword, hasVector, rewriteHits, freshFactor} —— 预览文本在 `content`、
+ * hasKeyword, hasVector, rewriteHits, freshFactor, textProvenance} —— 预览文本在
+ * `content`（原文可信度由 `textProvenance` 标记）、
  * 重排绝对分在 `relevanceScore`（issue #185：无绝对分时为 null）。
  * 旧模板读 `source.snippet || source.text`（恒 undefined → 弹层恒「无预览」）
  * 与 `source.score`（相关度永不显示）。
@@ -50,6 +51,7 @@ const i18n = createI18n({
       chat: {
         sourcesLabel: '来源',
         sourceDoc: '文档',
+        sourceLegacyWarning: '该来源缺少解析器原文，不能作为原文证据',
         unknownDoc: '未知文档',
         noPreview: '无预览',
         // 与 locales/zh.ts 真实口径一致（issue #185：重排绝对分 / 排序序位）
@@ -73,6 +75,7 @@ const realSource = {
   rank: 1,
   content: '架构文档正文片段：FastAPI + Vue3',
   documentId: 1,
+  textProvenance: 'parser_original',
   hasKeyword: true,
   hasVector: true,
   rewriteHits: 1,
@@ -128,5 +131,62 @@ describe('ChatMessages · 来源弹层读点（B32/B33）', () => {
     const wrapper = mountChat([emptySourceMsg])
     expect(wrapper.text()).toContain('无预览')
     expect(wrapper.text()).toContain('重排分: 0.50')
+  })
+})
+
+
+describe('ChatMessages · 来源片段原文提示（PR4）', () => {
+  it('parser_original 不显示未验证提示', () => {
+    const wrapper = mountChat([message])
+    expect(wrapper.find('[data-testid="source-provenance-warning"]').exists()).toBe(false)
+  })
+
+  it.each(['legacy_unverified', undefined])('%s 来源显示未验证提示', (prov) => {
+    const msg = {
+      id: 3,
+      content: '回答',
+      messageType: 'assistant',
+      conversationId: 1,
+      sources: [{
+        filename: 'old.md',
+        relevanceScore: 0.6,
+        rank: 1,
+        content: '旧版增强片段',
+        documentId: 3,
+        ...(prov ? { textProvenance: prov } : {}),
+      }],
+    } as unknown as ChatMessage
+    const wrapper = mountChat([msg])
+    expect(wrapper.text()).toContain('旧版增强片段')
+    const warning = wrapper.find('[data-testid="source-provenance-warning"]')
+    expect(warning.exists()).toBe(true)
+    expect(warning.text()).toContain('该来源缺少解析器原文')
+  })
+
+  it('无 content 时不显示未验证提示（没有可展示文本）', () => {
+    const msg = {
+      id: 4,
+      content: '回答',
+      messageType: 'assistant',
+      conversationId: 1,
+      sources: [{ filename: 'empty.md', relevanceScore: 0.5, rank: 1, documentId: 4 }],
+    } as unknown as ChatMessage
+    const wrapper = mountChat([msg])
+    expect(wrapper.find('[data-testid="source-provenance-warning"]').exists()).toBe(false)
+  })
+})
+
+
+describe('ChatMessages · 来源片段空白内容', () => {
+  it('仅空白 content 仍显示提示（正文被渲染而非 noPreview）', () => {
+    const msg = {
+      id: 5,
+      content: '回答',
+      messageType: 'assistant',
+      conversationId: 1,
+      sources: [{ filename: 'blank.md', relevanceScore: 0.5, rank: 1, content: '   ', documentId: 5 }],
+    } as unknown as ChatMessage
+    const wrapper = mountChat([msg])
+    expect(wrapper.find('[data-testid="source-provenance-warning"]').exists()).toBe(true)
   })
 })

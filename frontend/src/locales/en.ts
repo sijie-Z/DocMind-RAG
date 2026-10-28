@@ -331,6 +331,7 @@ export default {
     roleUser: 'User',
     roleAssistant: 'Assistant',
     sourceDoc: 'Document',
+    sourceLegacyWarning: 'This source has no parser original text; the snippet may include system-generated background summaries and must not be treated as original-text evidence.',
     // Error banner
     msgLoadFailed: 'Failed to load message history',
     // Prompt applied notification

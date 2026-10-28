@@ -303,6 +303,7 @@ export default {
     roleUser: 'Utilisateur',
     roleAssistant: 'Assistant',
     sourceDoc: 'Document',
+    sourceLegacyWarning: "Cette source n'a pas de texte original issu du parseur ; l'extrait peut contenir des résumés de contexte générés et ne doit pas servir de preuve du texte original.",
     msgLoadFailed: 'Échec du chargement de l\'historique des messages',
     promptFilled: 'Le prompt a été inséré dans le champ de saisie ; vérifiez-le avant de l\'envoyer',
     // ISS-3：warning 事件兜底文案（后端 content 缺失时；此前缺键会静默回退 zh）
