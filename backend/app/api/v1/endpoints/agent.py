@@ -65,7 +65,13 @@ from app.exceptions import (
     ValidationError,
 )
 from app.models.agent_task import TaskStatus
-from app.models.chat import ChatMessage, ChatSession, ChatSessionStatus, MessageType
+from app.models.chat import (
+    ChatMessage,
+    ChatSession,
+    ChatSessionStatus,
+    DeletedChatSession,
+    MessageType,
+)
 from app.models.user import User
 from app.services.session_service import (
     SessionAccessScope,
@@ -1751,8 +1757,20 @@ async def delete_session(
 
         from sqlalchemy import delete as sql_delete
 
+        # 与迟到保存串行化：先锁会话行；删除提交后保存侧会看到缺失行 + 墓碑。
+        await db.execute(select(ChatSession).where(ChatSession.id == session_id).with_for_update())
         await db.execute(sql_delete(ChatMessage).where(ChatMessage.session_id == session_id))
         await db.delete(session)
+        await db.execute(
+            sql_delete(DeletedChatSession).where(DeletedChatSession.session_id == session_id)
+        )
+        db.add(
+            DeletedChatSession(
+                session_id=session_id,
+                user_id=session.user_id,
+                organization_id=session.organization_id,
+            )
+        )
         await db.commit()
 
         # Clean up Redis keys

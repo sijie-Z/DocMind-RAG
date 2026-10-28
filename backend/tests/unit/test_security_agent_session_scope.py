@@ -54,6 +54,7 @@ async def test_write_into_foreign_session_refused(monkeypatch):
     """会话属于其他用户时：拒绝写入，不落任何消息。"""
     session = _make_session(
         _result(None),  # id + user_id 查找：不是调用者的会话
+        _result(None),  # 墓碑查找：无
         _result("sess-1"),  # 但该 id 已被他人占用
     )
     monkeypatch.setattr(agent_module, "AsyncSessionLocal", lambda: _FakeSessionCtx(session))

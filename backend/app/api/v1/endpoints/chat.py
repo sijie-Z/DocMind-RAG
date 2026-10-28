@@ -46,7 +46,13 @@ from app.core.ws_auth import (
     load_active_ws_user,
 )
 from app.exceptions import AppError, AuthorizationError, NotFoundError, ValidationError
-from app.models.chat import ChatMessage, ChatSession, ChatSessionStatus, MessageType
+from app.models.chat import (
+    ChatMessage,
+    ChatSession,
+    ChatSessionStatus,
+    DeletedChatSession,
+    MessageType,
+)
 from app.models.document import Document
 from app.models.user import User
 from app.schemas.chat import ChatSessionCreate, ChatStreamRequest, FeedbackRequest
@@ -444,9 +450,24 @@ async def delete_conversation(
         session = await load_accessible_session(db, conversation_id, current_user, scope)
         if not session:
             raise NotFoundError("会话不存在或无权删除")
+        # 与迟到保存串行化：先锁会话行；删除提交后保存侧会看到缺失行 + 墓碑。
+        await db.execute(
+            select(ChatSession).where(ChatSession.id == conversation_id).with_for_update()
+        )
         # Delete messages first (FK constraint), then the session
         await db.execute(delete(ChatMessage).where(ChatMessage.session_id == conversation_id))
         await db.delete(session)
+        # 墓碑与硬删除同事务：任何迟到的 finalize 都不得按原 id 复活会话。
+        await db.execute(
+            delete(DeletedChatSession).where(DeletedChatSession.session_id == conversation_id)
+        )
+        db.add(
+            DeletedChatSession(
+                session_id=conversation_id,
+                user_id=session.user_id,
+                organization_id=session.organization_id,
+            )
+        )
         await db.commit()
         return {"success": True, "message": "会话删除成功"}
     except NotFoundError:
@@ -1372,7 +1393,7 @@ async def chat_stream_endpoint(
                     "plan_approval_required",
                 ):
                     try:
-                        await save_session_interaction(
+                        saved_id = await save_session_interaction(
                             conversation_id,
                             current_user.id,
                             user_content,
@@ -1380,6 +1401,9 @@ async def chat_stream_endpoint(
                             full_response,
                             bypass_org=bool(getattr(current_user, "is_superuser", False)),
                         )
+                        if full_response and saved_id is None:
+                            # 会话已删除/无权写：不得静默当作已保存；空回复不是失败。
+                            save_error = "session_not_saved"
                     except Exception as save_exc:
                         save_error = log_safe(save_exc)
                         logger.error(

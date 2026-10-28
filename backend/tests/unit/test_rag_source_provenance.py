@@ -375,8 +375,12 @@ def test_018_migration_single_head_nullable_data_and_constraints_roundtrip(tmp_p
     script = ScriptDirectory.from_config(cfg)
 
     assert len(NEW_REV) <= 32
-    assert set(script.get_heads()) == {NEW_REV}
-    chain = [rev.revision for rev in script.iterate_revisions(NEW_REV, "base")]
+    # head 随迁移演进后移（019_deleted_chat_sessions 接在 018 之后）：只钉
+    # “单头 + 018 仍在主链”，不再把 018 钉成永久 head。
+    heads = set(script.get_heads())
+    assert len(heads) == 1, f"迁移必须单头，实际 {heads}"
+    chain = [rev.revision for rev in script.iterate_revisions(next(iter(heads)), "base")]
+    assert NEW_REV in chain
     assert PREV_REV in chain
 
     command.upgrade(cfg, PREV_REV)

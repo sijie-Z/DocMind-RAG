@@ -418,7 +418,10 @@ class TestChatAgentModePersistence:
         existing.organization_id = 7
         result = MagicMock()
         result.scalar_one_or_none = MagicMock(return_value=existing)
-        fake_session.execute = AsyncMock(return_value=result)
+        tombstone_missing = MagicMock()
+        tombstone_missing.scalar_one_or_none = MagicMock(return_value=None)
+        # 查询顺序：会话行 → 墓碑（无）→ seq 分配（计数器/MAX/推进，数次）。
+        fake_session.execute = AsyncMock(side_effect=[result, tombstone_missing] + [result] * 12)
         fake_session.add = MagicMock()
         fake_session.commit = AsyncMock()
 
