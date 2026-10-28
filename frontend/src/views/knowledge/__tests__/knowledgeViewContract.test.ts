@@ -84,7 +84,7 @@ const DetailStub = defineComponent({
         'div',
         { class: 'detail-stub' },
         props.currentDoc
-          ? `${(props.getStatusLabel as (d: unknown) => string)(props.currentDoc)}|${(props.getStatusType as (d: unknown) => string)(props.currentDoc)}`
+          ? `${(props.getStatusLabel as (d: unknown) => string)(props.currentDoc)}|${(props.getStatusType as (d: unknown) => string)(props.currentDoc)}|${(props.currentDoc as { preview_provenance?: string }).preview_provenance ?? ''}|${(props.currentDoc as { preview_truncated?: boolean }).preview_truncated ? 'truncated' : 'full'}`
           : ''
       )
   },
@@ -339,5 +339,65 @@ describe('KnowledgeView · 幽灵降级控件已清除（B17）', () => {
     const card = wrapper.findAll('.group').find((g) => g.text().includes('architecture.md'))
     expect(card).toBeTruthy()
     expect(card!.findAll('button')).toHaveLength(2)
+  })
+})
+
+describe('KnowledgeView · 预览原文口径接线（PR4）', () => {
+  it('legacy 响应 → 详情弹窗收到 legacy_unverified（删掉透传即红）', async () => {
+    mockedGetKnowledgeBases.mockResolvedValue(listResponse([REAL_DOC]) as never)
+    mockedGetDocumentDetail.mockResolvedValue({
+      data: { data: { id: 'doc-1', title: 'architecture.md', filename: 'architecture.md' } },
+    } as never)
+    mockedGetDocumentContent.mockResolvedValue({
+      data: {
+        data: {
+          id: 'doc-1',
+          filename: 'architecture.md',
+          content: '【文档背景：模型摘要】\n\n第一条 旧版文本',
+          text_provenance: 'legacy_unverified',
+          truncated: false,
+        },
+      },
+    } as never)
+
+    const wrapper = mountView()
+    await flushPromises()
+    await nextTick()
+    const card = wrapper.findAll('.group').find((g) => g.text().includes('architecture.md'))
+    await card!.findAll('button')[0].trigger('click')
+    await flushPromises()
+    await nextTick()
+
+    const stub = wrapper.find('.detail-stub')
+    expect(stub.text()).toContain('legacy_unverified')
+    expect(stub.text()).toContain('full')
+  })
+
+  it('服务端完整但界面只展示前 1500 字 → preview_truncated=true', async () => {
+    mockedGetKnowledgeBases.mockResolvedValue(listResponse([REAL_DOC]) as never)
+    mockedGetDocumentDetail.mockResolvedValue({
+      data: { data: { id: 'doc-1', title: 'architecture.md', filename: 'architecture.md' } },
+    } as never)
+    mockedGetDocumentContent.mockResolvedValue({
+      data: {
+        data: {
+          id: 'doc-1',
+          filename: 'architecture.md',
+          content: '原'.repeat(1600),
+          text_provenance: 'parser_original',
+          truncated: false,
+        },
+      },
+    } as never)
+
+    const wrapper = mountView()
+    await flushPromises()
+    await nextTick()
+    const card = wrapper.findAll('.group').find((g) => g.text().includes('architecture.md'))
+    await card!.findAll('button')[0].trigger('click')
+    await flushPromises()
+    await nextTick()
+
+    expect(wrapper.find('.detail-stub').text()).toContain('truncated')
   })
 })

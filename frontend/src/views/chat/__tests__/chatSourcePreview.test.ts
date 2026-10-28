@@ -13,7 +13,7 @@
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
-import { defineComponent, h } from 'vue'
+import { defineComponent, h, nextTick } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
 import { createRouter, createMemoryHistory } from 'vue-router'
 import { createI18n } from 'vue-i18n'
@@ -149,7 +149,14 @@ const MsgStub = defineComponent({
 })
 const PreviewStub = defineComponent({
   name: 'DocumentPreviewModal',
-  props: { show: Boolean, loading: Boolean, doc: Object, content: String },
+  props: {
+    show: Boolean,
+    loading: Boolean,
+    doc: Object,
+    content: String,
+    textProvenance: String,
+    truncated: Boolean,
+  },
   emits: ['update:show', 'download'],
   setup() {
     return () => h('div', { class: 'preview-stub' })
@@ -223,7 +230,15 @@ describe('W2-T7 · chat 页来源卡 → 原文预览接通', () => {
     mockedGetDocumentContent.mockResolvedValue({
       data: {
         success: true,
-        data: { id: 'doc-7', filename: '架构文档.pdf', content: '全文内容甲', summary: '摘要', suggested_tags: ['tag'] },
+        data: {
+          id: 'doc-7',
+          filename: '架构文档.pdf',
+          content: '全文内容甲',
+          summary: '摘要',
+          suggested_tags: ['tag'],
+          text_provenance: 'mixed',
+          truncated: true,
+        },
       },
     } as never)
 
@@ -239,7 +254,69 @@ describe('W2-T7 · chat 页来源卡 → 原文预览接通', () => {
     expect(modal.props('show')).toBe(true)
     expect(modal.props('loading')).toBe(false)
     expect(modal.props('content')).toBe('全文内容甲')
+    // 原文口径与截断从 API 透传到弹窗，不能被前端丢弃。
+    expect(modal.props('textProvenance')).toBe('mixed')
+    expect(modal.props('truncated')).toBe(true)
     expect(modal.props('doc')).toMatchObject({ id: 'doc-7', filename: '架构文档.pdf', source: '知识库上传', summary: '摘要' })
+    expect(messageSpies.error).not.toHaveBeenCalled()
+  })
+
+  it('连续打开两个来源：慢的旧请求不得覆盖新来源的正文与口径', async () => {
+    let resolveSlowDoc!: (value: unknown) => void
+    let resolveSlowContent!: (value: unknown) => void
+    const slowDoc = new Promise((resolve) => { resolveSlowDoc = resolve })
+    const slowContent = new Promise((resolve) => { resolveSlowContent = resolve })
+
+    mockedGetDocument
+      .mockImplementationOnce(() => slowDoc as never)
+      .mockResolvedValueOnce({
+        data: { success: true, data: { id: 'doc-8', filename: '新文档.pdf' } },
+      } as never)
+    mockedGetDocumentContent
+      .mockImplementationOnce(() => slowContent as never)
+      .mockResolvedValueOnce({
+        data: {
+          success: true,
+          data: {
+            id: 'doc-8',
+            filename: '新文档.pdf',
+            content: '新文档正文',
+            text_provenance: 'parser_original',
+            truncated: false,
+          },
+        },
+      } as never)
+
+    const wrapper = await mountChat()
+    const messages = wrapper.findComponent(MsgStub)
+    messages.vm.$emit('openSource', SOURCE)
+    await nextTick()
+    messages.vm.$emit('openSource', { ...SOURCE, documentId: 'doc-8', filename: '新文档.pdf' })
+    await flushPromises()
+    await flushPromises()
+
+    // 慢请求最后返回：旧来源内容/标题/口径都不得回写。
+    resolveSlowDoc({ data: { success: true, data: { id: 'doc-7', filename: '旧文档.pdf' } } })
+    resolveSlowContent({
+      data: {
+        success: true,
+        data: {
+          id: 'doc-7',
+          filename: '旧文档.pdf',
+          content: '旧文档正文',
+          text_provenance: 'legacy_unverified',
+          truncated: true,
+        },
+      },
+    })
+    await flushPromises()
+
+    const modal = wrapper.findComponent(PreviewStub)
+    expect(modal.props('content')).toBe('新文档正文')
+    expect(modal.props('doc')).toMatchObject({ id: 'doc-8', filename: '新文档.pdf' })
+    expect(modal.props('textProvenance')).toBe('parser_original')
+    expect(modal.props('truncated')).toBe(false)
+    expect(modal.props('loading')).toBe(false)
     expect(messageSpies.error).not.toHaveBeenCalled()
   })
 

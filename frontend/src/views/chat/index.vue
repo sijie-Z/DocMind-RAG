@@ -4,6 +4,8 @@
     :loading="previewLoading"
     :doc="previewDoc"
     :content="previewContent"
+    :text-provenance="previewProvenance"
+    :truncated="previewTruncated"
     :download-loading="downloadLoading"
     :download-error="downloadError"
     @download="handleDownload"
@@ -595,9 +597,16 @@ const previewDoc = ref<{
   suggested_tags?: string[]
 } | undefined>(undefined)
 const previewContent = ref('')
+// 预览原文口径：legacy/mixed 与截断都必须在弹窗可见，不能把可能含生成摘要
+// 的旧文本静默当成原文。
+const previewProvenance = ref<DocumentContent['text_provenance'] | undefined>(undefined)
+const previewTruncated = ref(false)
 const downloadLoading = ref(false)
 const downloadError = ref('')
 let downloadRequestSeq = 0
+// 来源卡可被连续点击：慢的旧请求不得覆盖新来源的标题/正文（证据必须对应
+// 用户最后点击的来源，而不是最后返回的请求）。
+let previewRequestSeq = 0
 
 const resetDownloadState = () => {
   downloadRequestSeq += 1
@@ -607,7 +616,10 @@ const resetDownloadState = () => {
 
 watch(showPreviewModal, (open) => {
   // 关闭弹窗也是视图离开点；旧 Promise 结果不得再打开或回写。
-  if (!open) resetDownloadState()
+  if (!open) {
+    resetDownloadState()
+    previewRequestSeq += 1
+  }
 })
 
 const handleDownload = async (fileId?: string) => {
@@ -663,16 +675,21 @@ const handleOpenSource = async (source: KnowledgeSource) => {
   const docId = source?.documentId
   if (docId === undefined || docId === null || docId === '') return
   const id = String(docId)
+  const requestSeq = ++previewRequestSeq
+  const ownsRequest = () => requestSeq === previewRequestSeq
   resetDownloadState()
   showPreviewModal.value = true
   previewLoading.value = true
   previewDoc.value = { id, filename: source.filename }
   previewContent.value = ''
+  previewProvenance.value = undefined
+  previewTruncated.value = false
   try {
     const [docRes, contentRes] = await Promise.all([
       getDocumentDetail(id),
       getDocumentContent(id),
     ])
+    if (!ownsRequest()) return
     const doc = (docRes?.data as { data?: DocumentDetail } | undefined)?.data
     const contentData = (contentRes?.data as { data?: DocumentContent } | undefined)?.data
     previewDoc.value = {
@@ -689,10 +706,12 @@ const handleOpenSource = async (source: KnowledgeSource) => {
       suggested_tags: contentData?.suggested_tags,
     }
     previewContent.value = contentData?.content || ''
+    previewProvenance.value = contentData?.text_provenance
+    previewTruncated.value = contentData?.truncated === true
   } catch {
-    message.error(t('chat.sourcePreviewFailed'))
+    if (ownsRequest()) message.error(t('chat.sourcePreviewFailed'))
   } finally {
-    previewLoading.value = false
+    if (ownsRequest()) previewLoading.value = false
   }
 }
 

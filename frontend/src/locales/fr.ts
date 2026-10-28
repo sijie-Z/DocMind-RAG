@@ -257,6 +257,8 @@ export default {
     description: 'Description',
     contentSummary: 'Résumé du contenu',
     noContent: 'Aucun contenu',
+    previewOriginalUnavailable: "Certains blocs, voire tous, de ce document n'ont pas de texte original issu du parseur. L'aperçu peut contenir des résumés de contexte générés par le système et ne doit pas servir de preuve du texte original.",
+    previewTruncated: "Ce document est long ; l'aperçu est tronqué et n'affiche que le début.",
     downloadDocument: 'Télécharger le document',
     downloadPreparing: 'Préparation du téléchargement…',
     downloadFailed: 'Échec du téléchargement. Veuillez réessayer.',
@@ -362,6 +364,8 @@ export default {
     cancelUpload: 'Annuler le téléchargement',
     removeFromList: 'Retirer de la liste',
     uploadCancelled: 'Téléchargement annulé',
+    previewOriginalUnavailable: "Certains blocs, voire tous, de ce document n'ont pas de texte original issu du parseur. L'aperçu peut contenir des résumés de contexte générés par le système et ne doit pas servir de preuve du texte original.",
+    previewTruncated: "Ce document est long ; l'aperçu est tronqué et n'affiche que le début.",
     table: {
       name: 'Nom du fichier',
       size: 'Taille',

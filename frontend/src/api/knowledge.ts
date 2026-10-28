@@ -16,6 +16,10 @@ export interface KnowledgeBase {
   summary?: string
   suggested_tags?: string[]
   preview_content?: string
+  // 预览内容的原文可信度与截断状态（/documents/{id}/content 的 data 透传）：
+  // legacy/mixed 表示部分分块没有 parser 原文，预览文本不能直接当原文证据。
+  preview_provenance?: DocumentContent['text_provenance']
+  preview_truncated?: boolean
   parse_error?: string
   raw_status?: string
   created_at: string
@@ -66,6 +70,20 @@ export interface DocumentContent {
   content: string
   summary?: string
   suggested_tags?: string[]
+  /**
+   * 实际返回内容的原文可信度：
+   * - parser_original：全部来自解析器原文；
+   * - mixed：部分分块只有检索增强文本；
+   * - legacy_unverified：全部是旧版分块，可能含生成的背景摘要，不能当原文证据；
+   * - none：没有可预览内容。
+   */
+  text_provenance?: 'parser_original' | 'mixed' | 'legacy_unverified' | 'none'
+  original_chunk_count?: number
+  legacy_chunk_count?: number
+  total_chunks?: number
+  returned_chunks?: number
+  /** 服务端读取有界：为 true 时 content 不是全文，界面必须提示。 */
+  truncated?: boolean
 }
 
 export interface DocumentDownloadUrl {
