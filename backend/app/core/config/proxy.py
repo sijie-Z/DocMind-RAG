@@ -43,6 +43,18 @@ class SettingsProxy:
     def _reset(self) -> None:
         object.__setattr__(self, "_target", None)
 
+    @property
+    def __dict__(self) -> dict[str, Any]:  # type: ignore[override]
+        """转发真实 ``Settings.__dict__``。
+
+        pytest 9.2（#10644）对非类目标、且无数据描述符的属性，改为从
+        ``target.__dict__`` 快照旧值；快照不到就 ``delattr`` 回滚。代理的
+        ``__dict__`` 原本只有 ``_target``，导致 ``monkeypatch.setattr(settings,
+        "X", v)`` 的 undo 把真实字段从 pydantic 实例上删掉，后续所有读取
+        级联失败。转发后 pytest 能看到真实旧值并用 ``setattr`` 恢复。
+        """
+        return self._resolve().__dict__
+
     def __getattr__(self, name: str) -> Any:
         # 只在正常查找失败时调用；dunder 查询（copy/pickle 等）直接按未定义处理。
         if name.startswith("__") and name.endswith("__"):
