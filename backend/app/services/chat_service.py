@@ -11,6 +11,7 @@ from dataclasses import dataclass, field
 from sqlalchemy import and_, desc, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.attributes import flag_modified
+from sqlalchemy.orm.exc import StaleDataError
 
 from app.core.config import settings
 from app.core.prometheus import RAG_RELEVANCE_GATE_TOTAL, RAG_RETRIEVAL_UNAVAILABLE
@@ -77,13 +78,143 @@ LLM_NOT_CONFIGURED_MESSAGE = (
 
 @dataclass
 class RAGEvent:
-    type: str  # "chunk", "message", "error", "cache_hit", "debug"
+    type: str  # "chunk", "message", "error", "warning", "cache_hit", "debug"
     content: str = ""
     conversation_id: str = ""
     message_id: str = ""
     sources: list[dict] = field(default_factory=list)
     is_cached: bool = False
     debug_data: dict | None = None
+
+
+@dataclass(frozen=True)
+class RegenerateTarget:
+    """重新生成的目标：会话最新一轮 assistant + 它对应的 user 行。"""
+
+    assistant_id: str
+    user_seq: int
+    user_content: str
+
+
+async def resolve_regenerate_target(
+    session: AsyncSession,
+    conversation_id: str | None,
+    user_id: int,
+    organization_id: int | None,
+) -> RegenerateTarget | None:
+    """解析“重新生成”目标；只读，绝不创建会话或消息。
+
+    仅允许会话本人、且会话组织与本次运行组织一致（历史 NULL 组织会话兼容）。
+    返回 None = 不可重新生成（会话不存在/不属于本人/组织不符/没有最新一轮），
+    调用方必须显式报错而非回退到普通发送——否则会再次插入重复 user 行。
+    """
+    if not conversation_id:
+        return None
+    chat_session = (
+        await session.execute(
+            select(ChatSession).where(
+                ChatSession.id == conversation_id,
+                ChatSession.user_id == user_id,
+            )
+        )
+    ).scalar_one_or_none()
+    if chat_session is None:
+        return None
+    if chat_session.organization_id is not None and chat_session.organization_id != organization_id:
+        return None
+
+    latest = (
+        await session.execute(
+            select(ChatMessage)
+            .where(ChatMessage.session_id == conversation_id)
+            .order_by(ChatMessage.seq.desc())
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    # 只允许重写会话最后一条消息，且它必须是 assistant——与 UI「仅最后一条
+    # 回答可重新生成」一致；否则会跳过更新的 user 轮次、悄悄丢上下文。
+    if latest is None or latest.message_type != MessageType.ASSISTANT:
+        return None
+    assistant = latest
+    user_msg = (
+        await session.execute(
+            select(ChatMessage)
+            .where(
+                ChatMessage.session_id == conversation_id,
+                ChatMessage.message_type == MessageType.USER,
+                ChatMessage.seq < assistant.seq,
+            )
+            .order_by(ChatMessage.seq.desc())
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    if user_msg is None:
+        return None
+    return RegenerateTarget(
+        assistant_id=assistant.id,
+        user_seq=user_msg.seq,
+        user_content=user_msg.content,
+    )
+
+
+async def _persist_assistant_message(
+    session: AsyncSession,
+    *,
+    conversation_id: str,
+    message_id: str,
+    content: str,
+    meta_data: dict,
+    replace_existing: bool,
+) -> bool:
+    """落库 assistant：普通发送插入新行；重新生成原地更新目标行。
+
+    重新生成时目标行必须仍然存在且属于同一会话；否则返回 False，绝不插入
+    新行（否则会复活已删除的会话/重复消息）。反馈随内容替换而清空。
+    """
+    meta_json = json.dumps(meta_data, ensure_ascii=False)
+    if replace_existing:
+        try:
+            msg = await session.get(ChatMessage, message_id)
+            if (
+                msg is None
+                or msg.session_id != conversation_id
+                or msg.message_type != MessageType.ASSISTANT
+            ):
+                logger.error(
+                    "重新生成保存失败：目标 assistant 行不存在或不属于该会话 session=%s message=%s",
+                    conversation_id,
+                    message_id,
+                )
+                return False
+            msg.content = content
+            msg.meta_data = meta_json
+            msg.feedback = 0
+            msg.feedback_note = None
+            await session.commit()
+            return True
+        except StaleDataError:
+            # 会话/消息在生成期间被并发删除或改写：ORM UPDATE 命中 0 行。
+            # 不得重试插入、不得复活已删除会话；回滚并让调用方发 warning。
+            await session.rollback()
+            logger.error(
+                "重新生成保存失败：目标行在生成期间被删除或改写 session=%s message=%s",
+                conversation_id,
+                message_id,
+            )
+            return False
+
+    session.add(
+        ChatMessage(
+            id=message_id,
+            session_id=conversation_id,
+            seq=await next_message_seq(session, conversation_id),
+            content=content,
+            message_type=MessageType.ASSISTANT,
+            meta_data=meta_json,
+        )
+    )
+    await session.commit()
+    return True
 
 
 def _provenance_error_event(
@@ -322,8 +453,15 @@ async def run_rag_pipeline(
     privacy_mode: bool,
     event_queue: asyncio.Queue | None = None,
     debug: bool = False,
+    regenerate: bool = False,
 ) -> None:
-    """RAG pipeline core logic; pushes events into ``event_queue``."""
+    """RAG pipeline core logic; pushes events into ``event_queue``.
+
+    ``regenerate=True``：对会话最新一轮做**原地重新生成**——复用同一 user 行
+    与 assistant 行（id/seq 不变），不再插入重复 user 消息；历史只取该 user
+    行之前的消息，旧答案不进入提示词。任何目标解析/保存失败都如实报错，绝不
+    回退成普通发送。
+    """
 
     def _emit(event: RAGEvent):
         if event_queue is not None:
@@ -371,21 +509,73 @@ async def run_rag_pipeline(
     # 不信任客户端可伪造的 privacyMode=true。
     privacy_mode = privacy_mode and org_policy.allow_privacy_mode
 
-    conversation_id, bound_doc_ids = await get_or_create_session(
-        session,
-        conversation_id,
-        user_id,
-        user_content,
-        organization_id,
-    )
+    # 重新生成必须先解析现有最新一轮；解析失败显式报错，绝不落到下面的
+    # “写入新 user 行”路径（那正是重复消息/旧答案复活的根因）。
+    regenerate_target: RegenerateTarget | None = None
+    if regenerate:
+        regenerate_target = await resolve_regenerate_target(
+            session, conversation_id, user_id, organization_id
+        )
+        if regenerate_target is None:
+            _emit(
+                RAGEvent(
+                    type="error",
+                    content="没有可重新生成的回答；请刷新会话后重试",
+                    conversation_id=conversation_id or "",
+                )
+            )
+            return
+        # 重新生成的提问以库中 user 行为准，忽略客户端重发的文本。
+        user_content = regenerate_target.user_content
+        # 结束解析阶段的只读事务，让随后的归属复核看到最新行。长流式生成期间的
+        # 历史/提示词读取会重新开启事务；删除中途的安全性由持久化处的
+        # StaleDataError 捕获兜底，不依赖这里释放连接。
+        await session.commit()
 
+    if regenerate_target is None:
+        conversation_id, bound_doc_ids = await get_or_create_session(
+            session,
+            conversation_id,
+            user_id,
+            user_content,
+            organization_id,
+        )
+    else:
+        # 重新生成绝不走“给定 id 可创建会话”的兼容路径：会话在解析后被删除时
+        # 必须失败，不能用同一 id 复活空会话。
+        chat_session = await session.get(ChatSession, conversation_id)
+        if (
+            chat_session is None
+            or chat_session.user_id != user_id
+            or (
+                chat_session.organization_id is not None
+                and chat_session.organization_id != organization_id
+            )
+        ):
+            _emit(
+                RAGEvent(
+                    type="error",
+                    content="会话不存在或无权访问；请刷新后重试",
+                    conversation_id=conversation_id or "",
+                )
+            )
+            return
+        settings_json = chat_session.settings or {}
+        bound_doc_ids = (
+            settings_json.get("bound_document_ids") or [] if isinstance(settings_json, dict) else []
+        )
+
+    history_stmt = select(ChatMessage).where(ChatMessage.session_id == conversation_id)
+    if regenerate_target is not None:
+        # 重新生成只保留目标 user 行之前的历史：旧 assistant 答案不得进入提示词，
+        # 否则模型会被旧答案锚定（且旧 user 问题不重复出现）。
+        history_stmt = history_stmt.where(ChatMessage.seq < regenerate_target.user_seq)
     history_msgs = (
         (
             await session.execute(
-                select(ChatMessage)
-                .where(ChatMessage.session_id == conversation_id)
-                .order_by(ChatMessage.seq.desc(), ChatMessage.created_at.desc())
-                .limit(10)
+                history_stmt.order_by(ChatMessage.seq.desc(), ChatMessage.created_at.desc()).limit(
+                    10
+                )
             )
         )
         .scalars()
@@ -399,19 +589,24 @@ async def run_rag_pipeline(
         for h in reversed(history_msgs)
     ]
 
-    user_meta_data = {}
-    if file_ids:
-        user_meta_data["file_ids"] = file_ids
-    user_msg = ChatMessage(
-        id=str(uuid.uuid4()),
-        session_id=conversation_id,
-        seq=await next_message_seq(session, conversation_id),
-        content=user_content,
-        message_type=MessageType.USER,
-        meta_data=json.dumps(user_meta_data) if user_meta_data else None,
-    )
-    session.add(user_msg)
-    await session.commit()
+    if regenerate_target is None:
+        user_meta_data = {}
+        if file_ids:
+            user_meta_data["file_ids"] = file_ids
+        user_msg = ChatMessage(
+            id=str(uuid.uuid4()),
+            session_id=conversation_id,
+            seq=await next_message_seq(session, conversation_id),
+            content=user_content,
+            message_type=MessageType.USER,
+            meta_data=json.dumps(user_meta_data) if user_meta_data else None,
+        )
+        session.add(user_msg)
+        await session.commit()
+
+    if regenerate_target is not None:
+        # 重新生成复用原轮次的会话绑定文档；不接受本轮请求里新附件改变证据范围。
+        file_ids = []
 
     active_doc_ids = [str(fid) for fid in file_ids if fid] if file_ids else bound_doc_ids
 
@@ -441,8 +636,11 @@ async def run_rag_pipeline(
                     for source in (cached_res.get("sources") or [])
                     if isinstance(source, dict)
                 ]
-                ai_msg_id = str(uuid.uuid4())
-
+                ai_msg_id = (
+                    regenerate_target.assistant_id
+                    if regenerate_target is not None
+                    else str(uuid.uuid4())
+                )
                 _emit(
                     RAGEvent(
                         type="message",
@@ -468,19 +666,22 @@ async def run_rag_pipeline(
                         )
                     )
 
-                ai_msg = ChatMessage(
-                    id=ai_msg_id,
-                    session_id=conversation_id,
-                    seq=await next_message_seq(session, conversation_id),
+                saved = await _persist_assistant_message(
+                    session,
+                    conversation_id=conversation_id,
+                    message_id=ai_msg_id,
                     content=full_response,
-                    message_type=MessageType.ASSISTANT,
-                    meta_data=json.dumps(
-                        {"sources": sources_list, "is_cached": True},
-                        ensure_ascii=False,
-                    ),
+                    meta_data={"sources": sources_list, "is_cached": True},
+                    replace_existing=regenerate_target is not None,
                 )
-                session.add(ai_msg)
-                await session.commit()
+                if not saved:
+                    _emit(
+                        RAGEvent(
+                            type="warning",
+                            content="回答已生成，但会话记录保存失败；刷新后可能仍显示旧回答",
+                            conversation_id=conversation_id,
+                        )
+                    )
                 return
 
     context_results: list[dict] = []
@@ -661,7 +862,9 @@ async def run_rag_pipeline(
         logger.warning(f"Memory recall failed (non-fatal): {e}")
 
     full_response = ""
-    ai_msg_id = str(uuid.uuid4())
+    ai_msg_id = (
+        regenerate_target.assistant_id if regenerate_target is not None else str(uuid.uuid4())
+    )
 
     _emit(
         RAGEvent(
@@ -737,19 +940,22 @@ async def run_rag_pipeline(
         )
     )
 
-    ai_msg = ChatMessage(
-        id=ai_msg_id,
-        session_id=conversation_id,
-        seq=await next_message_seq(session, conversation_id),
+    saved = await _persist_assistant_message(
+        session,
+        conversation_id=conversation_id,
+        message_id=ai_msg_id,
         content=full_response,
-        message_type=MessageType.ASSISTANT,
-        meta_data=json.dumps(
-            {"sources": cited_sources, "citations_used": sorted(cited_indices)},
-            ensure_ascii=False,
-        ),
+        meta_data={"sources": cited_sources, "citations_used": sorted(cited_indices)},
+        replace_existing=regenerate_target is not None,
     )
-    session.add(ai_msg)
-    await session.commit()
+    if not saved:
+        _emit(
+            RAGEvent(
+                type="warning",
+                content="回答已生成，但会话记录保存失败；刷新后可能仍显示旧回答",
+                conversation_id=conversation_id,
+            )
+        )
 
     try:
         token_usage = rag_service.get_last_token_usage()

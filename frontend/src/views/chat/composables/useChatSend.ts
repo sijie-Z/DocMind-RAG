@@ -36,6 +36,41 @@ export function useChatSend(
   // 挂起的一帧，组件卸载时取消，避免尾部内容丢失或在卸载后写入状态。
   let activeStream: { flush: () => void; cancel: () => void } | null = null
 
+  // 重新生成的可恢复状态：旧气泡被临时隐藏，停止/失败/流异常结束时必须恢复。
+  // 放在 composable 作用域（而不是 handleSSESend 闭包）才能被 stopGeneration /
+  // resetSendState 触达——否则点“停止生成”后旧答案永久空白。
+  type RegenerateBackup = {
+    content: string
+    sources?: KnowledgeSource[]
+    isCached?: boolean
+  }
+  let activeRegenerate: {
+    placeholderId: string
+    target: ChatMessage
+    backup: RegenerateBackup
+  } | null = null
+
+  const cleanupActiveRegenerate = (placeholderId?: string) => {
+    const state = activeRegenerate
+    if (!state) return
+    // 带 key 的调用只允许清理本流；停止/重置才允许无条件清理。
+    if (placeholderId !== undefined && state.placeholderId !== placeholderId) return
+    activeRegenerate = null
+    const placeholderIdx = messages.value.findIndex(m => m.id === state.placeholderId)
+    if (placeholderIdx >= 0) messages.value.splice(placeholderIdx, 1)
+    state.target.content = state.backup.content
+    state.target.sources = state.backup.sources
+    state.target.isCached = state.backup.isCached
+  }
+
+  const settleActiveRegenerateSuccess = (placeholderId: string) => {
+    const state = activeRegenerate
+    if (!state || state.placeholderId !== placeholderId) return
+    activeRegenerate = null
+    const targetIdx = messages.value.indexOf(state.target)
+    if (targetIdx >= 0) messages.value.splice(targetIdx, 1)
+  }
+
   const buildFileContext = (files: AttachedFile[]): string | null => {
     const withContent = files.filter(f => f.parsedContent)
     if (!withContent.length) return null
@@ -45,7 +80,12 @@ export function useChatSend(
     return parts.join('\n\n---\n\n')
   }
 
-  const handleSSESend = async (preprocessedMessage?: string) => {
+  const handleSSESend = async (
+    preprocessedMessage?: string,
+    options?: { regenerateTarget?: ChatMessage }
+  ) => {
+    const regenerateTarget = options?.regenerateTarget
+    const isRegenerate = !!regenerateTarget
     const generation = getGeneration()
     const ownsGeneration = () => generation === getGeneration()
     let userMessage = preprocessedMessage ?? inputMessage.value.trim()
@@ -66,17 +106,22 @@ export function useChatSend(
       }
     }
 
-    inputMessage.value = ''
-    attachedFiles.value = []
+    // 重新生成复用已有 user 消息：不清输入框/附件，也不追加 user 气泡。
+    if (!isRegenerate) {
+      inputMessage.value = ''
+      attachedFiles.value = []
+    }
 
     const userMsgId = Date.now()
-    messages.value.push({
-      id: userMsgId,
-      content: userMessage,
-      messageType: 'user',
-      conversationId: chatStore.currentConversation?.id || 0,
-      files: currentFiles.map(f => ({ ...f }))
-    })
+    if (!isRegenerate) {
+      messages.value.push({
+        id: userMsgId,
+        content: userMessage,
+        messageType: 'user',
+        conversationId: chatStore.currentConversation?.id || 0,
+        files: currentFiles.map(f => ({ ...f }))
+      })
+    }
     scrollToBottom()
     isLoading.value = true
     isRetrieving.value = true
@@ -89,6 +134,27 @@ export function useChatSend(
       messageType: 'assistant',
       conversationId: chatStore.currentConversation?.id || 0
     })
+
+    // 重新生成：旧回答先隐藏，失败/停止时由 activeRegenerate 原样恢复；
+    // 成功后才移除旧气泡。
+    if (regenerateTarget) {
+      activeRegenerate = {
+        placeholderId: aiMsgId,
+        target: regenerateTarget,
+        backup: {
+          content: regenerateTarget.content,
+          sources: regenerateTarget.sources,
+          isCached: regenerateTarget.isCached,
+        },
+      }
+      regenerateTarget.content = ''
+      regenerateTarget.sources = undefined
+    }
+    let terminalReceived = false
+    // 同一 generation 内也可能存在被 Stop 中止、因重试退避而迟到的旧流；
+    // 只有仍持有当前 regenerate 占位（普通发送恒真）的流可以改 UI。
+    const ownsActiveStream = () =>
+      !isRegenerate || activeRegenerate?.placeholderId === aiMsgId
 
     sseService.off('chunk')
     sseService.off('message')
@@ -142,6 +208,7 @@ export function useChatSend(
     // 等 message 终态一次性落屏（非流式展示）；开启时按帧节流落屏（默认行为不回归）。
     const onChunk = (data: SSEMessage) => {
       if (!ownsGeneration()) return
+      if (!ownsActiveStream()) return
       sseStatus.value = 'connected'
       if (data.conversationId && (!chatStore.currentConversation || chatStore.currentConversation.id !== data.conversationId)) {
         chatStore.setCurrentConversation({
@@ -166,6 +233,8 @@ export function useChatSend(
 
     const onMessage = (data: SSEMessage) => {
       if (!ownsGeneration()) return
+      if (!ownsActiveStream()) return
+      terminalReceived = true
       isLoading.value = false
       isRetrieving.value = false
       sseStatus.value = 'connected'
@@ -188,7 +257,11 @@ export function useChatSend(
         lastMsg.content = data.content || fullContent
         if (data.sources) lastMsg.sources = data.sources as KnowledgeSource[]
         if (data.is_cached) lastMsg.isCached = true
+        // 采用服务端真实消息 id：否则新回答的点赞/点踩会以本地 sse-* id 404。
+        if (data.messageId) lastMsg.id = data.messageId
       }
+      // 重新生成成功：旧回答气泡移除，新回答保留在原来的位置之后。
+      settleActiveRegenerateSuccess(aiMsgId)
       // 侧栏列表在流完成时刷新（chunk 路径不再触发，见 onChunk）
       fetchConversations()
       scrollToBottom()
@@ -196,9 +269,13 @@ export function useChatSend(
 
     const onError = (data: SSEMessage) => {
       if (!ownsGeneration()) return
+      if (!ownsActiveStream()) return
+      terminalReceived = true
       isLoading.value = false
       isRetrieving.value = false
       sseStatus.value = 'error'
+      // 重新生成失败：删除新占位气泡，原回答恢复可见（服务端未改旧行）。
+      cleanupActiveRegenerate(aiMsgId)
       // E3：出错终止时冲刷挂起的一帧，已到达的部分内容不丢（与旧逐 chunk 落屏观感一致）
       activeStream?.flush()
       activeStream = null
@@ -255,21 +332,33 @@ export function useChatSend(
         debug: debugEnabled?.value ?? false,
         payload: {
           strictMode: strictMode.value,
-          privacyMode: privacyMode.value
+          privacyMode: privacyMode.value,
+          // 后端据此原地替换最新 assistant 行、不插入重复 user 消息。
+          ...(isRegenerate ? { regenerate: true } : {})
         }
       })
 
       if (!ownsGeneration()) return
+      if (!ownsActiveStream()) return
       if (!sent) {
         message.error(t('chat.sendFailed'))
         isLoading.value = false
-        attachedFiles.value = currentFiles
+        cleanupActiveRegenerate(aiMsgId)
+        if (!isRegenerate) attachedFiles.value = currentFiles
+      } else if (isRegenerate && !terminalReceived) {
+        // 流干净结束但没有终态帧（代理/keepalive 截断）：不能留下隐藏的旧答案
+        // 和半截占位气泡；恢复旧答案并结束加载态。
+        cleanupActiveRegenerate(aiMsgId)
+        isLoading.value = false
+        isRetrieving.value = false
       }
     } catch {
       if (!ownsGeneration()) return
+      if (!ownsActiveStream()) return
       message.error(t('chat.networkError'))
       isLoading.value = false
-      attachedFiles.value = currentFiles
+      cleanupActiveRegenerate(aiMsgId)
+      if (!isRegenerate) attachedFiles.value = currentFiles
     }
   }
 
@@ -361,10 +450,26 @@ export function useChatSend(
     if (e.key === 'Enter' && !e.shiftKey) handleSend()
   }
 
-  const regenerateMessage = async (previousUserMessage: string) => {
-    if (!previousUserMessage || isLoading.value) return
-    inputMessage.value = previousUserMessage
-    await handleSend()
+  const regenerateMessage = async (assistantMessage: ChatMessage) => {
+    if (!assistantMessage || isLoading.value) return
+    // 未落库的本地占位（发送失败/停止且未收到终态）没有服务端 id；直接重生成会
+    // 让后端重写更早的一轮。要求先刷新会话拿到真实消息。
+    if (typeof assistantMessage.id === 'string' && assistantMessage.id.startsWith('sse-')) {
+      message.warning(t('chat.regenerateNeedsReload'))
+      return
+    }
+    const assistantIdx = messages.value.indexOf(assistantMessage)
+    if (assistantIdx < 1) return
+    let previousUserMessage = ''
+    for (let i = assistantIdx - 1; i >= 0; i--) {
+      if (messages.value[i].messageType === 'user') {
+        previousUserMessage = messages.value[i].content
+        break
+      }
+    }
+    if (!previousUserMessage) return
+    // 重新生成固定走 SSE：需要确定性的终态与原地替换；WS 传输不支持本契约。
+    await handleSSESend(previousUserMessage, { regenerateTarget: assistantMessage })
   }
 
   const resetSendState = () => {
@@ -374,6 +479,7 @@ export function useChatSend(
     sseService.abort()
     isLoading.value = false
     isRetrieving.value = false
+    cleanupActiveRegenerate()
   }
 
   const stopGeneration = () => {
@@ -392,6 +498,9 @@ export function useChatSend(
     }
     isLoading.value = false
     isRetrieving.value = false
+    // abort 会让 sseService.post 正常返回；必须在这里恢复被隐藏的旧答案，
+    // 否则停止生成后旧气泡永久空白。
+    cleanupActiveRegenerate()
   }
 
   // 组件卸载时中止进行中的 SSE 流并清理事件处理器，防止请求悬挂与内存泄漏

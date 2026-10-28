@@ -544,6 +544,11 @@ class TestMappingUnits:
             "请尝试换个问法，或联系管理员补充相关文档"
         )
         assert public_rag_error_content(gate_refusal) == gate_refusal
+        # 重新生成的可判定拒绝：刷新提示必须原样到达，不得伪装成服务故障。
+        regenerate_missing = "没有可重新生成的回答；请刷新会话后重试"
+        assert public_rag_error_content(regenerate_missing) == regenerate_missing
+        session_gone = "会话不存在或无权访问；请刷新后重试"
+        assert public_rag_error_content(session_gone) == session_gone
         assert public_rag_error_content(f"ValueError: {SECRET}") == GENERIC_RAG_ERROR
 
     def test_authorization_message_passes_but_other_4xx_does_not(self):

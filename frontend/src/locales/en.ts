@@ -318,6 +318,7 @@ export default {
     useful: 'Helpful',
     notUseful: 'Not Helpful',
     regenerate: 'Regenerate',
+    regenerateNeedsReload: 'This answer is not saved yet. Refresh the conversation and try again.',
     // Sidebar
     loadFailed: 'Load Failed',
     loadFailedDesc: 'Unable to load conversation list',

@@ -712,8 +712,10 @@ async def websocket_endpoint(
                 # 旧客户端若仍携带，继续忽略；勿接线。
                 strict_mode = payload_data.get("strictMode", False)
                 privacy_mode = payload_data.get("privacyMode", True)
+                # 重新生成走与 SSE 相同的原地替换契约；内容以库中 user 行为准。
+                regenerate = bool(msg_data.get("regenerate", False))
 
-                if not user_content:
+                if not user_content and not regenerate:
                     continue
 
                 async with AsyncSessionLocal() as session:
@@ -753,6 +755,7 @@ async def websocket_endpoint(
                             strict_mode=strict_mode,
                             privacy_mode=privacy_mode,
                             event_queue=queue,
+                            regenerate=regenerate,
                         )
                     )
 
@@ -787,6 +790,19 @@ async def websocket_endpoint(
                                     ),
                                     websocket,
                                 )
+                            elif event.type == "warning":
+                                # 回答已生成但落库失败：如实告知，不把未保存说成已保存。
+                                await manager.send_personal_message(
+                                    json.dumps(
+                                        {
+                                            "type": "warning",
+                                            "content": event.content,
+                                            "conversationId": event.conversation_id,
+                                        },
+                                        ensure_ascii=False,
+                                    ),
+                                    websocket,
+                                )
                             elif event.type == "error":
                                 # issue #268：RAG 链路的显式拒绝（如无组织）经此事件
                                 # 转发。此前无此 case，错误事件会被静默丢弃、客户端
@@ -818,6 +834,18 @@ async def websocket_endpoint(
                                                     "sources": event.sources,
                                                     "is_cached": event.is_cached,
                                                 }
+                                            ),
+                                            websocket,
+                                        )
+                                    elif event.type == "warning":
+                                        await manager.send_personal_message(
+                                            json.dumps(
+                                                {
+                                                    "type": "warning",
+                                                    "content": event.content,
+                                                    "conversationId": event.conversation_id,
+                                                },
+                                                ensure_ascii=False,
                                             ),
                                             websocket,
                                         )
@@ -1002,6 +1030,9 @@ async def chat_stream_endpoint(
             # 旧客户端若仍携带，继续忽略；勿接线。
             strict_mode = payload_data.get("strictMode", False)
             privacy_mode = payload_data.get("privacyMode", True)
+            # 重新生成：只允许对现有会话的最新一轮原地重写；解析/权限由
+            # run_rag_pipeline 统一执行（SSE/WS 共用同一契约）。
+            regenerate = bool(payload_data.get("regenerate", False))
 
             if not user_content:
                 yield await emitter.emit("error", {"content": "消息内容不能为空"})
@@ -1407,6 +1438,7 @@ async def chat_stream_endpoint(
                         privacy_mode=privacy_mode,
                         event_queue=queue,
                         debug=body.debug,
+                        regenerate=regenerate,
                     )
                 )
 
@@ -1442,6 +1474,15 @@ async def chat_stream_endpoint(
                                     "is_cached": event.is_cached,
                                 },
                             )
+                        elif event.type == "warning":
+                            # 回答已生成但落库失败：如实告知，不静默。
+                            yield await emitter.emit(
+                                "warning",
+                                {
+                                    "content": event.content,
+                                    "conversationId": event.conversation_id,
+                                },
+                            )
                         elif event.type == "error":
                             # issue #268：RAG 链路的显式拒绝（如无组织）经此事件
                             # 转发（与 WS 路径同一语义）。此前无此 case，错误会被
@@ -1466,6 +1507,14 @@ async def chat_stream_endpoint(
                                             "messageId": event.message_id,
                                             "sources": event.sources,
                                             "is_cached": event.is_cached,
+                                        },
+                                    )
+                                elif event.type == "warning":
+                                    yield await emitter.emit(
+                                        "warning",
+                                        {
+                                            "content": event.content,
+                                            "conversationId": event.conversation_id,
                                         },
                                     )
                                 elif event.type == "error":
