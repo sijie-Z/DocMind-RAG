@@ -27,6 +27,7 @@ from app.core.database import Base
 from app.exceptions import AppError, ServiceUnavailableError
 from app.models.document import Document, DocumentChunk, DocumentStatus, DocumentTag, DocumentType
 from app.models.knowledge_job import KnowledgeProcessingJob
+from app.models.review import ReviewDocumentMeta
 from app.rag.cache import RetrievalCache, SemanticCache
 from app.services.document_status import require_delete_by_query_response
 
@@ -200,6 +201,7 @@ async def delete_harness(monkeypatch):
         DocumentChunk.__table__,
         DocumentTag.__table__,
         KnowledgeProcessingJob.__table__,
+        ReviewDocumentMeta.__table__,
     ]
     async with engine.begin() as conn:
         await conn.run_sync(lambda sync_conn: Base.metadata.create_all(sync_conn, tables=tables))
@@ -763,3 +765,33 @@ async def test_batch_all_failures_write_no_success_audit(delete_harness, monkeyp
         "jobs": 1,
     }
     audit.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_delete_removes_review_meta(delete_harness, monkeypatch):
+    """核验身份是 documents 的子表：删除文档必须一并清理，否则 FK 会挡住或留下孤儿。"""
+    document_id = "doc-with-review-meta"
+    await _seed_document(delete_harness.factory, document_id)
+    async with delete_harness.factory() as session:
+        session.add(
+            ReviewDocumentMeta(
+                document_id=document_id,
+                organization_id=ORG_ID,
+                doc_role="contract",
+                family_key="f",
+                version_label="v1",
+                version_seq=1,
+                content_sha256="a" * 64,
+                registered_by=1,
+            )
+        )
+        await session.commit()
+
+    fake_es = _FakeES()
+    _wire_es(monkeypatch, fake_es)
+    service = ks_mod.KnowledgeService()
+    outcome = await service.delete_knowledge_thoroughly(document_id, ORG_ID)
+
+    assert outcome.success is True
+    async with delete_harness.factory() as session:
+        assert await session.get(ReviewDocumentMeta, document_id) is None

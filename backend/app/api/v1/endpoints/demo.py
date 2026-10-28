@@ -23,6 +23,7 @@ from app.models.chat import (
     MessageType,
 )
 from app.models.document import Document, DocumentChunk, DocumentStatus, DocumentType
+from app.models.review import ReviewDocumentMeta
 from app.models.user import User
 from app.services.document_status import mark_document_failed, mark_document_indexed
 from app.services.embedding_service import embedding_service
@@ -444,6 +445,9 @@ async def clear_demo_data(
             )
             for chunk in chunks_result.scalars().all():
                 await db.delete(chunk)
+            await db.execute(
+                delete(ReviewDocumentMeta).where(ReviewDocumentMeta.document_id == doc.id)
+            )
             await db.delete(doc)
 
         # 删除示例对话

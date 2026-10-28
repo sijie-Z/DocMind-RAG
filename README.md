@@ -489,8 +489,8 @@ DocMind/
 │   │   │   ├── context_compressor.py #  上下文压缩
 │   │   │   ├── context_window.py    #   令牌预算管理
 │   │   │   └── evaluator.py         #   质量评估
-│   │   ├── services/                # 业务服务层（27 个服务）
-│   │   ├── models/                  # ORM 模型（20 个模型文件）
+│   │   ├── services/                # 业务服务层（28 个服务）
+│   │   ├── models/                  # ORM 模型（21 个模型文件）
 │   │   ├── schemas/                 # Pydantic 请求/响应模式
 │   │   └── worker/                  # Kafka 消费者
 │   ├── tests/                       # 2223 个后端测试（前端另有 861 个）

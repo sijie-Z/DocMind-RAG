@@ -17,6 +17,7 @@ from app.models.rbac import (
     role_permission_association,
     user_organization_role_association,
 )
+from app.models.review import ReviewDocumentMeta
 from app.models.scheduled_task import ScheduledTask, ScheduleRunStatus, ScheduleType
 from app.models.token_usage import TokenUsageRecord
 from app.models.user import User
@@ -49,6 +50,7 @@ __all__ = [
     "Notification",
     "PromptTemplate",
     "PromptTemplateVersion",
+    "ReviewDocumentMeta",
     "TokenUsageRecord",
     "SystemManual",
     "Permission",
