@@ -1068,8 +1068,11 @@ class TestAgentChatSessionOrgSymmetry:
         legacy.organization_id = None
         result_mock = MagicMock()
         result_mock.scalar_one_or_none = MagicMock(return_value=legacy)
+        tombstone_missing = MagicMock()
+        tombstone_missing.scalar_one_or_none = MagicMock(return_value=None)
         fake = MagicMock()
-        fake.execute = AsyncMock(return_value=result_mock)
+        # 查询顺序：会话行 → 墓碑（无）→ seq 分配（数次）。
+        fake.execute = AsyncMock(side_effect=[result_mock, tombstone_missing] + [result_mock] * 12)
         fake.add = MagicMock()
         fake.commit = AsyncMock()
         monkeypatch.setattr(agent_mod, "AsyncSessionLocal", lambda: _AsyncCtx(fake))

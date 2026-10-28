@@ -351,3 +351,56 @@ async def test_regenerate_defaults_to_false(client, monkeypatch):
     resp = await client.post(STREAM_URL, json={"content": "普通问题"})
     assert resp.status_code == 200
     assert seen["regenerate"] is False
+
+
+@pytest.mark.asyncio
+async def test_legacy_agent_save_refusal_emits_warning(client, monkeypatch):
+    """legacy Agent 收尾被墓碑/无权拒绝时，必须发 warning，不得静默当作已保存。"""
+    monkeypatch.setattr(chat_api, "DEEP_ANALYSIS_GUARD_ENABLED", False)
+
+    async def _refuse(*_args, **_kwargs):
+        return None
+
+    monkeypatch.setattr(chat_api, "save_session_interaction", _refuse)
+
+    async def _fake_agent_chat(**_kwargs):
+        yield AgentEvent(type="chunk", content="答案")
+        yield AgentEvent(type="done", content="", task_state="completed")
+
+    monkeypatch.setattr(agent_service, "chat", _fake_agent_chat)
+
+    resp = await client.post(
+        STREAM_URL,
+        json={"content": "旧客户端", "useAgent": True, "conversationId": "conv-gone"},
+    )
+
+    assert resp.status_code == 200
+    frames = _parse_frames(resp.text)
+    warnings = [f for f in frames if f["event"] == "warning"]
+    assert warnings, frames
+    assert "会话记录保存失败" in warnings[0]["data"]["content"]
+
+
+@pytest.mark.asyncio
+async def test_legacy_agent_empty_answer_none_save_is_not_a_warning(client, monkeypatch):
+    """空回答返回 None 不是保存失败：不得误报 warning。"""
+    monkeypatch.setattr(chat_api, "DEEP_ANALYSIS_GUARD_ENABLED", False)
+
+    async def _refuse(*_args, **_kwargs):
+        return None
+
+    monkeypatch.setattr(chat_api, "save_session_interaction", _refuse)
+
+    async def _fake_agent_chat(**_kwargs):
+        yield AgentEvent(type="done", content="", task_state="completed")
+
+    monkeypatch.setattr(agent_service, "chat", _fake_agent_chat)
+
+    resp = await client.post(
+        STREAM_URL,
+        json={"content": "旧客户端", "useAgent": True, "conversationId": "conv-empty"},
+    )
+
+    assert resp.status_code == 200
+    frames = _parse_frames(resp.text)
+    assert not [f for f in frames if f["event"] == "warning"], frames

@@ -26,7 +26,13 @@ from app.core.log_safety import log_safe
 from app.core.security import require_organization
 from app.exceptions import AuthorizationError
 from app.models.agent_task import AgentTask, TaskStatus
-from app.models.chat import ChatMessage, ChatSession, ChatSessionStatus, MessageType
+from app.models.chat import (
+    ChatMessage,
+    ChatSession,
+    ChatSessionStatus,
+    DeletedChatSession,
+    MessageType,
+)
 from app.models.user import User
 from app.services.chat_seq import next_message_seq
 
@@ -217,12 +223,32 @@ async def save_session_interaction(
         async with factory() as session:
             # S6 安全加固：按 id + user_id 校验会话归属（与 _load_session_messages 一致），
             # 绝不允许把消息写进其他用户的会话
-            stmt = select(ChatSession).where(
-                ChatSession.id == session_id,
-                ChatSession.user_id == user_id,
+            stmt = (
+                select(ChatSession)
+                .where(
+                    ChatSession.id == session_id,
+                    ChatSession.user_id == user_id,
+                )
+                # 与删除端点串行化：删除持锁提交后，本查询要么看到缺失行、
+                # 要么在等锁后看到墓碑，不会基于旧快照重建会话。
+                .with_for_update()
             )
             result = await session.execute(stmt)
             existing = result.scalar_one_or_none()
+
+            # 墓碑优先于一切“缺失即创建”的兼容分支：删除后迟到的 finalize
+            # 无论 create_if_missing/agent_task_id 如何组合，都不得复活会话；
+            # 也覆盖“修复前已被复活”的残留行——墓碑存在即视为已删除会话。
+            tombstone = (
+                await session.execute(
+                    select(DeletedChatSession.session_id).where(
+                        DeletedChatSession.session_id == session_id
+                    )
+                )
+            ).scalar_one_or_none()
+            if tombstone is not None:
+                logger.warning("Refusing save into deleted session %s", log_safe(session_id))
+                return None
 
             if existing is None:
                 # id 可能已被其他用户的会话占用：确认后拒绝写入（也避免主键冲突）

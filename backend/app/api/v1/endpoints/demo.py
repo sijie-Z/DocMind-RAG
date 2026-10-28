@@ -8,14 +8,20 @@ import uuid
 from datetime import UTC, datetime, timedelta
 
 from fastapi import APIRouter, Depends
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.core.elasticsearch import ElasticsearchTools
 from app.core.security import get_current_user, require_organization
 from app.exceptions import AppError
-from app.models.chat import ChatMessage, ChatSession, ChatSessionStatus, MessageType
+from app.models.chat import (
+    ChatMessage,
+    ChatSession,
+    ChatSessionStatus,
+    DeletedChatSession,
+    MessageType,
+)
 from app.models.document import Document, DocumentChunk, DocumentStatus, DocumentType
 from app.models.user import User
 from app.services.document_status import mark_document_failed, mark_document_indexed
@@ -448,9 +454,23 @@ async def clear_demo_data(
             )
         )
         for session in sessions_result.scalars().all():
+            # 与保存/删除端点同一锁序：先锁会话行，再删消息与会话。
+            await db.execute(
+                select(ChatSession).where(ChatSession.id == session.id).with_for_update()
+            )
             for msg in session.messages:
                 await db.delete(msg)
             await db.delete(session)
+            await db.execute(
+                delete(DeletedChatSession).where(DeletedChatSession.session_id == session.id)
+            )
+            db.add(
+                DeletedChatSession(
+                    session_id=session.id,
+                    user_id=session.user_id,
+                    organization_id=session.organization_id,
+                )
+            )
 
         await db.commit()
 

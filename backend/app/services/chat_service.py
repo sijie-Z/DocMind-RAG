@@ -16,7 +16,13 @@ from sqlalchemy.orm.exc import StaleDataError
 from app.core.config import settings
 from app.core.prometheus import RAG_RELEVANCE_GATE_TOTAL, RAG_RETRIEVAL_UNAVAILABLE
 from app.exceptions import AuthorizationError
-from app.models.chat import ChatMessage, ChatSession, ChatSessionStatus, MessageType
+from app.models.chat import (
+    ChatMessage,
+    ChatSession,
+    ChatSessionStatus,
+    DeletedChatSession,
+    MessageType,
+)
 from app.models.prompt import PromptTemplate
 from app.rag.cache import SemanticCache
 from app.rag.errors import LLMNotConfiguredError, RetrievalUnavailableError
@@ -330,6 +336,18 @@ async def get_or_create_session(
         session.add(new_session)
         await session.flush()
         return new_session.id, bound_doc_ids
+
+    # 已删除会话的墓碑：给定 id 不得按“缺失即创建”复活，也不得继续使用
+    # 修复前已被复活的残留行；未删除过的新 id 仍保留既有创建语义。
+    tombstone = (
+        await session.execute(
+            select(DeletedChatSession.session_id).where(
+                DeletedChatSession.session_id == conversation_id
+            )
+        )
+    ).scalar_one_or_none()
+    if tombstone is not None:
+        raise AuthorizationError("无权访问该会话")
 
     existing = (
         await session.execute(select(ChatSession).where(ChatSession.id == conversation_id))

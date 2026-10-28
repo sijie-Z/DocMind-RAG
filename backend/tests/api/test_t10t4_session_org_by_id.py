@@ -44,7 +44,13 @@ from app.core.database import get_db
 from app.core.security import get_current_user
 from app.exceptions import AuthorizationError
 from app.models import Base
-from app.models.chat import ChatMessage, ChatSession, ChatSessionStatus, MessageType
+from app.models.chat import (
+    ChatMessage,
+    ChatSession,
+    ChatSessionStatus,
+    DeletedChatSession,
+    MessageType,
+)
 from app.models.organization import Organization
 from app.services.chat_service import get_or_create_session
 from app.services.session_service import save_session_interaction
@@ -224,6 +230,11 @@ async def _get_session_row(factory, session_id):
         return await s.get(ChatSession, session_id)
 
 
+async def _get_tombstone(factory, session_id):
+    async with factory() as s:
+        return await s.get(DeletedChatSession, session_id)
+
+
 def _sse_events(text: str) -> list[dict]:
     events = []
     for line in text.splitlines():
@@ -232,6 +243,79 @@ def _sse_events(text: str) -> list[dict]:
         with contextlib.suppress(json.JSONDecodeError):
             events.append(json.loads(line[len("data: ") :]))
     return events
+
+
+# ── 删除墓碑：硬删除后迟到保存不得复活 ─────────────────────────────────────
+
+
+class TestDeleteTombstone:
+    @pytest.mark.asyncio
+    async def test_chat_delete_tombstone_blocks_late_save(self):
+        engine, factory = await _seeded_factory()
+        try:
+            async with _AsyncClientCtx(_user(ORG_A), factory) as ac:
+                r = await ac.delete(CHAT_DETAIL.format(sid=SESSION_A))
+            assert r.status_code == 200, r.text
+            assert await _get_session_row(factory, SESSION_A) is None
+            tombstone = await _get_tombstone(factory, SESSION_A)
+            assert tombstone is not None
+            assert (tombstone.user_id, tombstone.organization_id) == (1, ORG_A)
+
+            saved = await save_session_interaction(
+                SESSION_A,
+                1,
+                "q",
+                ORG_A,
+                "answer",
+                session_factory=factory,
+                agent_task_id="task-late",
+                create_if_missing=True,
+            )
+            assert saved is None
+            assert await _get_session_row(factory, SESSION_A) is None, "迟到保存不得复活会话"
+            assert await _count(factory, ChatMessage, SESSION_A) == 0
+        finally:
+            await engine.dispose()
+
+    @pytest.mark.asyncio
+    async def test_agent_delete_tombstone_blocks_late_save(self):
+        engine, factory = await _seeded_factory()
+        try:
+            async with _AsyncClientCtx(_user(ORG_A), factory) as ac:
+                r = await ac.delete(AGENT_DETAIL.format(sid=SESSION_A))
+            assert r.status_code == 200, r.text
+            assert await _get_session_row(factory, SESSION_A) is None
+            assert await _get_tombstone(factory, SESSION_A) is not None
+
+            saved = await save_session_interaction(
+                SESSION_A,
+                1,
+                "q",
+                ORG_A,
+                "answer",
+                session_factory=factory,
+                agent_task_id="task-late",
+                create_if_missing=True,
+            )
+            assert saved is None
+            assert await _get_session_row(factory, SESSION_A) is None
+            assert await _count(factory, ChatMessage, SESSION_A) == 0
+        finally:
+            await engine.dispose()
+
+    @pytest.mark.asyncio
+    async def test_denied_cross_org_delete_leaves_no_tombstone(self):
+        engine, factory = await _seeded_factory()
+        try:
+            async with _AsyncClientCtx(_user(ORG_B), factory) as ac:
+                r = await ac.delete(CHAT_DETAIL.format(sid=SESSION_A))
+            assert r.status_code == 404
+            assert await _get_session_row(factory, SESSION_A) is not None
+            assert await _get_tombstone(factory, SESSION_A) is None, (
+                "被拒绝的删除不得留下墓碑（否则后续合法访问会被误伤）"
+            )
+        finally:
+            await engine.dispose()
 
 
 # ── 1. 跨组织按 id 访问必须明确拒绝 ─────────────────────────────────────────

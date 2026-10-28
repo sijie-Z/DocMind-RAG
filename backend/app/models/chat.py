@@ -201,3 +201,21 @@ class ChatMessage(Base):
     session: Mapped[Optional["ChatSession"]] = relationship(
         "ChatSession", back_populates="messages"
     )
+
+
+class DeletedChatSession(Base):
+    """已删除会话的墓碑（防止迟到保存用同一 id 复活会话）。
+
+    删除端点在同一事务内写入本表；``save_session_interaction`` 与
+    ``get_or_create_session`` 在“缺失会话是否允许创建”之前查墓碑，命中即拒绝。
+    刻意不加外键：会话行已被硬删除，墓碑必须独立存活；用户/组织仅作审计冗余。
+    """
+
+    __tablename__ = "deleted_chat_sessions"
+
+    session_id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    user_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    organization_id: Mapped[int | None] = mapped_column(Integer)
+    deleted_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), comment="删除时间"
+    )
