@@ -279,3 +279,75 @@ def test_frontend_agent_event_taxonomy_matches_backend_literal():
     for required in ("approval_required", "plan_approval_required", "run_cancelled"):
         assert required in backend_types
         assert required in frontend_types
+
+
+@pytest.mark.asyncio
+async def test_regenerate_flag_forwarded_and_warning_visible(client, monkeypatch):
+    """payload.regenerate 必须透传给 pipeline；保存失败 warning 必须成帧。"""
+    from app.services.chat_service import RAGEvent
+
+    monkeypatch.setattr(chat_api, "DEEP_ANALYSIS_GUARD_ENABLED", True)
+    monkeypatch.setattr(chat_api, "AsyncSessionLocal", lambda: _FakeSessionCtx())
+
+    seen: dict = {}
+
+    async def _fake_rag_pipeline(**kwargs):
+        seen.update(kwargs)
+        queue = kwargs["event_queue"]
+        await queue.put(
+            RAGEvent(
+                type="message",
+                content="新答案",
+                conversation_id="conv-regenerate",
+                message_id="msg-a1",
+            )
+        )
+        await queue.put(
+            RAGEvent(
+                type="warning",
+                content="回答已生成，但会话记录保存失败；刷新后可能仍显示旧回答",
+                conversation_id="conv-regenerate",
+            )
+        )
+
+    monkeypatch.setattr(chat_api, "run_rag_pipeline", _fake_rag_pipeline)
+
+    resp = await client.post(
+        STREAM_URL,
+        json={
+            "content": "本轮问题",
+            "conversationId": "conv-regenerate",
+            "payload": {"regenerate": True},
+        },
+    )
+
+    assert resp.status_code == 200
+    assert seen["regenerate"] is True
+    assert seen["conversation_id"] == "conv-regenerate"
+    frames = _parse_frames(resp.text)
+    assert [f["event"] for f in frames] == ["message", "warning"], frames
+    assert frames[1]["data"]["content"].startswith("回答已生成")
+    assert frames[0]["data"]["messageId"] == "msg-a1"
+
+
+@pytest.mark.asyncio
+async def test_regenerate_defaults_to_false(client, monkeypatch):
+    """普通发送不得被误标成重新生成。"""
+    from app.services.chat_service import RAGEvent
+
+    monkeypatch.setattr(chat_api, "DEEP_ANALYSIS_GUARD_ENABLED", True)
+    monkeypatch.setattr(chat_api, "AsyncSessionLocal", lambda: _FakeSessionCtx())
+
+    seen: dict = {}
+
+    async def _fake_rag_pipeline(**kwargs):
+        seen.update(kwargs)
+        await kwargs["event_queue"].put(
+            RAGEvent(type="message", content="A", conversation_id="c", message_id="m")
+        )
+
+    monkeypatch.setattr(chat_api, "run_rag_pipeline", _fake_rag_pipeline)
+
+    resp = await client.post(STREAM_URL, json={"content": "普通问题"})
+    assert resp.status_code == 200
+    assert seen["regenerate"] is False

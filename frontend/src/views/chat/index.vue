@@ -307,23 +307,12 @@ const handleSend = async () => {
   await baseHandleSend()
 }
 
-// Feature 1: Regenerate last assistant response
+// Feature 1: Regenerate last assistant response（原地替换契约，见 useChatSend）
 const handleRegenerate = (assistantMsg: ChatMessage) => {
-  const lastAssistantIdx = messages.value.lastIndexOf(assistantMsg)
-  if (lastAssistantIdx < 1) return
-  // Find the last user message before this assistant message
-  let userMsgContent = ''
-  for (let i = lastAssistantIdx - 1; i >= 0; i--) {
-    if (messages.value[i].messageType === 'user') {
-      userMsgContent = messages.value[i].content
-      break
-    }
-  }
-  if (!userMsgContent) return
-  // Remove the assistant message
-  messages.value.splice(lastAssistantIdx, 1)
-  // Re-send the user message
-  nextTick(() => regenerateMessage(userMsgContent))
+  // 与 handleSend 同口径：历史加载期间禁止重生成，避免终止事件把
+  // currentConversation 改回旧会话。
+  if (isLoadingHistory.value) return
+  void regenerateMessage(assistantMsg)
 }
 
 // Feature 2: Drag-and-drop file upload

@@ -323,6 +323,7 @@ export default {
     useful: '有用',
     notUseful: '没用',
     regenerate: '重新生成',
+    regenerateNeedsReload: '该回答尚未保存，请刷新会话后再重新生成',
     // Sidebar
     loadFailed: '加载失败',
     loadFailedDesc: '无法加载对话列表',

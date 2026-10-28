@@ -294,6 +294,7 @@ export default {
     useful: 'Utile',
     notUseful: 'Pas utile',
     regenerate: 'Régénérer',
+    regenerateNeedsReload: "Cette réponse n'est pas encore enregistrée. Actualisez la conversation puis réessayez.",
     loadFailed: 'Échec du chargement',
     loadFailedDesc: 'Impossible de charger la liste des conversations',
     retry: 'Réessayer',

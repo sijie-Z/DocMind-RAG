@@ -293,6 +293,7 @@ export default {
     useful: '役に立った',
     notUseful: '役に立たなかった',
     regenerate: '再生成',
+    regenerateNeedsReload: 'この回答はまだ保存されていません。会話を更新してから再生成してください。',
     loadFailed: '読み込みに失敗しました',
     loadFailedDesc: '対話リストを読み込めませんでした',
     retry: '再試行',
