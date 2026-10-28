@@ -749,6 +749,7 @@ export default {
     searchErrorDesc: 'Vérifiez votre réseau ou réessayez plus tard ; cliquez sur Réessayer pour relancer la recherche.',
     noOrganization: 'Votre compte n\'a encore rejoint aucune organisation ; la recherche est indisponible.',
     fileContent: 'Contenu du fichier',
+    legacyTextWarning: "Certaines sources, voire toutes, de ce résultat n'ont pas de texte original issu du parseur ; le texte affiché peut contenir des résumés de contexte générés et ne doit pas servir de preuve du texte original.",
     askAIQuestion: 'À propos du fichier « {filename} » : {query}',
     askAIQuestionGeneric: 'À propos du fichier « {filename} », veuillez résumer les points clés',
   },

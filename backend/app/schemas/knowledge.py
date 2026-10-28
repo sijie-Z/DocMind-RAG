@@ -44,7 +44,14 @@ class SearchResult(BaseModel):
     """搜索结果项"""
 
     id: str = Field(..., description="结果ID")
-    text: str = Field(..., description="匹配文本内容")
+    text: str = Field(..., description="匹配文本内容（检索增强文本，可能含生成背景摘要）")
+    # PR4 消费者：O 派生展示正文 + 逐条溯源。legacy 行只能展示，不能当原文证据。
+    content: str | None = Field(
+        None, description="展示正文（parser_original 为原文片段；legacy 为检索片段）"
+    )
+    text_provenance: str | None = Field(
+        None, description="parser_original / legacy_unverified；缺失按 legacy 处理"
+    )
     score: float = Field(..., description="相对排序分（融合阶段，仅用于排序/序位，不是相关度）")
     # issue #185：重排绝对分（local CE logit / zhipu relevance_score）；无重排分时为 null。
     relevance_score: float | None = Field(

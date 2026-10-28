@@ -365,7 +365,9 @@ class TestKnowledgeSearch:
                 return_value=[
                     {
                         "id": "chunk-1",
-                        "text": "Annual report content about revenue",
+                        "text": "【文档背景：生成摘要】 Annual report content about revenue",
+                        "content": "Annual report content about revenue",
+                        "text_provenance": "parser_original",
                         "score": 0.95,
                         "source": {"filename": "report.pdf"},
                         "metadata": {"document_id": "doc-1"},
@@ -386,6 +388,9 @@ class TestKnowledgeSearch:
                 data = r.json()
                 assert "results" in data
                 assert len(data["results"]) > 0
+                first = data["results"][0]
+                assert first["content"] == "Annual report content about revenue"
+                assert first["text_provenance"] == "parser_original"
             finally:
                 app.dependency_overrides.pop(get_db, None)
                 app.dependency_overrides.pop(get_current_user, None)
@@ -702,3 +707,39 @@ class TestKnowledgeGraphNodeAttribution:
             e["source"] == "Hub" and e["target"] == "数据层" and e["relation"] == "PART_OF"
             for e in body["edges"]
         ), "边不得因修复丢失"
+
+
+class TestSearchSourceProvenance:
+    def test_strict_provenance_refusal_is_409_not_empty(self, client: TestClient):
+        """strict 全 legacy：必须是结构化 409，不得 200 + 空结果。"""
+        from app.main import app
+        from app.rag.source_provenance import SourceProvenanceUnavailableError
+
+        mock_user = _make_mock_user(is_superuser=True)
+        override_func, _ = _override_get_db()
+
+        async def _override_user():
+            return mock_user
+
+        app.dependency_overrides[get_db] = override_func
+        app.dependency_overrides[get_current_user] = _override_user
+
+        with patch("app.api.v1.endpoints.knowledge.knowledge_service") as mock_ks:
+            mock_ks.search_knowledge = AsyncMock(
+                side_effect=SourceProvenanceUnavailableError(["doc-1"], unverified_count=2)
+            )
+            try:
+                r = client.post(
+                    "/api/v1/knowledge/search",
+                    json={"query": "条款", "top_k": 5, "organization_id": 1},
+                    headers={"Authorization": "Bearer test_token"},
+                )
+            finally:
+                app.dependency_overrides.pop(get_db, None)
+                app.dependency_overrides.pop(get_current_user, None)
+
+        assert r.status_code == 409, r.text
+        body = r.json()
+        assert body["error_code"] == "SOURCE_ORIGINAL_UNAVAILABLE"
+        assert body["detail"]["status"] == "needs_rebuild"
+        assert body["detail"]["document_ids"] == ["doc-1"]

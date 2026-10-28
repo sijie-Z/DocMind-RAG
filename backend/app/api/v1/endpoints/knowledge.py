@@ -42,6 +42,7 @@ from app.models.rbac import PermissionType
 from app.models.user import User
 from app.rag.errors import RetrievalUnavailableError
 from app.rag.query_processor import effective_search_mode
+from app.rag.source_provenance import SourceProvenanceUnavailableError
 from app.schemas.knowledge import (
     BatchDeleteRequest,
     KnowledgeBuildResponse,
@@ -258,6 +259,9 @@ async def search_knowledge(
                 {
                     "id": str(r.get("id") or r.get("document_id") or ""),
                     "text": r.get("text") or r.get("content") or "",
+                    # O 派生展示正文 + 逐条溯源；legacy 行不得被当作原文证据。
+                    "content": r.get("content"),
+                    "text_provenance": r.get("text_provenance"),
                     "score": r.get("score") or r.get("relevance_score") or 0,
                     # issue #185：重排绝对分单独透传（score 是相对排序分）；
                     # null 表示无重排分，前端不得按百分比相关度展示。
@@ -303,6 +307,14 @@ async def search_knowledge(
             "知识库检索服务暂不可用，请稍后重试",
             error_code="RETRIEVAL_UNAVAILABLE",
             detail={"kind": e.kind},
+        ) from e
+    except SourceProvenanceUnavailableError as e:
+        # strict 模式拒答是「需重建」的确定性状态，不是空结果/服务故障。
+        logger.warning(f"搜索被拒绝（原文不可用）: {e}")
+        raise ConflictError(
+            "知识库原文尚未完成迁移，无法在 strict 模式下返回检索结果；请先重建相关文档",
+            error_code="SOURCE_ORIGINAL_UNAVAILABLE",
+            detail=e.as_dict(),
         ) from e
     except Exception as e:
         logger.error(f"搜索失败: {str(e)}")

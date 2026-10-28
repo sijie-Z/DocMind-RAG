@@ -17,6 +17,7 @@ from app.exceptions import AppError, ServiceUnavailableError
 from app.models.document import Document, DocumentChunk, DocumentStatus, DocumentTag
 from app.models.knowledge_job import KnowledgeProcessingJob
 from app.rag.errors import RetrievalUnavailableError
+from app.rag.source_provenance import SourceProvenanceUnavailableError
 from app.services.document_status import (
     require_count_response,
     require_delete_by_query_response,
@@ -158,6 +159,11 @@ class KnowledgeService:
                     {
                         "id": res.get("document_id"),
                         "text": res.get("text"),
+                        # 展示用正文：parser_original 时是 O 派生 snippet；legacy 时
+                        # 是检索文本 snippet。调用方必须结合 text_provenance 展示，
+                        # 不得把 legacy 文本当原文证据（PR4 消费者）。
+                        "content": res.get("snippet"),
+                        "text_provenance": res.get("text_provenance"),
                         "score": res.get("score"),
                         # issue #185：相对排序分（score）与重排绝对分分开透传；
                         # 无重排分时保持 None，绝不拿 score 回填。
@@ -190,6 +196,11 @@ class KnowledgeService:
             # suggestions 等 best-effort 调用方自行降级为空并留痕；绝不在这里吞成 []。
             logger.error("Knowledge search unavailable: retrieval backend failure", exc_info=True)
             raise
+        except SourceProvenanceUnavailableError:
+            # strict 模式下全部命中都缺 parser 原文：这是「需重建」的确定性拒绝，
+            # 不是「没搜到」。原样上抛，由 /search 映射为 409 结构化错误。
+            logger.warning("Knowledge search refused: source original unavailable")
+            raise
         except Exception as e:
             logger.error(f"Knowledge search failed: {e}")
             return []
@@ -208,6 +219,11 @@ class KnowledgeService:
             logger.warning(
                 f"Search suggestions degraded (retrieval unavailable, kind={e.kind}): {e}"
             )
+            return []
+        except SourceProvenanceUnavailableError as e:
+            # strict 下原文不可用：补全同样按 best-effort 降级，但留痕；
+            # 主搜索端点仍必须 409，不得把拒答伪装成空结果。
+            logger.warning(f"Search suggestions degraded (source original unavailable): {e}")
             return []
         return [r["text"][:50] + "..." for r in results]
 

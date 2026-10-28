@@ -148,8 +148,17 @@
                 </div>
               </div>
 
-              <div class="text-sm text-gray-600 dark:text-gray-400 line-clamp-2 leading-relaxed mb-3">
-                {{ contentOf(result) }}
+              <div class="mb-3">
+                <div class="text-sm text-gray-600 dark:text-gray-400 line-clamp-2 leading-relaxed">
+                  {{ contentOf(result) }}
+                </div>
+                <div
+                  v-if="isUnverifiedText(result)"
+                  data-testid="search-provenance-warning"
+                  class="mt-1 text-xs text-amber-700 dark:text-amber-400"
+                >
+                  {{ t('search.legacyTextWarning') }}
+                </div>
               </div>
 
               <div class="flex items-center justify-between mt-4 pt-4 border-t border-gray-100 dark:border-gray-800/50">
@@ -226,6 +235,13 @@
           <div
             class="p-6 rounded-3xl bg-gray-50 dark:bg-gray-800/50 text-gray-700 dark:text-gray-300 leading-loose whitespace-pre-wrap max-h-96 overflow-y-auto custom-scrollbar border border-gray-100 dark:border-gray-700/30">
             {{ contentOf(selectedResult) }}
+          </div>
+          <div
+            v-if="isUnverifiedText(selectedResult)"
+            data-testid="search-modal-provenance-warning"
+            class="text-xs text-amber-700 dark:text-amber-400"
+          >
+            {{ t('search.legacyTextWarning') }}
           </div>
         </div>
 
@@ -310,7 +326,13 @@ const fileTypes = [
 // metadata），推导不出的（大小/日期）不渲染；兜底不允许 undefined 进入
 // toLowerCase / 数值格式化 / Date。
 const filenameOf = (r: SearchResult): string => r.source?.filename ?? r.metadata?.filename ?? ''
-const contentOf = (r: SearchResult): string => r.text ?? r.metadata?.snippet ?? ''
+// PR4：优先展示 O 派生正文；缺省才回退检索文本（并显示未验证提示）。
+const contentOf = (r: SearchResult): string => r.content || r.metadata?.snippet || r.text || ''
+// 只有“实际展示的 content 字段”本身带 parser_original 标记才算可信；
+// content 为空而回退到 text（增强检索文本）时，即使 provenance=parser_original
+// 也必须提示——展示的不是已认证的 O。
+const isUnverifiedText = (r: SearchResult): boolean =>
+  !!contentOf(r) && !(!!r.content && r.text_provenance === 'parser_original')
 // issue #185：诚实分数口径——score 是相对排序分（只用于排序），界面只展示
 // 重排绝对分（后端 relevance_score）；无重排分时返回 null，不伪造百分比相关度。
 const rerankScoreOf = (r: SearchResult): string | null =>
