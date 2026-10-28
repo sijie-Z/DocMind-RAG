@@ -41,6 +41,24 @@
 
         <div class="bg-gray-50 dark:bg-gray-800/40 rounded-xl p-4 border border-gray-100 dark:border-gray-700/60">
           <div class="text-sm font-semibold mb-2">文档预览</div>
+          <n-alert
+            v-if="currentDoc.preview_content && currentDoc.preview_provenance !== 'parser_original' && currentDoc.preview_provenance !== 'none'"
+            type="warning"
+            :bordered="false"
+            class="mb-3"
+            data-testid="knowledge-preview-provenance"
+          >
+            {{ t('knowledge.previewOriginalUnavailable') }}
+          </n-alert>
+          <n-alert
+            v-if="currentDoc.preview_truncated"
+            type="info"
+            :bordered="false"
+            class="mb-3"
+            data-testid="knowledge-preview-truncated"
+          >
+            {{ t('knowledge.previewTruncated') }}
+          </n-alert>
           <div v-if="detailLoading" class="text-xs text-gray-400">加载预览中...</div>
           <div v-else-if="currentDoc.summary" class="text-sm leading-6 text-gray-700 dark:text-gray-200 mb-3">
             {{ currentDoc.summary }}

@@ -273,6 +273,9 @@ export default {
     description: 'Description',
     contentSummary: 'Content Summary',
     noContent: 'No Content',
+    previewOriginalUnavailable:
+      'Some or all chunks of this document have no parser original text. The preview may include system-generated background summaries and must not be treated as original-text evidence.',
+    previewTruncated: 'This document is long; the preview is truncated and shows only the beginning.',
     downloadDocument: 'Download Document',
     downloadPreparing: 'Preparing download…',
     downloadFailed: 'Download failed. Please try again.',
@@ -402,6 +405,9 @@ export default {
       actions: 'Actions',
     },
     previewLoadFailed: 'Document details displayed, preview content failed to load',
+    previewOriginalUnavailable:
+      'Some or all chunks of this document have no parser original text. The preview may include system-generated background summaries and must not be treated as original-text evidence.',
+    previewTruncated: 'This document is long; the preview is truncated and shows only the beginning.',
     noFailedDocs: 'No failed documents',
     rebuildSubmitted: 'Rebuild submitted: {title}',
     rebuildSubmitFailed: 'Failed to submit rebuild',

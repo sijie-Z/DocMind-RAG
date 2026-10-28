@@ -256,6 +256,8 @@ export default {
     description: '説明',
     contentSummary: '内容の要約',
     noContent: '内容がありません',
+    previewOriginalUnavailable: 'このドキュメントの一部またはすべてのチャンクにはパーサー原文がありません。プレビューにはシステム生成の背景要約が含まれる可能性があり、原文の証拠として扱えません。',
+    previewTruncated: 'ドキュメントが長いため、プレビューは先頭部分のみに切り詰められています。',
     downloadDocument: 'ドキュメントをダウンロード',
     downloadPreparing: 'ダウンロードを準備しています…',
     downloadFailed: 'ダウンロードに失敗しました。後でもう一度お試しください。',
@@ -361,6 +363,8 @@ export default {
     cancelUpload: 'アップロードをキャンセル',
     removeFromList: 'リストから削除',
     uploadCancelled: 'アップロードをキャンセルしました',
+    previewOriginalUnavailable: 'このドキュメントの一部またはすべてのチャンクにはパーサー原文がありません。プレビューにはシステム生成の背景要約が含まれる可能性があり、原文の証拠として扱えません。',
+    previewTruncated: 'ドキュメントが長いため、プレビューは先頭部分のみに切り詰められています。',
     table: {
       name: 'ファイル名',
       size: 'サイズ',

@@ -9,7 +9,6 @@ from datetime import datetime, timedelta
 
 from fastapi import APIRouter, Depends, File, Form, UploadFile, status
 from fastapi.responses import RedirectResponse
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
@@ -29,6 +28,7 @@ from app.models.knowledge_job import KnowledgeJobStatus, KnowledgeProcessingJob
 from app.models.rbac import PermissionType
 from app.models.user import User
 from app.schemas.knowledge import DocumentDownloadUrl, DocumentDownloadUrlResponse
+from app.services.document_preview import load_document_preview_text
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -405,41 +405,16 @@ async def get_document_full_content(
 ):
     """
     获取文档全文内容（用于预览）
+
+    预览正文原文优先（``original_text``），旧分块回退检索文本但显式标记
+    ``legacy_unverified``；返回实际覆盖的分块计数与 ``truncated``，不再静默
+    截断在 1000 个 ES hit。详见 ``app/services/document_preview.py``。
     """
     try:
         doc = await get_document_for_user(db, current_user, document_id)
 
-        # 从 ES 中获取该文档的所有分块，并在 Python 侧按 chunk_index 排序。
-        # 修复：metadata 字段在 mapping 中是 enabled:false（不可排序），
-        # 原 sort 语句必然报错导致预览恒 500；chunk_index 从 _source.metadata 读取。
-        from app.core.elasticsearch import ElasticsearchTools
-
-        query = {
-            "query": {"term": {"document_id": document_id}},
-            "size": 1000,
-        }
-        res = await ElasticsearchTools.search_documents(query)
-        hits = res.get("hits", {}).get("hits", [])
-
-        full_text = ""
-        if hits:
-            ordered = sorted(
-                hits,
-                key=lambda h: (h.get("_source", {}).get("metadata") or {}).get("chunk_index", 0),
-            )
-            full_text = "\n".join([h.get("_source", {}).get("chunk_text", "") for h in ordered])
-
-        # 如果 ES 没找到，尝试从数据库 chunks 表找 (备用)
-        if not full_text:
-            from app.models.document import DocumentChunk
-
-            stmt = (
-                select(DocumentChunk)
-                .where(DocumentChunk.document_id == document_id)
-                .order_by(DocumentChunk.chunk_index.asc())
-            )
-            chunks = (await db.execute(stmt)).scalars().all()
-            full_text = "\n".join([c.chunk_text for c in chunks])
+        preview = await load_document_preview_text(db, document_id)
+        full_text = preview.content
 
         return {
             "success": True,
@@ -449,6 +424,12 @@ async def get_document_full_content(
                 "content": full_text,
                 "summary": build_brief_summary(full_text),
                 "suggested_tags": build_suggested_tags(full_text),
+                "text_provenance": preview.text_provenance,
+                "original_chunk_count": preview.original_chunk_count,
+                "legacy_chunk_count": preview.legacy_chunk_count,
+                "total_chunks": preview.total_chunks,
+                "returned_chunks": preview.returned_chunks,
+                "truncated": preview.truncated,
             },
         }
     except (NotFoundError, AuthorizationError):

@@ -483,6 +483,9 @@ const showErrorModal = ref(false)
 const currentErrorDetail = ref('')
 const currentDoc = ref<KnowledgeBase | null>(null)
 const detailLoading = ref(false)
+// 连续打开不同文档时，慢的旧请求不得覆盖新文档的详情/预览（证据对应
+// 用户最后点击的文档，而不是最后返回的请求）。
+let previewRequestSeq = 0
 
 const fileList = ref<UploadFileInfo[]>([])
 
@@ -821,6 +824,8 @@ const uploadFile = async () => {
 
 // ✅ 核心修复：现在点击按钮会正确打开弹窗
 const viewKnowledge = async (item: KnowledgeBase) => {
+  const requestSeq = ++previewRequestSeq
+  const ownsRequest = () => requestSeq === previewRequestSeq
   detailLoading.value = true
   currentDoc.value = {
     ...item,
@@ -832,6 +837,7 @@ const viewKnowledge = async (item: KnowledgeBase) => {
       getDocumentDetail(item.id, { silent: true }),
       getDocumentContent(item.id, { silent: true })
     ])
+    if (!ownsRequest()) return
     // T11：宽容解包（与既有 detailRes/contentRes 手写解包恒等）
     const detail = apiUnwrap<DocumentDetail>(detailRes) || {}
     const content = apiUnwrap<DocumentContent>(contentRes) || {}
@@ -842,12 +848,17 @@ const viewKnowledge = async (item: KnowledgeBase) => {
       upload_source: detail.upload_source || (String(detail.description || '').includes('来自聊天') ? '聊天上传' : '知识库上传'),
       summary: content.summary || detail.description || '',
       suggested_tags: content.suggested_tags || [],
-      preview_content: (content.content || '').slice(0, 1500)
+      preview_content: (content.content || '').slice(0, 1500),
+      // 预览原文口径透传给详情弹窗；legacy/mixed 与截断必须在界面上可见，
+      // 不能把可能带生成摘要的文本静默当作原文。客户端只展示前 1500 字，
+      // 超出同样属于截断，不能因为服务端 truncated=false 就冒充完整预览。
+      preview_provenance: content.text_provenance,
+      preview_truncated: content.truncated === true || (content.content || '').length > 1500
     } as KnowledgeBase
   } catch {
-    message.warning(t('knowledge.previewLoadFailed'))
+    if (ownsRequest()) message.warning(t('knowledge.previewLoadFailed'))
   } finally {
-    detailLoading.value = false
+    if (ownsRequest()) detailLoading.value = false
   }
 }
 

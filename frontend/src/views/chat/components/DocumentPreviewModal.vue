@@ -39,6 +39,25 @@
         </div>
       </div>
 
+      <n-alert
+        v-if="content && textProvenance !== 'parser_original' && textProvenance !== 'none'"
+        type="warning"
+        :bordered="false"
+        class="mb-3"
+        data-testid="chat-preview-provenance"
+      >
+        {{ t('chat.previewOriginalUnavailable') }}
+      </n-alert>
+      <n-alert
+        v-if="truncated"
+        type="info"
+        :bordered="false"
+        class="mb-3"
+        data-testid="chat-preview-truncated"
+      >
+        {{ t('chat.previewTruncated') }}
+      </n-alert>
+
       <div class="flex-1 overflow-y-auto pr-2 scrollbar-thin">
         <n-skeleton v-if="loading" :repeat="10" />
         <div v-else-if="content" class="markdown-body text-sm leading-relaxed p-2 whitespace-pre-wrap">
@@ -77,6 +96,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
+import type { DocumentContent } from '@/api/knowledge'
 
 const { t } = useI18n()
 
@@ -98,6 +118,10 @@ const props = defineProps<{
     suggested_tags?: string[]
   }
   content: string
+  /** 预览内容原文口径；缺失（旧后端/回滚）与未知值一律按不可信处理。 */
+  textProvenance?: DocumentContent['text_provenance']
+  /** 服务端读取有界：true 时 content 不是全文。 */
+  truncated?: boolean
   downloadLoading?: boolean
   downloadError?: string
 }>()

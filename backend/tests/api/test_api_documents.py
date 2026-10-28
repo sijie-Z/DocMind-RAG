@@ -353,6 +353,10 @@ class TestDocumentContent:
 
         override_func, mock_db = _override_get_db()
         mock_db.get = AsyncMock(return_value=doc)
+        # 预览服务先查 DB 分块数；本夹具没有真实分块行 → count=0，走 ES 回退。
+        count_result = MagicMock()
+        count_result.scalar.return_value = 0
+        mock_db.execute = AsyncMock(return_value=count_result)
 
         async def _override_user():
             return mock_user
@@ -361,12 +365,13 @@ class TestDocumentContent:
         app.dependency_overrides[get_current_user] = _override_user
 
         with patch("app.core.elasticsearch.ElasticsearchTools") as mock_es:
-            # 索引侧同时写 `content` 与 `chunk_text` 两个字段（app/worker/doc_processor.py:174-175），
-            # 而端点读的是 `chunk_text`（app/api/v1/endpoints/documents.py:351）。
-            # 原 mock 只给 `content`，于是每个 hit 都取到空串，join 出 "\n"。
+            # 索引侧同时写 `content` 与 `chunk_text` 两个字段（app/worker/doc_processor.py），
+            # 预览回退读 `chunk_text`；旧 mock 只给 `content` 会 join 出空串。
+            # 命中缺 original_text/text_provenance → 必须如实标记 legacy_unverified。
             mock_es.search_documents = AsyncMock(
                 return_value={
                     "hits": {
+                        "total": {"value": 2},
                         "hits": [
                             {
                                 "_source": {
@@ -382,7 +387,7 @@ class TestDocumentContent:
                                     "metadata": {"chunk_index": 1},
                                 }
                             },
-                        ]
+                        ],
                     }
                 }
             )
@@ -395,6 +400,12 @@ class TestDocumentContent:
                 data = r.json()
                 assert data["success"] is True
                 assert "This is chunk 1." in data["data"]["content"]
+                assert data["data"]["text_provenance"] == "legacy_unverified"
+                assert data["data"]["legacy_chunk_count"] == 2
+                assert data["data"]["original_chunk_count"] == 0
+                assert data["data"]["total_chunks"] == 2
+                assert data["data"]["returned_chunks"] == 2
+                assert data["data"]["truncated"] is False
             finally:
                 app.dependency_overrides.pop(get_db, None)
                 app.dependency_overrides.pop(get_current_user, None)
