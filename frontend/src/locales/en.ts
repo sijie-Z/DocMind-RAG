@@ -800,6 +800,7 @@ export default {
     searchErrorDesc: 'Please check your network or try again later; click Retry to search again',
     noOrganization: 'Your account has not joined any organization yet, so search is unavailable.',
     fileContent: 'File Content',
+    legacyTextWarning: 'Some or all sources of this result have no parser original text; the displayed text may include system-generated background summaries and must not be treated as original-text evidence.',
     searchFailed: 'Search failed',
     askAIQuestion: 'About the file "{filename}": {query}',
     askAIQuestionGeneric: 'Regarding the file "{filename}", please summarize its key points'

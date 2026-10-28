@@ -25,6 +25,11 @@ function extractBackendDetail(error: unknown): string | null {
     if (joined) return joined
   }
   if (typeof raw === 'string' && raw.trim()) return raw
+  // 结构化 detail（如 409 SOURCE_ORIGINAL_UNAVAILABLE）不直接上屏；优先用
+  // 后端同时给出的可读 message，避免页面退化成“检查网络/重试”。
+  if (raw && typeof raw === 'object' && typeof data?.message === 'string' && data.message.trim()) {
+    return data.message
+  }
   return null
 }
 

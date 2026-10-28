@@ -748,6 +748,7 @@ export default {
     searchErrorDesc: 'ネットワークを確認するか、しばらくしてから再試行してください。',
     noOrganization: 'アカウントがまだどの組織にも所属していないため、検索できません',
     fileContent: 'ファイル内容',
+    legacyTextWarning: 'この結果の一部またはすべての出典にパーサー原文がありません。表示テキストにはシステム生成の背景要約が含まれる可能性があり、原文の証拠として扱えません。',
     askAIQuestion: 'ファイル「{filename}」について：{query}',
     askAIQuestionGeneric: 'ファイル「{filename}」の主な内容を要約してください',
   },

@@ -202,6 +202,69 @@ describe('SearchView · 结果渲染（P1-3 真实响应不崩）', () => {
     expect(modal.text()).not.toContain('undefined')
   })
 
+  it('parser_original：优先展示 O 正文，不显示生成背景，无未验证提示', async () => {
+    const wrapper = mountView()
+    await doSearch(wrapper, [{
+      ...REAL_RESULT,
+      text: '【文档背景：生成摘要】原文正文',
+      content: '原文正文',
+      text_provenance: 'parser_original',
+    }])
+
+    const text = wrapper.text()
+    expect(text).toContain('原文正文')
+    expect(text).not.toContain('生成摘要')
+    expect(wrapper.find('[data-testid="search-provenance-warning"]').exists()).toBe(false)
+  })
+
+  it('content 为空而回退到 text：即使 provenance=parser_original 也提示', async () => {
+    const wrapper = mountView()
+    await doSearch(wrapper, [{
+      ...REAL_RESULT,
+      text: '【文档背景：生成摘要】回退正文',
+      content: '',
+      metadata: { ...REAL_RESULT.metadata, snippet: '' },
+      text_provenance: 'parser_original',
+    }])
+
+    expect(wrapper.text()).toContain('回退正文')
+    expect(wrapper.find('[data-testid="search-provenance-warning"]').exists()).toBe(true)
+  })
+
+  it('详情模态同样展示未验证提示', async () => {
+    const wrapper = mountView()
+    await doSearch(wrapper, [{
+      ...REAL_RESULT,
+      content: '【文档背景：生成摘要】旧文',
+      text_provenance: 'legacy_unverified',
+    }])
+
+    const card = findCard(wrapper, 'architecture.md')
+    await card.trigger('click')
+    await nextTick()
+
+    const modal = wrapper.find('.n-modal-stub')
+    expect(modal.exists()).toBe(true)
+    expect(modal.find('[data-testid="search-modal-provenance-warning"]').exists()).toBe(true)
+  })
+
+  it('legacy/missing provenance：展示提示，不能冒充原文', async () => {
+    const legacyWrapper = mountView()
+    await doSearch(legacyWrapper, [{
+      ...REAL_RESULT,
+      content: '【文档背景：生成摘要】旧文',
+      text_provenance: 'legacy_unverified',
+    }])
+    expect(legacyWrapper.find('[data-testid="search-provenance-warning"]').exists()).toBe(true)
+
+    const missingWrapper = mountView()
+    await doSearch(missingWrapper, [{
+      ...REAL_RESULT,
+      content: '旧后端正文',
+    }])
+    expect(missingWrapper.find('[data-testid="search-provenance-warning"]').exists()).toBe(true)
+  })
+
   it('relevance 排序保持后端（重排）顺序，不用相对 score 重排（issue #185）', async () => {
     // 后端顺序 first→second（重排绝对分 8.5 > 1.0）；若前端按相对 score 重排，
     // second（0.9）会越过 first（0.2）——那正是把 rerank 结果打回原序的缺陷。

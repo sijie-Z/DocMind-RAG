@@ -85,3 +85,20 @@ describe('getErrorMessage（E14/D1 页面 catch 统一出口）', () => {
     expect(getErrorMessage({ response: { data: {} } }, '兜底文案')).toBe('兜底文案')
   })
 })
+
+
+describe('结构化 detail 的 409（搜索 strict 拒答）', () => {
+  it('detail 为对象时回退到后端 message，不吞成通用兜底', () => {
+    const err = {
+      response: {
+        status: 409,
+        data: {
+          message: '知识库原文尚未完成迁移，请先重建相关文档',
+          detail: { code: 'source_original_unavailable', status: 'needs_rebuild' },
+        },
+      },
+    }
+    expect(extractApiError(err, '兜底')).toBe('知识库原文尚未完成迁移，请先重建相关文档')
+    expect(getErrorMessage(err, '兜底')).toBe('知识库原文尚未完成迁移，请先重建相关文档')
+  })
+})
