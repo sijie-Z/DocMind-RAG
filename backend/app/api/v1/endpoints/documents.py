@@ -7,7 +7,7 @@ import logging
 import uuid
 from datetime import datetime, timedelta
 
-from fastapi import APIRouter, Depends, File, Form, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, Query, UploadFile, status
 from fastapi.responses import RedirectResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -22,13 +22,29 @@ from app.core.security import (
     require_organization,
     require_scope,
 )
-from app.exceptions import AppError, AuthorizationError, NotFoundError
+from app.exceptions import (
+    AppError,
+    AuthorizationError,
+    ConflictError,
+    NotFoundError,
+)
 from app.models.document import Document, DocumentStatus, DocumentType
 from app.models.knowledge_job import KnowledgeJobStatus, KnowledgeProcessingJob
 from app.models.rbac import PermissionType
 from app.models.user import User
+from app.rag.source_provenance import SourceProvenanceUnavailableError
 from app.schemas.knowledge import DocumentDownloadUrl, DocumentDownloadUrlResponse
+from app.schemas.review import ReviewMetaUpsert
 from app.services.document_preview import load_document_preview_text
+from app.services.review_document_service import (
+    ReviewMetaInput,
+    compute_readiness,
+    evidence_to_dict,
+    meta_to_dict,
+    query_evidence,
+    readiness_to_dict,
+    upsert_review_meta,
+)
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -437,6 +453,115 @@ async def get_document_full_content(
     except Exception as e:
         logger.error(f"Get document content failed: {str(e)}")
         raise AppError("获取文档内容失败")
+
+
+@router.put(
+    "/{document_id}/review-meta",
+    response_model=dict,
+    dependencies=[
+        Depends(require_scope("knowledge:write")),
+        Depends(permission_required([PermissionType.DOCUMENT_UPDATE])),
+    ],
+)
+async def put_document_review_meta(
+    document_id: str,
+    body: ReviewMetaUpsert,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """注册/更新文档核验身份（角色/版本族/版本序/哈希）。
+
+    content_sha256 由服务端从 MinIO 对象流式计算，客户端不可伪造。
+    """
+    try:
+        doc = await get_document_for_user(db, current_user, document_id)
+        meta = await upsert_review_meta(
+            db,
+            doc,
+            ReviewMetaInput(**body.model_dump()),
+            current_user.id,
+        )
+        return {"success": True, "data": meta_to_dict(meta)}
+    except (NotFoundError, AuthorizationError):
+        raise
+    except AppError:
+        raise
+    except Exception as e:
+        logger.error(f"Register review meta failed: {type(e).__name__}: {e}")
+        raise AppError("注册文档核验身份失败") from e
+
+
+@router.get(
+    "/{document_id}/readiness",
+    response_model=dict,
+    dependencies=[
+        Depends(require_scope("knowledge:read")),
+        Depends(permission_required([PermissionType.DOCUMENT_READ])),
+    ],
+)
+async def get_document_review_readiness(
+    document_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """说明文档能否用于核验：reviewable/blocked + 原因码与覆盖率。"""
+    try:
+        doc = await get_document_for_user(db, current_user, document_id)
+        readiness = await compute_readiness(db, doc)
+        return {"success": True, "data": readiness_to_dict(readiness)}
+    except (NotFoundError, AuthorizationError):
+        raise
+    except AppError:
+        raise
+    except Exception as e:
+        logger.error(f"Compute review readiness failed: {type(e).__name__}: {e}")
+        raise AppError("获取文档核验可用性失败") from e
+
+
+@router.get(
+    "/{document_id}/evidence",
+    response_model=dict,
+    dependencies=[
+        Depends(require_scope("knowledge:read")),
+        Depends(permission_required([PermissionType.DOCUMENT_READ])),
+    ],
+)
+async def get_document_evidence(
+    document_id: str,
+    clause_no: int | None = Query(None, ge=1, description="条款号（第 N 条定义位）"),
+    section_no: str | None = Query(None, max_length=32, description="章节号（如 2.3）"),
+    q: str | None = Query(None, max_length=200, description="原文关键字"),
+    limit: int = Query(5, ge=1, le=20),
+    offset: int = Query(0, ge=0),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """只读 parser 原文证据；legacy 文档显式 409，绝不回退检索文本。"""
+    try:
+        doc = await get_document_for_user(db, current_user, document_id)
+        result = await query_evidence(
+            db,
+            doc,
+            clause_no=clause_no,
+            section_no=section_no,
+            query=q,
+            limit=limit,
+            offset=offset,
+        )
+        return {"success": True, "data": evidence_to_dict(result)}
+    except (NotFoundError, AuthorizationError):
+        raise
+    except SourceProvenanceUnavailableError as e:
+        raise ConflictError(
+            "知识库原文尚未完成迁移，无法提供原文证据；请先重建相关文档",
+            error_code="SOURCE_ORIGINAL_UNAVAILABLE",
+            detail=e.as_dict(),
+        ) from e
+    except AppError:
+        raise
+    except Exception as e:
+        logger.error(f"Query document evidence failed: {type(e).__name__}: {e}")
+        raise AppError("获取文档原文证据失败") from e
 
 
 async def _get_document_download_url(

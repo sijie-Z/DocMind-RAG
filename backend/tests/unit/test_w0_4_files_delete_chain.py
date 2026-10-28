@@ -131,7 +131,7 @@ def _recording_cache(records):
 
 @pytest.mark.asyncio
 async def test_unified_chain_cleans_children_es_and_caches_in_order(monkeypatch):
-    """delete_knowledge_thoroughly：四张表按序清、ES 按 id 清、缓存按 org 清。"""
+    """delete_knowledge_thoroughly：五张表按序清、ES 按 id 清、缓存按 org 清。"""
     svc = ks_mod.KnowledgeService()
     doc = MagicMock()
     doc.file_path = "7/shared-object.pdf"
@@ -177,11 +177,12 @@ async def test_unified_chain_cleans_children_es_and_caches_in_order(monkeypatch)
         "document_chunks",
         "document_tags",
         "knowledge_processing_jobs",
+        "review_document_meta",
         "documents",
     ]
     # 3. 全部子表删完才 commit
     assert session.commit_count == 1
-    assert session.deletes_before_commit == 4
+    assert session.deletes_before_commit == 5
 
     # 4. ES 按 document_id 清索引
     assert fake_es.delete_calls == [

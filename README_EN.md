@@ -509,8 +509,8 @@ DocMind/
 │   │   │   ├── context_compressor.py #  Context compression
 │   │   │   ├── context_window.py    #   Token budget management
 │   │   │   └── evaluator.py         #   Quality evaluation
-│   │   ├── services/                # Business service layer (27 services)
-│   │   ├── models/                  # ORM models (20 model files)
+│   │   ├── services/                # Business service layer (28 services)
+│   │   ├── models/                  # ORM models (21 model files)
 │   │   ├── schemas/                 # Pydantic request/response schemas
 │   │   └── worker/                  # Kafka consumer
 │   ├── tests/                       # 2223 backend tests (plus 861 frontend)

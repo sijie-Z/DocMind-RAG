@@ -16,6 +16,7 @@ from app.core.log_safety import log_safe
 from app.exceptions import AppError, ServiceUnavailableError
 from app.models.document import Document, DocumentChunk, DocumentStatus, DocumentTag
 from app.models.knowledge_job import KnowledgeProcessingJob
+from app.models.review import ReviewDocumentMeta
 from app.rag.errors import RetrievalUnavailableError
 from app.rag.source_provenance import SourceProvenanceUnavailableError
 from app.services.document_status import (
@@ -92,6 +93,7 @@ _DOCUMENT_CHILD_MODELS: tuple[type, ...] = (
     DocumentChunk,
     DocumentTag,
     KnowledgeProcessingJob,
+    ReviewDocumentMeta,
 )
 
 
