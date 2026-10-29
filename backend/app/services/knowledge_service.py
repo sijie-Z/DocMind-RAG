@@ -7,16 +7,16 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
-from sqlalchemy import and_, delete, func, select
+from sqlalchemy import and_, delete, func, or_, select
 
 from app.core.config import settings
 from app.core.database import AsyncSessionLocal
 from app.core.elasticsearch import get_elasticsearch
 from app.core.log_safety import log_safe
-from app.exceptions import AppError, ServiceUnavailableError
+from app.exceptions import AppError, ConflictError, ServiceUnavailableError
 from app.models.document import Document, DocumentChunk, DocumentStatus, DocumentTag
 from app.models.knowledge_job import KnowledgeProcessingJob
-from app.models.review import ReviewDocumentMeta
+from app.models.review import ReviewCase, ReviewDocumentMeta
 from app.rag.errors import RetrievalUnavailableError
 from app.rag.source_provenance import SourceProvenanceUnavailableError
 from app.services.document_status import (
@@ -349,6 +349,34 @@ class KnowledgeService:
                     # —— 直接调用方（批量删除按原始 id 列表）不应把它计成错误。
                     # 跨 org 的 id 在这里同样落空：无副作用，不会泄漏或误删他人文档。
                     return DeleteOutcome(success=True)
+
+                # Batch 5 生命周期保护：被核验案件引用的文档禁止物理删除 ——
+                # 删除会让案件只能看到 stale 快照，且没有归档/恢复出口。
+                # 该检查在任何副作用（ES/DB/对象存储）之前执行，fail closed。
+                referenced_cases = (
+                    (
+                        await session.execute(
+                            select(ReviewCase.id).where(
+                                or_(
+                                    ReviewCase.policy_document_id == document_id,
+                                    ReviewCase.base_document_id == document_id,
+                                    ReviewCase.revised_document_id == document_id,
+                                )
+                            )
+                        )
+                    )
+                    .scalars()
+                    .all()
+                )
+                if referenced_cases:
+                    raise ConflictError(
+                        "文档被核验案件引用，不能删除；请先处理相关案件",
+                        error_code="REVIEW_DOCUMENT_IN_USE",
+                        detail={
+                            "document_id": document_id,
+                            "case_ids": sorted(referenced_cases)[:50],
+                        },
+                    )
 
                 # 先判定物理对象是否该删（共享引用保护），但**推迟到 DB commit 之后**
                 # 才真正删除 —— fail-closed 的中止点之前不得有不可逆副作用（P2-3）。
