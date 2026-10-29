@@ -15,7 +15,7 @@
   renumbered；完全相同 → unchanged；无法判定/扫描截断 → unidentified；
 - 条款/事件的先后顺序不产生事实差异（按集合比较，仅顺序变化 → unchanged）；
   moved 类型 v1 不产出；排除语境只在期限所在分句及其相邻分句的付款回退中
-  生效（「付款方逾期，30 天内未付款」这类跨分句排除属已知边界）；交货动词
+  生效（「付款方逾期，30 天内应支付货款」这类跨分句排除属已知边界）；交货动词
   与「付款后 N 天内交货」类复合语序、宽限期/质保金期限同句属 v1 已登记
   边界（见 tests 中 xfail / 保守 ambiguous 用例）；
 - 纯规则实现：不调用 LLM、不访问网络、不依赖 ES；同一输入重复运行结果一致；
@@ -72,7 +72,9 @@ NON_PAYMENT_CONTEXT = (
     "保证金",
     "押金",
     "逾期",
-    "未付",
+    "超过",
+    "延迟",
+    "超期",
     "违约",
     "滞纳",
     "罚息",
@@ -118,6 +120,8 @@ EXCEPTION_TERMS = (
     "除外",
     "例外",
 )
+# 阈值语境：定义「逾期/超过 N 天」的违约条件时，期限不是账期。
+THRESHOLD_CONTEXT = ("逾期", "超过", "延迟", "超期", "违约", "滞纳", "罚息")
 CROSS_REF_RE = re.compile(
     r"(?:详见|见|依据|根据|按照|参照)(?:本合同|本协议)?"
     r"第[一二三四五六七八九十百零〇0-9]+条"
@@ -296,8 +300,16 @@ def _duration_context_ok(sentence: str, start: int, end: int) -> bool:
         payment = _payment_anchor_distance(fragment, local_start, local_end)
         excluded = _anchor_distance(fragment, local_start, local_end, NON_PAYMENT_CONTEXT)
         if payment is not None:
-            # 等距时按付款处理：「到期后 30 天内付款」不应被排除词误杀。
-            return excluded is None or payment <= excluded
+            if excluded is None:
+                return True
+            if payment < excluded:
+                return True
+            if payment == excluded:
+                # 等距时区分语义：「到期后 30 天内付款」是付款截止期；
+                # 「逾期 30 天支付」是违约条件，阈值语境等距时应拒绝。
+                threshold = _anchor_distance(fragment, local_start, local_end, THRESHOLD_CONTEXT)
+                return threshold is None or threshold > payment
+            return False
         if excluded is not None:
             return False
         # 付款动作可以在相邻分句（中文常见：「…后 30 日内，向乙方支付…」）。

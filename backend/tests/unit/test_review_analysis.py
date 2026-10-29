@@ -353,6 +353,41 @@ def test_cross_ref_change_is_modified():
     assert analysis.align_item("exception", base, revised) == "modified"
 
 
+def test_negative_payment_deadline_is_identified():
+    """「N 天内未付款」是在定义付款截止期，不是逾期阈值（最终评审 R2 R1）。"""
+    a = analysis.extract_payment_term([_clause("第八条 甲方收到发票后30天内未付款的，视为逾期。")])
+    assert a["status"] == "identified"
+    assert (a["value"], a["unit"]) == (30, "day")
+
+    b = analysis.extract_payment_term(
+        [_clause("第八条 如甲方在收到发票后30天内未付款，乙方有权暂停供货。")]
+    )
+    assert b["status"] == "identified"
+
+    c = analysis.extract_payment_term(
+        [_clause("第八条 甲方应在收到发票后30个工作日内未付款的，视为逾期。")]
+    )
+    assert (c["value"], c["unit"]) == (30, "workday")
+
+
+def test_threshold_overdue_variants_are_not_payment_terms():
+    """超过/延迟/逾期紧邻或等距的违约阈值不得当作账期。"""
+    over = analysis.extract_payment_term(
+        [_clause("第八条 甲方超过30天未支付货款的，乙方可解除合同。")]
+    )
+    assert over == {"status": "not_found", "reason": "no_duration"}
+
+    delayed = analysis.extract_payment_term(
+        [_clause("第八条 甲方延迟付款超过30天的，乙方可解除合同。")]
+    )
+    assert delayed == {"status": "not_found", "reason": "no_duration"}
+
+    overdue_tie = analysis.extract_payment_term(
+        [_clause("第八条 甲方逾期30天支付货款的，乙方可解除合同。")]
+    )
+    assert overdue_tie == {"status": "not_found", "reason": "no_duration"}
+
+
 def test_synonym_units_do_not_make_ambiguous():
     """30 个自然日 / 30 天 是同一事实，重复表述不得降级 ambiguous。"""
     facts = analysis.extract_payment_term(
