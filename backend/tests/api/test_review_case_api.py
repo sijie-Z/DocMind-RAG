@@ -572,6 +572,9 @@ async def test_decision_on_blocked_case_is_409_and_unknown_export_404(factory):
         )
         assert r.status_code == 409, r.text
         assert r.json()["error_code"] == "REVIEW_CASE_NOT_READY"
+        blocked_export = await ac.post(f"/api/v1/reviews/{blocked['id']}/export")
+        assert blocked_export.status_code == 409, blocked_export.text
+        assert blocked_export.json()["error_code"] == "REVIEW_CASE_NOT_READY"
 
         case = await _create_case(ac)
         assert (await ac.post(f"/api/v1/reviews/{case['id']}/analyze")).status_code == 200
@@ -591,3 +594,37 @@ async def test_decision_on_blocked_case_is_409_and_unknown_export_404(factory):
             params={"format": "json"},
         )
         assert good.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_read_only_can_download_exports_but_not_decide(factory, monkeypatch):
+    async with _Ctx(_user(superuser=True), factory) as ac:
+        case = await _create_case(ac)
+        assert (await ac.post(f"/api/v1/reviews/{case['id']}/analyze")).status_code == 200
+        for it in case["items"]:
+            decided = await ac.put(
+                f"/api/v1/reviews/{case['id']}/items/{it['id']}/decision",
+                json={"status": "verified"},
+            )
+            assert decided.status_code == 200, decided.text
+        export = (await ac.post(f"/api/v1/reviews/{case['id']}/export")).json()["data"]
+
+    async def _read_only(_db, _user_obj, organization_id=None):
+        return {PermissionType.DOCUMENT_READ.value}
+
+    monkeypatch.setattr("app.core.security.permission_service.get_user_permissions", _read_only)
+    async with _Ctx(_user(org=ORG), factory) as ac:
+        listed = await ac.get(f"/api/v1/reviews/{case['id']}/exports")
+        assert listed.status_code == 200, listed.text
+        download = await ac.get(
+            f"/api/v1/reviews/{case['id']}/exports/{export['id']}/download",
+            params={"format": "json"},
+        )
+        assert download.status_code == 200, download.text
+        put = await ac.put(
+            f"/api/v1/reviews/{case['id']}/items/{case['items'][0]['id']}/decision",
+            json={"status": "verified"},
+        )
+        post = await ac.post(f"/api/v1/reviews/{case['id']}/export")
+    assert put.status_code == 403, put.text
+    assert post.status_code == 403, post.text

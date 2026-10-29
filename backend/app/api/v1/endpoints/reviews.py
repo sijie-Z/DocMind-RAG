@@ -1,5 +1,5 @@
 # backend/app/api/v1/endpoints/reviews.py
-"""合同核验案件 API（Batch 2）：建案 / 列表 / 详情 / 人工选择证据。
+"""合同核验 API（Batch 2–4）：建案/列表/详情/证据选择/分析/决策/核验单导出。
 
 证据只来自 parser 原文快照；legacy 分块选择时与 Batch 1 同口径返回 409
 ``SOURCE_ORIGINAL_UNAVAILABLE``，绝不回退检索增强文本。

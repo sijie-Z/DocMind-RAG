@@ -285,6 +285,27 @@ async def test_export_payload_contract(factory):
     for banned in ("合法", "违法", "合规", "不合规", "无风险", "可签", "风险分", "合规率"):
         assert banned not in generated
 
+    # Markdown 渲染器的生成文案同样不得含禁词（把原文 quote 清空后扫描）。
+    blanked = json.loads(serialized)
+    for item in blanked["items"]:
+        for rows in item["evidence"].values():
+            for row in rows:
+                row["quote"] = ""
+    markdown_generated = svc.render_markdown(blanked).lower()
+    for banned in (
+        "合法",
+        "违法",
+        "合规",
+        "无风险",
+        "可签",
+        "legal conclusion",
+        "risk score",
+        "compliance status",
+        "minio",
+        "x-amz",
+    ):
+        assert banned not in markdown_generated
+
 
 @pytest.mark.asyncio
 async def test_export_is_deterministic_and_rows_immutable(factory):
@@ -466,6 +487,8 @@ def test_023_migration_roundtrip(tmp_path, monkeypatch):
     assert set(columns) == {
         column.name for column in Base.metadata.tables["review_export"].columns
     }, "迁移列与 ORM 模型漂移"
+    assert columns["payload"][2].upper() == "JSON"
+    assert columns["created_at"][4] is not None, "created_at 必须有 server_default"
     assert "ix_review_export_case_created" in indexes
     assert ("organizations", "organization_id") in fks
     assert ("review_case", "case_id") in fks
