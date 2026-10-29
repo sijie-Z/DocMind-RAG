@@ -283,3 +283,29 @@ describe('合同核验工作台 · 状态边界', () => {
     expect(selectButton!.attributes('disabled')).toBeDefined()
   })
 })
+
+
+describe('合同核验工作台 · 证据选择', () => {
+  it('已选证据点击取消选择时发送 selected=false', async () => {
+    const detail = makeDetail()
+    detail.items[0].evidence.base[0].selected = true
+    api.get.mockResolvedValue({ data: { data: detail } } as never)
+    api.selectEvidence.mockResolvedValue({ data: { success: true } } as never)
+
+    const wrapper = mountDetail()
+    await flushPromises()
+
+    const deselect = wrapper
+      .findAll('button')
+      .find((button) => button.text().includes('取消选择'))
+    expect(deselect).toBeTruthy()
+    await deselect!.trigger('click')
+    await flushPromises()
+    expect(api.selectEvidence).toHaveBeenCalledWith('case-1', 'item-1', {
+      side: 'base',
+      chunk_id: 'chunk-1',
+      role: 'main',
+      selected: false
+    })
+  })
+})
