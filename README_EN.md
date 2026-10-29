@@ -6,215 +6,234 @@
   <img src="https://img.shields.io/badge/Python-3.11+-blue?logo=python" alt="Python">
   <img src="https://img.shields.io/badge/FastAPI-0.115+-009688?logo=fastapi" alt="FastAPI">
   <img src="https://img.shields.io/badge/Vue_3-3.4-4FC08D?logo=vuedotjs" alt="Vue 3">
+  <img src="https://github.com/sijie-Z/DocMind-RAG/actions/workflows/ci-fast.yml/badge.svg?branch=develop" alt="CI">
   <img src="https://img.shields.io/badge/License-MIT-green" alt="License">
 </p>
 
 <div align="center">
-  <h1>🤖 DocMind</h1>
-  <p><strong>Enterprise RAG×Agent platform — eval gates in CI, fake-successes cleared, ratchets that only shrink. Quality can't silently regress.</strong></p>
+  <h1>DocMind</h1>
+  <p><strong>From documents to trustworthy answers — and to deliverable review reports.</strong></p>
+  <p>An enterprise RAG × Agent platform: hybrid retrieval, a PER autonomous agent, and a contract-review vertical.<br/>
+  Every answer traces back to parser-original text; every review conclusion carries version, hash and evidence snapshots; uncertainty is reported as unidentified — never silently guessed.</p>
+  <p>
+    <a href="#quick-start">Quick Start</a> ·
+    <a href="#architecture-in-three-minutes">Architecture</a> ·
+    <a href="#engineering-quality-five-verifiable-commitments">Quality Gates</a> ·
+    <a href="#contract-review-a-concrete-business-slice">Contract Review</a> ·
+    <a href="docs/USER_GUIDE_EN.md">User Guide</a>
+  </p>
 </div>
 
 ---
 
-## Overview
+## What this is
 
-DocMind is a full-stack enterprise AI knowledge base system built around the **PER (Plan-Execute-Reflect) Agent architecture**. It provides multi-format document parsing, hybrid retrieval-augmented generation (RAG), visual workflow editing, real-time SSE streaming Q&A, and a comprehensive observability stack.
+DocMind is not a chat box wrapped around an LLM. It treats an enterprise knowledge base as a system that can be **accepted by business owners** — retrieval, answer provenance, agent execution, and review deliverables each come with verifiable semantics.
 
-Core use cases:
-- 📄 **Document KB** — Upload PDF, Word, Excel, TXT, Markdown, CSV, and PNG/JPG/JPEG/WEBP/BMP images (OCR). Auto-parse, chunk, embed, and semantic search.
-- 💬 **Intelligent Q&A** — RAG pipeline: keyword + vector hybrid search, reranking, LLM generation with SSE streaming.
-- 🤖 **Autonomous Agent** — PER three-phase loop (Plan → Execute → Reflect), 31 tools for complex multi-step tasks.
-- 🧩 **Workflow Editor** — Visual DAG design & debugging (Vue Flow). Configurable LLM models, prompts, and execution engines.
-- 📊 **Observability** — Prometheus metrics, Langfuse full-trace, 24 SSE event types, RunReport execution summaries.
-- 🔐 **Multi-Tenant + RBAC** — Organization isolation, role-based permissions, JWT authentication.
+Three typical uses:
 
-> Design decisions and experimental data belong in the research repo: [DocMind-Agent-Causal-Study](https://github.com/sijie-Z/DocMind-Agent-Causal-Study)
->
-> 📖 **User guide**: [docs/USER_GUIDE_EN.md](docs/USER_GUIDE_EN.md) — quick start, configuration, core concepts, API, operations, and troubleshooting.
+- **Knowledge Q&A with provenance** — upload PDF/Word/Excel/TXT/Markdown or scanned images (OCR); the system parses, chunks, retrieves with hybrid search (BM25 + vector + RRF) and reranking, then streams an answer. Every citation comes from **parser-original text** with clause/page/character anchors, not from retrieval-augmented text.
+- **An agent that plans, executes and self-checks** — a PER (Plan → Execute → Reflect) loop with 31 tools for complex multi-step tasks; every run produces a RunReport (what was done, why, with what result), with replay and experience memory.
+- **Contract review (vertical slice)** — bind “policy/template + contract V1 + V2” into a review case: document identity and content hashes, readiness gates, evidence snapshots, deterministic clause extraction and V1↔V2 alignment, and finally a review report with coverage and disclaimers. This is the most product-oriented part of the repo.
+
+> **Project status**: public project, completeness ahead of stability — suitable for learning, secondary development and local demos; harden security and operations before any production use. Engineering discipline comes before feature count: **numbers have a stated method, fixes come with evidence, regressions are blocked before merge** (see “Engineering quality”).
 
 ---
 
-## Project Status
+## Architecture in three minutes
 
-> Positioning: **public project / immature product** — feature completeness runs ahead of stability; suitable for learning, secondary development, and local demos; harden security and operations before deploying publicly. The product can still be maturing while engineering discipline leads: **numbers carry their method, fixes carry evidence, regressions are stopped before merge** (see Quality & Gates).
+```
+┌── Frontend ─────────────────────────────────────────┐
+│  Vue 3 · TypeScript · Naive UI · Vue Flow editor    │
+├── API Gateway ──────────────────────────────────────┤
+│  FastAPI · JWT + RBAC · SSE · WebSocket · Request ID│
+├── AI Agent Core ────────────────────────────────────┤
+│  PER Loop (Planner → Executor → Reflector)          │
+│  Tool Registry (31) · RunReport · Hooks · Replay    │
+├── RAG Pipeline ─────────────────────────────────────┤
+│  HybridRetriever (BM25 + vector + RRF) · Reranker   │
+│  two-level cache · PII masking · original O/E split │
+├── Data layer ───────────────────────────────────────┤
+│  MySQL 8 · Elasticsearch 8 · Redis 7 · Kafka · MinIO│
+└─────────────────────────────────────────────────────┘
+```
 
-Current baseline:
-- Test baseline (frozen snapshot, 2026-10-15): backend `pytest tests/` **2223 passed / 51 skipped** (0 failed); frontend **861 passed** (128 test files) + `vue-tsc --noEmit` 0 errors. Numbers evolve with CI in real time — CI is the single source of truth; this page keeps a frozen snapshot. Method and commands: `docs/METRICS.md`.
-- Recent fixes: org-scoped semantic cache, conversation ownership checks, org isolation for knowledge search/delete/rebuild, upload path traversal and MinIO deletion fixes, API key masking, web-fetch SSRF protection, workflow ownership isolation, in-process document processing when Kafka is unavailable, local startup scripts, and removal of sensitive artifacts from git tracking.
-- Architecture: document parsing/embedding/ES indexing is unified in a single processor, the chat pipeline moved into `services/chat_service.py`, and a shared document authorization helper was added.
-- Hardening: agent memory endpoints are user-scoped, the `/files` proxy requires auth for non-public objects, pure-ASGI metrics and rate-limit middleware are enabled, and the legacy `ci.yml` was removed.
+Lifecycle of a RAG request:
 
-Known limitations:
-- Workflow code nodes are disabled by default. Set `ENABLE_WORKFLOW_CODE_NODES=true` to opt in; execution now requires the Docker sandbox.
-- GraphRAG graphs, long-term/reflective agent memory, metrics snapshots, and live counters now persist to Redis (short-term/working memory stays in-process and does not survive a restart); live counters are written per instance and aggregated on read for multi-instance deployments.
-- The knowledge, profile, and workflow editor pages have all been split into components/composables; no 1000-line SFC pages remain.
+```
+upload → parse (original O vs retrieval text E stored separately) → chunk → embed → index
+ask → intent/complexity routing → hybrid retrieval → rerank → context compression → streaming LLM answer
+    → citations only expose parser-original text (O); legacy docs return an explicit 409, never fall back to enhanced text
+```
+
+Contract review end-to-end:
+
+```
+register document identity → readiness gate → create case (blocked/ready + reason codes)
+→ evidence snapshots (quote + hash + locator) → rule-based extraction/alignment
+→ per-item human decisions → export review report (versions/hashes/coverage/human-review items)
+```
+
+## Capabilities
+
+| Area | What it does | Key facts |
+|------|--------------|-----------|
+| Knowledge base / RAG | multi-format parsing (OCR included), semantic chunking, hybrid retrieval, reranking, query rewriting/HyDE, semantic cache, strict mode | scoring happens on enhanced text; **the evidence exit only exposes parser-original text**; unusable documents return `SOURCE_ORIGINAL_UNAVAILABLE` |
+| Agent | PER loop, DAG-based parallel scheduling, timeout/retry/fallback, adversarial reviewer, RunReport, replay, experience memory | **31 Built-In Tools** (10 tools are injected by default; terminal/Feishu/delegation are gated) |
+| Contract review | document role/family/version/content hash, readiness, review cases, evidence snapshots, deterministic extraction and alignment | text facts and change types only (modified/renumbered/…); no legal conclusions; ambiguous facts are never guessed |
+| Platform | multi-tenant org isolation, RBAC + API-Key scopes, audit logs, Prometheus/Grafana, OpenTelemetry, 24 SSE event types | org isolation spans retrieval/chat/documents/cache/WS; failure semantics are decidable (4xx + error_code) |
+
+<details>
+<summary><b>31 Built-In Tools</b> (click to expand)</summary>
+
+11 in `core_tools.py` + 20 under `tools/` (31 built-in tools total), with 10 tools are injected by default; see `docs/METRICS.md` for the derivation. Legacy names in `disabled_tools` act at capability granularity (e.g. `calculate` disables only the calculate operation of `utility`); canonical names disable the whole tool.
+
+| Category | Tools | Notes |
+|----------|-------|-------|
+| Knowledge | `search_knowledge_base` | hybrid search; `mode=vector` for pure semantic search |
+| Web | `web_search` | live search; `action=fetch` extracts page text |
+| Code | `execute_python`, `execute_sql` | sandboxed (disabled by default, opt-in) |
+| Data | `utility` | calculation, conversion, language detection, numeric analysis, time |
+| Translation | `translate_text` | multi-language translation |
+| Documents | `extract_insights`, `extract_keywords` | summaries/structured insights, keywords |
+| Analysis | `cross_document_analysis`, `generate_report` | cross-document analysis, report generation |
+| Management | `list_documents`, `get_document_info` | document management |
+| Conversations | `list_conversations`, `get_conversation_history` | history (extended surface) |
+| External | `mcp_call`, `feishu_bitable_query` | MCP bridge, Feishu Bitable (gated) |
+| Skills | `load_skill_reference`, `deep_research`, `document_comparison`, `knowledge_analysis` | skill loading, composite analysis |
+
+</details>
 
 ---
 
-## Quality & Gates
+## Engineering quality: five verifiable commitments
 
-"Never silently regress" is not a slogan — it is a set of checkable mechanisms:
+“No silent regressions” is not a slogan; it is a set of mechanisms enforced in CI:
 
-- **Eval gate in CI (`Eval Gate`)** — retrieval quality is guarded per PR by a zero-tolerance gate: Eval v1.5 uses **80 golden-set items (60 positive / 20 negative)** and seven metrics (ClauseHit@1/@3/@5, MRR, EmptyAcc, NearMiss@5, errors) with zero tolerance — any drop turns the build red (fail-closed). `make eval-ci` (`mode=fake`, 2026-10-24, corpus commit `d867a2b3`) measures ClauseHit@1 **70.0%** / @3 **76.7%** / @5 **80.0%**, NearMiss@5 **25.0%**, MRR **0.74**, EmptyAcc **100%**, errors **0** (source PR #525, merged in 552efaad; not comparable with the v1 28-item baseline). Updating the baseline is an explicit PR action (rules in `backend/docs/eval-gate-phase1.md`; method and commands in `docs/METRICS.md`).
-- **Ratchets only shrink** — a backend coverage floor (`--cov-fail-under=42`) plus four frontend baseline ratchets (hardcoded CJK / i18n completeness / naming consistency / translation-key usage). Growth turns them red; shrinkage is allowed.
-- **Silent false-successes cleared (#301)** — a full audit of ~551 exception handlers; all 32 silent false-success paths closed (fail-closed logout, three-state retrieval, honest document status, degraded-identity stats…), each backed by regression tests.
-- **Red-first + mutation verification** — every fix starts with a failing test; after the fix, injected defects must turn exactly the right tests red, proving the tests can actually detect the bug.
-- **Documented-number invariants** — the SSE event count, endpoint-module count, frontend-route count, and tool count are derived from source; expected values live in `docs/facts.json`, and the public method for every metric (value / method / command / date / note) lives in `docs/METRICS.md`. `backend/scripts/check_doc_facts.py` verifies code ↔ facts JSON ↔ METRICS.md ↔ docs on every PR. Frontend routes are recorded in two ways: 34 route records (including top-level and redirect records) / 29 named routes (routes with a name).
+1. **Evaluation gate in CI** — retrieval quality is guarded per PR with zero tolerance: Eval v1.5 ships **80 golden cases (60 positive + 20 negative)**; ClauseHit@1/@3/@5, MRR, EmptyAcc, NearMiss@5 and errors are all zero-tolerance, fail-closed. `make eval-ci` (`mode=fake`, 2026-10-24, corpus commit `d867a2b3`) measured ClauseHit@1 **70.0%** / @3 **76.7%** / @5 **80.0%**, NearMiss@5 **25.0%**, MRR **0.74**, EmptyAcc **100%**, errors **0** (PR #525, squash 552efaad; not comparable with the 28-case v1 baseline). Baseline updates are explicit PRs (`backend/docs/eval-gate-phase1.md`; method in `docs/METRICS.md`).
+2. **Silent false-success cleanup (#301)** — ~551 exception handlers audited, 32 silent false-success paths closed (logout fail-closed, three-state retrieval, honest document state machine, degraded stats identity…), each with a regression test.
+3. **Red first, then green + mutation checks** — every fix starts with a failing test; after the fix, injecting the defect back must fail *that* test — proof the test has discriminating power.
+4. **Documented-number invariants** — SSE event count, endpoint-module count, frontend-route count and tool count are derived from source; expected values live in `docs/facts.json`, the public method for every metric (value / method / command / date / note) lives in `docs/METRICS.md`, and `backend/scripts/check_doc_facts.py` verifies code ↔ facts JSON ↔ METRICS.md ↔ docs on every PR. Frontend routes are recorded in two ways: 34 route records (29 named routes, including top-level and redirect records).
+5. **Ratchet only tightens** — backend coverage floor `--cov-fail-under=42` plus four frontend baseline ratchets (hardcoded Chinese / i18n completeness / naming consistency / key usage): they block drops, never chase scores.
 
----
+Hardening closed (completed): user-scoped agent memory, `/files` proxy authorization (auth + org ownership for non-public objects), pure-ASGI metrics and rate-limit middleware, legacy `ci.yml` removed; plus workflow ownership isolation, API-key masking, SSRF protection for web fetch, upload path traversal and MinIO delete fixes, agent sandbox escape closure, `execute_sql` tenant filtering, MCP subprocess env allow-list, login-failure lockout + enumeration timing defense, and end-to-end PII masking.
 
-## System Architecture
-
-```
-┌── Frontend ──────────────────────────────────┐
-│  Vue 3 · TypeScript · Naive UI · ECharts     │
-│  Vue Flow Editor · Pinia · UnoCSS            │
-├── API Gateway ───────────────────────────────┤
-│  FastAPI · JWT + RBAC · CORS · SSE · GZip    │
-│  WebSocket Push · Request ID Tracking        │
-├── AI Agent Core ─────────────────────────────┤
-│  PER Loop (Planner → Executor → Reflector)   │
-│  Tool Registry (31) · RunReport · Reviewer  │
-│  Experience Memory · Replay                  │
-├── RAG Pipeline ──────────────────────────────┤
-│  HybridRetriever (BM25 + Vector + RRF fusion)│
-│  Query Processor · Reranker · Context Comp.   │
-│  Two-Level Cache (Exact + Semantic) · PII    │
-├── LLM ───────────────────────────────────────┤
-│  DeepSeek · OpenAI-compatible API · Langfuse │
-├── Data Layer ────────────────────────────────┤
-│  MySQL 8 · Elasticsearch 8 · Redis 7         │
-│  Kafka · MinIO (S3-compatible Object Storage) │
-└──────────────────────────────────────────────┘
-```
+Historical snapshots are kept separate from current quality: `docs/legacy/` archives old evaluation artifacts (e.g. `eval_first_report_2026-06-15.json`), for reference only — **not representative of current quality** and not part of the gate.
 
 ---
 
-## Core Modules
+## Contract review: a concrete business slice
 
-### 🤖 PER Agent System (`backend/app/agent/`)
+Generic “chat + knowledge base” is hard to accept. Contract review is narrow enough to define “done”:
 
-An autonomous AI agent that decomposes and executes multi-step tasks:
+**Input**: one policy (or template) plus V1 and V2 of the same contract (text-layer PDF/DOCX).
+**Fixed checklist**: payment term, start condition, acceptance/invoice prerequisites, exceptions/deferrals/other agreements — only these four; no “full-contract review” claim.
+**What the system does**:
 
-```
-User instruction
-  → Planner   — Decompose into DAG/Serial steps, recommend tools, assess risk
-  → Executor  — Dependency-aware scheduling, parallel independent steps,
-                timeout/retry/fallback per step
-  → Reflector — Verify output, detect hallucinations/gaps/contradictions, trigger fixes
-  → RunReport — Summarize the entire run: what happened, why, and outcome
-```
+- `PUT /documents/{id}/review-meta`: register role, version family/sequence, effective dates; SHA-256 computed server-side from the MinIO object;
+- `GET /documents/{id}/readiness`: `reviewable/blocked` with reason codes (legacy / not indexed / parse failed / missing version meta / no original text);
+- `POST /reviews`: the three documents must share an org, have correct roles and increasing version sequence to become `ready`; otherwise the case is stored as `blocked` with `side:reason` codes;
+- evidence snapshots: at case creation / selection, parser-original quotes are frozen with hashes, clause/page/character anchors — snapshots survive document rebuilds or deletion, while chunk and document fingerprints flag `live_source_stale`;
+- `POST /reviews/{id}/analyze`: rule-based extraction (term value/unit, start events, conditions, exceptions/cross-refs) and V1↔V2 alignment (unchanged/modified/added/removed/renumbered/unidentified); date fragments and warranty periods are never mistaken for payment terms, unclear units stay `ambiguous` instead of guessing;
+- next batches: per-item human decisions and export with versions/hashes/coverage (in progress).
 
-| Module | File | Purpose |
-|--------|------|---------|
-| Main Loop | `loop.py` | PER three-phase orchestration, SSE events, RunReport generation |
-| Planner | `planner.py` | LLM planner + structured rule templates (coarse/normal/fine) |
-| Executor | `executor.py` | DAG topological sort + parallel group scheduling, timeout/retry/fallback |
-| Reflector | `reflector.py` | Output quality evaluation, auto-correction suggestions |
-| Reviewer | `reviewer.py` | Adversarial review — finds issues, proposes improvements |
-| Tool Registry | `registry.py` | Centralized tool namespace + tag-based filtering |
-| Context Engine | `context.py` | Token budget management, message window builder |
-| Config | `config.py` | AgentConfig (model/temperature/max steps/phase toggles) |
+**Explicitly out of scope**: no legal conclusions (lawful/unlawful, compliant/non-compliant, risk-free, safe-to-sign), `needs_human`/`insufficient` never count as done, and no conclusion without evidence.
 
-**31 Built-In Tools** (`core_tools.py` 11 + `tools/` 20; 10 tools are injected by default, with terminal/Feishu/delegation/extended tools gated by settings or explicit `tool_tags`; method: `docs/METRICS.md`):
+---
 
-| Category | Tool | Description |
-|----------|------|-------------|
-| Knowledge | `search_knowledge_base` | Hybrid search; `mode=vector` for pure semantic |
-| Web | `web_search` | Real-time search; `action=fetch` for webpage text |
-| Code | `execute_python`, `execute_sql` | Sandboxed Python / SQL (disabled by default, opt-in) |
-| Data | `utility` | Math, format conversion, language detection, statistics, current time |
-| Translation | `translate_text` | Multi-language translation |
-| Document | `extract_insights`, `extract_keywords` | Summary/structured insights, keyword extraction |
-| Analysis | `cross_document_analysis`, `generate_report` | Cross-doc analysis, report generation |
-| Management | `list_documents`, `get_document_info` | Document management |
-| Conversation | `list_conversations`, `get_conversation_history` | Session history (extended surface) |
-| External | `mcp_call`, `feishu_bitable_query` | MCP bridge, Feishu Bitable (gated by default) |
-| Skills | `load_skill_reference`, `deep_research`, `document_comparison`, `knowledge_analysis` | Skill loading, composite analysis (last three extended) |
+## Quick start
 
-**Self-Improving System** (experimental):
+### Prerequisites
 
-| Subsystem | Directory | Purpose |
-|-----------|-----------|---------|
-| Experience Memory | `experience/` | Auto-extract lessons from failed runs, inject into Planner |
-| Execution Replay | `replay/` | Full execution snapshots, save & replay with diff comparison |
+Docker Desktop (recommended), or: Python 3.11+ · Node.js 18+ · MySQL 8 · Redis 7 · Elasticsearch 8 · Kafka · MinIO.
 
-**Hooks extension points** (issue #474, off by default):
+### 1. Clone
 
-In-process event bus covering agent turns and tool execution, with `waterfall`
-(can rewrite/short-circuit) and `serial` (ordered observation) semantics.
-Configuration lives in `backend/config/hooks.yaml`; enable it with
-`HOOKS_ENABLED=true` (disabled means the file is never read and behavior is
-unchanged):
-
-```yaml
-hooks:
-  - name: audit_tool_calls
-    event: tools/pre_execute        # agent/turn_start | agent/pre_step | agent/post_step
-    module: app.agent.hooks.builtin.audit_tool_calls   # must start with app.agent.hooks.
-    enabled: true
-    priority: 100                   # lower runs first
-    timeout_seconds: 2.0            # 0.1-30
-    failure_policy: fail_open       # fail_open | fail_closed
+```bash
+git clone https://github.com/sijie-Z/DocMind-RAG.git
+cd DocMind-RAG/backend
 ```
 
-A handler is `async def handler(ctx, next)`: `await next(payload)` continues the
-chain; skipping it short-circuits; return
-`HookDecision(action="deny"|"modify"|"ask", ...)`. `ask` on `tools/pre_execute`
-reuses the existing HITL approval gate — hooks cannot bypass approval. Failures
-emit `hook_error` SSE events and `docmind_hook_*` metrics. See
-`docs/decisions/ADR-004-hooks.md`.
+### 2. Configure
 
-### 📚 RAG Pipeline (`backend/app/rag/`)
-
-Multi-stage retrieval-augmented generation — from user query to streaming answer:
-
-```
-Query enters
-  → QueryIntentClassifier     — Intent classification (fact/procedure/definition/causal)
-  → QueryComplexityClassifier — Complexity grading → strategy selection
-  → Rewrite/HyDE              — Query rewriting + hypothetical document embeddings (optional)
-  → HybridRetriever           — Keyword (fuzzy + wildcard + multi_match)
-                                + Vector (script_score cosineSimilarity)
-                                + RRF reciprocal rank fusion (k=60)
-  → MMR Selection             — Maximal Marginal Relevance deduplication
-  → Reranker                  — Cross-encoder rerank (local BGE or API)
-  → ContextCompressor         — query-term sentence extraction (rule-based, no LLM call)
-  → Cache Check               — Exact match cache (TTL 600s) + semantic cache
-  → LLM Generation            — Streaming SSE output, strict mode, PII masking
+```bash
+# host app
+cp .env.example .env               # Windows: copy .env.example .env
+# required for any Docker usage:
+cp .env.docker.example .env.docker
 ```
 
-| File | Purpose |
-|------|---------|
-| `pipeline.py` | Pipeline orchestrator — chains all stages |
-| `retriever.py` | HybridRetriever — 3 modes (keyword/hybrid/HyDE) + RRF + MMR |
-| `reranker.py` | Cross-encoder rerank (local BAAI/bge-reranker-base or API) |
-| `query_processor.py` | HyDE generation, LLM query rewrite, intent/complexity classification, decomposition |
-| `cache.py` | RetrievalCache (exact TTL) + SemanticCache (cosine similarity) |
-| `context_compressor.py` | Query-term sentence extraction compression (rule-based, no LLM call) |
-| `context_window.py` | Token budget message builder for RAG chat |
-| `evaluator.py` / `metrics.py` | RAG quality scoring (groundedness, relevance) |
+- Host app requires `SECRET_KEY`, `JWT_SECRET_KEY` (generate with `python -c "import secrets; print(secrets.token_hex(32))"`).
+- `.env.docker` requires self-generated values for `MYSQL_ROOT_PASSWORD`, `MYSQL_PASSWORD`, `MINIO_ACCESS_KEY`, `MINIO_SECRET_KEY`, `GRAFANA_PASSWORD` (no default passwords).
+- Backend startup requires `SECRET_KEY`, `JWT_SECRET_KEY`; chat requires `DEEPSEEK_API_KEY`. Embedding defaults to local Ollama (nomic-embed-text / 768 dims, reusing the chat key); configure `EMBEDDING_API_KEY` / `EMBEDDING_API_URL` for a cloud provider.
+- Compose does whole-file interpolation before service selection: `GRAFANA_PASSWORD` is required even without selecting Grafana.
 
-### 🔧 Infrastructure (`backend/app/core/`)
+### 3. Start Infrastructure
 
-| Module | File(s) | Purpose |
-|--------|---------|---------|
-| Config | `config/` | Pydantic Settings (Base/DB/AI/Security), env-var driven |
-| Database | `database.py` | SQLAlchemy async engine, Alembic migrations |
-| Cache | `redis.py` | Lazy-connect proxy pattern, RedisTools cache wrapper |
-| Search | `elasticsearch.py` | ES client proxy, dense_vector index, IK analyzer support |
-| Storage | `minio_client.py` | MinIO S3-compatible client |
-| Messaging | `kafka_client.py` | aiokafka producer |
-| Auth | `security.py` | JWT + bcrypt, get_current_user dependency, RBAC helpers |
-| Middleware | `middleware.py` | Metrics collection (request count/latency/errors) |
-| Circuit Breaker | `circuit_breaker.py` | Circuit breaker pattern — **state-machine API is wired into the LLM step path (cross-request breaking + half-open recovery, issue #242); covers the executor's per-step main LLM call only — planner (stream) / synthesis / reflector / loop direct-answer paths are not covered**; the unused decorator degraded-value path has been removed (issue #467; the state-machine API is the only contract) |
-| LLM Fast-Fail | `llm_failfast.py` | Connection-level unreachable classification (refused / DNS / connect-phase timeout) + separate short connect timeout + bounded transient retries + per-endpoint negative cache; slow reads/writes and post-connect transport interruptions are not treated as unreachable (issue #467) |
-| Step Runner | `step_runner.py` | Safe step execution with retry/fallback |
-| Tracing | `tracing.py` | OpenTelemetry OTLP gRPC export |
-| Trace Logger | `trace_logger.py` | Agent execution tracing to JSONL (dev-only: used solely by the unmounted standalone test app `agent_api.py`:8010; no in-repo readers) |
-| Metrics | `prometheus.py` | Custom counters/histograms (retrieval latency, LLM tokens, cache hits, RAG quality) |
-| WebSocket | `notification_ws.py` | Real-time push notification connection manager |
-| Request ID | `request_id.py` | X-Request-ID injection |
+```bash
+docker compose --env-file .env.docker up -d mysql redis elasticsearch minio kafka zookeeper
+```
+
+### 4. Start the backend (with migrations)
+
+```bash
+python -m venv venv && source venv/bin/activate   # Windows: venv\Scripts\activate
+pip install -r requirements.txt
+alembic upgrade head                              # schema guard refuses to start on a stale DB (issue #495)
+python -m app --profile web                       # profiles: web | worker | headless | sdk | acp
+```
+
+`python -m app --profile web` compares `alembic_version` with the migration head at startup; when stale it prints `current=... head=...` and the fix command, then exits with code 2 instead of serving 500s (`SCHEMA_GUARD`; `AUTO_MIGRATE` is off by default). `uvicorn app.main:app` / `python run.py` remain compatible entrypoints.
+
+### 5. Start the frontend
+
+```bash
+cd ../frontend && npm install && npm run dev      # http://localhost:5173
+```
+
+### Endpoints
+
+| URL | Purpose |
+|-----|---------|
+| http://localhost:5173 | frontend |
+| http://localhost:8000/docs | Swagger UI |
+| http://localhost:8000/health | diagnostic health view |
+| http://localhost:8000/readyz | readiness probe (DB/Redis/ES) |
+| http://localhost:8000/metrics | Prometheus metrics |
+
+Demo accounts: `guest` (random password printed once at creation, or `DEMO_PASSWORD`; enabled by `ENABLE_DEMO_ACCOUNT=true`); `admin` via `reset_admin.py` (`ADMIN_PASSWORD`).
+
+---
+
+## Project layout
+
+```
+DocMind/
+├── backend/
+│   ├── app/
+│   │   ├── main.py                  # FastAPI compatibility entry (assembly lives in bootstrap.py)
+│   │   ├── agent/                   # PER agent: loop / planner / executor / reflector
+│   │   │   ├── events.py            #   SSE event types (24 types)
+│   │   │   ├── core_tools.py        #   base tools (11)
+│   │   │   └── tools/               #   extended tools (20; 31 built-in tools total)
+│   │   ├── rag/                     # retriever / reranker / pipeline / cache
+│   │   ├── api/v1/
+│   │   │   ├── router.py            # main router (29 modules registered)
+│   │   │   └── endpoints/           # Endpoint implementations (29 files)
+│   │   ├── services/                # business services (30 services)
+│   │   ├── models/                  # ORM models (21 model files)
+│   │   ├── core/                    # config / DB / Redis / ES / MinIO / Kafka / JWT
+│   │   └── worker/                  # Kafka consumer (parse → chunk → embed → index)
+│   ├── tests/                       # backend tests (unit + API + integration)
+│   ├── alembic/                     # migrations
+│   ├── benchmark/                   # evaluation framework (eval gate)
+│   └── docker-compose.yml
+├── frontend/
+│   └── src/
+│       ├── views/                   # pages (23 page modules, 34 route records / 29 named routes)
+│       ├── components/ · api/ · stores/ · router/ · composables/ · locales/
+└── docs/                            # architecture page / user guide / ADRs / metrics
+```
 
 ### 🌐 API Layer (`backend/app/api/v1/`)
 
@@ -252,340 +271,97 @@ Query enters
 | Webhooks | `/webhooks` | Inbound webhook rule management, HMAC-verified delivery, outbox processing (issue #478) |
 | Demo Data | `/demo` | Seed demo documents & data |
 
-Swagger docs: `http://localhost:8000/docs`
-
-### 🖥 Frontend (`frontend/src/`)
-
-Vue 3 + TypeScript + Naive UI SPA, 34 route records (29 named routes; the table below lists key pages):
-
-| Page | Route | Description |
-|------|-------|-------------|
-| Dashboard | `/dashboard` | KPI cards, charts, quick access |
-| AI Chat | `/chat` | Dual mode RAG + Agent, SSE streaming |
-| Conversations | `/conversations` | Chat history list & management |
-| Knowledge Base | `/knowledge` | Document upload, parsing, search, knowledge graph |
-| Search | `/search` | Global standalone search |
-| Prompts | `/prompts` | Prompt template management |
-| Workflow | `/workflow` | Visual DAG editor (Vue Flow) |
-| Agent Config | `/agent` | Model/temperature/tools/memory toggle config |
-| Organizations | `/organizations` | Org CRUD, member management (admin) |
-| Users | `/users` | User CRUD, role assignment (admin) |
-| Audit Logs | `/audit-logs` | User activity audit (admin) |
-| Monitoring | `/monitoring` | Performance charts, health status (admin) |
-| Profile | `/profile` | Personal info, password change |
-| Notifications | `/notifications` | Real-time notification list |
-| System Help | `/system-help` | Usage help docs |
-| About | `/system-about` | System info |
-
-### 🧰 Service Layer (`backend/app/services/`)
-
-| Service | File | Purpose |
-|---------|------|---------|
-| Auth Service | `auth_service.py` | JWT creation/validation, bcrypt hashing, token blacklist (jti) |
-| Document Parser | `document_parser.py` | Parse PDF/Word/Excel/CSV/TXT/MD and images (OCR), text extraction & chunking |
-| RAG Service | `rag_service.py` | RAG pipeline facade |
-| File Service | `file_service.py` | File storage & retrieval |
-| Knowledge Service | `knowledge_service.py` | Knowledge base business logic |
-| Permission Service | `permission_service.py` | RBAC permission initialization & management |
-| Audit Service | `audit_service.py` | Audit log write & query |
-| Workflow Engine | `workflow_engine.py` | Workflow execution engine |
-| Organization Service | `organization_service.py` | Multi-tenant org management |
-| Memory Service | `memory_service.py` | Agent memory CRUD |
-| PII Masking | `masking_service.py` | Sensitive info redaction |
-| Semantic Chunker | `semantic_chunker.py` | Semantic-aware text chunking |
-| Graph Service | `graph_rag_service.py` | Knowledge-graph build, query, and visualization (not part of the RAG retrieval path) |
-
-### 🔄 Async Processing (`backend/app/worker/`)
-
-A Kafka consumer worker process (`python -m app --profile worker`; the legacy `start_worker.py` still works) listens on the `file-processing` topic, handling: document parsing → chunking → embedding → ES indexing.
-
-When Kafka is unavailable, `/documents/upload` and knowledge-base rebuild endpoints automatically fall back to in-process processing, so local development does not stay stuck in `pending`.
+Swagger docs: `http://localhost:8000/docs` (OpenAPI: `/api/v1/openapi.json`).
 
 ---
 
-## Quick Start
+## Design trade-offs (the five questions interviewers ask)
 
-### Prerequisites
+1. **Why PER instead of single-turn ReAct?** Enterprise tasks need planning, replay and explanations. The planner produces an auditable step DAG, the executor runs independent steps in parallel with retries, and the reflector self-checks before finishing; every run leaves a RunReport and replay snapshots — debuggable, not just a chat transcript.
+2. **Why separate `original_text` from retrieval-augmented text?** Retrieval optimizes recall; citations must be verifiable. Long documents prepend generated summaries for scoring (E), while the evidence exit only exposes parser-original text (O) marked via `text_provenance`; legacy documents return an explicit 409 `SOURCE_ORIGINAL_UNAVAILABLE` instead of disguising enhanced text as original.
+3. **Why is “cannot review” a state, not an exception?** Missing version identity, legacy text or cross-family versions are business facts; users must see reason codes (`side:reason`) and the flow must stop. Exceptions are reserved for genuine program errors. A `blocked` case cannot select evidence, cannot complete, and will never be exported as “reviewed”.
+4. **Why put the evaluation gate in CI?** Retrieval/generation quality degrades silently. A zero-tolerance gate over 80 golden cases (seven metrics) turns “quality must not silently regress” into a process constraint, not a matter of discipline.
+5. **Why rule-based extraction + human decisions before LLM extraction?** Build a decidable gold set and evidence chain first: rules only output text facts that can be compared field by field (term value/unit, start events, conditions, exceptions); anything unclear is `ambiguous`/`not_found`. Humans decide per item with an audit trail. Once the gold set is stable, model assistance can be added — without letting the model emit unverifiable conclusions.
 
-Docker Desktop (recommended), or manual install:
-- Python 3.11+ · Node.js 18+ · MySQL 8 · Redis 7 · Elasticsearch 8 · Kafka · MinIO
-
-### 1. Clone
-
-```bash
-git clone https://github.com/sijie-Z/DocMind-RAG.git
-cd DocMind-RAG
-```
-
-### 2. Configure
-
-Create the environment files **before starting anything** — without `backend/.env.docker`, every compose command fails outright.
-
-```bash
-cd backend
-
-# Local development (apps run on the host — steps 4/5 below)
-cp .env.example .env               # Windows: copy .env.example .env
-# Required: SECRET_KEY / JWT_SECRET_KEY (generate: python -c "import secrets; print(secrets.token_hex(32))")
-# Fill in DEEPSEEK_API_KEY / EMBEDDING_API_KEY as needed (LLM / Embedding credentials)
-
-# Any Docker use (including infrastructure-only in step 3) requires this file — compose fails without it:
-cp .env.docker.example .env.docker
-# Fill in the required values below; never commit real credentials.
-```
-
-- **Required for Compose interpolation**: generate and set `MYSQL_ROOT_PASSWORD`,
-  `MYSQL_PASSWORD`, `MINIO_ACCESS_KEY`, `MINIO_SECRET_KEY`, and `GRAFANA_PASSWORD`;
-  none has a default password.
-- **Required for backend startup**: `SECRET_KEY` and `JWT_SECRET_KEY`; chat also needs
-  `DEEPSEEK_API_KEY`. Embedding defaults to local Ollama (nomic-embed-text / 768 dims)
-  and reuses the chat key. Configure `EMBEDDING_API_KEY` / `EMBEDDING_API_URL` for a
-  cloud embedding provider.
-- Compose performs **whole-file interpolation before service selection**: even without
-  selecting Grafana, `GRAFANA_PASSWORD` remains required. This documents existing
-  behavior; it neither adds a default password nor weakens Grafana's validation.
-- `.env.example` targets host apps with Docker infrastructure and defaults to
-  `localhost:3308/docmind` plus Redis `localhost:6390`. Full Docker still overrides
-  these with container-internal `docmind-mysql:3306/docmind` and
-  `docmind-redis:6379`; do not substitute the host-published ports.
-- If MySQL and Redis also run directly on the host without Docker, update `.env`
-  with their actual hosts, ports, and database name (commonly 3306/6379 locally,
-  but always follow your service configuration).
-
-### 3. Start Infrastructure
-
-```bash
-cd backend && docker compose --env-file .env.docker up -d mysql redis elasticsearch minio kafka zookeeper
-# Infrastructure containers only (apps keep running on the host — see below); skip this step without Docker and use local services per SETUP.md
-# Full Docker deployment (apps in containers): see the Deployment section
-```
-
-### 4. Start Backend
-
-On Windows you can use `start_windows.bat` at the repo root (it detects `.venv` or `venv`). Manual start:
-
-```bash
-cd backend
-python -m venv venv && source venv/bin/activate   # Windows: venv\Scripts\activate
-pip install -r requirements.txt
-python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
-```
-
-The unified entrypoint is recommended (issue #479):
-
-```bash
-# profile = web | worker | headless | sdk | acp (default: web)
-python -m app --profile web
-# apply patch files in order
-python -m app --profile web --patch config/patches/local.yaml
-# print the merged config (sorted keys, masked secrets)
-python -m app --profile web --dump-config
-```
-
-Layering: `backend/config/base.yaml` → bundles declared by the profile → `profiles/<profile>.yaml` → `--patch` → environment (`.env` belongs to the environment layer). `uvicorn app.main:app` and `python run.py` remain supported compatibility entrypoints; keep using `python run.py` for reload.
-
-### 5. Start Frontend
-
-```bash
-cd frontend && npm install && npm run dev          # http://localhost:5173
-```
-
-### Access
-
-| URL | Description |
-|-----|-------------|
-| http://localhost:5173 | Frontend UI |
-| http://localhost:8000/docs | Swagger API Docs |
-| http://localhost:8000/health | Health Check |
-| http://localhost:8000/metrics | Prometheus Metrics |
-
-### Demo Accounts
-
-| Username | Password | Role |
-|----------|----------|------|
-| `guest` | Random at first creation (printed once, or via `DEMO_PASSWORD`) | User (when `ENABLE_DEMO_ACCOUNT=true`) |
-| `admin` | Created via `reset_admin.py` (`ADMIN_PASSWORD` env) | Admin |
+**Hooks extension points** (off by default): an in-process event bus with `waterfall` (rewrite/short-circuit) and `serial` (observe) semantics; `ask` on `tools/pre_execute` reuses the HITL approval gate and cannot be bypassed. See [`docs/decisions/ADR-004-hooks.md`](docs/decisions/ADR-004-hooks.md) and more records in [`docs/decisions/`](docs/decisions/).
 
 ---
 
 ## Configuration
 
-Environment variables via `.env` file. Key settings:
-
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `DEEPSEEK_API_KEY` | LLM API Key | Required |
+| Variable | Purpose | Default |
+|----------|---------|---------|
+| `DEEPSEEK_API_KEY` | LLM API key | required |
 | `DEEPSEEK_API_URL` | LLM API URL | `https://api.deepseek.com` |
-| `DEEPSEEK_MODEL` | Chat model | `deepseek-v4-flash` |
-| `EMBEDDING_API_KEY` | Embedding API Key | Falls back to `DEEPSEEK_API_KEY` |
-| `EMBEDDING_API_URL` | Embedding API URL | `http://localhost:11434/v1` (local Ollama) |
-| `EMBEDDING_MODEL` | Embedding model | `nomic-embed-text` |
-| `DATABASE_URL` | MySQL connection string | `mysql+aiomysql://...` (required in deployments) |
-| `VECTOR_DIMENSION` | Vector dimension | `768` |
-| `ENABLE_TRACING` | OpenTelemetry toggle | `false` |
-| `ENABLE_DEMO_ACCOUNT` | Enable demo accounts | `false` |
-| `ENABLE_WORKFLOW_CODE_NODES` | Allow workflow code nodes (security risk; disabled by default) | `false` |
-| `APP_VERSION` | App version | `1.22.1-rc.1` |
+| `EMBEDDING_API_KEY` | embedding key | falls back to `DEEPSEEK_API_KEY` |
+| `EMBEDDING_API_URL` | embedding URL | local Ollama |
+| `DATABASE_URL` | MySQL DSN | required in deployment |
+| `VECTOR_DIMENSION` | vector dimension | `768` |
+| `SCHEMA_GUARD` / `AUTO_MIGRATE` | startup schema check / fallback migration | `true` / `false` |
+| `ENABLE_TRACING` | OpenTelemetry | `false` |
+| `ENABLE_DEMO_ACCOUNT` | demo account | `false` |
+| `ENABLE_WORKFLOW_CODE_NODES` | allow workflow code nodes (security risk, off by default) | `false` |
 
-> Model / vector-dimension defaults are defined once in
-> `backend/app/core/config/ai.py`. When `EMBEDDING_MODEL` / `VECTOR_DIMENSION` are
-> not set explicitly, hardware tiers auto-select: CPU `bge-m3` / 1024, 8G-GPU
-> `Qwen3-Embedding-4B` / 2048, 16G-GPU `Qwen3-Embedding-8B` / 4096. Explicit
-> values (as in the templates above) take precedence over auto-tiering.
-
-Full configuration reference: `backend/.env.example` and `backend/.env.docker.example`.
+See `backend/.env.example` and `backend/.env.docker.example`; model/vector defaults are sourced from `backend/app/core/config/ai.py` (CPU/8G/16G auto tiers; explicit config wins).
 
 ---
 
-## Project Structure
-
-```
-DocMind/
-├── backend/
-│   ├── app/
-│   │   ├── main.py                  # FastAPI entry point, lifecycle management
-│   │   ├── agent_api.py             # Standalone agent test API (dev-only, port 8010, not in production deploy)
-│   │   ├── dependencies.py          # Dependency injection container
-│   │   ├── exceptions.py            # Custom exception hierarchy
-│   │   ├── api/v1/
-│   │   │   ├── router.py            # Main router (29 modules registered)
-│   │   │   └── endpoints/           # Endpoint implementations (29 files)
-│   │   ├── agent/                   # PER Agent core
-│   │   │   ├── loop.py              #   PER main loop
-│   │   │   ├── planner.py           #   Planner (LLM + structured rules)
-│   │   │   ├── executor.py          #   Executor (DAG/Serial + retry)
-│   │   │   ├── reflector.py         #   Reflector
-│   │   │   ├── reviewer.py          #   Adversarial Reviewer
-│   │   │   ├── run_report.py        #   RunReport (execution summary)
-│   │   │   ├── orchestrator.py      #   Deterministic orchestrator
-│   │   │   ├── service.py           #   AgentService (Facade)
-│   │   │   ├── config.py            #   AgentConfig
-│   │   │   ├── exec_context.py      #   ExecutionContext
-│   │   │   ├── registry.py          #   Tool registry
-│   │   │   ├── memory_bridge.py     #   Memory bridge
-│   │   │   ├── events.py            #   SSE event types (24 types)
-│   │   │   ├── message.py           #   Agent message bus
-│   │   │   ├── tracing.py           #   Execution trace records (dev-only: eval/offline; not written in production)
-│   │   │   ├── core_tools.py        #   11 base tools
-│   │   │   ├── tools/               #   20 extension tools (31 built-in tools total)
-│   │   │   │   ├── web_search.py    #   Web search
-│   │   │   │   ├── code_execution.py #  Python/SQL sandbox
-│   │   │   │   ├── data_analysis.py #   Data analysis
-│   │   │   │   ├── translation.py   #   Translation
-│   │   │   │   ├── skills.py        #   Skill learning
-│   │   │   │   ├── utility.py       #   General utilities
-│   │   │   │   ├── mcp_bridge.py    #   MCP protocol bridge
-│   │   │   │   └── feishu/          #   Feishu integration
-│   │   │   ├── experience/          #   Experience memory
-│   │   │   │   ├── extractor.py     #   Experience extractor
-│   │   │   │   ├── store.py         #   Experience store
-│   │   │   │   ├── models.py        #   Data models
-│   │   │   │   └── run_extract.py   #   Experience bootstrap (dev-only; manual run after benchmarks)
-│   │   │   └── replay/              #   Execution replay
-│   │   │       └── engine.py        #   Replay engine
-│   │   ├── core/                    # Infrastructure
-│   │   │   ├── config/              #   Settings (Base/DB/AI/Security)
-│   │   │   ├── database.py          #   SQLAlchemy engine
-│   │   │   ├── redis.py             #   Redis proxy
-│   │   │   ├── elasticsearch.py     #   ES proxy
-│   │   │   ├── minio_client.py      #   MinIO client
-│   │   │   ├── kafka_client.py      #   Kafka producer
-│   │   │   ├── security.py          #   JWT + RBAC
-│   │   │   ├── middleware.py         #   Metrics collection
-│   │   │   ├── circuit_breaker.py   #   Circuit breaker
-│   │   │   ├── step_runner.py       #   Step runner
-│   │   │   ├── tracing.py           #   OpenTelemetry
-│   │   │   ├── trace_logger.py      #   JSONL trace logging
-│   │   │   ├── prometheus.py        #   Prometheus metrics
-│   │   │   ├── notification_ws.py   #   WebSocket manager
-│   │   │   ├── request_id.py        #   Request ID
-│   │   │   ├── response.py          #   Unified response
-│   │   │   └── ensure_demo_user.py  #   Demo account seeding
-│   │   ├── rag/                     # RAG pipeline
-│   │   │   ├── pipeline.py          #   Pipeline orchestrator
-│   │   │   ├── retriever.py         #   Hybrid retriever
-│   │   │   ├── reranker.py          #   Reranker
-│   │   │   ├── query_processor.py   #   Query processing (intent/complexity/HyDE)
-│   │   │   ├── cache.py             #   Two-level cache
-│   │   │   ├── context_compressor.py #  Context compression
-│   │   │   ├── context_window.py    #   Token budget management
-│   │   │   └── evaluator.py         #   Quality evaluation
-│   │   ├── services/                # Business service layer (30 services)
-│   │   ├── models/                  # ORM models (21 model files)
-│   │   ├── schemas/                 # Pydantic request/response schemas
-│   │   └── worker/                  # Kafka consumer
-│   ├── tests/                       # 2223 backend tests (plus 861 frontend)
-│   ├── benchmark/                   # Benchmark framework
-│   ├── alembic/                     # DB migrations
-│   ├── scripts/                     # Utility scripts
-│   ├── docker/                      # Docker init SQL
-│   ├── config/                      # Prometheus/Grafana configs
-│   └── docker-compose.yml           # 10-service orchestration
-├── frontend/
-│   └── src/
-│       ├── views/                   # Pages (23 page modules, 34 route records / 29 named routes)
-│       ├── components/              # Shared components
-│       ├── api/                     # Axios API clients
-│       ├── stores/                  # Pinia state stores
-│       ├── router/                  # Vue Router config
-│       ├── composables/             # Vue composables
-│       ├── locales/                 # i18n internationalization
-│       └── utils/                   # Utility functions
-└── docs/                            # Design documents
-```
-
----
-
-## Testing
+## Tests and evaluation
 
 ```bash
 cd backend
-
-# Run all tests
-python -m pytest tests/ -v --tb=short
-
-# Coverage report
+python -m pytest tests/ -v --tb=short          # all backend tests
 python -m pytest tests/ --cov=app --cov-report=html
-
-# Frontend tests
-cd ../frontend && npm run test
+make eval-ci                                    # evaluation gate (same as CI)
+cd ../frontend && npm run test                  # frontend tests
 ```
+
+Frozen test baseline (2026-10-15): backend `pytest tests/` **2223 passed / 51 skipped** (0 failed); frontend **861 passed** (128 test files) + `vue-tsc --noEmit` clean. Numbers evolve with CI — CI is the single source of truth; this page keeps only the frozen snapshot (method in `docs/METRICS.md`).
 
 ---
 
 ## Deployment
 
-### Docker Compose
-
-Prerequisite: create and fill `backend/.env.docker` first (see Quick Start · 2. Configure) — without it, every compose command fails outright.
-
 ```bash
 cd backend && docker compose --env-file .env.docker up -d
-# Starts 10 services: backend, worker, mysql, redis, elasticsearch, minio, zookeeper, kafka, prometheus, grafana
+# starts migrate + backend + worker + mysql + redis + elasticsearch + minio
+# + zookeeper + kafka + prometheus + grafana; apps wait for the one-shot migrate to exit successfully
 ```
-
-### Infrastructure Ports
 
 | Service | Port |
 |---------|------|
-| FastAPI Backend | 8000 |
-| Vite Frontend Dev | 5173 |
+| FastAPI backend | 8000 |
+| Vite dev server | 5173 |
 | MySQL | 3308 (Docker) / 3306 (local) |
 | Redis | 6390 (Docker) / 6379 (local) |
 | Elasticsearch | 9200 |
 | MinIO API / Console | 9000 / 9001 |
 | Kafka | 9092 / 29092 (internal) |
-| Prometheus | 9090 |
-| Grafana | 3001 |
+| Prometheus / Grafana | 9090 / 3001 |
+
+K8s manifests and deployment notes live in [`deploy/`](deploy/). When Kafka is unavailable, `/documents/upload` and rebuild endpoints automatically fall back to in-process processing, so local development never gets stuck in `pending`.
 
 ---
 
-## Links
+## Known boundaries
 
-- **Research Repo**: https://github.com/sijie-Z/DocMind-Agent-Causal-Study
-- **GitHub**: https://github.com/sijie-Z/DocMind-RAG
-- **API Docs**: http://localhost:8000/docs
-- **Issues**: https://github.com/sijie-Z/DocMind-RAG/issues
+- Workflow code nodes are off by default and must run in the Docker sandbox with `ENABLE_WORKFLOW_CODE_NODES=true`.
+- GraphRAG is not part of the RAG retrieval path; context compression is rule-based, no LLM call; short-term/working memory is in-process while long-term/reflective memory uses Redis.
+- Contract review currently covers four fixed checklist items for Chinese contracts; evidence is chunk-level quotes with clause/page/character anchors, not PDF highlighting.
+- Evaluation `mode=fake` metrics guard regressions; they are not an online-quality claim for a specific model.
+
+---
+
+## Documentation map
+
+| Document | Content |
+|----------|---------|
+| [`docs/USER_GUIDE_EN.md`](docs/USER_GUIDE_EN.md) | 5-minute setup → first document → first grounded answer → agent workbench |
+| [`docs/architecture.html`](docs/architecture.html) | interactive architecture page (GitHub Pages: [sijie-z.github.io/DocMind-RAG](https://sijie-z.github.io/DocMind-RAG/)) |
+| [`docs/METRICS.md`](docs/METRICS.md) | method behind every public number (value / command / date / note) |
+| [`docs/decisions/`](docs/decisions/) | ADRs |
+| [`backend/docs/eval-gate-phase1.md`](backend/docs/eval-gate-phase1.md) | eval-gate rules and baseline-update process |
+| [Research repo](https://github.com/sijie-Z/DocMind-Agent-Causal-Study) | architecture decisions and experiment data |
 
 ---
 
