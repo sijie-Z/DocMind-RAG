@@ -81,6 +81,16 @@ describe('合同核验列表页', () => {
     expect(api.list).toHaveBeenLastCalledWith({ status: 'ready', page: 1, page_size: 20 })
   })
 
+  it('翻页时按新页码取数', async () => {
+    const wrapper = mountList()
+    await flushPromises()
+    const vm = wrapper.vm as unknown as { page: number; load: () => Promise<void> }
+    vm.page = 2
+    await vm.load()
+    await flushPromises()
+    expect(api.list).toHaveBeenLastCalledWith({ status: undefined, page: 2, page_size: 20 })
+  })
+
   it('点击行跳转到详情页', async () => {
     const wrapper = mountList()
     await flushPromises()

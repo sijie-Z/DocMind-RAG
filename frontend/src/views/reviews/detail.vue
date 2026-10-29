@@ -25,7 +25,7 @@
           </div>
         </div>
         <div class="flex flex-wrap gap-2">
-          <n-button :loading="loading" quaternary @click="load">
+          <n-button :loading="loading" quaternary @click="load(false)">
             <template #icon><n-icon><RefreshOutline /></n-icon></template>
             {{ t('reviews.retry') }}
           </n-button>
@@ -429,7 +429,11 @@ function canSaveDecision(item: ReviewItem) {
   const draft = decisionOf(item)
   if (!draft.status) return false
   // 与服务端一致时不重复提交：completed 案件的无变更保存会把状态打回 in_review。
-  return draft.status !== item.status || (draft.note || '') !== (item.decision_note || '')
+  // 后端会 strip 备注空白：比较时同样 trim，避免仅靠尾随空格绕过变更检测。
+  return (
+    draft.status !== item.status ||
+    (draft.note || '').trim() !== (item.decision_note || '').trim()
+  )
 }
 const canSelectEvidence = computed(
   () => !!detail.value && ['ready', 'in_review'].includes(detail.value.status)
@@ -468,10 +472,29 @@ function factLines(item: ReviewItem): Array<{ side: ReviewSide; text: string }> 
         unit_unclear: t('reviews.ambiguousUnit'),
         multiple_durations: t('reviews.ambiguousMultiple')
       }
-      const reasonText = reasonMap[String(fact.reason || '')] || String(fact.reason || '')
+      // 后端可能给出组合码（unit_unclear+multiple_durations）。
+      const reasonText =
+        String(fact.reason || '')
+          .split('+')
+          .filter(Boolean)
+          .map((code) => reasonMap[code] || code)
+          .join(' · ') || String(fact.reason || '')
       const candidates = Array.isArray(fact.candidates)
-        ? (fact.candidates as Array<{ value?: number; unit?: string }>)
-            .map((candidate) => `${candidate.value} ${unitLabel(candidate.unit)}`)
+        ? (
+            fact.candidates as Array<{
+              value?: number
+              unit?: string | null
+              unit_raw?: string | null
+              raw?: string | null
+            }>
+          )
+            .map((candidate) =>
+              candidate.raw
+                ? String(candidate.raw)
+                : `${candidate.value} ${
+                    candidate.unit ? unitLabel(candidate.unit) : candidate.unit_raw || ''
+                  }`
+            )
             .join(' / ')
         : ''
       lines.push({

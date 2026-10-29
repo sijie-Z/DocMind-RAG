@@ -309,3 +309,57 @@ describe('合同核验工作台 · 证据选择', () => {
     })
   })
 })
+
+
+describe('合同核验工作台 · 导出与草稿', () => {
+  it('全部决策后导出触发 exportCase；409 时展示未决项（不静默）', async () => {
+    const base = makeDetail()
+    const detail = makeDetail({
+      items: [{ ...base.items[0], status: 'verified', decision_note: 'ok' }]
+    })
+    api.get.mockResolvedValue({ data: { data: detail } } as never)
+    api.exportCase.mockRejectedValue({
+      response: {
+        status: 409,
+        data: { detail: { items: [{ item_key: 'payment_term', reasons: ['undecided'] }] } }
+      }
+    })
+
+    const wrapper = mountDetail()
+    await flushPromises()
+
+    const exportButton = wrapper
+      .findAll('button')
+      .find((button) => button.text().includes('导出核验单'))
+    expect(exportButton).toBeTruthy()
+    expect(exportButton!.attributes('disabled')).toBeUndefined()
+    await exportButton!.trigger('click')
+    await flushPromises()
+    expect(api.exportCase).toHaveBeenCalledWith('case-1')
+  })
+
+  it('顺带刷新（选证据）保留未保存的决策草稿', async () => {
+    api.get.mockResolvedValue({ data: { data: makeDetail() } } as never)
+    api.selectEvidence.mockResolvedValue({ data: { success: true } } as never)
+
+    const wrapper = mountDetail()
+    await flushPromises()
+
+    const noteInput = wrapper
+      .findAll('input')
+      .find((input) => input.attributes('placeholder') === '决策说明')
+    expect(noteInput).toBeTruthy()
+    await noteInput!.setValue('尚未保存的草稿')
+
+    const selectButton = wrapper
+      .findAll('button')
+      .find((button) => button.text().includes('选为证据'))
+    await selectButton!.trigger('click')
+    await flushPromises()
+
+    const refreshedInput = wrapper
+      .findAll('input')
+      .find((input) => input.attributes('placeholder') === '决策说明')
+    expect((refreshedInput!.element as HTMLInputElement).value).toBe('尚未保存的草稿')
+  })
+})

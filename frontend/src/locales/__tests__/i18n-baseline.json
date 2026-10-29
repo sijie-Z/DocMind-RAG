@@ -1,7 +1,7 @@
 {
   "$comment": "ISS-4 i18n 缺口棘轮基线（基准语 zh）。缺口只缩不涨：新增缺口会让 locales/__tests__/completeness.test.ts 变红；有意改动后用 UPDATE_I18N_BASELINE=1 npx vitest run src/locales/__tests__/completeness.test.ts 重生成。",
   "source": "zh",
-  "zhLeafKeys": 1255,
+  "zhLeafKeys": 1253,
   "locales": {
     "en": [],
     "ja": [
