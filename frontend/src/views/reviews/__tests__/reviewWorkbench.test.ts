@@ -227,10 +227,17 @@ describe('合同核验工作台', () => {
       selected: true
     })
 
-    const saveButton = wrapper
-      .findAll('button')
-      .find((button) => button.text().includes('保存决策'))
-    expect(saveButton).toBeTruthy()
+    // 未决策项不预选：保存按钮在人工选择前必须禁用（评审 F2）。
+    const findSave = () =>
+      wrapper.findAll('button').find((button) => button.text().includes('保存决策'))
+    expect(findSave()?.attributes('disabled')).toBeDefined()
+
+    const verifiedRadio = wrapper.find('input[type="radio"][value="verified"]')
+    expect(verifiedRadio.exists()).toBe(true)
+    await verifiedRadio.setValue(true)
+    await flushPromises()
+    const saveButton = findSave()
+    expect(saveButton?.attributes('disabled')).toBeUndefined()
     await saveButton!.trigger('click')
     await flushPromises()
     expect(api.decide).toHaveBeenCalledWith('case-1', 'item-1', {
@@ -238,10 +245,41 @@ describe('合同核验工作台', () => {
       note: null
     })
 
+    // 未识别事实必须如实展示（不得渲染成正常值）。
+    expect(wrapper.text()).toContain('未识别')
+
     const exportButton = wrapper
       .findAll('button')
       .find((button) => button.text().includes('导出核验单'))
     expect(exportButton).toBeTruthy()
     expect(exportButton!.attributes('disabled')).toBeDefined()
+  })
+})
+
+
+describe('合同核验工作台 · 状态边界', () => {
+  it('completed 案件禁止再选择证据（与后端 SELECTABLE 状态一致）', async () => {
+    api.get.mockResolvedValue({
+      data: {
+        data: makeDetail({
+          status: 'completed',
+          items: [
+            {
+              ...makeDetail().items[0],
+              status: 'verified',
+              decision_note: 'ok'
+            }
+          ]
+        })
+      }
+    } as never)
+    const wrapper = mountDetail()
+    await flushPromises()
+
+    const selectButton = wrapper
+      .findAll('button')
+      .find((button) => button.text().includes('选为证据'))
+    expect(selectButton).toBeTruthy()
+    expect(selectButton!.attributes('disabled')).toBeDefined()
   })
 })

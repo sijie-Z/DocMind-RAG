@@ -9,10 +9,10 @@
         <n-select
           v-model:value="statusFilter"
           :options="statusOptions"
-          :placeholder="t('reviews.filterStatus')"
+          :placeholder="t('reviews.allStatuses')"
           clearable
           class="w-44"
-          @update:value="load"
+          @update:value="applyFilter"
         />
       </div>
 
@@ -23,14 +23,24 @@
 
       <n-spin :show="loading">
         <n-empty v-if="!loading && rows.length === 0" :description="t('reviews.empty')" class="py-20" />
-        <n-data-table
-          v-else
-          :columns="columns"
-          :data="rows"
-          :bordered="false"
-          :single-line="false"
-          :row-props="rowProps"
-        />
+        <div v-else>
+          <n-data-table
+            :columns="columns"
+            :data="rows"
+            :bordered="false"
+            :single-line="false"
+            :row-props="rowProps"
+          />
+          <div class="mt-4 flex justify-end">
+            <n-pagination
+              v-model:page="page"
+              :page-size="pageSize"
+              :item-count="total"
+              :page-slot="7"
+              @update:page="load"
+            />
+          </div>
+        </div>
       </n-spin>
     </div>
   </div>
@@ -40,7 +50,7 @@
 import { computed, h, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
-import { NButton, NTag } from 'naive-ui'
+import { NButton, NPagination, NTag } from 'naive-ui'
 import { reviewsApi, type ReviewCaseStatus, type ReviewCaseSummary } from '@/api/reviews'
 import { apiUnwrap } from '@/utils/apiUnwrap'
 
@@ -48,9 +58,12 @@ const { t } = useI18n()
 const router = useRouter()
 
 const rows = ref<ReviewCaseSummary[]>([])
+const total = ref(0)
 const loading = ref(false)
 const loadError = ref(false)
 const statusFilter = ref<ReviewCaseStatus | null>(null)
+const page = ref(1)
+const pageSize = 20
 
 const statusLabel = computed<Record<ReviewCaseStatus, string>>(() => ({
   blocked: t('reviews.statusBlocked'),
@@ -77,11 +90,12 @@ async function load() {
   try {
     const response = await reviewsApi.list({
       status: statusFilter.value ?? undefined,
-      page: 1,
-      page_size: 50
+      page: page.value,
+      page_size: pageSize
     })
-    const data = apiUnwrap<{ items: ReviewCaseSummary[] }>(response)
+    const data = apiUnwrap<{ items: ReviewCaseSummary[]; total?: number }>(response)
     rows.value = data?.items ?? []
+    total.value = data?.total ?? rows.value.length
   } catch {
     loadError.value = true
   } finally {
@@ -95,7 +109,7 @@ function open(row: ReviewCaseSummary) {
 
 const columns = computed(() => [
   {
-    title: t('reviews.open'),
+    title: t('reviews.caseColumn'),
     key: 'title',
     render: (row: ReviewCaseSummary) =>
       h('div', [
@@ -104,7 +118,7 @@ const columns = computed(() => [
       ])
   },
   {
-    title: t('reviews.filterStatus'),
+    title: t('reviews.statusColumn'),
     key: 'status',
     render: (row: ReviewCaseSummary) =>
       h(NTag, { type: statusTagType[row.status], size: 'small' }, {
@@ -150,6 +164,11 @@ function rowProps(row: ReviewCaseSummary) {
     style: 'cursor: pointer',
     onClick: () => open(row)
   }
+}
+
+function applyFilter() {
+  page.value = 1
+  load()
 }
 
 onMounted(load)

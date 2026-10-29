@@ -3,7 +3,13 @@
     <div class="max-w-7xl mx-auto">
       <div class="mb-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div class="flex items-center gap-3">
-          <n-button quaternary circle @click="router.push('/reviews')">
+          <n-button
+            quaternary
+            circle
+            :aria-label="t('reviews.backToList')"
+            :title="t('reviews.backToList')"
+            @click="router.push('/reviews')"
+          >
             <template #icon><n-icon><ArrowBackOutline /></n-icon></template>
           </n-button>
           <div>
@@ -138,6 +144,7 @@
               <!-- 证据快照 -->
               <div class="mt-3">
                 <div class="mb-1 text-xs font-medium text-gray-500">{{ t('reviews.evidenceTitle') }}</div>
+                <div class="mb-1 text-[11px] text-gray-400">{{ t('reviews.selectHint') }}</div>
                 <div class="grid gap-3 md:grid-cols-3">
                   <div v-for="side in SIDES" :key="side" class="rounded-lg bg-gray-50 p-2 dark:bg-gray-800/50">
                     <div class="mb-1 text-xs font-medium text-gray-500">
@@ -179,7 +186,7 @@
                           size="tiny"
                           type="primary"
                           class="mt-1"
-                          :disabled="detail.status === 'blocked'"
+                          :disabled="!canSelectEvidence"
                           @click="toggleEvidence(item, row)"
                         >
                           {{
@@ -196,6 +203,16 @@
               </div>
 
               <!-- 人工决策 -->
+              <div
+                v-if="item.decided_by"
+                class="mt-3 text-[11px] text-gray-400"
+                :data-testid="`decision-meta-${item.item_key}`"
+              >
+                {{ t('reviews.decidedBy') }} #{{ item.decided_by }}
+                <span v-if="item.decided_at">
+                  · {{ t('reviews.decidedAt') }} {{ new Date(item.decided_at).toLocaleString() }}
+                </span>
+              </div>
               <div class="mt-3 flex flex-col gap-2 sm:flex-row sm:items-center">
                 <span class="text-xs font-medium text-gray-500">{{ t('reviews.decisionTitle') }}</span>
                 <n-radio-group
@@ -221,7 +238,7 @@
                 <n-button
                   size="small"
                   type="primary"
-                  :disabled="detail.status === 'blocked'"
+                  :disabled="detail.status === 'blocked' || !item.change_type || !canSaveDecision(item)"
                   :loading="decidingItem === item.id"
                   @click="saveDecision(item)"
                 >
@@ -308,7 +325,9 @@ const analyzing = ref(false)
 const exporting = ref(false)
 const decidingItem = ref('')
 
-const decisions = reactive<Record<string, { status: ReviewDecisionStatus; note: string }>>({})
+const decisions = reactive<
+  Record<string, { status: ReviewDecisionStatus | null; note: string }>
+>({})
 
 const statusLabel = computed<Record<ReviewCaseDetail['status'], string>>(() => ({
   blocked: t('reviews.statusBlocked'),
@@ -384,21 +403,33 @@ function docOf(side: ReviewSide) {
 function decisionOf(item: ReviewItem) {
   if (!decisions[item.id]) {
     decisions[item.id] = {
+      // 未决策/证据不足/解析失败不预选：人工必须显式选择三态之一。
       status:
         item.status === 'verified' ||
         item.status === 'needs_human' ||
         item.status === 'not_applicable'
           ? item.status
-          : 'verified',
+          : null,
       note: item.decision_note || ''
     }
   }
   return decisions[item.id]
 }
+function canSaveDecision(item: ReviewItem) {
+  const draft = decisionOf(item)
+  if (!draft.status) return false
+  // 与服务端一致时不重复提交：completed 案件的无变更保存会把状态打回 in_review。
+  return draft.status !== item.status || (draft.note || '') !== (item.decision_note || '')
+}
+const canSelectEvidence = computed(
+  () => !!detail.value && ['ready', 'in_review'].includes(detail.value.status)
+)
 function unitLabel(unit?: string | null) {
   if (unit === 'workday') return t('reviews.unitWorkday')
   if (unit === 'month') return t('reviews.unitMonth')
-  return t('reviews.unitDay')
+  if (unit === 'day') return t('reviews.unitDay')
+  // 契约外/缺失单位不得渲染成确定的「自然日」。
+  return unit ? String(unit) : t('reviews.factsNone')
 }
 function factLines(item: ReviewItem): Array<{ side: ReviewSide; text: string }> {
   const facts = (item.facts || {}) as Record<string, unknown>
@@ -423,7 +454,22 @@ function factLines(item: ReviewItem): Array<{ side: ReviewSide; text: string }> 
       }
       lines.push({ side, text: parts.join(' · ') || t('reviews.factsNone') })
     } else if (status === 'ambiguous') {
-      lines.push({ side, text: t('reviews.ambiguous', { reason: fact.reason || '' }) })
+      const reasonMap: Record<string, string> = {
+        unit_unclear: t('reviews.ambiguousUnit'),
+        multiple_durations: t('reviews.ambiguousMultiple')
+      }
+      const reasonText = reasonMap[String(fact.reason || '')] || String(fact.reason || '')
+      const candidates = Array.isArray(fact.candidates)
+        ? (fact.candidates as Array<{ value?: number; unit?: string }>)
+            .map((candidate) => `${candidate.value} ${unitLabel(candidate.unit)}`)
+            .join(' / ')
+        : ''
+      lines.push({
+        side,
+        text:
+          (reasonText || t('reviews.notFound')) +
+          (candidates ? ` · ${t('reviews.candidatesLabel')}: ${candidates}` : '')
+      })
     } else {
       lines.push({ side, text: t('reviews.notFound') })
     }
@@ -431,7 +477,7 @@ function factLines(item: ReviewItem): Array<{ side: ReviewSide; text: string }> 
   return lines
 }
 
-async function load() {
+async function load(keepDrafts = false) {
   if (!caseId.value) return
   loading.value = true
   loadError.value = false
@@ -439,24 +485,28 @@ async function load() {
     const data = apiUnwrap<ReviewCaseDetail>(await reviewsApi.get(caseId.value))
     detail.value = data
     for (const item of data.items) {
+      const decided =
+        item.status === 'verified' ||
+        item.status === 'needs_human' ||
+        item.status === 'not_applicable'
+      if (keepDrafts && decisions[item.id]) continue
       decisions[item.id] = {
-        status:
-          item.status === 'verified' ||
-          item.status === 'needs_human' ||
-          item.status === 'not_applicable'
-            ? item.status
-            : 'verified',
+        status: decided ? (item.status as ReviewDecisionStatus) : null,
         note: item.decision_note || ''
       }
     }
+  } catch {
+    loadError.value = true
+  } finally {
+    loading.value = false
+  }
+  try {
     const listed = apiUnwrap<{ items: ReviewExportSummary[] }>(
       await reviewsApi.exports(caseId.value)
     )
     exports.value = listed?.items ?? []
   } catch {
-    loadError.value = true
-  } finally {
-    loading.value = false
+    // 导出历史失败不影响案件主体；保持旧列表。
   }
 }
 
@@ -468,14 +518,15 @@ async function toggleEvidence(item: ReviewItem, row: ReviewEvidenceRow) {
       role: 'main',
       selected: !row.selected
     })
-    await load()
+    await load(true)
   } catch {
-    message.error(t('reviews.loadFailed'))
+    message.error(t('reviews.evidenceFailed'))
   }
 }
 
 async function saveDecision(item: ReviewItem) {
   const decision = decisionOf(item)
+  if (!decision.status) return
   decidingItem.value = item.id
   try {
     await reviewsApi.decide(caseId.value, item.id, {
@@ -483,7 +534,7 @@ async function saveDecision(item: ReviewItem) {
       note: decision.note || null
     })
     message.success(t('reviews.decisionSaved'))
-    await load()
+    await load(true)
   } catch {
     message.error(t('reviews.decisionFailed'))
   } finally {
@@ -496,7 +547,7 @@ async function runAnalyze() {
   try {
     await reviewsApi.analyze(caseId.value)
     message.success(t('reviews.analysisDone'))
-    await load()
+    await load(true)
   } catch {
     message.error(t('reviews.analysisFailed'))
   } finally {
@@ -509,9 +560,24 @@ async function runExport() {
   try {
     await reviewsApi.exportCase(caseId.value)
     message.success(t('reviews.exportDone'))
-    await load()
-  } catch {
-    message.error(t('reviews.exportBlocked'))
+    await load(true)
+  } catch (error) {
+    const response = (error as { response?: { status?: number; data?: unknown } })?.response
+    if (response?.status === 409) {
+      const detailBlock = (
+        response.data as {
+          detail?: { items?: Array<{ item_key?: string; reasons?: string[] }> }
+        }
+      )?.detail
+      const items = (detailBlock?.items || [])
+        .map((item) => `${item.item_key || '?'}(${(item.reasons || []).join('/')})`)
+        .join(', ')
+      message.error(
+        items ? t('reviews.exportBlockedDetail', { items }) : t('reviews.exportBlocked')
+      )
+    } else {
+      message.error(t('reviews.exportFailed'))
+    }
   } finally {
     exporting.value = false
   }
@@ -527,8 +593,10 @@ async function downloadExport(exportId: string, format: 'json' | 'markdown') {
     anchor.download = `review-${caseId.value.slice(0, 8)}-${exportId.slice(0, 8)}.${
       format === 'json' ? 'json' : 'md'
     }`
+    document.body.appendChild(anchor)
     anchor.click()
-    URL.revokeObjectURL(url)
+    document.body.removeChild(anchor)
+    setTimeout(() => URL.revokeObjectURL(url), 0)
   } catch {
     message.error(t('reviews.downloadFailed'))
   }
