@@ -146,29 +146,34 @@ DocMind 不是一个「聊天框套壳」：它把企业知识库当成一套**�
 
 Docker Desktop（推荐），或手动安装：Python 3.11+ · Node.js 18+ · MySQL 8 · Redis 7 · Elasticsearch 8 · Kafka · MinIO。
 
-### 1. 克隆并配置
+### 1. 克隆
 
 ```bash
 git clone https://github.com/sijie-Z/DocMind-RAG.git
 cd DocMind-RAG/backend
+```
 
+### 2. 配置
+
+```bash
 # 本地开发（应用在宿主机跑）
 cp .env.example .env               # Windows: copy .env.example .env
-# 必填：SECRET_KEY / JWT_SECRET_KEY（生成: python -c "import secrets; print(secrets.token_hex(32))"）
-
 # 只要用到 Docker（含仅启动基础设施），都需要 .env.docker：
 cp .env.docker.example .env.docker
 ```
 
-`.env.docker` 的必填项（不提供默认密码，全部自行生成）：`MYSQL_ROOT_PASSWORD`、`MYSQL_PASSWORD`、`MINIO_ACCESS_KEY`、`MINIO_SECRET_KEY`、`GRAFANA_PASSWORD`；后端启动必填 `SECRET_KEY`、`JWT_SECRET_KEY`，Chat 需要 `DEEPSEEK_API_KEY`。Embedding 默认走本机 Ollama（nomic-embed-text / 768 维，复用 Chat Key），云端 Embedding 再配置 `EMBEDDING_API_KEY` / `EMBEDDING_API_URL`。Compose 的**全文件插值**先于服务选择：即使不启用 Grafana，`GRAFANA_PASSWORD` 仍为必填。
+- 本地开发必填：`SECRET_KEY`、`JWT_SECRET_KEY`（生成：`python -c "import secrets; print(secrets.token_hex(32))"`）。
+- `.env.docker` 的 compose 必填项（不提供默认密码，全部自行生成）：`MYSQL_ROOT_PASSWORD`、`MYSQL_PASSWORD`、`MINIO_ACCESS_KEY`、`MINIO_SECRET_KEY`、`GRAFANA_PASSWORD`。
+- 后端启动必填 `SECRET_KEY`、`JWT_SECRET_KEY`，Chat 需要 `DEEPSEEK_API_KEY`；Embedding 默认走本机 Ollama（nomic-embed-text / 768 维，复用 Chat Key），云端 Embedding 再配置 `EMBEDDING_API_KEY` / `EMBEDDING_API_URL`。
+- Compose 的**全文件插值**先于服务选择：即使不选择 Grafana，`GRAFANA_PASSWORD` 仍为必填。
 
-### 2. 启动基础设施
+### 3. 启动基础设施
 
 ```bash
 docker compose --env-file .env.docker up -d mysql redis elasticsearch minio kafka zookeeper
 ```
 
-### 3. 启动后端（含迁移）
+### 4. 启动后端（含迁移）
 
 ```bash
 python -m venv venv && source venv/bin/activate   # Windows: venv\Scripts\activate
@@ -179,7 +184,7 @@ python -m app --profile web                       # 统一入口：web | worker 
 
 `python -m app --profile web` 会在启动期比对 `alembic_version` 与迁移 head，落后时打印 `current=... head=...` 与修复命令并以退出码 2 结束，而不是带病提供 500（`SCHEMA_GUARD`，`AUTO_MIGRATE` 默认关闭）。`uvicorn app.main:app` / `python run.py` 保留为兼容入口。
 
-### 4. 启动前端
+### 5. 启动前端
 
 ```bash
 cd ../frontend && npm install && npm run dev      # http://localhost:5173

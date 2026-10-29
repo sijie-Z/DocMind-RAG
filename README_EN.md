@@ -147,25 +147,34 @@ Generic “chat + knowledge base” is hard to accept. Contract review is narrow
 
 Docker Desktop (recommended), or: Python 3.11+ · Node.js 18+ · MySQL 8 · Redis 7 · Elasticsearch 8 · Kafka · MinIO.
 
-### 1. Clone and configure
+### 1. Clone
 
 ```bash
 git clone https://github.com/sijie-Z/DocMind-RAG.git
 cd DocMind-RAG/backend
-
-cp .env.example .env               # host app; SECRET_KEY / JWT_SECRET_KEY are required
-cp .env.docker.example .env.docker # required for any Docker usage
 ```
 
-`.env.docker` requires self-generated values for `MYSQL_ROOT_PASSWORD`, `MYSQL_PASSWORD`, `MINIO_ACCESS_KEY`, `MINIO_SECRET_KEY`, `GRAFANA_PASSWORD` (no default passwords). Backend startup requires `SECRET_KEY`, `JWT_SECRET_KEY`; chat requires `DEEPSEEK_API_KEY`. Embedding defaults to local Ollama (nomic-embed-text / 768 dims, reusing the chat key); configure `EMBEDDING_API_KEY` / `EMBEDDING_API_URL` for a cloud provider. Compose interpolates the whole file: `GRAFANA_PASSWORD` is required even when Grafana is not started.
+### 2. Configure
 
-### 2. Start infrastructure
+```bash
+# host app
+cp .env.example .env               # Windows: copy .env.example .env
+# required for any Docker usage:
+cp .env.docker.example .env.docker
+```
+
+- Host app requires `SECRET_KEY`, `JWT_SECRET_KEY` (generate with `python -c "import secrets; print(secrets.token_hex(32))"`).
+- `.env.docker` requires self-generated values for `MYSQL_ROOT_PASSWORD`, `MYSQL_PASSWORD`, `MINIO_ACCESS_KEY`, `MINIO_SECRET_KEY`, `GRAFANA_PASSWORD` (no default passwords).
+- Backend startup requires `SECRET_KEY`, `JWT_SECRET_KEY`; chat requires `DEEPSEEK_API_KEY`. Embedding defaults to local Ollama (nomic-embed-text / 768 dims, reusing the chat key); configure `EMBEDDING_API_KEY` / `EMBEDDING_API_URL` for a cloud provider.
+- Compose does whole-file interpolation before service selection: `GRAFANA_PASSWORD` is required even without selecting Grafana.
+
+### 3. Start Infrastructure
 
 ```bash
 docker compose --env-file .env.docker up -d mysql redis elasticsearch minio kafka zookeeper
 ```
 
-### 3. Start the backend (with migrations)
+### 4. Start the backend (with migrations)
 
 ```bash
 python -m venv venv && source venv/bin/activate   # Windows: venv\Scripts\activate
@@ -176,7 +185,7 @@ python -m app --profile web                       # profiles: web | worker | hea
 
 `python -m app --profile web` compares `alembic_version` with the migration head at startup; when stale it prints `current=... head=...` and the fix command, then exits with code 2 instead of serving 500s (`SCHEMA_GUARD`; `AUTO_MIGRATE` is off by default). `uvicorn app.main:app` / `python run.py` remain compatible entrypoints.
 
-### 4. Start the frontend
+### 5. Start the frontend
 
 ```bash
 cd ../frontend && npm install && npm run dev      # http://localhost:5173
@@ -337,7 +346,7 @@ K8s manifests and deployment notes live in [`deploy/`](deploy/). When Kafka is u
 ## Known boundaries
 
 - Workflow code nodes are off by default and must run in the Docker sandbox with `ENABLE_WORKFLOW_CODE_NODES=true`.
-- GraphRAG is not part of the RAG retrieval path; context compression is rule-based, no LLM call; short/working agent memory is in-process while long-term/reflective memory uses Redis.
+- GraphRAG is not part of the RAG retrieval path; context compression is rule-based, no LLM call; short-term/working memory is in-process while long-term/reflective memory uses Redis.
 - Contract review currently covers four fixed checklist items for Chinese contracts; evidence is chunk-level quotes with clause/page/character anchors, not PDF highlighting.
 - Evaluation `mode=fake` metrics guard regressions; they are not an online-quality claim for a specific model.
 
