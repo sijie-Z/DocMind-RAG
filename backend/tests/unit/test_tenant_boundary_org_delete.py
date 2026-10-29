@@ -24,6 +24,7 @@ from app.models.agent_task import AgentTask
 from app.models.chat import ChatSession
 from app.models.document import Document, DocumentType
 from app.models.organization import Organization
+from app.models.review import ReviewCase
 from app.models.user import User
 from app.services.organization_service import organization_service
 
@@ -146,6 +147,37 @@ async def test_delete_org_with_agent_tasks_blocks():
         async with factory() as s:
             with pytest.raises(ConflictError):
                 await organization_service.delete_organization_thoroughly(s, 10)
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_delete_org_with_review_cases_blocks():
+    """核验案件属于组织挂载数据：必须先转移/清理，不允许裸删触发 1451。"""
+    engine, factory = await _setup()
+    try:
+        async with factory() as s:
+            s.add(
+                ReviewCase(
+                    id="case-1",
+                    organization_id=10,
+                    title="case",
+                    policy_document_id="doc-p1",
+                    base_document_id="doc-b1",
+                    revised_document_id="doc-r1",
+                    checklist_version="v1",
+                    status="blocked",
+                    created_by=20,
+                    lock_version=1,
+                )
+            )
+            await s.commit()
+        async with factory() as s:
+            with pytest.raises(ConflictError) as excinfo:
+                await organization_service.delete_organization_thoroughly(s, 10)
+        assert "核验案件 1 条" in str(excinfo.value)
+        async with factory() as s:
+            assert await s.get(Organization, 10) is not None, "409 时组织不得被删除"
     finally:
         await engine.dispose()
 

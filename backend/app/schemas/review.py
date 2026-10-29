@@ -1,4 +1,4 @@
-"""文档核验身份请求/响应 schema（合同核验场景 Batch 1）。"""
+"""核验请求/响应 schema（合同核验场景 Batch 1/2）。"""
 
 from datetime import datetime
 from typing import Literal
@@ -18,3 +18,27 @@ class ReviewMetaUpsert(BaseModel):
     )
     effective_from: datetime | None = Field(None, description="生效起点（可选）")
     effective_to: datetime | None = Field(None, description="生效终点（可选）")
+
+
+class ReviewCaseCreate(BaseModel):
+    """建案：一份制度/模板 + 合同基准版 + 修订版。"""
+
+    title: str = Field(..., min_length=1, max_length=255, description="案件标题")
+    policy_document_id: str = Field(
+        ..., min_length=1, max_length=36, description="制度/模板文档 id"
+    )
+    base_document_id: str = Field(..., min_length=1, max_length=36, description="合同基准版 id")
+    revised_document_id: str = Field(..., min_length=1, max_length=36, description="合同修订版 id")
+    checklist_version: str = Field("v1", max_length=16, description="核验清单版本")
+    assignee_id: int | None = Field(None, ge=1, description="指定审核人（可选）")
+
+
+class ReviewEvidenceSelect(BaseModel):
+    """人工选择/改选某核验项某一侧的证据（chunk 必须属于该侧文档）。"""
+
+    side: Literal["policy", "base", "revised"] = Field(..., description="证据侧")
+    chunk_id: str = Field(..., min_length=1, max_length=36, description="文档分块 id")
+    role: Literal["main", "condition", "exception", "cross_ref"] = Field(
+        "main", description="证据角色"
+    )
+    selected: bool = Field(True, description="选中=true；取消选择=false")

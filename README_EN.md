@@ -218,7 +218,7 @@ Query enters
 
 ### 🌐 API Layer (`backend/app/api/v1/`)
 
-28 endpoint modules under `/api/v1`:
+29 endpoint modules under `/api/v1`:
 
 | Module | Prefix | Description |
 |--------|--------|-------------|
@@ -229,6 +229,7 @@ Query enters
 | Documents | `/documents` | Document parsing, vectorization, knowledge base indexing, status tracking |
 | Chat | `/chat` | Session CRUD, SSE streaming Q&A, strict mode, debug endpoints |
 | Knowledge | `/knowledge` | Knowledge base CRUD, retrieval, statistics, settings |
+| Contract Review | `/reviews` | Review cases / items / evidence snapshots (parser-original quotes + version hashes; Batch 2) |
 | Organizations | `/organizations` | Org CRUD, member management, role assignment |
 | Organization Settings | `/organizations` | Org-level settings and audit (shared prefix with Organizations) |
 | Monitoring | `/monitoring` | Performance metrics, health checks, alerts, RAG quality scoring |
@@ -447,8 +448,8 @@ DocMind/
 │   │   ├── dependencies.py          # Dependency injection container
 │   │   ├── exceptions.py            # Custom exception hierarchy
 │   │   ├── api/v1/
-│   │   │   ├── router.py            # Main router (28 modules registered)
-│   │   │   └── endpoints/           # Endpoint implementations (28 files)
+│   │   │   ├── router.py            # Main router (29 modules registered)
+│   │   │   └── endpoints/           # Endpoint implementations (29 files)
 │   │   ├── agent/                   # PER Agent core
 │   │   │   ├── loop.py              #   PER main loop
 │   │   │   ├── planner.py           #   Planner (LLM + structured rules)
@@ -509,7 +510,7 @@ DocMind/
 │   │   │   ├── context_compressor.py #  Context compression
 │   │   │   ├── context_window.py    #   Token budget management
 │   │   │   └── evaluator.py         #   Quality evaluation
-│   │   ├── services/                # Business service layer (28 services)
+│   │   ├── services/                # Business service layer (29 services)
 │   │   ├── models/                  # ORM models (21 model files)
 │   │   ├── schemas/                 # Pydantic request/response schemas
 │   │   └── worker/                  # Kafka consumer
