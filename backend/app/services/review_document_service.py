@@ -254,7 +254,7 @@ def _as_utc(value: datetime | None) -> datetime | None:
     return value.replace(tzinfo=UTC) if value.tzinfo is None else value.astimezone(UTC)
 
 
-def _chunk_original_text(chunk: DocumentChunk) -> str | None:
+def chunk_original_text(chunk: DocumentChunk) -> str | None:
     """只有正文非空且写入方标记 parser_original 才算可证据原文。
 
     与 retrieval/preview 同口径：缺标记/标记不符一律 legacy，防止未来回填
@@ -269,7 +269,7 @@ def _chunk_original_text(chunk: DocumentChunk) -> str | None:
     return None
 
 
-async def _iter_chunks(session: AsyncSession, document_id: str, *, max_chunks: int | None = None):
+async def iter_chunks(session: AsyncSession, document_id: str, *, max_chunks: int | None = None):
     """按 chunk_index 分页遍历分块；可选上限用于证据扫描的边界。"""
     offset = 0
     scanned = 0
@@ -318,11 +318,11 @@ async def _scan_review_chunks(
     original = 0
     page_chunks = 0
     clause_candidates = 0
-    async for chunk in _iter_chunks(session, document_id):
+    async for chunk in iter_chunks(session, document_id):
         scanned += 1
         if chunk.page_number is not None:
             page_chunks += 1
-        text = _chunk_original_text(chunk)
+        text = chunk_original_text(chunk)
         if text is None:
             continue
         original += 1
@@ -445,9 +445,9 @@ async def query_evidence(
     truncated = False
     scanned = 0
     original_chunks = 0
-    async for chunk in _iter_chunks(session, document.id, max_chunks=MAX_EVIDENCE_SCAN_CHUNKS):
+    async for chunk in iter_chunks(session, document.id, max_chunks=MAX_EVIDENCE_SCAN_CHUNKS):
         scanned += 1
-        text = _chunk_original_text(chunk)
+        text = chunk_original_text(chunk)
         if text is None:
             continue
         original_chunks += 1

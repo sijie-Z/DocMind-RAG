@@ -218,7 +218,7 @@ hook 失败产出 `hook_error` SSE + `docmind_hook_*` 指标。详见
 
 ### 🌐 API 层 (`backend/app/api/v1/`)
 
-28 个端点模块，统一 `/api/v1` 前缀：
+29 个端点模块，统一 `/api/v1` 前缀：
 
 | 模块 | 路由前缀 | 说明 |
 |------|----------|------|
@@ -229,6 +229,7 @@ hook 失败产出 `hook_error` SSE + `docmind_hook_*` 指标。详见
 | 文档管理 | `/documents` | 文档解析、向量化、知识库索引、状态追踪 |
 | 聊天 | `/chat` | 会话 CRUD、SSE 流式问答、严格模式、调试端点 |
 | 知识库 | `/knowledge` | 知识库 CRUD、检索、统计、设置 |
+| 合同核验 | `/reviews` | 核验案件/核验项/证据快照（原文证据 + 版本哈希；Batch 2） |
 | 组织管理 | `/organizations` | 组织 CRUD、成员管理、角色分配 |
 | 组织设置 | `/organizations` | 组织级设置读写与审计（与组织管理共用前缀） |
 | 系统监控 | `/monitoring` | 性能指标、健康检查、告警、RAG 质量评估 |
@@ -427,8 +428,8 @@ DocMind/
 │   │   ├── dependencies.py          # 依赖注入容器
 │   │   ├── exceptions.py            # 自定义异常层次结构
 │   │   ├── api/v1/
-│   │   │   ├── router.py            # 主路由（注册 28 个模块）
-│   │   │   └── endpoints/           # 端点实现（28 个文件）
+│   │   │   ├── router.py            # 主路由（注册 29 个模块）
+│   │   │   └── endpoints/           # 端点实现（29 个文件）
 │   │   ├── agent/                   # PER Agent 核心
 │   │   │   ├── loop.py              #   PER 主循环
 │   │   │   ├── planner.py           #   规划器（LLM + 结构化规则）
@@ -489,7 +490,7 @@ DocMind/
 │   │   │   ├── context_compressor.py #  上下文压缩
 │   │   │   ├── context_window.py    #   令牌预算管理
 │   │   │   └── evaluator.py         #   质量评估
-│   │   ├── services/                # 业务服务层（28 个服务）
+│   │   ├── services/                # 业务服务层（29 个服务）
 │   │   ├── models/                  # ORM 模型（21 个模型文件）
 │   │   ├── schemas/                 # Pydantic 请求/响应模式
 │   │   └── worker/                  # Kafka 消费者

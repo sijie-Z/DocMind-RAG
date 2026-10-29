@@ -37,6 +37,7 @@ from app.api.v1.endpoints import (
     organization_settings,
     organizations,
     prompts,
+    reviews,
     scheduled_tasks,
     sessions,
     terminal,
@@ -59,6 +60,8 @@ ROUTER_SPECS: dict[str, tuple[APIRouter, str, list[str], str]] = {
     "documents": (documents.router, "/documents", ["文档管理(RAG)"], "rag"),
     "chat": (chat.router, "/chat", ["聊天"], "rag"),
     "knowledge": (knowledge.router, "/knowledge", ["知识库"], "rag"),
+    # 合同核验案件（Batch 2）：建案/列表/详情/证据选择；证据只读 parser 原文。
+    "reviews": (reviews.router, "/reviews", ["合同核验"], "rag"),
     "organizations": (organizations.router, "/organizations", ["组织管理"], "core"),
     "organization_settings": (
         organization_settings.router,

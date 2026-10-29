@@ -646,7 +646,7 @@ Successful login returns an envelope:
 
 ### 5.2 Endpoint modules
 
-There are **28 endpoint modules** (`docs/facts.json` → `endpoint_modules`, derived from the `ROUTER_SPECS` table in `backend/app/api/v1/router.py`):
+There are **29 endpoint modules** (`docs/facts.json` → `endpoint_modules`, derived from the `ROUTER_SPECS` table in `backend/app/api/v1/router.py`):
 
 | Module | Prefix | Purpose |
 |--------|--------|---------|
