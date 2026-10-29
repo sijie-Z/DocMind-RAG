@@ -35,6 +35,11 @@ exports[`sidebar menu domains > menu tree snapshot 1`] = `
         "icon": "search",
         "routeName": "Search",
       },
+      {
+        "i18nKey": "menu.reviews",
+        "icon": "document-text",
+        "routeName": "Reviews",
+      },
     ],
   },
   {
