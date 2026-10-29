@@ -7,6 +7,7 @@ import math
 import re
 import uuid
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 
 from sqlalchemy import and_, desc, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -233,6 +234,30 @@ def _provenance_error_event(
         conversation_id=conversation_id or "",
         debug_data=error.as_dict(),
     )
+
+
+def _as_utc(value: datetime | None) -> datetime | None:
+    if not isinstance(value, datetime):
+        return None
+    return value.replace(tzinfo=UTC) if value.tzinfo is None else value.astimezone(UTC)
+
+
+async def _session_cleared_since(
+    session: AsyncSession, conversation_id: str, started_at: datetime
+) -> bool:
+    """锁会话行并判断本轮运行开始后是否被清空（清空水位更高即拒绝追加）。"""
+    row = (
+        await session.execute(
+            select(ChatSession.messages_cleared_at)
+            .where(ChatSession.id == conversation_id)
+            .with_for_update()
+        )
+    ).first()
+    if row is None:
+        # 会话在运行中被删除：按已清空处理，不得再插入（FK 也可能已失败）。
+        return True
+    normalized_cleared = _as_utc(row[0])
+    return normalized_cleared is not None and normalized_cleared > _as_utc(started_at)
 
 
 def _cached_answer_provenance_blocked(cached_res: dict) -> bool:
@@ -485,6 +510,9 @@ async def run_rag_pipeline(
         if event_queue is not None:
             event_queue.put_nowait(event)
 
+    # 清空水位比较的基准：本轮任一保存都不得越过「运行开始后被清空」。
+    run_started_at = datetime.now(UTC)
+
     # 安全加固（issue #268）：RAG 链路本质是「组织知识库问答」。此前调用方用
     # `search_org_id … or 1` 把无组织用户的检索静默放进 1 号组织上下文（语义缓存
     # `org:1:` 命名空间 + retriever 的 `organization_id` term 双重命中他人数据，
@@ -608,6 +636,15 @@ async def run_rag_pipeline(
     ]
 
     if regenerate_target is None:
+        if await _session_cleared_since(session, conversation_id, run_started_at):
+            _emit(
+                RAGEvent(
+                    type="warning",
+                    content="会话已清空，本轮问题未保存",
+                    conversation_id=conversation_id,
+                )
+            )
+            return
         user_meta_data = {}
         if file_ids:
             user_meta_data["file_ids"] = file_ids
@@ -659,6 +696,15 @@ async def run_rag_pipeline(
                     if regenerate_target is not None
                     else str(uuid.uuid4())
                 )
+                if await _session_cleared_since(session, conversation_id, run_started_at):
+                    _emit(
+                        RAGEvent(
+                            type="warning",
+                            content="会话已清空，本轮回答未保存",
+                            conversation_id=conversation_id,
+                        )
+                    )
+                    return
                 _emit(
                     RAGEvent(
                         type="message",
@@ -947,6 +993,15 @@ async def run_rag_pipeline(
         else sources_list[:3]
     )
 
+    if await _session_cleared_since(session, conversation_id, run_started_at):
+        _emit(
+            RAGEvent(
+                type="warning",
+                content="会话已清空，本轮回答未保存",
+                conversation_id=conversation_id,
+            )
+        )
+        return
     _emit(
         RAGEvent(
             type="message",

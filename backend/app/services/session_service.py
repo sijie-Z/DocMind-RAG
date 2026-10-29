@@ -15,6 +15,7 @@
 
 import logging
 import uuid
+from datetime import UTC, datetime
 from typing import NamedTuple
 
 from sqlalchemy import func, or_, select
@@ -37,6 +38,12 @@ from app.models.user import User
 from app.services.chat_seq import next_message_seq
 
 logger = logging.getLogger(__name__)
+
+
+def _as_utc(value: datetime | None) -> datetime | None:
+    if not isinstance(value, datetime):
+        return None
+    return value.replace(tzinfo=UTC) if value.tzinfo is None else value.astimezone(UTC)
 
 
 class SessionAccessScope(NamedTuple):
@@ -189,6 +196,7 @@ async def save_session_interaction(
     agent_task_id: str | None = None,
     create_if_missing: bool | None = None,
     replace_existing_assistant: bool = False,
+    run_started_at: datetime | None = None,
 ) -> str | None:
     """Save the user query and assistant response as messages in the session.
 
@@ -203,6 +211,10 @@ async def save_session_interaction(
 
     ``session_factory`` 仅作测试缝：默认使用 ``AsyncSessionLocal``；
     agent 端点会显式传入其模块级同名工厂，保持既有测试的 monkeypatch 兼容。
+
+    ``run_started_at``：调用方捕获的本次运行开始时间。若会话在运行开始后被
+    清空（``messages_cleared_at`` 更高），迟到的收尾必须返回 None，不能把旧
+    问答追加回已清空会话。
 
     ``replace_existing_assistant`` 只供 resume/审批等**已成功的权威收尾**使用：
     旧版本曾把 legacy 全败占位按 task 幂等键写成 assistant，随后真实恢复答案
@@ -249,6 +261,23 @@ async def save_session_interaction(
             if tombstone is not None:
                 logger.warning("Refusing save into deleted session %s", log_safe(session_id))
                 return None
+
+            effective_run_started_at = run_started_at
+            if effective_run_started_at is None and existing is not None and agent_task_id:
+                # Task-scoped finalizers (resume/approval/ACP/RPC/webhook) may not
+                # thread run_started_at explicitly; the task's own start time is
+                # the authoritative watermark baseline.
+                task = await session.get(AgentTask, agent_task_id)
+                if task is not None:
+                    effective_run_started_at = task.created_at
+            if effective_run_started_at is not None and existing is not None:
+                cleared_at = _as_utc(existing.messages_cleared_at)
+                if cleared_at is not None and cleared_at > _as_utc(effective_run_started_at):
+                    logger.warning(
+                        "Refusing save into session %s cleared after run start",
+                        log_safe(session_id),
+                    )
+                    return None
 
             if existing is None:
                 # id 可能已被其他用户的会话占用：确认后拒绝写入（也避免主键冲突）
@@ -370,6 +399,25 @@ async def save_session_interaction(
         if not agent_task_id:
             raise
         async with factory() as session:
+            # 与清空端点同一锁序：先锁会话行；清空后不得在并发回退路径补写。
+            session_row = (
+                await session.execute(
+                    select(ChatSession).where(ChatSession.id == session_id).with_for_update()
+                )
+            ).scalar_one_or_none()
+            fallback_started_at = run_started_at
+            if fallback_started_at is None and session_row is not None and agent_task_id:
+                task = await session.get(AgentTask, agent_task_id)
+                if task is not None:
+                    fallback_started_at = task.created_at
+            if fallback_started_at is not None and session_row is not None:
+                cleared_at = _as_utc(session_row.messages_cleared_at)
+                if cleared_at is not None and cleared_at > _as_utc(fallback_started_at):
+                    logger.warning(
+                        "Refusing fallback save into session %s cleared after run start",
+                        log_safe(session_id),
+                    )
+                    return None
             rows = await session.execute(
                 select(ChatMessage).where(
                     ChatMessage.session_id == session_id,

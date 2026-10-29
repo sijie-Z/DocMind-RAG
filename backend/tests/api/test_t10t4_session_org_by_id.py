@@ -570,6 +570,22 @@ class TestEffectiveOrgResolution:
             await engine.dispose()
 
 
+class TestClearWatermark:
+    @pytest.mark.asyncio
+    async def test_chat_clear_advances_watermark(self):
+        engine, factory = await _seeded_factory()
+        try:
+            async with _AsyncClientCtx(_user(ORG_A), factory) as ac:
+                r = await ac.delete(f"{CHAT_DETAIL.format(sid=SESSION_A)}/clear")
+            assert r.status_code == 200, r.text
+            row = await _get_session_row(factory, SESSION_A)
+            assert row is not None
+            assert row.messages_cleared_at is not None, "清空必须推进水位"
+            assert await _count(factory, ChatMessage, SESSION_A) == 0
+        finally:
+            await engine.dispose()
+
+
 class TestSuperuserBypass:
     @pytest.mark.asyncio
     async def test_superuser_reads_and_updates_own_sessions_across_orgs(self):
