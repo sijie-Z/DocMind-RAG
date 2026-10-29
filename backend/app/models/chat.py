@@ -83,6 +83,14 @@ class ChatSession(Base):
     last_message_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), comment="最后消息时间"
     )
+    # 最近一次清空消息的时间水位。清空是「删除消息但保留会话」；在途的
+    # RAG/Agent 运行不得在本时间之后把旧一轮问答追加回来。
+    messages_cleared_at: Mapped[datetime | None] = mapped_column(
+        # MySQL DATETIME 默认秒精度会把亚秒清空时间四舍五入，可能逃过水位比较；
+        # 明确 fsp=6 与 Python 微秒对齐（SQLite 保留完整精度）。
+        DateTime(timezone=True).with_variant(mysql.DATETIME(fsp=6), "mysql"),
+        comment="最近一次清空消息时间（迟到保存不得越过）",
+    )
 
     # 配置信息
     settings: Mapped[Any | None] = mapped_column(JSON, comment="会话设置")

@@ -25,6 +25,7 @@ import contextlib
 import json
 import logging
 import uuid
+from datetime import UTC, datetime
 from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, Query, Request
@@ -299,6 +300,7 @@ async def agent_chat(
         assistant_message_id = None
         save_error: str | None = None
         last_event_type = ""
+        run_started_at = datetime.now(UTC)
         # issue #480 §5.2：流键 = session_id；无会话时由首个事件的 task_id 绑定。
         emitter = SSEStream(body.session_id, scope=f"u{current_user.id}")
         # 防御式读取：测试替身 request 可能没有 headers 属性（生产 Request 不变）。
@@ -438,6 +440,7 @@ async def agent_chat(
                         bypass_org=bool(getattr(current_user, "is_superuser", False)),
                         agent_task_id=answers.task_id or None,
                         create_if_missing=True,
+                        run_started_at=run_started_at,
                     )
                     if answers.answer and assistant_message_id is None:
                         save_error = "session_save_rejected"
@@ -726,6 +729,7 @@ async def resume_agent_task(
                         # for this task: correct a stale failure-derived assistant
                         # row left by older legacy builds without adding a row.
                         replace_existing_assistant=True,
+                        run_started_at=task.created_at,
                     )
                     if answers.answer and assistant_message_id is None:
                         save_error = "session_save_rejected"
@@ -908,6 +912,7 @@ async def decide_agent_task_approval(
                         # for this task: correct a stale failure-derived assistant
                         # row left by older legacy builds without adding a row.
                         replace_existing_assistant=True,
+                        run_started_at=task.created_at,
                     )
                     if answers.answer and assistant_message_id is None:
                         save_error = "session_save_rejected"
@@ -1137,6 +1142,7 @@ async def decide_agent_task_plan_approval(
                         # for this task: correct a stale failure-derived assistant
                         # row left by older legacy builds without adding a row.
                         replace_existing_assistant=True,
+                        run_started_at=task.created_at,
                     )
                     if answers.answer and assistant_message_id is None:
                         save_error = "session_save_rejected"
@@ -1956,6 +1962,7 @@ async def _save_session_interaction(
     agent_task_id: str | None = None,
     create_if_missing: bool | None = None,
     replace_existing_assistant: bool = False,
+    run_started_at: datetime | None = None,
 ) -> str | None:
     """兼容包装：实现已提升为 app.services.session_service.save_session_interaction。
 
@@ -1975,4 +1982,5 @@ async def _save_session_interaction(
         agent_task_id=agent_task_id,
         create_if_missing=create_if_missing,
         replace_existing_assistant=replace_existing_assistant,
+        run_started_at=run_started_at,
     )

@@ -3,6 +3,7 @@ import json
 import logging
 import os
 import uuid
+from datetime import UTC, datetime
 
 from fastapi import (
     APIRouter,
@@ -227,8 +228,14 @@ async def clear_conversation_messages(
         session = await load_accessible_session(db, conversation_id, current_user, scope)
         if not session:
             raise NotFoundError("会话不存在")
+        # 与在途运行/保存串行化：先锁会话行，再删消息并推进清空水位。
+        # 迟到保存看到 messages_cleared_at > 运行开始时间时不得追加旧问答。
+        await db.execute(
+            select(ChatSession).where(ChatSession.id == conversation_id).with_for_update()
+        )
         delete_stmt = delete(ChatMessage).where(ChatMessage.session_id == conversation_id)
         await db.execute(delete_stmt)
+        session.messages_cleared_at = datetime.now(UTC)
         await db.commit()
         return {"success": True, "message": "会话已清空"}
     except NotFoundError:
@@ -1060,6 +1067,7 @@ async def chat_stream_endpoint(
                 return
 
             # ── Agent mode: delegate to PER agent ──────────────────────────
+            run_started_at = datetime.now(UTC)
             if body.useAgent:
                 from app.agent.config import AgentConfig
                 from app.agent.service import agent_service
@@ -1400,6 +1408,7 @@ async def chat_stream_endpoint(
                             persist_org_id,
                             full_response,
                             bypass_org=bool(getattr(current_user, "is_superuser", False)),
+                            run_started_at=run_started_at,
                         )
                         if full_response and saved_id is None:
                             # 会话已删除/无权写：不得静默当作已保存；空回复不是失败。
