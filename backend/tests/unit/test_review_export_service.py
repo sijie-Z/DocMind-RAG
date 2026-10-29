@@ -3,12 +3,13 @@
 import json
 import sqlite3
 import uuid
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
 from alembic.config import Config
 from alembic.script import ScriptDirectory
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 import app.models  # noqa: F401
@@ -19,6 +20,7 @@ from app.exceptions import ConflictError, NotFoundError, ValidationError
 from app.models.document import Document, DocumentChunk, DocumentStatus, DocumentType
 from app.models.review import ReviewDocumentMeta, ReviewExport, ReviewItem
 from app.models.user_audit import UserActivityLog
+from app.services import review_analysis_service as analysis_service
 from app.services import review_case_service as case_service
 from app.services import review_export_service as svc
 
@@ -54,12 +56,13 @@ async def factory(tmp_path):
     await engine.dispose()
 
 
-async def _seed_case(factory):
+async def _seed_case(factory, suffix=""):
+    policy_id, base_id, revised_id = f"{POLICY}{suffix}", f"{BASE}{suffix}", f"{REVISED}{suffix}"
     async with factory() as db:
         for doc_id, role, family, label, seq in (
-            (POLICY, "policy", None, None, None),
-            (BASE, "contract", "supplier-x", "V1", 1),
-            (REVISED, "contract", "supplier-x", "V2", 2),
+            (policy_id, "policy", None, None, None),
+            (base_id, "contract", f"supplier-x{suffix}", "V1", 1),
+            (revised_id, "contract", f"supplier-x{suffix}", "V2", 2),
         ):
             db.add(
                 Document(
@@ -87,23 +90,23 @@ async def _seed_case(factory):
             )
         db.add_all(
             [
-                _chunk(POLICY, 0, "第3条 采购付款应遵循本制度，另有约定的从其约定。"),
-                _chunk(BASE, 0, "第八条 付款期限为30天，自收到发票之日起算。"),
-                _chunk(BASE, 1, "第九条 验收合格后支付价款。"),
-                _chunk(REVISED, 0, "第九条 付款期限为60天，自收到发票之日起算。"),
-                _chunk(REVISED, 1, "第十条 验收合格后支付价款。"),
+                _chunk(policy_id, 0, "第3条 采购付款应遵循本制度，另有约定的从其约定。"),
+                _chunk(base_id, 0, "第八条 付款期限为30天，自收到发票之日起算。"),
+                _chunk(base_id, 1, "第九条 验收合格后支付价款。"),
+                _chunk(revised_id, 0, "第九条 付款期限为60天，自收到发票之日起算。"),
+                _chunk(revised_id, 1, "第十条 验收合格后支付价款。"),
             ]
         )
         await db.commit()
         docs = {
-            "policy": await db.get(Document, POLICY),
-            "base": await db.get(Document, BASE),
-            "revised": await db.get(Document, REVISED),
+            "policy": await db.get(Document, policy_id),
+            "base": await db.get(Document, base_id),
+            "revised": await db.get(Document, revised_id),
         }
         return await case_service.create_case(
             db,
             docs=docs,
-            title="export case",
+            title=f"export case{suffix}",
             checklist_version="v1",
             created_by=USER_ID,
         )
@@ -124,14 +127,19 @@ async def _items(factory, case_id):
         )
 
 
-async def _decide_all(factory, case, *, status="verified"):
+async def _analyze(factory, case):
+    async with factory() as db:
+        fresh = await db.get(type(case), case.id)
+        await analysis_service.analyze_case(db, fresh)
+
+
+async def _decide_all(factory, case, *, status="verified", note="ok"):
     items = await _items(factory, case.id)
     async with factory() as db:
         fresh = await db.get(type(case), case.id)
         for item in items:
             db_item = await db.get(ReviewItem, item.id)
-            await svc.decide_item(db, fresh, db_item, status=status, note="ok", user_id=USER_ID)
-    return items
+            await svc.decide_item(db, fresh, db_item, status=status, note=note, user_id=USER_ID)
 
 
 @pytest.mark.asyncio
@@ -151,23 +159,27 @@ async def test_decision_moves_case_to_in_review(factory):
         assert row.decided_at is not None
         await db.refresh(fresh)
         assert fresh.status == "in_review"
+        assert fresh.lock_version >= 2
 
 
 @pytest.mark.asyncio
 async def test_export_blocked_until_all_items_decided(factory):
     case = await _seed_case(factory)
+    await _analyze(factory, case)
     async with factory() as db:
         fresh = await db.get(type(case), case.id)
         with pytest.raises(ConflictError) as excinfo:
             await svc.export_case(db, fresh, user_id=USER_ID)
     err = excinfo.value
     assert err.error_code == "REVIEW_EXPORT_BLOCKED"
-    assert set(err.detail["items"]) == {
+    blocking = err.detail["items"]
+    assert {item["item_key"] for item in blocking} == {
         "payment_term",
         "start_condition",
         "acceptance_invoice",
         "exception",
     }
+    assert all(item["reason"] == "undecided" for item in blocking)
 
     await _decide_all(factory, case)
     async with factory() as db:
@@ -179,12 +191,53 @@ async def test_export_blocked_until_all_items_decided(factory):
 
 
 @pytest.mark.asyncio
+async def test_export_requires_analysis_first(factory):
+    case = await _seed_case(factory)
+    await _decide_all(factory, case)
+    async with factory() as db:
+        fresh = await db.get(type(case), case.id)
+        with pytest.raises(ConflictError) as excinfo:
+            await svc.export_case(db, fresh, user_id=USER_ID)
+    blocking = excinfo.value.detail["items"]
+    assert blocking and all(item["reason"] == "not_analyzed" for item in blocking)
+
+
+@pytest.mark.asyncio
+async def test_export_gate_blocks_insufficient_and_parse_failed(factory):
+    case = await _seed_case(factory)
+    await _analyze(factory, case)
+    await _decide_all(factory, case)
+    items = await _items(factory, case.id)
+    async with factory() as db:
+        row = await db.get(ReviewItem, items[0].id)
+        row.status = "insufficient"
+        await db.commit()
+    async with factory() as db:
+        fresh = await db.get(type(case), case.id)
+        with pytest.raises(ConflictError) as excinfo:
+            await svc.export_case(db, fresh, user_id=USER_ID)
+    assert any(
+        item["status"] == "insufficient" and item["reason"] == "undecided"
+        for item in excinfo.value.detail["items"]
+    )
+
+    async with factory() as db:
+        row = await db.get(ReviewItem, items[0].id)
+        row.status = "parse_failed"
+        await db.commit()
+    async with factory() as db:
+        fresh = await db.get(type(case), case.id)
+        with pytest.raises(ConflictError):
+            await svc.export_case(db, fresh, user_id=USER_ID)
+
+
+@pytest.mark.asyncio
 async def test_export_payload_contract(factory):
     case = await _seed_case(factory)
+    await _analyze(factory, case)
     await _decide_all(factory, case, status="needs_human")
     async with factory() as db:
         fresh = await db.get(type(case), case.id)
-        # 选中一条原文证据，导出只能包含已选快照
         detail = await case_service.case_detail(db, fresh)
         payment = next(i for i in detail["items"] if i["item_key"] == "payment_term")
         base_chunk = payment["evidence"]["base"][0]["chunk_id_at_capture"]
@@ -206,8 +259,10 @@ async def test_export_payload_contract(factory):
     assert payload["documents"]["revised"]["content_sha256"] == "d" * 64
     payment_payload = next(i for i in payload["items"] if i["item_key"] == "payment_term")
     assert payment_payload["status"] == "needs_human"
-    assert payment_payload["evidence"]["base"], "导出必须包含已选原文证据"
-    row = payment_payload["evidence"]["base"][0]
+    assert payment_payload["change_type"] == "modified"
+    base_rows = payment_payload["evidence"]["base"]
+    assert len(base_rows) == 1, "导出只能包含已选证据，候选行不得混入"
+    row = base_rows[0]
     assert row["text_provenance"] == "parser_original"
     assert "【文档背景" not in row["quote"]
     assert row["quote_sha256"]
@@ -217,7 +272,6 @@ async def test_export_payload_contract(factory):
     serialized = json.dumps(payload, ensure_ascii=False)
     assert "chunk_text" not in serialized
     assert "X-Amz" not in serialized
-    # 只扫描生成文案/字段名，不扫描原文引用（原文可能含任何词）。
     generated = json.dumps(
         {
             "statuses": [i["status"] for i in payload["items"]],
@@ -235,6 +289,7 @@ async def test_export_payload_contract(factory):
 @pytest.mark.asyncio
 async def test_export_is_deterministic_and_rows_immutable(factory):
     case = await _seed_case(factory)
+    await _analyze(factory, case)
     await _decide_all(factory, case)
     async with factory() as db:
         fresh = await db.get(type(case), case.id)
@@ -243,7 +298,6 @@ async def test_export_is_deterministic_and_rows_immutable(factory):
     assert first.payload_sha256 == second.payload_sha256, "无变更重导出必须同哈希"
     assert first.id != second.id
 
-    # 决策变化 → 案件回 in_review，旧导出行保留
     items = await _items(factory, case.id)
     async with factory() as db:
         fresh = await db.get(type(case), case.id)
@@ -252,6 +306,7 @@ async def test_export_is_deterministic_and_rows_immutable(factory):
         await db.refresh(fresh)
         assert fresh.status == "in_review"
         assert fresh.completed_at is None
+        assert fresh.completed_by is None
         for rest in items[1:]:
             db_item = await db.get(ReviewItem, rest.id)
             await svc.decide_item(db, fresh, db_item, status="verified", note=None, user_id=USER_ID)
@@ -264,8 +319,29 @@ async def test_export_is_deterministic_and_rows_immutable(factory):
 
 
 @pytest.mark.asyncio
+async def test_export_payload_marks_stale_source(factory):
+    case = await _seed_case(factory)
+    await _analyze(factory, case)
+    await _decide_all(factory, case)
+    async with factory() as db:
+        await db.execute(
+            DocumentChunk.__table__.delete().where(DocumentChunk.document_id == REVISED)
+        )
+        db.add(_chunk(REVISED, 0, "第九条 付款期限为90天，自收到发票之日起算。"))
+        await db.execute(
+            update(Document).where(Document.id == REVISED).values(indexed_at=datetime.now(UTC))
+        )
+        await db.commit()
+    async with factory() as db:
+        fresh = await db.get(type(case), case.id)
+        export = await svc.export_case(db, fresh, user_id=USER_ID)
+    assert export.payload["source_stale"] is True
+
+
+@pytest.mark.asyncio
 async def test_markdown_rendering_and_audit_rows(factory):
     case = await _seed_case(factory)
+    await _analyze(factory, case)
     await _decide_all(factory, case, status="verified")
     async with factory() as db:
         fresh = await db.get(type(case), case.id)
@@ -281,16 +357,36 @@ async def test_markdown_rendering_and_audit_rows(factory):
     assert "# 核验单：export case" in markdown
     assert "## 文档与版本" in markdown
     assert "## 核验项" in markdown
+    assert "| 决策人 | 决策时间 |" in markdown
     assert "## 证据（原文引用）" in markdown
     assert "本核验单仅覆盖本次选定的条款与文档版本" in markdown
     assert "X-Amz" not in markdown
+    assert "minio" not in markdown.lower()
     actions = sorted(log.action for log in logs)
     assert actions == ["review_export", "review_export_download"]
 
 
 @pytest.mark.asyncio
+async def test_markdown_escapes_table_and_flattens_quotes(factory):
+    case = await _seed_case(factory)
+    await _analyze(factory, case)
+    items = await _items(factory, case.id)
+    async with factory() as db:
+        fresh = await db.get(type(case), case.id)
+        for item in items:
+            db_item = await db.get(ReviewItem, item.id)
+            note = "已核对 | 见附件\n第二行" if item.id == items[0].id else "ok"
+            await svc.decide_item(db, fresh, db_item, status="verified", note=note, user_id=USER_ID)
+        export = await svc.export_case(db, fresh, user_id=USER_ID)
+        markdown = svc.render_markdown(export.payload)
+    assert "已核对 \\| 见附件 第二行" in markdown
+    assert "\n第二行" not in markdown
+
+
+@pytest.mark.asyncio
 async def test_export_get_and_list_guard(factory):
     case = await _seed_case(factory)
+    await _analyze(factory, case)
     await _decide_all(factory, case)
     async with factory() as db:
         fresh = await db.get(type(case), case.id)
@@ -301,6 +397,20 @@ async def test_export_get_and_list_guard(factory):
         assert fetched.id == export.id
         with pytest.raises(NotFoundError):
             await svc.get_export_for_case(db, fresh, str(uuid.uuid4()))
+
+
+@pytest.mark.asyncio
+async def test_export_cross_case_export_is_404(factory):
+    case_a = await _seed_case(factory)
+    case_b = await _seed_case(factory, suffix="-2")
+    await _analyze(factory, case_a)
+    await _decide_all(factory, case_a)
+    async with factory() as db:
+        fresh_a = await db.get(type(case_a), case_a.id)
+        export = await svc.export_case(db, fresh_a, user_id=USER_ID)
+        fresh_b = await db.get(type(case_b), case_b.id)
+        with pytest.raises(NotFoundError):
+            await svc.get_export_for_case(db, fresh_b, export.id)
 
 
 # ── 迁移 023 round-trip ────────────────────────────────────────────────────
@@ -349,7 +459,7 @@ def test_023_migration_roundtrip(tmp_path, monkeypatch):
         "payload_sha256",
         "item_count",
         "needs_human_count",
-        "insufficient_count",
+        "unidentified_count",
         "created_by",
         "created_at",
     }

@@ -25,6 +25,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
 )
+from sqlalchemy.dialects import mysql
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.sql import func
 
@@ -274,8 +275,11 @@ class ReviewExport(Base):
     payload_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
     item_count: Mapped[int] = mapped_column(Integer, nullable=False)
     needs_human_count: Mapped[int] = mapped_column(Integer, nullable=False)
-    insufficient_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    # 口径：change_type == unidentified（文本事实无法判定）的项数，不是 status。
+    unidentified_count: Mapped[int] = mapped_column(Integer, nullable=False)
     created_by: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"), nullable=False)
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now(), comment="导出时间"
+        DateTime(timezone=True).with_variant(mysql.DATETIME(fsp=6), "mysql"),
+        server_default=func.now(),
+        comment="导出时间（微秒精度，保证同秒导出排序稳定）",
     )

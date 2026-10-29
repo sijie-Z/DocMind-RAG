@@ -8,6 +8,7 @@ Revises: 022_review_case_evidence
 """
 
 import sqlalchemy as sa
+from sqlalchemy.dialects import mysql
 
 from alembic import op
 
@@ -28,11 +29,11 @@ def upgrade() -> None:
         sa.Column("payload_sha256", sa.String(length=64), nullable=False),
         sa.Column("item_count", sa.Integer(), nullable=False),
         sa.Column("needs_human_count", sa.Integer(), nullable=False),
-        sa.Column("insufficient_count", sa.Integer(), nullable=False),
+        sa.Column("unidentified_count", sa.Integer(), nullable=False),
         sa.Column("created_by", sa.Integer(), nullable=False),
         sa.Column(
             "created_at",
-            sa.DateTime(timezone=True),
+            sa.DateTime(timezone=True).with_variant(mysql.DATETIME(fsp=6), "mysql"),
             server_default=sa.func.now(),
             nullable=False,
         ),

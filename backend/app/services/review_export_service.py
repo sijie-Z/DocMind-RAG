@@ -88,9 +88,15 @@ def _audit(
     )
 
 
-async def _reload_case(session: AsyncSession, case: ReviewCase) -> ReviewCase:
-    """在当前会话重载案件并刷新列（onupdate 的 updated_at 可能已过期）。"""
-    fresh = await session.get(ReviewCase, case.id)
+async def _lock_case(session: AsyncSession, case: ReviewCase) -> ReviewCase:
+    """锁定案件行并刷新列：decision/export 的状态机必须串行。
+
+    MySQL 下 SELECT ... FOR UPDATE 会阻塞并发事务（SQLite 方言忽略该子句）；
+    ``updated_at`` 等 onupdate 列可能在提交后过期，refresh 一并解决。
+    """
+    fresh = (
+        await session.execute(select(ReviewCase).where(ReviewCase.id == case.id).with_for_update())
+    ).scalar_one_or_none()
     if fresh is None:
         raise ConflictError("核验案件已被删除", error_code="REVIEW_CASE_NOT_FOUND")
     await session.refresh(fresh)
@@ -109,7 +115,7 @@ async def decide_item(
     """逐项人工决策；completed 后再改决策会回到 in_review。"""
     if status not in DECISION_STATUSES:
         raise ValidationError(f"未知决策状态: {status!r}", field="status")
-    case = await _reload_case(session, case)
+    case = await _lock_case(session, case)
     if case.status not in ("ready", "in_review", "completed"):
         raise ConflictError(
             "当前案件状态不允许决策",
@@ -214,7 +220,7 @@ def _build_payload(case: ReviewCase, detail: dict[str, Any]) -> dict[str, Any]:
 
 async def export_case(session: AsyncSession, case: ReviewCase, *, user_id: int) -> ReviewExport:
     """生成不可变核验单快照；未决项阻止导出。"""
-    case = await _reload_case(session, case)
+    case = await _lock_case(session, case)
     if case.status not in ("ready", "in_review", "completed"):
         raise ConflictError(
             "当前案件状态不允许导出",
@@ -223,11 +229,18 @@ async def export_case(session: AsyncSession, case: ReviewCase, *, user_id: int) 
         )
     detail = await case_detail(session, case)
     blocking = [
-        item["item_key"] for item in detail["items"] if item["status"] in INCOMPLETE_STATUSES
+        {"item_key": item["item_key"], "status": item["status"], "reason": "undecided"}
+        for item in detail["items"]
+        if item["status"] in INCOMPLETE_STATUSES
+    ] + [
+        # 未运行分析（change_type 为 None）不算「已核验」，不能导出完成态。
+        {"item_key": item["item_key"], "status": item["status"], "reason": "not_analyzed"}
+        for item in detail["items"]
+        if item["change_type"] is None
     ]
     if blocking:
         raise ConflictError(
-            "存在未决核验项，不能导出",
+            "存在未决或未分析的核验项，不能导出",
             error_code="REVIEW_EXPORT_BLOCKED",
             detail={"items": blocking},
         )
@@ -242,10 +255,11 @@ async def export_case(session: AsyncSession, case: ReviewCase, *, user_id: int) 
         payload_sha256=digest,
         item_count=len(payload["items"]),
         needs_human_count=sum(1 for item in payload["items"] if item["status"] == "needs_human"),
-        insufficient_count=sum(
+        unidentified_count=sum(
             1 for item in payload["items"] if item["change_type"] == "unidentified"
         ),
         created_by=user_id,
+        created_at=_now(),
     )
     session.add(export)
     case.status = "completed"
@@ -278,7 +292,7 @@ def export_summary(export: ReviewExport) -> dict[str, Any]:
         "payload_sha256": export.payload_sha256,
         "item_count": export.item_count,
         "needs_human_count": export.needs_human_count,
-        "insufficient_count": export.insufficient_count,
+        "unidentified_count": export.unidentified_count,
         "created_by": export.created_by,
         "created_at": export.created_at.isoformat() if export.created_at else None,
     }
@@ -324,6 +338,17 @@ async def audit_download(
     await session.commit()
 
 
+def _cell(value: Any) -> str:
+    """表格单元转义：竖线破坏列、换行破坏行。"""
+    text = "" if value is None else str(value)
+    return text.replace("|", "\\|").replace("\n", " ")
+
+
+def _flatten(value: Any) -> str:
+    text = "" if value is None else str(value)
+    return " ".join(text.split())
+
+
 def render_markdown(payload: dict[str, Any]) -> str:
     """把导出 payload 渲染为 Markdown；内容只来自快照，不引入第二套真源。"""
     case = payload["case"]
@@ -338,17 +363,18 @@ def render_markdown(payload: dict[str, Any]) -> str:
     for side in REVIEW_SIDES:
         entry = payload["documents"].get(side) or {}
         lines.append(
-            f"| {side} | {entry.get('filename') or ''} | "
-            f"{entry.get('version_label') or ''} | {entry.get('content_sha256') or ''} |"
+            f"| {_cell(side)} | {_cell(entry.get('filename') or '')} | "
+            f"{_cell(entry.get('version_label') or '')} | {_cell(entry.get('content_sha256') or '')} |"
         )
     lines.append("")
     lines.append("## 核验项")
-    lines.append("| 核验项 | 差异类型 | 决策 | 说明 |")
-    lines.append("| --- | --- | --- | --- |")
+    lines.append("| 核验项 | 差异类型 | 决策 | 决策人 | 决策时间 | 说明 |")
+    lines.append("| --- | --- | --- | --- | --- | --- |")
     for item in payload["items"]:
         lines.append(
-            f"| {item['item_key']} | {item.get('change_type') or ''} | "
-            f"{item['status']} | {item.get('decision_note') or ''} |"
+            f"| {_cell(item['item_key'])} | {_cell(item.get('change_type') or '')} | "
+            f"{_cell(item['status'])} | {_cell(item.get('decided_by') or '')} | "
+            f"{_cell(item.get('decided_at') or '')} | {_cell(item.get('decision_note') or '')} |"
         )
     lines.append("")
     lines.append("## 证据（原文引用）")
@@ -363,7 +389,7 @@ def render_markdown(payload: dict[str, Any]) -> str:
                 page = row.get("page_number")
                 lines.append(
                     f"- [{side}] {locator}{' 第' + str(page) + '页' if page else ''}："
-                    f"{row['quote']}"
+                    f"{_flatten(row['quote'])}"
                 )
         if not has_evidence:
             lines.append("- （无已选证据）")

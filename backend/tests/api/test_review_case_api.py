@@ -15,6 +15,7 @@ from app.models.document import Document, DocumentChunk, DocumentStatus, Documen
 from app.models.organization import Organization
 from app.models.rbac import PermissionType
 from app.models.review import ReviewDocumentMeta
+from app.models.user_audit import UserActivityLog
 
 ORG = 1
 POLICY = "doc-api-policy"
@@ -447,9 +448,12 @@ async def test_analyze_legacy_after_creation_maps_409(factory):
 async def test_decision_export_and_download_flow(factory):
     async with _Ctx(_user(superuser=True), factory) as ac:
         case = await _create_case(ac)
+        analyzed = await ac.post(f"/api/v1/reviews/{case['id']}/analyze")
+        assert analyzed.status_code == 200, analyzed.text
         blocked = await ac.post(f"/api/v1/reviews/{case['id']}/export")
         assert blocked.status_code == 409, blocked.text
         assert blocked.json()["error_code"] == "REVIEW_EXPORT_BLOCKED"
+        assert blocked.json()["detail"]["items"][0]["reason"] == "undecided"
 
         for item in case["items"]:
             decided = await ac.put(
@@ -490,6 +494,29 @@ async def test_decision_export_and_download_flow(factory):
 
         detail = await ac.get(f"/api/v1/reviews/{case['id']}")
         assert detail.json()["data"]["status"] == "completed"
+
+        # completed 后再改决策：状态回 in_review，旧导出保留
+        reopened = await ac.put(
+            f"/api/v1/reviews/{case['id']}/items/{case['items'][0]['id']}/decision",
+            json={"status": "needs_human", "note": "复核后调整"},
+        )
+        assert reopened.status_code == 200, reopened.text
+        detail2 = await ac.get(f"/api/v1/reviews/{case['id']}")
+        assert detail2.json()["data"]["status"] == "in_review"
+
+    async with factory() as db:
+        logs = (
+            (
+                await db.execute(
+                    select(UserActivityLog).where(UserActivityLog.target_id == case["id"])
+                )
+            )
+            .scalars()
+            .all()
+        )
+    actions = {log.action for log in logs}
+    assert "review_export" in actions
+    assert "review_export_download" in actions
 
 
 @pytest.mark.asyncio
@@ -547,6 +574,7 @@ async def test_decision_on_blocked_case_is_409_and_unknown_export_404(factory):
         assert r.json()["error_code"] == "REVIEW_CASE_NOT_READY"
 
         case = await _create_case(ac)
+        assert (await ac.post(f"/api/v1/reviews/{case['id']}/analyze")).status_code == 200
         for it in case["items"]:
             await ac.put(
                 f"/api/v1/reviews/{case['id']}/items/{it['id']}/decision",

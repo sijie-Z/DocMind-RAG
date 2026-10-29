@@ -212,7 +212,7 @@ async def test_delete_org_with_review_exports_blocks():
                     payload_sha256="a" * 64,
                     item_count=4,
                     needs_human_count=0,
-                    insufficient_count=0,
+                    unidentified_count=0,
                     created_by=20,
                 )
             )
