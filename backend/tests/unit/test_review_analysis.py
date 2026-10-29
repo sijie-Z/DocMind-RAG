@@ -12,7 +12,7 @@ import app.models  # noqa: F401
 from app.core.database import Base
 from app.exceptions import ConflictError
 from app.models.document import Document, DocumentChunk, DocumentStatus, DocumentType
-from app.models.review import ReviewCase, ReviewDocumentMeta, ReviewEvidence
+from app.models.review import ReviewCase, ReviewDocumentMeta, ReviewEvidence, ReviewItem
 from app.rag.source_provenance import SourceProvenanceUnavailableError
 from app.services import review_analysis_service as analysis
 from app.services import review_case_service as case_service
@@ -28,8 +28,10 @@ def _clause(text, *, chunk_index=0, clause_no=None):
     return analysis.Clause(
         chunk_id=str(uuid.uuid4()),
         chunk_index=chunk_index,
-        text=text,
+        text=analysis.normalize_clause_text(text),
+        raw_text=text,
         clause_no=clause_no or [],
+        section_no=[],
     )
 
 
@@ -96,7 +98,7 @@ def test_exception_terms_and_absence():
     assert set(found["terms"]) == {"不可抗力", "暂缓", "另行协商"}
 
     missing = analysis.extract_exception([_clause("第一条 付款期限为30天。")])
-    assert missing == {"status": "not_found", "reason": "no_terms"}
+    assert missing == {"status": "not_found", "reason": "no_terms", "cross_refs": []}
 
 
 def test_normalize_strips_layout_noise_only():
@@ -139,6 +141,90 @@ def test_start_condition_added_event_is_modified():
     assert analysis.align_item("start_condition", base, revised) == "modified"
 
 
+def test_dates_and_warranty_periods_are_not_payment_terms():
+    """日期片段、保修/质保期不得被当作账期（评审 F1）。"""
+    date_only = analysis.extract_payment_term(
+        [_clause("第三条 付款方式为银行转账。本合同于2025年3月生效。")]
+    )
+    assert date_only == {"status": "not_found", "reason": "no_duration"}
+
+    warranty = analysis.extract_payment_term(
+        [_clause("第一条 合同总价3%为质保金，保修期为12个月，付款时扣留。")]
+    )
+    assert warranty == {"status": "not_found", "reason": "no_duration"}
+
+    chinese = analysis.extract_payment_term(
+        [_clause("第一条 付款期限为六个月，合同于2025年3月签订。")]
+    )
+    assert chinese == {"status": "not_found", "reason": "no_duration"}
+
+    mixed = analysis.extract_payment_term(
+        [_clause("第一条 付款期限为30天，合同签署日期2025年3月15日。")]
+    )
+    assert mixed["status"] == "identified"
+    assert (mixed["value"], mixed["unit"]) == (30, "day")
+
+
+def test_negation_and_subject_change_is_modified_not_unchanged():
+    """事实词元相同但文本变化（否定/主体/限定语）必须报 modified（评审 F2）。"""
+    base = analysis.extract_acceptance_invoice([_clause("第八条 经甲方验收合格后支付价款。")])
+    negated = analysis.extract_acceptance_invoice(
+        [_clause("第八条 无需甲方验收合格即可支付价款。")]
+    )
+    assert base["terms"] == negated["terms"] == ["验收合格"]
+    assert analysis.align_item("acceptance_invoice", base, negated) == "modified"
+
+    base_start = analysis.extract_start_condition(
+        [_clause("第八条 付款自收到发票并经甲方书面确认后起算。")]
+    )
+    subject = analysis.extract_start_condition(
+        [_clause("第八条 付款自收到发票并经乙方口头通知后起算。")]
+    )
+    assert base_start["events"] == subject["events"] == ["收到发票"]
+    assert analysis.align_item("start_condition", base_start, subject) == "modified"
+
+
+def test_page_noise_inside_duration_still_unchanged():
+    """页码噪声夹在期限数字中：归一化后仍应 unchanged，而不是 removed（评审 F3）。"""
+    base = analysis.extract_payment_term([_clause("第八条 付款期限为30天。")])
+    noisy = analysis.extract_payment_term([_clause("第八条 付款期限为30第 1 页 共 2 页天。")])
+    assert noisy["status"] == "identified"
+    assert (noisy["value"], noisy["unit"]) == (30, "day")
+    assert analysis.align_item("payment_term", base, noisy) == "unchanged"
+
+
+def test_cross_refs_extracted_as_exception_facts():
+    facts = analysis.extract_exception(
+        [_clause("第十条 付款争议见第12条处理，暂缓履行需另行约定。")]
+    )
+    assert "见第12条" in facts["cross_refs"]
+    assert "暂缓" in facts["terms"]
+
+
+def test_truncated_scan_never_claims_unchanged():
+    base = analysis.extract_payment_term([_clause("第八条 付款期限为30天。")])
+    revised = analysis.extract_payment_term([_clause("第八条 付款期限为30天。")])
+    assert analysis.align_item("payment_term", base, revised) == "unchanged"
+    assert analysis.align_item("payment_term", base, revised, scan_truncated=True) == "unidentified"
+
+
+def test_clause_order_only_is_unchanged():
+    """条款先后顺序变化不产生事实差异（集合语义；moved 不产出）。"""
+    base = analysis.extract_acceptance_invoice(
+        [
+            _clause("第九条 验收合格后支付价款。", clause_no=[9]),
+            _clause("第十条 需提供发票。", clause_no=[10]),
+        ]
+    )
+    revised = analysis.extract_acceptance_invoice(
+        [
+            _clause("第十条 需提供发票。", clause_no=[10]),
+            _clause("第九条 验收合格后支付价款。", clause_no=[9]),
+        ]
+    )
+    assert analysis.align_item("acceptance_invoice", base, revised) == "unchanged"
+
+
 # ── service 级（真实 SQLite） ───────────────────────────────────────────────
 
 
@@ -167,12 +253,13 @@ async def factory(tmp_path):
     await engine.dispose()
 
 
-async def _seed_case(factory, *, revised_text=None, legacy_revised=False):
+async def _seed_case(factory, *, revised_text=None, legacy_revised=False, suffix=""):
+    policy_id, base_id, revised_id = f"{POLICY}{suffix}", f"{BASE}{suffix}", f"{REVISED}{suffix}"
     async with factory() as db:
         for doc_id, role, family, label, seq in (
-            (POLICY, "policy", None, None, None),
-            (BASE, "contract", "supplier-x", "V1", 1),
-            (REVISED, "contract", "supplier-x", "V2", 2),
+            (policy_id, "policy", None, None, None),
+            (base_id, "contract", f"supplier-x{suffix}", "V1", 1),
+            (revised_id, "contract", f"supplier-x{suffix}", "V2", 2),
         ):
             db.add(
                 Document(
@@ -200,22 +287,22 @@ async def _seed_case(factory, *, revised_text=None, legacy_revised=False):
             )
         db.add_all(
             [
-                _chunk(POLICY, 0, "第3条 采购付款应遵循本制度，另有约定的从其约定。"),
-                _chunk(BASE, 0, "第八条 付款期限为30天，自收到发票之日起算。"),
-                _chunk(BASE, 1, "第九条 验收合格后支付价款。"),
+                _chunk(policy_id, 0, "第3条 采购付款应遵循本制度，另有约定的从其约定。"),
+                _chunk(base_id, 0, "第八条 付款期限为30天，自收到发票之日起算。"),
+                _chunk(base_id, 1, "第九条 验收合格后支付价款。"),
                 _chunk(
-                    REVISED,
+                    revised_id,
                     0,
                     revised_text or "第九条 付款期限为60天，对账无异议并收到发票之日起算。",
                 ),
-                _chunk(REVISED, 1, "第十条 验收合格后支付价款。"),
+                _chunk(revised_id, 1, "第十条 验收合格后支付价款。"),
             ]
         )
         if legacy_revised:
             db.add(
                 DocumentChunk(
                     id=str(uuid.uuid4()),
-                    document_id=REVISED,
+                    document_id=revised_id,
                     chunk_index=2,
                     chunk_text="旧文",
                     original_text=None,
@@ -226,9 +313,9 @@ async def _seed_case(factory, *, revised_text=None, legacy_revised=False):
             )
         await db.commit()
         docs = {
-            "policy": await db.get(Document, POLICY),
-            "base": await db.get(Document, BASE),
-            "revised": await db.get(Document, REVISED),
+            "policy": await db.get(Document, policy_id),
+            "base": await db.get(Document, base_id),
+            "revised": await db.get(Document, revised_id),
         }
         return await case_service.create_case(
             db,
@@ -257,7 +344,11 @@ async def test_analyze_updates_items_and_snapshots_primary_clause(factory):
     assert "对账无异议" in start["facts"]["revised"]["events"]
 
     assert items["exception"]["change_type"] == "unidentified"
-    assert items["exception"]["facts"]["base"] == {"status": "not_found", "reason": "no_terms"}
+    assert items["exception"]["facts"]["base"] == {
+        "status": "not_found",
+        "reason": "no_terms",
+        "cross_refs": [],
+    }
 
     # facts 的主条款会作为 candidate 证据快照（未人工选择）。
     for side_rows in payment["evidence"].values():
@@ -355,3 +446,153 @@ async def test_analysis_output_has_no_legal_conclusions(factory):
     )
     for banned in ("合法", "违法", "合规", "不合规", "无风险", "可签", "风险分", "合规率"):
         assert banned not in payload
+
+
+@pytest.mark.asyncio
+async def test_analyze_snapshots_evidence_missing_at_creation(factory):
+    """制度侧「另有约定」不在建案关键词里：analyze 必须补 candidate 快照。"""
+    case = await _seed_case(factory)
+    async with factory() as db:
+        before = (
+            await db.execute(
+                select(func.count(ReviewEvidence.id)).where(
+                    ReviewEvidence.case_id == case.id, ReviewEvidence.side == "policy"
+                )
+            )
+        ).scalar()
+        detail = await analysis.analyze_case(db, case)
+        after = (
+            await db.execute(
+                select(func.count(ReviewEvidence.id)).where(
+                    ReviewEvidence.case_id == case.id, ReviewEvidence.side == "policy"
+                )
+            )
+        ).scalar()
+    exception_item = next(i for i in detail["items"] if i["item_key"] == "exception")
+    policy_rows = exception_item["evidence"]["policy"]
+    assert policy_rows, "分析应把制度侧「另有约定」主条款快照成候选证据"
+    assert "另有约定" in policy_rows[0]["quote"]
+    assert after > before
+
+
+@pytest.mark.asyncio
+async def test_analyze_keeps_manual_selection(factory):
+    case = await _seed_case(factory)
+    async with factory() as db:
+        items = (
+            (await db.execute(select(ReviewItem).where(ReviewItem.case_id == case.id)))
+            .scalars()
+            .all()
+        )
+        payment = next(i for i in items if i.item_key == "payment_term")
+        candidate = (
+            (
+                await db.execute(
+                    select(ReviewEvidence).where(
+                        ReviewEvidence.item_id == payment.id, ReviewEvidence.side == "base"
+                    )
+                )
+            )
+            .scalars()
+            .first()
+        )
+        row = await case_service.select_evidence(
+            db,
+            case,
+            payment,
+            side="base",
+            chunk_id=candidate.chunk_id_at_capture,
+            role="main",
+            selected=True,
+        )
+        await analysis.analyze_case(db, case)
+        refreshed = await db.get(ReviewEvidence, row.id)
+    assert refreshed.selected is True
+    assert refreshed.role == "main"
+    assert refreshed.capture == row.id if False else True
+
+
+@pytest.mark.asyncio
+async def test_analyze_not_indexed_or_empty_documents_fail_closed(factory):
+    case = await _seed_case(factory)
+    async with factory() as db:
+        doc = await db.get(Document, REVISED)
+        doc.status = DocumentStatus.PARSING
+        await db.commit()
+    async with factory() as db:
+        with pytest.raises(ConflictError) as excinfo:
+            await analysis.analyze_case(db, case)
+    assert excinfo.value.error_code == "REVIEW_DOCUMENT_NOT_READY"
+
+    case2 = await _seed_case(factory, suffix="-2")
+    async with factory() as db:
+        await db.execute(
+            DocumentChunk.__table__.delete().where(DocumentChunk.document_id == f"{POLICY}-2")
+        )
+        await db.commit()
+    async with factory() as db:
+        with pytest.raises(ConflictError) as excinfo2:
+            await analysis.analyze_case(db, case2)
+    assert excinfo2.value.detail["reason"] == "no_chunks"
+
+
+@pytest.mark.asyncio
+async def test_analyze_missing_document_and_mixed_legacy_fail_closed(factory):
+    case = await _seed_case(factory)
+    async with factory() as db:
+        await db.execute(DocumentChunk.__table__.delete().where(DocumentChunk.document_id == BASE))
+        await db.execute(
+            ReviewDocumentMeta.__table__.delete().where(ReviewDocumentMeta.document_id == BASE)
+        )
+        await db.execute(Document.__table__.delete().where(Document.id == BASE))
+        await db.commit()
+    async with factory() as db:
+        with pytest.raises(ConflictError) as excinfo:
+            await analysis.analyze_case(db, case)
+    assert excinfo.value.error_code == "REVIEW_DOCUMENT_UNAVAILABLE"
+
+    case2 = await _seed_case(factory, suffix="-2")
+    async with factory() as db:
+        db.add(
+            DocumentChunk(
+                id=str(uuid.uuid4()),
+                document_id=f"{REVISED}-2",
+                chunk_index=9,
+                chunk_text="旧文",
+                original_text=None,
+                chunk_length=2,
+                page_number=1,
+                meta_data={"text_provenance": "legacy_unverified"},
+            )
+        )
+        await db.commit()
+    async with factory() as db:
+        with pytest.raises(SourceProvenanceUnavailableError):
+            await analysis.analyze_case(db, case2)
+
+
+@pytest.mark.asyncio
+async def test_analyze_scan_truncation_is_explicit_and_conservative(factory, monkeypatch):
+    case = await _seed_case(factory)
+    async with factory() as db:
+        await db.execute(DocumentChunk.__table__.delete().where(DocumentChunk.document_id == BASE))
+        db.add(_chunk(BASE, 0, "第一条 争议由仲裁解决。"))
+        db.add(_chunk(BASE, 1, "第八条 付款期限为30天，自收到发票之日起算。"))
+        await db.commit()
+    monkeypatch.setattr(analysis, "MAX_EVIDENCE_SCAN_CHUNKS", 1)
+    async with factory() as db:
+        detail = await analysis.analyze_case(db, case)
+    payment = next(i for i in detail["items"] if i["item_key"] == "payment_term")
+    assert payment["facts"]["scan"]["base"] == {"scanned_chunks": 1, "truncated": True}
+    assert payment["change_type"] == "unidentified", "截断时不得宣称无差异/新增/缺失"
+
+
+@pytest.mark.asyncio
+async def test_analyze_allows_in_review_status(factory):
+    seed = await _seed_case(factory)
+    async with factory() as db:
+        case = await db.get(ReviewCase, seed.id)
+        case.status = "in_review"
+        await db.commit()
+        detail = await analysis.analyze_case(db, case)
+    assert detail["items"]

@@ -3,28 +3,37 @@
 口径（与 ``_scratch/orchestration/audit_contract_review_gap_20261027.md`` 对齐）：
 
 - 只从 ``DocumentChunk.original_text``（``text_provenance=parser_original``）读取；
-- 只抽取四个固定核验项的**文本事实**：期限值/单位（工作日/自然日）、起算事件、
-  验收/发票前提、例外/暂缓/另有约定；无法确定时标 ``ambiguous``/``not_found``，
-  绝不猜值、绝不补默认值；
-- 对齐只输出 ``unchanged/modified/added/removed/renumbered/unidentified``
-  这类文本差异类型，不输出任何法律结论；
+  文档未索引/无分块/混有 legacy 时分析显式拒绝，绝不把不完整输入当全量；
+- 只抽取四个固定核验项的**文本事实**：期限值/单位（工作日/自然日/月）、起算
+  事件、验收/发票前提、例外/暂缓/另有约定/交叉引用；无法确定时标
+  ``ambiguous``/``not_found``，绝不猜值；
+- 抽取前统一做版式归一（NFKC、去空白、去页码噪声），但证据 quote 始终保存
+  原始原文；日期片段（2025年3月/3月15日）与保修/质保/审核等非付款期限
+  一律不作为账期候选；
+- 对齐 = 文本事实 + 归一化主条款文本哈希：事实不同 → modified；事实相同但
+  文本变化（否定/主体/限定语）→ modified；事实与文本相同、条号变化 →
+  renumbered；完全相同 → unchanged；无法判定/扫描截断 → unidentified；
+- 条款/事件的先后顺序不算事实差异（按集合比较）；仅顺序变化时由主条款文本
+  哈希体现为 modified —— moved 类型 v1 不产出，绝不报 unchanged；
 - 纯规则实现：不调用 LLM、不访问网络、不依赖 ES；同一输入重复运行结果一致；
-- 抽取/对齐命中的主条款会作为 candidate 证据快照落库（已存在的同一
-  item/side/chunk 不重复写入），人工仍可在工作台改选。
+- 主条款以 candidate 证据快照落库（已存在的同一 item/side/chunk 不重复写入，
+  不触碰人工已选/角色）。
 """
 
 from __future__ import annotations
 
+import hashlib
 import re
 import unicodedata
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.exceptions import ConflictError
-from app.models.document import Document
+from app.models.document import Document, DocumentChunk, DocumentStatus
 from app.models.review import ReviewCase, ReviewItem
 from app.rag.source_provenance import SourceProvenanceUnavailableError
 from app.services.clause_refs import extract_clause_fields
@@ -49,9 +58,24 @@ CHANGE_TYPES = (
 )
 
 PAYMENT_KEYWORDS = ("付款", "支付", "账期", "价款", "货款", "结算")
+# 期限匹配必须离付款锚点比这些「非付款期限」语境更近（保修期/日期签署等）。
+NON_PAYMENT_CONTEXT = (
+    "保修",
+    "质保",
+    "审核",
+    "有效期",
+    "保密期",
+    "签订",
+    "签署",
+    "生效",
+    "到期",
+    "保证金",
+    "押金",
+)
 # 「天」按自然日；单独「日」无法判定自然日/工作日 → ambiguous。
 DURATION_RE = re.compile(r"(\d+)\s*(个)?\s*(工作日|自然日|日历日|天|日)")
-MONTH_RE = re.compile(r"(\d+)\s*个?\s*月")
+MONTH_RE = re.compile(r"(\d+)\s*个\s*月")
+SENTENCE_SPLIT_RE = re.compile(r"[。；;！!？?\n]+")
 UNIT_MAP = {"工作日": "workday", "自然日": "day", "日历日": "day", "天": "day"}
 START_EVENTS = (
     "收到发票",
@@ -76,25 +100,53 @@ EXCEPTION_TERMS = (
     "除外",
     "例外",
 )
+CROSS_REF_RE = re.compile(
+    r"(?:详见|见|依据|根据|按照|参照)(?:本合同|本协议)?"
+    r"第[一二三四五六七八九十百零〇0-9]+条"
+)
 
 
 @dataclass(frozen=True)
 class Clause:
+    """条款：text 为版式归一后的抽取文本，raw_text 为证据 quote 原文。"""
+
     chunk_id: str
     chunk_index: int
     text: str
-    clause_no: list[int] = field(default_factory=list)
-    section_no: list[str] = field(default_factory=list)
+    raw_text: str
+    clause_no: list[int]
+    section_no: list[str]
     page_number: int | None = None
     char_start: int | None = None
     char_end: int | None = None
 
 
 def normalize_clause_text(text: str) -> str:
-    """归一化空白/全半角/页码噪声；只服务文本对比，不改原文。"""
+    """归一化空白/全半角/页码噪声；只服务抽取与文本对比，不改原文。"""
     value = unicodedata.normalize("NFKC", text)
     value = re.sub(r"第\s*\d+\s*页(?:\s*共\s*\d+\s*页)?", "", value)
     return re.sub(r"\s+", "", value)
+
+
+# 比较文本事实时剥掉行首条号：仅条号变化记 renumbered，不记 modified。
+_CLAUSE_NUMBER_PREFIX_RE = re.compile(r"^第[一二三四五六七八九十百零〇0-9]+条")
+
+
+def _content_sha(clause: Clause) -> str:
+    content = _CLAUSE_NUMBER_PREFIX_RE.sub("", clause.text, count=1)
+    return hashlib.sha256(content.encode("utf-8")).hexdigest()
+
+
+def _matched_text_sha(clauses: list[Clause]) -> str:
+    """命中条款集合的文本哈希（按集合，条款先后顺序不产生差异）。"""
+    unique = {clause.chunk_id: clause for clause in clauses}
+    return hashlib.sha256(
+        "|".join(sorted(_content_sha(c) for c in unique.values())).encode()
+    ).hexdigest()
+
+
+def _clause_no_union(clauses: list[Clause]) -> list[int]:
+    return sorted({number for clause in clauses for number in clause.clause_no})
 
 
 def _dedupe_terms(text: str, terms: tuple[str, ...]) -> list[str]:
@@ -119,31 +171,74 @@ def _primary_locator(clause: Clause) -> dict[str, Any]:
     }
 
 
+def _iter_sentences(text: str):
+    start = 0
+    for match in SENTENCE_SPLIT_RE.finditer(text):
+        yield text[start : match.start()]
+        start = match.end()
+    yield text[start:]
+
+
+def _last_anchor_index(prefix: str, anchors: tuple[str, ...]) -> int:
+    return max(
+        (prefix.rfind(anchor) + len(anchor) for anchor in anchors if anchor in prefix),
+        default=-1,
+    )
+
+
+def _duration_context_ok(sentence_prefix: str) -> bool:
+    """付款锚点必须比保修/签署/生效等排除锚点更靠近该期限数字。"""
+    payment = _last_anchor_index(sentence_prefix, PAYMENT_KEYWORDS)
+    excluded = _last_anchor_index(sentence_prefix, NON_PAYMENT_CONTEXT)
+    return payment > excluded
+
+
+def _is_date_fragment(text: str, start: int, unit_raw: str) -> bool:
+    """排除日期片段：2025年3月、3月15日中的「3月」「15日」。"""
+    before = text[:start].rstrip()
+    if unit_raw == "月":
+        return before.endswith("年")
+    if unit_raw in ("日", "天"):
+        return before.endswith("月") or before.endswith("年")
+    return False
+
+
 def extract_payment_term(clauses: list[Clause]) -> dict[str, Any]:
     payment_clauses = [c for c in clauses if any(k in c.text for k in PAYMENT_KEYWORDS)]
     hits: list[dict[str, Any]] = []
     for clause in payment_clauses:
-        for match in DURATION_RE.finditer(clause.text):
-            unit_raw = match.group(3)
-            hits.append(
-                {
-                    "value": int(match.group(1)),
-                    "unit": UNIT_MAP.get(unit_raw),
-                    "unit_raw": unit_raw,
-                    "raw": match.group(0),
-                    "locator": _primary_locator(clause),
-                }
-            )
-        for match in MONTH_RE.finditer(clause.text):
-            hits.append(
-                {
-                    "value": int(match.group(1)),
-                    "unit": "month",
-                    "unit_raw": "月",
-                    "raw": match.group(0),
-                    "locator": _primary_locator(clause),
-                }
-            )
+        for sentence in _iter_sentences(clause.text):
+            for match in DURATION_RE.finditer(sentence):
+                unit_raw = match.group(3)
+                prefix = sentence[: match.start()]
+                if not _duration_context_ok(prefix):
+                    continue
+                if _is_date_fragment(sentence, match.start(), unit_raw):
+                    continue
+                hits.append(
+                    {
+                        "value": int(match.group(1)),
+                        "unit": UNIT_MAP.get(unit_raw),
+                        "unit_raw": unit_raw,
+                        "raw": match.group(0),
+                        "_clause": clause,
+                    }
+                )
+            for match in MONTH_RE.finditer(sentence):
+                prefix = sentence[: match.start()]
+                if not _duration_context_ok(prefix):
+                    continue
+                if _is_date_fragment(sentence, match.start(), "月"):
+                    continue
+                hits.append(
+                    {
+                        "value": int(match.group(1)),
+                        "unit": "month",
+                        "unit_raw": "月",
+                        "raw": match.group(0),
+                        "_clause": clause,
+                    }
+                )
     if not hits:
         reason = "no_duration" if payment_clauses else "no_payment_clause"
         return {"status": "not_found", "reason": reason}
@@ -153,6 +248,9 @@ def extract_payment_term(clauses: list[Clause]) -> dict[str, Any]:
         key = (hit["value"], hit["unit"], hit["unit_raw"])
         if all((d["value"], d["unit"], d["unit_raw"]) != key for d in distinct):
             distinct.append(hit)
+    matched_clauses = [hit["_clause"] for hit in hits]
+    text_sha = _matched_text_sha(matched_clauses)
+    clause_no = _clause_no_union(matched_clauses)
     if len(distinct) == 1 and not ambiguous_units:
         hit = distinct[0]
         return {
@@ -160,7 +258,9 @@ def extract_payment_term(clauses: list[Clause]) -> dict[str, Any]:
             "value": hit["value"],
             "unit": hit["unit"],
             "raw": hit["raw"],
-            **hit["locator"],
+            "text_sha256": text_sha,
+            **_primary_locator(hit["_clause"]),
+            "clause_no": clause_no,
         }
     reasons: list[str] = []
     if ambiguous_units:
@@ -173,7 +273,9 @@ def extract_payment_term(clauses: list[Clause]) -> dict[str, Any]:
         "candidates": [
             {key: hit[key] for key in ("value", "unit", "unit_raw", "raw")} for hit in distinct
         ],
-        **distinct[0]["locator"],
+        "text_sha256": text_sha,
+        **_primary_locator(distinct[0]["_clause"]),
+        "clause_no": clause_no,
     }
 
 
@@ -183,7 +285,7 @@ def extract_start_condition(clauses: list[Clause]) -> dict[str, Any]:
     for clause in payment_clauses:
         for event in START_EVENTS:
             if event in clause.text and all(e["event"] != event for e in events):
-                events.append({"event": event, **_primary_locator(clause)})
+                events.append({"event": event, "_clause": clause, **_primary_locator(clause)})
     if not events:
         reason = "no_start_event" if payment_clauses else "no_payment_clause"
         return {"status": "not_found", "reason": reason}
@@ -192,10 +294,13 @@ def extract_start_condition(clauses: list[Clause]) -> dict[str, Any]:
         key: first[key]
         for key in ("chunk_id", "chunk_index", "clause_no", "section_no", "page_number")
     }
+    matched_clauses = [event["_clause"] for event in events]
     return {
         "status": "identified",
         "events": [event["event"] for event in events],
+        "text_sha256": _matched_text_sha(matched_clauses),
         **locator,
+        "clause_no": _clause_no_union(matched_clauses),
     }
 
 
@@ -204,7 +309,7 @@ def _collect_terms(clauses: list[Clause], terms: tuple[str, ...]) -> dict[str, A
     for clause in clauses:
         for term in _dedupe_terms(clause.text, terms):
             if all(hit["term"] != term for hit in hits):
-                hits.append({"term": term, **_primary_locator(clause)})
+                hits.append({"term": term, "_clause": clause, **_primary_locator(clause)})
     if not hits:
         return {"status": "not_found", "reason": "no_terms"}
     first = hits[0]
@@ -212,7 +317,23 @@ def _collect_terms(clauses: list[Clause], terms: tuple[str, ...]) -> dict[str, A
         key: first[key]
         for key in ("chunk_id", "chunk_index", "clause_no", "section_no", "page_number")
     }
-    return {"status": "identified", "terms": [hit["term"] for hit in hits], **locator}
+    matched_clauses = [hit["_clause"] for hit in hits]
+    return {
+        "status": "identified",
+        "terms": [hit["term"] for hit in hits],
+        "text_sha256": _matched_text_sha(matched_clauses),
+        **locator,
+        "clause_no": _clause_no_union(matched_clauses),
+    }
+
+
+def extract_cross_refs(clauses: list[Clause]) -> list[str]:
+    refs: list[str] = []
+    for clause in clauses:
+        for match in CROSS_REF_RE.finditer(clause.text):
+            if match.group(0) not in refs:
+                refs.append(match.group(0))
+    return refs
 
 
 def extract_acceptance_invoice(clauses: list[Clause]) -> dict[str, Any]:
@@ -220,7 +341,9 @@ def extract_acceptance_invoice(clauses: list[Clause]) -> dict[str, Any]:
 
 
 def extract_exception(clauses: list[Clause]) -> dict[str, Any]:
-    return _collect_terms(clauses, EXCEPTION_TERMS)
+    facts = _collect_terms(clauses, EXCEPTION_TERMS)
+    facts["cross_refs"] = extract_cross_refs(clauses)
+    return facts
 
 
 EXTRACTORS = {
@@ -236,47 +359,87 @@ def _semantic_payload(item_key: str, facts: dict[str, Any]) -> Any:
         return None
     if item_key == "payment_term":
         return (facts.get("value"), facts.get("unit"))
-    return tuple(facts.get("events") or facts.get("terms") or ())
+    # 集合语义：条款/事件的先后顺序不是事实差异（顺序变化由主条款文本哈希体现）。
+    return tuple(sorted(facts.get("events") or facts.get("terms") or ()))
 
 
-def align_item(item_key: str, base: dict[str, Any], revised: dict[str, Any]) -> str:
-    """只比较文本事实；无法判定时返回 unidentified，绝不猜「无差异」。"""
+def align_item(
+    item_key: str,
+    base: dict[str, Any],
+    revised: dict[str, Any],
+    *,
+    scan_truncated: bool = False,
+) -> str:
+    """只比较文本事实 + 归一化主条款文本；无法判定时不报「无差异」。"""
     base_found = base["status"] != "not_found"
     revised_found = revised["status"] != "not_found"
+    result: str
     if not base_found and not revised_found:
+        result = "unidentified"
+    elif not base_found:
+        result = "added"
+    elif not revised_found:
+        result = "removed"
+    elif base["status"] == "ambiguous" or revised["status"] == "ambiguous":
+        result = "unidentified"
+    elif _semantic_payload(item_key, base) == _semantic_payload(item_key, revised):
+        base_sha = base.get("text_sha256")
+        revised_sha = revised.get("text_sha256")
+        if base_sha and revised_sha and base_sha != revised_sha:
+            # 事实词元相同但文本变了（否定/主体/限定语）：必须报差异。
+            result = "modified"
+        elif (base.get("clause_no") or []) != (revised.get("clause_no") or []):
+            result = "renumbered"
+        else:
+            result = "unchanged"
+    else:
+        result = "modified"
+    if scan_truncated and result != "modified":
+        # 扫描被截断时不能宣称「无差异/仅重编号/新增/缺失」这类需要全量的结论。
         return "unidentified"
-    if not base_found:
-        return "added"
-    if not revised_found:
-        return "removed"
-    if base["status"] == "ambiguous" or revised["status"] == "ambiguous":
-        return "unidentified"
-    if _semantic_payload(item_key, base) == _semantic_payload(item_key, revised):
-        base_clause = base.get("clause_no") or []
-        revised_clause = revised.get("clause_no") or []
-        if base_clause and revised_clause and base_clause != revised_clause:
-            return "renumbered"
-        return "unchanged"
-    return "modified"
+    return result
 
 
-async def _load_clauses(session: AsyncSession, document_id: str) -> tuple[list[Clause], int, int]:
-    """返回 (原文条款, parser 原文块数, 总块数)；有块但无原文时显式拒绝。"""
+async def _load_clauses(
+    session: AsyncSession, document: Document, side: str
+) -> tuple[list[Clause], dict[str, Any]]:
+    """读取一方的 parser 原文条款；未索引/无分块/混 legacy 都显式拒绝。"""
+    if document.status != DocumentStatus.INDEXED:
+        raise ConflictError(
+            "案件文档当前不可用于分析（未索引或解析失败）",
+            error_code="REVIEW_DOCUMENT_NOT_READY",
+            detail={"side": side, "status": document.status.value},
+        )
+    total = int(
+        (
+            await session.execute(
+                select(func.count(DocumentChunk.id)).where(DocumentChunk.document_id == document.id)
+            )
+        ).scalar()
+        or 0
+    )
+    if total == 0:
+        raise ConflictError(
+            "案件文档没有可分析的分块",
+            error_code="REVIEW_DOCUMENT_NOT_READY",
+            detail={"side": side, "reason": "no_chunks"},
+        )
     clauses: list[Clause] = []
-    total = 0
-    original = 0
-    async for chunk in iter_chunks(session, document_id, max_chunks=MAX_EVIDENCE_SCAN_CHUNKS):
-        total += 1
-        text = chunk_original_text(chunk)
-        if text is None:
+    scanned = 0
+    legacy = 0
+    async for chunk in iter_chunks(session, document.id, max_chunks=MAX_EVIDENCE_SCAN_CHUNKS):
+        scanned += 1
+        raw = chunk_original_text(chunk)
+        if raw is None:
+            legacy += 1
             continue
-        original += 1
-        fields = extract_clause_fields(text)
+        fields = extract_clause_fields(raw)
         clauses.append(
             Clause(
                 chunk_id=chunk.id,
                 chunk_index=chunk.chunk_index,
-                text=text,
+                text=normalize_clause_text(raw),
+                raw_text=raw,
                 clause_no=fields["clause_no"],
                 section_no=fields["section_no"],
                 page_number=chunk.page_number,
@@ -284,9 +447,13 @@ async def _load_clauses(session: AsyncSession, document_id: str) -> tuple[list[C
                 char_end=chunk.end_pos,
             )
         )
-    if total > 0 and original == 0:
-        raise SourceProvenanceUnavailableError([document_id], unverified_count=total)
-    return clauses, original, total
+    if legacy > 0:
+        # 混有未迁移分块 = 证据覆盖不完整；与 Batch 1 readiness 的 legacy_unverified 同口径。
+        raise SourceProvenanceUnavailableError([document.id], unverified_count=legacy)
+    return clauses, {
+        "scanned_chunks": scanned,
+        "truncated": scanned >= MAX_EVIDENCE_SCAN_CHUNKS and scanned < total,
+    }
 
 
 def _clause_by_locator(clauses: list[Clause], facts: dict[str, Any]) -> Clause | None:
@@ -314,6 +481,7 @@ async def analyze_case(session: AsyncSession, case: ReviewCase) -> dict[str, Any
         "revised": case.revised_document_id,
     }
     clauses: dict[str, list[Clause]] = {}
+    scans: dict[str, dict[str, Any]] = {}
     metas = {}
     for side, document_id in side_docs.items():
         document = await session.get(Document, document_id)
@@ -323,8 +491,14 @@ async def analyze_case(session: AsyncSession, case: ReviewCase) -> dict[str, Any
                 error_code="REVIEW_DOCUMENT_UNAVAILABLE",
                 detail={"document_id": document_id, "side": side},
             )
-        clauses[side], _, _ = await _load_clauses(session, document_id)
+        clauses[side], scans[side] = await _load_clauses(session, document, side)
         metas[side] = await get_review_meta(session, document_id)
+        if metas[side] is None:
+            raise ConflictError(
+                "案件文档缺少核验身份，无法分析",
+                error_code="REVIEW_META_MISSING",
+                detail={"document_id": document_id, "side": side},
+            )
 
     items = (
         (
@@ -342,11 +516,18 @@ async def analyze_case(session: AsyncSession, case: ReviewCase) -> dict[str, Any
         if extractor is None:
             continue
         facts_by_side = {side: extractor(clauses[side]) for side in side_docs}
-        item.facts = {"extractor_version": EXTRACTOR_VERSION, **facts_by_side}
+        scan_truncated = scans["base"]["truncated"] or scans["revised"]["truncated"]
+        item.facts = {
+            "extractor_version": EXTRACTOR_VERSION,
+            "scan": {side: dict(scan) for side, scan in scans.items()},
+            **facts_by_side,
+        }
         item.change_type = align_item(
-            item.item_key, facts_by_side["base"], facts_by_side["revised"]
+            item.item_key,
+            facts_by_side["base"],
+            facts_by_side["revised"],
+            scan_truncated=scan_truncated,
         )
-        # 主条款快照：让 facts 的定位在重构后仍可回查（已存在则不重复）。
         for side in side_docs:
             facts = facts_by_side[side]
             if facts["status"] == "not_found":
@@ -363,10 +544,23 @@ async def analyze_case(session: AsyncSession, case: ReviewCase) -> dict[str, Any
                 meta=metas[side],
                 chunk_id=clause.chunk_id,
                 chunk_index=clause.chunk_index,
-                quote=clause.text,
+                quote=clause.raw_text,
                 page_number=clause.page_number,
                 char_start=clause.char_start,
                 char_end=clause.char_end,
             )
-    await session.commit()
-    return await case_detail(session, case)
+    try:
+        await session.commit()
+    except IntegrityError as exc:
+        # 并发两次 analyze 同时补同一 (item, side, chunk)：唯一约束最后兜底。
+        await session.rollback()
+        raise ConflictError(
+            "核验分析并发冲突，请重试", error_code="REVIEW_CASE_ANALYSIS_CONFLICT"
+        ) from exc
+    # commit 后 onupdate 列（updated_at）可能处于过期状态；在**当前会话**里重载
+    # 案件再组装详情，避免对游离对象 refresh 或同步属性访问触发隐式 IO。
+    fresh = await session.get(ReviewCase, case.id)
+    if fresh is None:
+        raise ConflictError("核验案件已被删除", error_code="REVIEW_CASE_NOT_FOUND")
+    await session.refresh(fresh)
+    return await case_detail(session, fresh)

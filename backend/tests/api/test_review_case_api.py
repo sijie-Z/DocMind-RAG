@@ -400,3 +400,44 @@ async def test_analyze_blocked_case_409_cross_org_403_and_unknown_404(factory, m
         assert cross.status_code == 403, cross.text
         missing = await ac.post(f"/api/v1/reviews/{uuid.uuid4()}/analyze")
         assert missing.status_code == 404, missing.text
+
+
+@pytest.mark.asyncio
+async def test_analyze_requires_write_permission(factory, monkeypatch):
+    async with _Ctx(_user(superuser=True), factory) as ac:
+        case = await _create_case(ac)
+
+    async def _read_only(_db, _user_obj, organization_id=None):
+        return {PermissionType.DOCUMENT_READ.value}
+
+    monkeypatch.setattr("app.core.security.permission_service.get_user_permissions", _read_only)
+
+    async with _Ctx(_user(org=ORG), factory) as ac:
+        r = await ac.post(f"/api/v1/reviews/{case['id']}/analyze")
+        assert r.status_code == 403, r.text
+
+
+@pytest.mark.asyncio
+async def test_analyze_legacy_after_creation_maps_409(factory):
+    async with _Ctx(_user(superuser=True), factory) as ac:
+        case = await _create_case(ac)
+        async with factory() as db:
+            await db.execute(
+                DocumentChunk.__table__.delete().where(DocumentChunk.document_id == BASE)
+            )
+            db.add(
+                DocumentChunk(
+                    id=str(uuid.uuid4()),
+                    document_id=BASE,
+                    chunk_index=0,
+                    chunk_text="旧文 付款期限30天",
+                    original_text=None,
+                    chunk_length=10,
+                    page_number=1,
+                    meta_data={"text_provenance": "legacy_unverified"},
+                )
+            )
+            await db.commit()
+        r = await ac.post(f"/api/v1/reviews/{case['id']}/analyze")
+        assert r.status_code == 409, r.text
+        assert r.json()["error_code"] == "SOURCE_ORIGINAL_UNAVAILABLE"

@@ -229,7 +229,7 @@ Query enters
 | Documents | `/documents` | Document parsing, vectorization, knowledge base indexing, status tracking |
 | Chat | `/chat` | Session CRUD, SSE streaming Q&A, strict mode, debug endpoints |
 | Knowledge | `/knowledge` | Knowledge base CRUD, retrieval, statistics, settings |
-| Contract Review | `/reviews` | Review cases / items / evidence snapshots (parser-original quotes + version hashes; Batch 2) |
+| Contract Review | `/reviews` | Review cases / items / evidence snapshots + deterministic extraction and V1/V2 alignment (parser-original quotes + version hashes) |
 | Organizations | `/organizations` | Org CRUD, member management, role assignment |
 | Organization Settings | `/organizations` | Org-level settings and audit (shared prefix with Organizations) |
 | Monitoring | `/monitoring` | Performance metrics, health checks, alerts, RAG quality scoring |

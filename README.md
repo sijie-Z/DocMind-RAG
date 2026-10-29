@@ -229,7 +229,7 @@ hook 失败产出 `hook_error` SSE + `docmind_hook_*` 指标。详见
 | 文档管理 | `/documents` | 文档解析、向量化、知识库索引、状态追踪 |
 | 聊天 | `/chat` | 会话 CRUD、SSE 流式问答、严格模式、调试端点 |
 | 知识库 | `/knowledge` | 知识库 CRUD、检索、统计、设置 |
-| 合同核验 | `/reviews` | 核验案件/核验项/证据快照（原文证据 + 版本哈希；Batch 2） |
+| 合同核验 | `/reviews` | 核验案件/核验项/证据快照 + 确定性抽取与 V1/V2 对齐（原文证据 + 版本哈希） |
 | 组织管理 | `/organizations` | 组织 CRUD、成员管理、角色分配 |
 | 组织设置 | `/organizations` | 组织级设置读写与审计（与组织管理共用前缀） |
 | 系统监控 | `/monitoring` | 性能指标、健康检查、告警、RAG 质量评估 |
