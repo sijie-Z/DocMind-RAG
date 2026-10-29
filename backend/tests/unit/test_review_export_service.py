@@ -397,6 +397,8 @@ async def test_markdown_escapes_table_and_flattens_quotes(factory):
     items = await _items(factory, case.id)
     async with factory() as db:
         fresh = await db.get(type(case), case.id)
+        fresh.title = "export case\n## 伪造章节"
+        await db.commit()
         for item in items:
             db_item = await db.get(ReviewItem, item.id)
             note = "已核对 | 见附件\n第二行" if item.id == items[0].id else "ok"
@@ -405,6 +407,8 @@ async def test_markdown_escapes_table_and_flattens_quotes(factory):
         markdown = svc.render_markdown(export.payload)
     assert "已核对 \\| 见附件 第二行" in markdown
     assert "\n第二行" not in markdown
+    assert "# 核验单：export case ## 伪造章节" in markdown, "标题换行必须折叠"
+    assert "\n## 伪造章节" not in markdown, "标题不得注入独立章节"
 
 
 @pytest.mark.asyncio
