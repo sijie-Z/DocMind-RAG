@@ -256,3 +256,26 @@ class ReviewEvidence(Base):
     updated_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), onupdate=func.now(), comment="选择状态更新时间"
     )
+
+
+class ReviewExport(Base):
+    """核验单快照：导出后不可变；决策变化只能新增行（旧行留档）。"""
+
+    __tablename__ = "review_export"
+    __table_args__ = (Index("ix_review_export_case_created", "case_id", "created_at"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    case_id: Mapped[str] = mapped_column(String(36), ForeignKey("review_case.id"), nullable=False)
+    organization_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("organizations.id"), nullable=False
+    )
+    schema_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    payload: Mapped[Any] = mapped_column(JSON, nullable=False)
+    payload_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    item_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    needs_human_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    insufficient_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    created_by: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), comment="导出时间"
+    )

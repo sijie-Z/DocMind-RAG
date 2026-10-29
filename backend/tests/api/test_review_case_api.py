@@ -441,3 +441,125 @@ async def test_analyze_legacy_after_creation_maps_409(factory):
         r = await ac.post(f"/api/v1/reviews/{case['id']}/analyze")
         assert r.status_code == 409, r.text
         assert r.json()["error_code"] == "SOURCE_ORIGINAL_UNAVAILABLE"
+
+
+@pytest.mark.asyncio
+async def test_decision_export_and_download_flow(factory):
+    async with _Ctx(_user(superuser=True), factory) as ac:
+        case = await _create_case(ac)
+        blocked = await ac.post(f"/api/v1/reviews/{case['id']}/export")
+        assert blocked.status_code == 409, blocked.text
+        assert blocked.json()["error_code"] == "REVIEW_EXPORT_BLOCKED"
+
+        for item in case["items"]:
+            decided = await ac.put(
+                f"/api/v1/reviews/{case['id']}/items/{item['id']}/decision",
+                json={"status": "verified", "note": "已核对"},
+            )
+            assert decided.status_code == 200, decided.text
+
+        exported = await ac.post(f"/api/v1/reviews/{case['id']}/export")
+        assert exported.status_code == 200, exported.text
+        export = exported.json()["data"]
+        assert export["item_count"] == 4
+
+        listed = await ac.get(f"/api/v1/reviews/{case['id']}/exports")
+        assert listed.status_code == 200
+        assert listed.json()["data"]["items"][0]["id"] == export["id"]
+
+        download = await ac.get(
+            f"/api/v1/reviews/{case['id']}/exports/{export['id']}/download",
+            params={"format": "json"},
+        )
+        assert download.status_code == 200, download.text
+        assert download.headers["content-type"].startswith("application/json")
+        assert download.headers["content-disposition"].startswith("attachment; filename=")
+        body = download.json()
+        assert body["schema_version"] == 1
+        assert body["documents"]["base"]["version_label"] == "V1"
+        assert "chunk_text" not in download.text
+
+        markdown = await ac.get(
+            f"/api/v1/reviews/{case['id']}/exports/{export['id']}/download",
+            params={"format": "markdown"},
+        )
+        assert markdown.status_code == 200
+        assert "text/markdown" in markdown.headers["content-type"]
+        assert "# 核验单" in markdown.text
+        assert "本核验单仅覆盖本次选定的条款与文档版本" in markdown.text
+
+        detail = await ac.get(f"/api/v1/reviews/{case['id']}")
+        assert detail.json()["data"]["status"] == "completed"
+
+
+@pytest.mark.asyncio
+async def test_decision_export_permission_and_scope(factory, monkeypatch):
+    async with _Ctx(_user(superuser=True), factory) as ac:
+        case = await _create_case(ac)
+        item = case["items"][0]
+
+    async def _grant_all(_db, _user_obj, organization_id=None):
+        return {PermissionType.DOCUMENT_READ.value, PermissionType.DOCUMENT_UPDATE.value}
+
+    monkeypatch.setattr("app.core.security.permission_service.get_user_permissions", _grant_all)
+    async with _Ctx(_user(org=2), factory) as ac:
+        put = await ac.put(
+            f"/api/v1/reviews/{case['id']}/items/{item['id']}/decision",
+            json={"status": "verified"},
+        )
+        post = await ac.post(f"/api/v1/reviews/{case['id']}/export")
+        download = await ac.get(
+            f"/api/v1/reviews/{case['id']}/exports/{uuid.uuid4()}/download",
+            params={"format": "json"},
+        )
+    assert put.status_code == 403, put.text
+    assert post.status_code == 403, post.text
+    assert download.status_code == 403, download.text
+
+    async def _read_only(_db, _user_obj, organization_id=None):
+        return {PermissionType.DOCUMENT_READ.value}
+
+    monkeypatch.setattr("app.core.security.permission_service.get_user_permissions", _read_only)
+    async with _Ctx(_user(org=ORG), factory) as ac:
+        ro_put = await ac.put(
+            f"/api/v1/reviews/{case['id']}/items/{item['id']}/decision",
+            json={"status": "verified"},
+        )
+        ro_post = await ac.post(f"/api/v1/reviews/{case['id']}/export")
+        ro_list = await ac.get(f"/api/v1/reviews/{case['id']}/exports")
+    assert ro_put.status_code == 403, ro_put.text
+    assert ro_post.status_code == 403, ro_post.text
+    assert ro_list.status_code == 200, ro_list.text
+
+
+@pytest.mark.asyncio
+async def test_decision_on_blocked_case_is_409_and_unknown_export_404(factory):
+    async with _Ctx(_user(superuser=True), factory) as ac:
+        blocked = (await ac.post("/api/v1/reviews", json=_case_payload(revised=LEGACY))).json()[
+            "data"
+        ]
+        item = blocked["items"][0]
+        r = await ac.put(
+            f"/api/v1/reviews/{blocked['id']}/items/{item['id']}/decision",
+            json={"status": "verified"},
+        )
+        assert r.status_code == 409, r.text
+        assert r.json()["error_code"] == "REVIEW_CASE_NOT_READY"
+
+        case = await _create_case(ac)
+        for it in case["items"]:
+            await ac.put(
+                f"/api/v1/reviews/{case['id']}/items/{it['id']}/decision",
+                json={"status": "not_applicable"},
+            )
+        export = (await ac.post(f"/api/v1/reviews/{case['id']}/export")).json()["data"]
+        missing = await ac.get(
+            f"/api/v1/reviews/{case['id']}/exports/{uuid.uuid4()}/download",
+            params={"format": "json"},
+        )
+        assert missing.status_code == 404, missing.text
+        good = await ac.get(
+            f"/api/v1/reviews/{case['id']}/exports/{export['id']}/download",
+            params={"format": "json"},
+        )
+        assert good.status_code == 200
