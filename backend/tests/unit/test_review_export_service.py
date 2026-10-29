@@ -191,6 +191,19 @@ async def test_export_blocked_until_all_items_decided(factory):
 
 
 @pytest.mark.asyncio
+async def test_export_blocked_merges_reasons_for_new_case(factory):
+    """未决策且未分析的新案件：每个条目一条记录，reasons 同时含两项。"""
+    case = await _seed_case(factory)
+    async with factory() as db:
+        fresh = await db.get(type(case), case.id)
+        with pytest.raises(ConflictError) as excinfo:
+            await svc.export_case(db, fresh, user_id=USER_ID)
+    blocking = excinfo.value.detail["items"]
+    assert len(blocking) == 4, "每个核验项只出现一次"
+    assert all(item["reasons"] == ["undecided", "not_analyzed"] for item in blocking)
+
+
+@pytest.mark.asyncio
 async def test_export_requires_analysis_first(factory):
     case = await _seed_case(factory)
     await _decide_all(factory, case)
