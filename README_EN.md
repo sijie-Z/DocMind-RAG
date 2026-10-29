@@ -220,7 +220,7 @@ DocMind/
 │   │   ├── api/v1/
 │   │   │   ├── router.py            # main router (29 modules registered)
 │   │   │   └── endpoints/           # Endpoint implementations (29 files)
-│   │   ├── services/                # business services (29 services)
+│   │   ├── services/                # business services (30 services)
 │   │   ├── models/                  # ORM models (21 model files)
 │   │   ├── core/                    # config / DB / Redis / ES / MinIO / Kafka / JWT
 │   │   └── worker/                  # Kafka consumer (parse → chunk → embed → index)
@@ -248,7 +248,7 @@ DocMind/
 | Documents | `/documents` | Document parsing, vectorization, knowledge base indexing, status tracking |
 | Chat | `/chat` | Session CRUD, SSE streaming Q&A, strict mode, debug endpoints |
 | Knowledge | `/knowledge` | Knowledge base CRUD, retrieval, statistics, settings |
-| Contract Review | `/reviews` | Review cases / items / evidence snapshots (parser-original quotes + version hashes) |
+| Contract Review | `/reviews` | Review cases / items / evidence snapshots + deterministic extraction and V1/V2 alignment (parser-original quotes + version hashes) |
 | Organizations | `/organizations` | Org CRUD, member management, role assignment |
 | Organization Settings | `/organizations` | Org-level settings and audit (shared prefix with Organizations) |
 | Monitoring | `/monitoring` | Performance metrics, health checks, alerts, RAG quality scoring |
