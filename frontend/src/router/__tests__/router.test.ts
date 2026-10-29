@@ -43,7 +43,11 @@ describe('路由表', () => {
   it('每条具名路由都能解析出匹配项', () => {
     const router = createRouter({ history: createMemoryHistory(), routes })
     for (const r of named) {
-      const resolved = router.resolve({ name: r.name as string })
+      // 带参路由（如 reviews/:id）解析时必须补占位参数。
+      const params = Object.fromEntries(
+        (r.path.match(/:([A-Za-z0-9_]+)/g) ?? []).map((token) => [token.slice(1), 'probe'])
+      )
+      const resolved = router.resolve({ name: r.name as string, params })
       expect(resolved.matched.length, `路由 ${String(r.name)} 无法解析`).toBeGreaterThan(0)
     }
   })

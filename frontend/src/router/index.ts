@@ -164,6 +164,26 @@ export const routes: RouteRecordRaw[] = [
         }
       },
       {
+        path: 'reviews',
+        name: 'Reviews',
+        component: () => import('@/views/reviews/index.vue'),
+        meta: {
+          title: 'menu.reviews',
+          icon: 'document-text'
+        }
+      },
+      {
+        path: 'reviews/:id',
+        name: 'ReviewDetail',
+        component: () => import('@/views/reviews/detail.vue'),
+        meta: {
+          title: 'menu.reviews',
+          // 详情页侧栏高亮「合同核验」一级项
+          activeMenu: 'Reviews',
+          icon: 'document-text'
+        }
+      },
+      {
         path: 'organizations',
         name: 'Organizations',
         component: () => import('@/views/organizations/index.vue'),

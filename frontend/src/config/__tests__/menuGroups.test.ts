@@ -47,7 +47,7 @@ const expectedDomains = [
   },
   {
     key: 'menu.groupKnowledge',
-    routes: ['Knowledge', 'Search'],
+    routes: ['Knowledge', 'Search', 'Reviews'],
     adminOnly: false,
   },
   {

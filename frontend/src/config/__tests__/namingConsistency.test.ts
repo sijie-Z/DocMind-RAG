@@ -77,6 +77,7 @@ for (const item of USER_MENU_ITEMS) {
 /** 已归一注册表：routeName → 视图文件（glob 键，相对本文件），主标题必须与菜单同键 */
 const NORMALIZED_PAGES: Record<string, string> = {
   Search: '../../views/search.vue',
+  Reviews: '../../views/reviews/index.vue',
   AuditLogs: '../../views/admin/audit/index.vue',
   SystemHelp: '../../views/systemHelp/index.vue',
   // T9 十组页名归一：h1 全部改引菜单键（值以菜单语义为准，裁决依据见 T9 报告）
@@ -106,6 +107,7 @@ const MERGED_INTO_CHAT: Record<string, string> = {
 const NO_NAME_HEADING: Record<string, string> = {
   Dashboard: 'h1 是问候语（dashboard.welcome），页名由菜单/顶栏承载',
   Chat: 'h1 是动态会话标题（ChatHeader）',
+  ReviewDetail: 'h1 是案件标题（动态），页名由菜单/顶栏承载',
   Profile: 'h2 是用户昵称，页名由菜单/顶栏承载',
   SystemAbout: 'h1 是品牌名 DocMind',
 }

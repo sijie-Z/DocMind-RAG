@@ -64,6 +64,7 @@ export const SIDEBAR_MENU_GROUPS: MenuGroupDef[] = [
     items: [
       { routeName: 'Knowledge', i18nKey: 'menu.knowledge', icon: 'book' },
       { routeName: 'Search', i18nKey: 'menu.search', icon: 'search' },
+      { routeName: 'Reviews', i18nKey: 'menu.reviews', icon: 'document-text' },
     ],
   },
   {
