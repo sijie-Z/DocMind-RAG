@@ -14,7 +14,8 @@
   文本变化（否定/主体/限定语）→ modified；事实与文本相同、条号变化 →
   renumbered；完全相同 → unchanged；无法判定/扫描截断 → unidentified；
 - 条款/事件的先后顺序不产生事实差异（按集合比较，仅顺序变化 → unchanged）；
-  moved 类型 v1 不产出；
+  moved 类型 v1 不产出；排除语境只在期限所在分句及其相邻分句的付款回退中
+  生效（「付款方逾期，30 天内未付款」这类跨分句排除属已知边界）；
 - 纯规则实现：不调用 LLM、不访问网络、不依赖 ES；同一输入重复运行结果一致；
 - 主条款以 candidate 证据快照落库（已存在的同一 item/side/chunk 不重复写入，
   不触碰人工已选/角色）。
@@ -72,6 +73,18 @@ NON_PAYMENT_CONTEXT = (
     "违约",
     "滞纳",
     "罚息",
+    "交货期",
+    "交付期",
+    "工期",
+    "供货期",
+    "装运期",
+    "服务期",
+    "质量保证",
+    "供货周期",
+    "合同期限",
+    "合作期",
+    "试用期",
+    "租赁期",
 )
 # 「天」按自然日；单独「日」无法判定自然日/工作日 → ambiguous。
 DURATION_RE = re.compile(r"(\d+)\s*(个)?\s*(工作日|自然日|日历日|天|日)")
@@ -240,6 +253,10 @@ def _payment_anchor_distance(fragment: str, start: int, end: int) -> int | None:
     return best
 
 
+def _has_payment_anchor(fragment: str) -> bool:
+    return _payment_anchor_distance(fragment, len(fragment), len(fragment)) is not None
+
+
 def _duration_context_ok(sentence: str, start: int, end: int) -> bool:
     """期限只归属它所在的分句片段（中文「保修期为12个月，付款时扣留」
     里的付款动作不能把保修期认成账期）。
@@ -250,19 +267,23 @@ def _duration_context_ok(sentence: str, start: int, end: int) -> bool:
     - 片段内没有付款锚点：仅当上一分句有付款锚点且本片段没有排除锚点
       时接受（如「关于付款，期限为 30 天」）。
     """
-    previous_text = ""
-    for fragment, offset in _iter_fragments(sentence):
+    fragments = list(_iter_fragments(sentence))
+    for index, (fragment, offset) in enumerate(fragments):
         fragment_end = offset + len(fragment)
-        if start >= offset and end <= fragment_end:
-            local_start, local_end = start - offset, end - offset
-            payment = _payment_anchor_distance(fragment, local_start, local_end)
-            excluded = _anchor_distance(fragment, local_start, local_end, NON_PAYMENT_CONTEXT)
-            if payment is not None:
-                return excluded is None or payment < excluded
-            if excluded is not None:
-                return False
-            return _anchor_distance(previous_text, 0, 0, PAYMENT_KEYWORDS) is not None
-        previous_text = fragment
+        if not (start >= offset and end <= fragment_end):
+            continue
+        local_start, local_end = start - offset, end - offset
+        payment = _payment_anchor_distance(fragment, local_start, local_end)
+        excluded = _anchor_distance(fragment, local_start, local_end, NON_PAYMENT_CONTEXT)
+        if payment is not None:
+            # 等距时按付款处理：「到期后 30 天内付款」不应被排除词误杀。
+            return excluded is None or payment <= excluded
+        if excluded is not None:
+            return False
+        # 付款动作可以在相邻分句（中文常见：「…后 30 日内，向乙方支付…」）。
+        previous_text = fragments[index - 1][0] if index > 0 else ""
+        next_text = fragments[index + 1][0] if index + 1 < len(fragments) else ""
+        return _has_payment_anchor(previous_text) or _has_payment_anchor(next_text)
     return False
 
 

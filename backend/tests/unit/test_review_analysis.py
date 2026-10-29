@@ -187,6 +187,55 @@ def test_postfix_payment_phrasing_is_identified():
     assert signed["status"] == "identified"
 
 
+def test_payment_anchor_in_adjacent_fragment_is_inherited():
+    """「…后 30 日内，向乙方支付…」：付款动作在下一个分句也要识别。"""
+    workday = analysis.extract_payment_term(
+        [_clause("第八条 验收合格后30个工作日内，甲方支付至合同总价的95%。")]
+    )
+    assert workday["status"] == "identified"
+    assert (workday["value"], workday["unit"]) == (30, "workday")
+
+    month = analysis.extract_payment_term([_clause("第八条 甲方应在2个月内，向乙方付清全部货款。")])
+    assert (month["value"], month["unit"]) == (2, "month")
+
+    ri = analysis.extract_payment_term(
+        [_clause("第八条 甲方应在收到乙方开具的发票后30日内，向乙方支付合同价款的95%。")]
+    )
+    assert ri["status"] == "ambiguous"
+    assert "unit_unclear" in ri["reason"]
+
+
+def test_non_payment_periods_are_not_inherited_as_terms():
+    """交货期/合同期限/质量保证期不得被相邻付款分句继承成账期。"""
+    delivery = analysis.extract_payment_term([_clause("第八条 付款方式为银行转账，交货期为30天。")])
+    assert delivery == {"status": "not_found", "reason": "no_duration"}
+
+    contract = analysis.extract_payment_term(
+        [_clause("第八条 付款方式为银行转账，合同期限为12个月。")]
+    )
+    assert contract == {"status": "not_found", "reason": "no_duration"}
+
+    quality = analysis.extract_payment_term(
+        [_clause("第八条 付款期限为30天，质量保证期为24个月。")]
+    )
+    assert quality["status"] == "identified"
+    assert (quality["value"], quality["unit"]) == (30, "day")
+
+
+def test_equal_distance_prefers_payment_anchor():
+    """「到期后30天内付款」付款与排除词等距时应按付款处理，而不是误杀。"""
+    facts = analysis.extract_payment_term([_clause("第八条 到期后30天内付款。")])
+    assert facts["status"] == "identified"
+    assert (facts["value"], facts["unit"]) == (30, "day")
+
+
+def test_cross_fragment_overdue_is_not_payment_term():
+    facts = analysis.extract_payment_term(
+        [_clause("第八条 甲方逾期付款，超过30天的，乙方有权解除合同。")]
+    )
+    assert facts == {"status": "not_found", "reason": "no_duration"}
+
+
 def test_postfix_ri_is_ambiguous_not_not_found():
     """「30日内支付」：期限能识别、单位存疑 → ambiguous，不是 not_found。"""
     facts = analysis.extract_payment_term([_clause("第八条 甲方应在30日内支付货款。")])
@@ -209,6 +258,12 @@ def test_cross_phrasing_30_vs_60_is_modified_not_removed():
     )
     assert base["status"] == "identified" and revised["status"] == "identified"
     assert analysis.align_item("payment_term", base, revised) == "modified"
+
+    comma = analysis.extract_payment_term(
+        [_clause("第八条 收到发票后60天内，甲方支付货款。", clause_no=[8])]
+    )
+    assert comma["status"] == "identified"
+    assert analysis.align_item("payment_term", base, comma) == "modified"
 
     both_base = analysis.extract_payment_term(
         [_clause("第八条 收到发票后30天内支付货款。", clause_no=[8])]
