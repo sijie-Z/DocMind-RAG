@@ -75,7 +75,7 @@
             >
               <div class="flex items-center justify-between">
                 <div class="text-sm font-semibold text-gray-700 dark:text-gray-200">
-                  {{ t(`reviews.doc${sideCap(side)}`) }}
+                  {{ docLabel(side) }}
                 </div>
                 <n-tag
                   v-if="docOf(side)?.readiness"
@@ -121,7 +121,7 @@
             >
               <div class="flex flex-wrap items-center gap-2">
                 <span class="text-base font-semibold text-gray-800 dark:text-gray-100">
-                  {{ t(`reviews.item${itemCap(item.item_key)}`) }}
+                  {{ itemLabel(item.item_key) }}
                 </span>
                 <n-tag v-if="item.change_type" :type="changeTagType[item.change_type]" size="small">
                   {{ changeLabel[item.change_type] }}
@@ -136,7 +136,7 @@
               <div class="mt-2 space-y-1 text-xs text-gray-600 dark:text-gray-300">
                 <div class="font-medium text-gray-500">{{ t('reviews.factsTitle') }}</div>
                 <div v-for="line in factLines(item)" :key="line.side">
-                  <span class="text-gray-400">{{ t(`reviews.doc${sideCap(line.side)}`) }}:</span>
+                  <span class="text-gray-400">{{ docLabel(line.side) }}:</span>
                   {{ line.text }}
                 </div>
               </div>
@@ -148,7 +148,7 @@
                 <div class="grid gap-3 md:grid-cols-3">
                   <div v-for="side in SIDES" :key="side" class="rounded-lg bg-gray-50 p-2 dark:bg-gray-800/50">
                     <div class="mb-1 text-xs font-medium text-gray-500">
-                      {{ t(`reviews.doc${sideCap(side)}`) }}
+                      {{ docLabel(side) }}
                     </div>
                     <template v-if="(item.evidence[side] || []).length">
                       <div
@@ -233,6 +233,7 @@
                   size="small"
                   class="flex-1"
                   :placeholder="t('reviews.decisionNote')"
+                  :maxlength="2000"
                   :disabled="detail.status === 'blocked'"
                 />
                 <n-button
@@ -388,14 +389,23 @@ const canExport = computed(() => {
   )
 })
 
-function sideCap(side: ReviewSide) {
-  return side.charAt(0).toUpperCase() + side.slice(1)
+// 静态键映射：动态模板键无法通过 tUsageKeysDefined 门禁（前缀不是对象节点）。
+const DOC_LABELS: Record<ReviewSide, string> = {
+  policy: 'reviews.docPolicy',
+  base: 'reviews.docBase',
+  revised: 'reviews.docRevised'
 }
-function itemCap(key: string) {
-  return key
-    .split('_')
-    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-    .join('')
+const ITEM_LABELS: Record<string, string> = {
+  payment_term: 'reviews.itemPaymentTerm',
+  start_condition: 'reviews.itemStartCondition',
+  acceptance_invoice: 'reviews.itemAcceptanceInvoice',
+  exception: 'reviews.itemException'
+}
+function docLabel(side: ReviewSide) {
+  return t(DOC_LABELS[side])
+}
+function itemLabel(key: string) {
+  return ITEM_LABELS[key] ? t(ITEM_LABELS[key]) : key
 }
 function docOf(side: ReviewSide) {
   return detail.value?.documents?.[side]
