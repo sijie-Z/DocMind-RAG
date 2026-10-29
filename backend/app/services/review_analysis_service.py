@@ -15,7 +15,9 @@
   renumbered；完全相同 → unchanged；无法判定/扫描截断 → unidentified；
 - 条款/事件的先后顺序不产生事实差异（按集合比较，仅顺序变化 → unchanged）；
   moved 类型 v1 不产出；排除语境只在期限所在分句及其相邻分句的付款回退中
-  生效（「付款方逾期，30 天内未付款」这类跨分句排除属已知边界）；
+  生效（「付款方逾期，30 天内未付款」这类跨分句排除属已知边界）；交货动词
+  与「付款后 N 天内交货」类复合语序、宽限期/质保金期限同句属 v1 已登记
+  边界（见 tests 中 xfail / 保守 ambiguous 用例）；
 - 纯规则实现：不调用 LLM、不访问网络、不依赖 ES；同一输入重复运行结果一致；
 - 主条款以 candidate 证据快照落库（已存在的同一 item/side/chunk 不重复写入，
   不触碰人工已选/角色）。
@@ -70,6 +72,7 @@ NON_PAYMENT_CONTEXT = (
     "保证金",
     "押金",
     "逾期",
+    "未付",
     "违约",
     "滞纳",
     "罚息",
@@ -234,22 +237,39 @@ def _adjacent_to_exclusion(fragment: str, start: int, end: int) -> bool:
 
 
 def _payment_anchor_distance(fragment: str, start: int, end: int) -> int | None:
-    """最近的付款锚点距离；与排除锚点相邻的付款词（如「逾期付款」）不算。"""
-    best: int | None = None
+    """最近的付款锚点距离。
+
+    与排除锚点相邻的付款词不算（「逾期付款」）；与已跳过付款词相邻的复合词
+    同样跳过（「逾期支付货款」里的「货款」），避免复合语境被任一近义词带回。
+    """
+    spans: list[tuple[int, int]] = []
     for anchor in PAYMENT_KEYWORDS:
         index = fragment.find(anchor)
         while index != -1:
-            anchor_start, anchor_end = index, index + len(anchor)
-            if not _adjacent_to_exclusion(fragment, anchor_start, anchor_end):
-                if anchor_end <= start:
-                    distance = start - anchor_end
-                elif anchor_start >= end:
-                    distance = anchor_start - end
-                else:
-                    distance = 0
-                if best is None or distance < best:
-                    best = distance
+            spans.append((index, index + len(anchor)))
             index = fragment.find(anchor, index + 1)
+    skipped = {(s0, s1) for s0, s1 in spans if _adjacent_to_exclusion(fragment, s0, s1)}
+    changed = True
+    while changed:
+        changed = False
+        for s0, s1 in spans:
+            if (s0, s1) in skipped:
+                continue
+            if any(s0 <= k1 + 1 and k0 <= s1 + 1 for k0, k1 in skipped):
+                skipped.add((s0, s1))
+                changed = True
+    best: int | None = None
+    for s0, s1 in spans:
+        if (s0, s1) in skipped:
+            continue
+        if s1 <= start:
+            distance = start - s1
+        elif s0 >= end:
+            distance = s0 - end
+        else:
+            distance = 0
+        if best is None or distance < best:
+            best = distance
     return best
 
 
@@ -337,8 +357,22 @@ def extract_payment_term(clauses: list[Clause]) -> dict[str, Any]:
     ambiguous_units = [hit for hit in hits if hit["unit"] is None]
     distinct: list[dict[str, Any]] = []
     for hit in hits:
-        key = (hit["value"], hit["unit"], hit["unit_raw"])
-        if all((d["value"], d["unit"], d["unit_raw"]) != key for d in distinct):
+        # 单位已明确时按映射后单位去重（30天 / 30个自然日 是同一事实）；
+        # 单位不明（「日」）保留原文单位参与去重，避免掩盖歧义。
+        key = (
+            (hit["value"], hit["unit"])
+            if hit["unit"] is not None
+            else (hit["value"], None, hit["unit_raw"])
+        )
+        if all(
+            (
+                (d["value"], d["unit"])
+                if d["unit"] is not None
+                else (d["value"], None, d["unit_raw"])
+            )
+            != key
+            for d in distinct
+        ):
             distinct.append(hit)
     matched_clauses = [hit["_clause"] for hit in hits]
     text_sha = _matched_text_sha(matched_clauses)
@@ -434,7 +468,19 @@ def extract_acceptance_invoice(clauses: list[Clause]) -> dict[str, Any]:
 
 def extract_exception(clauses: list[Clause]) -> dict[str, Any]:
     facts = _collect_terms(clauses, EXCEPTION_TERMS)
-    facts["cross_refs"] = extract_cross_refs(clauses)
+    refs = extract_cross_refs(clauses)
+    facts["cross_refs"] = refs
+    if facts["status"] == "identified" and refs:
+        matched: dict[str, Clause] = {}
+        for clause in clauses:
+            if any(term in clause.text for term in facts.get("terms") or ()):
+                matched[clause.chunk_id] = clause
+            if any(ref in clause.text for ref in refs):
+                matched[clause.chunk_id] = clause
+        if matched:
+            clauses_matched = list(matched.values())
+            facts["text_sha256"] = _matched_text_sha(clauses_matched)
+            facts["clause_no_union"] = _clause_no_union(clauses_matched)
     return facts
 
 
@@ -451,6 +497,13 @@ def _semantic_payload(item_key: str, facts: dict[str, Any]) -> Any:
         return None
     if item_key == "payment_term":
         return (facts.get("value"), facts.get("unit"))
+    if item_key == "exception":
+        # 例外项的事实包括命中的例外词与交叉引用；只看 terms 会把
+        # 「详见第12条 → 详见第15条」这类实质变化报成无差异。
+        return (
+            tuple(sorted(facts.get("terms") or ())),
+            tuple(sorted(facts.get("cross_refs") or ())),
+        )
     # 集合语义：条款/事件的先后顺序不是事实差异（顺序变化由主条款文本哈希体现）。
     return tuple(sorted(facts.get("events") or facts.get("terms") or ()))
 
@@ -468,12 +521,13 @@ def align_item(
     result: str
     if not base_found and not revised_found:
         result = "unidentified"
+    elif base["status"] == "ambiguous" or revised["status"] == "ambiguous":
+        # 一侧未识别时不能把另一侧断言成「新增/删除」。
+        result = "unidentified"
     elif not base_found:
         result = "added"
     elif not revised_found:
         result = "removed"
-    elif base["status"] == "ambiguous" or revised["status"] == "ambiguous":
-        result = "unidentified"
     elif _semantic_payload(item_key, base) == _semantic_payload(item_key, revised):
         base_sha = base.get("text_sha256")
         revised_sha = revised.get("text_sha256")
@@ -605,48 +659,50 @@ async def analyze_case(session: AsyncSession, case: ReviewCase) -> dict[str, Any
         .scalars()
         .all()
     )
-    for item in items:
-        extractor = EXTRACTORS.get(item.item_key)
-        if extractor is None:
-            continue
-        facts_by_side = {side: extractor(clauses[side]) for side in side_docs}
-        scan_truncated = scans["base"]["truncated"] or scans["revised"]["truncated"]
-        item.facts = {
-            "extractor_version": EXTRACTOR_VERSION,
-            "scan": {side: dict(scan) for side, scan in scans.items()},
-            **facts_by_side,
-        }
-        item.change_type = align_item(
-            item.item_key,
-            facts_by_side["base"],
-            facts_by_side["revised"],
-            scan_truncated=scan_truncated,
-        )
-        for side in side_docs:
-            facts = facts_by_side[side]
-            if facts["status"] == "not_found":
-                continue
-            clause = _clause_by_locator(clauses[side], facts)
-            if clause is None or metas[side] is None:
-                continue
-            await ensure_candidate_evidence(
-                session,
-                case,
-                item,
-                side=side,
-                document_id=side_docs[side],
-                meta=metas[side],
-                chunk_id=clause.chunk_id,
-                chunk_index=clause.chunk_index,
-                quote=clause.raw_text,
-                page_number=clause.page_number,
-                char_start=clause.char_start,
-                char_end=clause.char_end,
-            )
     try:
+        for item in items:
+            extractor = EXTRACTORS.get(item.item_key)
+            if extractor is None:
+                continue
+            facts_by_side = {side: extractor(clauses[side]) for side in side_docs}
+            scan_truncated = scans["base"]["truncated"] or scans["revised"]["truncated"]
+            item.facts = {
+                "extractor_version": EXTRACTOR_VERSION,
+                "scan": {side: dict(scan) for side, scan in scans.items()},
+                **facts_by_side,
+            }
+            item.change_type = align_item(
+                item.item_key,
+                facts_by_side["base"],
+                facts_by_side["revised"],
+                scan_truncated=scan_truncated,
+            )
+            for side in side_docs:
+                facts = facts_by_side[side]
+                if facts["status"] == "not_found":
+                    continue
+                clause = _clause_by_locator(clauses[side], facts)
+                if clause is None or metas[side] is None:
+                    continue
+                await ensure_candidate_evidence(
+                    session,
+                    case,
+                    item,
+                    side=side,
+                    document_id=side_docs[side],
+                    meta=metas[side],
+                    chunk_id=clause.chunk_id,
+                    chunk_index=clause.chunk_index,
+                    quote=clause.raw_text,
+                    page_number=clause.page_number,
+                    char_start=clause.char_start,
+                    char_end=clause.char_end,
+                )
         await session.commit()
     except IntegrityError as exc:
         # 并发两次 analyze 同时补同一 (item, side, chunk)：唯一约束最后兜底。
+        # IntegrityError 可能在任何后续 SELECT 的 autoflush 阶段抛出，因此
+        # try 覆盖整个写入循环 + commit，而不是只包住 commit。
         await session.rollback()
         raise ConflictError(
             "核验分析并发冲突，请重试", error_code="REVIEW_CASE_ANALYSIS_CONFLICT"

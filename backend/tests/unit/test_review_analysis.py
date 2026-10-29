@@ -334,6 +334,75 @@ def test_clause_order_only_is_unchanged():
     assert analysis.align_item("acceptance_invoice", base, revised) == "unchanged"
 
 
+def test_cross_ref_change_is_modified():
+    """交叉引用变化（详见第12条→第15条）不得报 unchanged（最终评审 F1）。"""
+    base = analysis.extract_exception(
+        [
+            _clause("第十条 不可抗力暂缓履行。", clause_no=[10]),
+            _clause("第十一条 未尽事宜详见第12条。", clause_no=[11]),
+        ]
+    )
+    revised = analysis.extract_exception(
+        [
+            _clause("第十条 不可抗力暂缓履行。", clause_no=[10]),
+            _clause("第十一条 未尽事宜详见第15条。", clause_no=[11]),
+        ]
+    )
+    assert base["cross_refs"] == ["详见第12条"]
+    assert revised["cross_refs"] == ["详见第15条"]
+    assert analysis.align_item("exception", base, revised) == "modified"
+
+
+def test_synonym_units_do_not_make_ambiguous():
+    """30 个自然日 / 30 天 是同一事实，重复表述不得降级 ambiguous。"""
+    facts = analysis.extract_payment_term(
+        [_clause("第八条 付款期限为30个自然日，自收到发票之日起30天内支付货款。")]
+    )
+    assert facts["status"] == "identified"
+    assert (facts["value"], facts["unit"]) == (30, "day")
+
+
+def test_ambiguous_side_never_reported_as_added_or_removed():
+    ambiguous = analysis.extract_payment_term([_clause("第八条 付款期限为30日内。")])
+    missing = {"status": "not_found", "reason": "no_duration"}
+    assert analysis.align_item("payment_term", ambiguous, missing) == "unidentified"
+    assert analysis.align_item("payment_term", missing, ambiguous) == "unidentified"
+
+
+def test_compound_overdue_phrases_are_not_payment_terms():
+    """逾期支付货款 / 超过 N 天未付款：复合语境不得被近义付款词带回。"""
+    paid_late = analysis.extract_payment_term(
+        [_clause("第八条 甲方逾期支付货款超过30天，乙方有权解除合同。")]
+    )
+    assert paid_late == {"status": "not_found", "reason": "no_duration"}
+
+    unpaid = analysis.extract_payment_term(
+        [_clause("第八条 甲方超过30天未付款的，乙方有权解除合同。")]
+    )
+    assert unpaid == {"status": "not_found", "reason": "no_duration"}
+
+
+@pytest.mark.xfail(reason="v1 边界：付款后 N 天内交货的复合语序未区分方向", strict=True)
+def test_delivery_after_payment_is_boundary():
+    facts = analysis.extract_payment_term([_clause("第八条 甲方付款后30天内，乙方交货。")])
+    assert facts == {"status": "not_found", "reason": "no_duration"}
+
+
+@pytest.mark.xfail(reason="v1 边界：N 天内交货 + 下一分句付款", strict=True)
+def test_delivery_first_with_payment_next_is_boundary():
+    facts = analysis.extract_payment_term([_clause("第八条 甲方应在30天内交货，乙方付款。")])
+    assert facts == {"status": "not_found", "reason": "no_duration"}
+
+
+def test_guarantee_period_same_sentence_is_conservatively_ambiguous():
+    """宽限/质保金期限同句：v1 保守降级 ambiguous（已登记边界，不产出错误值）。"""
+    facts = analysis.extract_payment_term(
+        [_clause("第八条 付款期限为30天，质保金在到期后60天内支付。")]
+    )
+    assert facts["status"] == "ambiguous"
+    assert "multiple_durations" in facts["reason"]
+
+
 # ── service 级（真实 SQLite） ───────────────────────────────────────────────
 
 
@@ -718,3 +787,46 @@ async def test_analyze_missing_meta_fails_closed(factory):
         with pytest.raises(ConflictError) as excinfo:
             await analysis.analyze_case(db, case)
     assert excinfo.value.error_code == "REVIEW_META_MISSING"
+
+
+@pytest.mark.asyncio
+async def test_analyze_autoflush_conflict_maps_409(factory, monkeypatch):
+    """并发冲突可能在循环内 SELECT 的 autoflush 阶段抛出，也必须映射 409。"""
+    case = await _seed_case(factory)
+    original = analysis.ensure_candidate_evidence
+
+    def _duplicate(row):
+        return ReviewEvidence(
+            id=str(uuid.uuid4()),
+            case_id=row.case_id,
+            item_id=row.item_id,
+            side=row.side,
+            role="candidate",
+            selected=False,
+            document_id=row.document_id,
+            doc_role=row.doc_role,
+            doc_version_label=row.doc_version_label,
+            doc_version_seq=row.doc_version_seq,
+            document_sha256=row.document_sha256,
+            chunk_id_at_capture=row.chunk_id_at_capture,
+            chunk_index=row.chunk_index,
+            clause_no=row.clause_no,
+            section_no=row.section_no,
+            page_number=row.page_number,
+            char_start=row.char_start,
+            char_end=row.char_end,
+            quote_text=row.quote_text,
+            quote_sha256=row.quote_sha256,
+            text_provenance=row.text_provenance,
+        )
+
+    async def _conflicting(session, case_, item, **kwargs):
+        row = await original(session, case_, item, **kwargs)
+        session.add(_duplicate(row))
+        return row
+
+    monkeypatch.setattr(analysis, "ensure_candidate_evidence", _conflicting)
+    async with factory() as db:
+        with pytest.raises(ConflictError) as excinfo:
+            await analysis.analyze_case(db, case)
+    assert excinfo.value.error_code == "REVIEW_CASE_ANALYSIS_CONFLICT"
