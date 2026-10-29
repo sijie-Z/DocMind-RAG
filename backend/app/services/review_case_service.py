@@ -457,6 +457,55 @@ async def select_evidence(
     return row
 
 
+async def ensure_candidate_evidence(
+    session: AsyncSession,
+    case: ReviewCase,
+    item: ReviewItem,
+    *,
+    side: str,
+    document_id: str,
+    meta: Any,
+    chunk_id: str,
+    chunk_index: int,
+    quote: str,
+    page_number: int | None,
+    char_start: int | None,
+    char_end: int | None,
+) -> ReviewEvidence:
+    """确保 (item, side, chunk) 有一条 candidate 证据；已存在则原样返回。
+
+    供 Batch 3 分析在快照主条款时调用；不 commit（由调用方统一提交）。
+    """
+    existing = (
+        await session.execute(
+            select(ReviewEvidence).where(
+                ReviewEvidence.item_id == item.id,
+                ReviewEvidence.side == side,
+                ReviewEvidence.chunk_id_at_capture == chunk_id,
+            )
+        )
+    ).scalar_one_or_none()
+    if existing is not None:
+        return existing
+    row = _new_evidence_row(
+        case=case,
+        item_id=item.id,
+        side=side,
+        role="candidate",
+        selected=False,
+        document_id=document_id,
+        meta=meta,
+        chunk_id=chunk_id,
+        chunk_index=chunk_index,
+        quote=quote,
+        page_number=page_number,
+        char_start=char_start,
+        char_end=char_end,
+    )
+    session.add(row)
+    return row
+
+
 async def get_item_for_case(session: AsyncSession, case: ReviewCase, item_id: str) -> ReviewItem:
     item = await session.get(ReviewItem, item_id)
     if item is None or item.case_id != case.id:
