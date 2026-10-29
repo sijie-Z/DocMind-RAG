@@ -179,7 +179,7 @@ async def test_export_blocked_until_all_items_decided(factory):
         "acceptance_invoice",
         "exception",
     }
-    assert all(item["reason"] == "undecided" for item in blocking)
+    assert all(item["reasons"] == ["undecided"] for item in blocking)
 
     await _decide_all(factory, case)
     async with factory() as db:
@@ -199,7 +199,7 @@ async def test_export_requires_analysis_first(factory):
         with pytest.raises(ConflictError) as excinfo:
             await svc.export_case(db, fresh, user_id=USER_ID)
     blocking = excinfo.value.detail["items"]
-    assert blocking and all(item["reason"] == "not_analyzed" for item in blocking)
+    assert blocking and all(item["reasons"] == ["not_analyzed"] for item in blocking)
 
 
 @pytest.mark.asyncio
@@ -217,7 +217,7 @@ async def test_export_gate_blocks_insufficient_and_parse_failed(factory):
         with pytest.raises(ConflictError) as excinfo:
             await svc.export_case(db, fresh, user_id=USER_ID)
     assert any(
-        item["status"] == "insufficient" and item["reason"] == "undecided"
+        item["status"] == "insufficient" and "undecided" in item["reasons"]
         for item in excinfo.value.detail["items"]
     )
 
@@ -264,9 +264,12 @@ async def test_export_payload_contract(factory):
     assert len(base_rows) == 1, "导出只能包含已选证据，候选行不得混入"
     row = base_rows[0]
     assert row["text_provenance"] == "parser_original"
+    assert row["role"] == "main"
+    assert row["stale"] is False
     assert "【文档背景" not in row["quote"]
     assert row["quote_sha256"]
     assert export.needs_human_count == 4
+    assert export.unidentified_count == 1, "exception 项应为 unidentified"
     assert payload["coverage"]["needs_human_items"]
 
     serialized = json.dumps(payload, ensure_ascii=False)

@@ -453,7 +453,7 @@ async def test_decision_export_and_download_flow(factory):
         blocked = await ac.post(f"/api/v1/reviews/{case['id']}/export")
         assert blocked.status_code == 409, blocked.text
         assert blocked.json()["error_code"] == "REVIEW_EXPORT_BLOCKED"
-        assert blocked.json()["detail"]["items"][0]["reason"] == "undecided"
+        assert blocked.json()["detail"]["items"][0]["reasons"] == ["undecided"]
 
         for item in case["items"]:
             decided = await ac.put(

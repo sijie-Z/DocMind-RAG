@@ -89,13 +89,17 @@ def _audit(
 
 
 async def _lock_case(session: AsyncSession, case: ReviewCase) -> ReviewCase:
-    """锁定案件行并刷新列：decision/export 的状态机必须串行。
+    """锁定案件行：decision/export 的状态机必须串行。
 
-    MySQL 下 SELECT ... FOR UPDATE 会阻塞并发事务（SQLite 方言忽略该子句）；
-    ``updated_at`` 等 onupdate 列可能在提交后过期，refresh 一并解决。
+    MySQL REPEATABLE READ 下，请求内先前的普通 SELECT 已建立 read view，
+    直接在旧事务里 FOR UPDATE 后接普通 SELECT 仍会读到旧快照（实测）。
+    因此先结束只读事务，让加锁 SELECT 成为新事务的第一条语句；之后的
+    refresh/case_detail 才能看到锁内最新已提交值。SQLite 忽略 FOR UPDATE。
     """
+    case_id = case.id
+    await session.commit()  # 结束只读事务，重建 read view
     fresh = (
-        await session.execute(select(ReviewCase).where(ReviewCase.id == case.id).with_for_update())
+        await session.execute(select(ReviewCase).where(ReviewCase.id == case_id).with_for_update())
     ).scalar_one_or_none()
     if fresh is None:
         raise ConflictError("核验案件已被删除", error_code="REVIEW_CASE_NOT_FOUND")
@@ -228,16 +232,18 @@ async def export_case(session: AsyncSession, case: ReviewCase, *, user_id: int) 
             detail={"status": case.status},
         )
     detail = await case_detail(session, case)
-    blocking = [
-        {"item_key": item["item_key"], "status": item["status"], "reason": "undecided"}
-        for item in detail["items"]
-        if item["status"] in INCOMPLETE_STATUSES
-    ] + [
-        # 未运行分析（change_type 为 None）不算「已核验」，不能导出完成态。
-        {"item_key": item["item_key"], "status": item["status"], "reason": "not_analyzed"}
-        for item in detail["items"]
-        if item["change_type"] is None
-    ]
+    blocking: list[dict[str, Any]] = []
+    for item in detail["items"]:
+        reasons: list[str] = []
+        if item["status"] in INCOMPLETE_STATUSES:
+            reasons.append("undecided")
+        if item["change_type"] is None:
+            # 未运行分析（change_type 为 None）不算「已核验」，不能导出完成态。
+            reasons.append("not_analyzed")
+        if reasons:
+            blocking.append(
+                {"item_key": item["item_key"], "status": item["status"], "reasons": reasons}
+            )
     if blocking:
         raise ConflictError(
             "存在未决或未分析的核验项，不能导出",
@@ -352,7 +358,7 @@ def _flatten(value: Any) -> str:
 def render_markdown(payload: dict[str, Any]) -> str:
     """把导出 payload 渲染为 Markdown；内容只来自快照，不引入第二套真源。"""
     case = payload["case"]
-    lines = [f"# 核验单：{case['title']}", ""]
+    lines = [f"# 核验单：{_flatten(case['title'])}", ""]
     lines.append(f"- 案件：{case['id']}")
     lines.append(f"- 清单版本：{case['checklist_version']}")
     lines.append(f"- 源文档在建案后发生变化：{'是' if payload['source_stale'] else '否'}")
