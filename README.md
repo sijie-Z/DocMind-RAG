@@ -6,118 +6,86 @@
   <img src="https://img.shields.io/badge/Python-3.11+-blue?logo=python" alt="Python">
   <img src="https://img.shields.io/badge/FastAPI-0.115+-009688?logo=fastapi" alt="FastAPI">
   <img src="https://img.shields.io/badge/Vue_3-3.4-4FC08D?logo=vuedotjs" alt="Vue 3">
+  <img src="https://github.com/sijie-Z/DocMind-RAG/actions/workflows/ci-fast.yml/badge.svg?branch=develop" alt="CI">
   <img src="https://img.shields.io/badge/License-MIT-green" alt="License">
 </p>
 
 <div align="center">
-  <h1>🤖 DocMind</h1>
-  <p><strong>企业级 RAG×Agent 平台 —— 评测门禁进 CI、静默假成功清零、棘轮只缩不涨：质量，不可静默回退。</strong></p>
+  <h1>DocMind</h1>
+  <p><strong>从文档到可信答案，再到可交付的核验单。</strong></p>
+  <p>企业级 RAG × Agent 平台：混合检索 + PER 自主 Agent + 合同核验垂直场景。<br/>
+  回答必须能回到原文；核验结论必须带版本、哈希与证据快照；不确定就标「未识别」，绝不假装成功。</p>
+  <p>
+    <a href="#快速开始">快速开始</a> ·
+    <a href="#三分钟看懂">架构与请求生命周期</a> ·
+    <a href="#工程质量五个可验证的承诺">质量门禁</a> ·
+    <a href="#合同核验从一个真实业务场景切入">合同核验</a> ·
+    <a href="docs/USER_GUIDE.md">使用手册</a>
+  </p>
 </div>
 
 ---
 
-## 简介
+## 这是什么
 
-DocMind 是一个全栈企业级 AI 知识库系统，围绕 **PER（Plan-Execute-Reflect）Agent 架构**构建。支持多格式文档解析、混合检索增强生成（RAG）、可视化工作流编辑、实时 SSE 流式问答，以及完整的可观测性体系。
+DocMind 不是一个「聊天框套壳」：它把企业知识库当成一套**可验收的系统**来做——检索链路、答案出处、Agent 执行过程、核验交付物，每一层都有可核对的口径。
 
-核心场景：
-- 📄 **文档知识库** — 上传 PDF/Word/Excel/TXT/Markdown/CSV 及 PNG/JPG/JPEG/WEBP/BMP 图片（OCR），自动解析、分块、向量化，支持语义搜索
-- 💬 **智能问答** — 基于 RAG 管线（关键词 + 向量混合检索 + 重排序 + LLM 生成），带 SSE 流式输出
-- 🤖 **自主 Agent** — PER 三阶段循环（规划 → 执行 → 反思），可调用 31 个工具（默认注入 10 个）完成复杂任务
-- 🧩 **工作流编辑器** — 可视化 DAG 设计与调试（Vue Flow），可配置 LLM 模型、提示词、执行引擎
-- 📊 **可观测性** — Prometheus 指标、Langfuse 全链路追踪、24 种 SSE 事件、RunReport 运行摘要
-- 🔐 **多租户 + RBAC** — 组织隔离、角色权限管理、JWT 认证
+三个典型用法：
 
-> 关于架构决策和实验数据，请参见研究仓库：[DocMind-Agent-Causal-Study](https://github.com/sijie-Z/DocMind-Agent-Causal-Study)
->
-> 📖 **使用手册**：[docs/USER_GUIDE.md](docs/USER_GUIDE.md) —— 5 分钟启动、配置、核心概念、API、运维与排错。
+- **带出处的知识问答** — 上传 PDF/Word/Excel/TXT/Markdown、扫描件（OCR），系统解析、分块、混合检索（BM25 + 向量 + RRF）、重排后流式回答；每个引用都来自**未加工的解析原文**，可溯源到条款/页码/字符区间，而不是检索用的增强文本。
+- **能规划、能执行、能自检的 Agent** — PER（Plan → Execute → Reflect）循环，可调用 31 个工具完成多步任务；每轮运行产出 RunReport（做了什么、为何这么做、结果如何），支持执行回放与经验记忆。
+- **合同核验（垂直场景）** — 把「制度/模板 + 合同 V1 + V2」绑成核验案件：文档版本身份与内容哈希、readiness 门禁、原文证据快照、确定性条款抽取与差异对齐，最后交付带覆盖范围与免责声明的核验单。这是本仓库最「产品化」的一块，见下文。
+
+> **项目状态**：公开项目，功能完整度高于稳定度，适合学习、二次开发与本地演示；生产部署前请按自己的合规要求加固。工程纪律先于功能数量：**数字带口径、修复带证据、退化拦在合并前**（见「工程质量」）。
 
 ---
 
-## 项目状态
-
-> 定位：**公开项目 / 不成熟产品**——功能完整度高于稳定度，适合学习、二次开发与本地演示；正式生产部署前请自行加固安全与运维配置。产品可以还在打磨，工程纪律先行：**数字带口径，修复带证据，退化拦在合并前**（见「质量与门禁」）。
-
-当前基线：
-- 测试基线（冻结快照 2026-10-15）：后端 `pytest tests/` **2223 passed / 51 skipped**（0 failed）；前端 **861 passed**（128 个测试文件）+ `vue-tsc --noEmit` 0 错误。数字随 CI 实时演进——CI 是唯一真源，本页只记录冻结快照；口径与命令见 `docs/METRICS.md`。
-- 已修复：语义缓存按组织隔离、会话归属校验、知识库搜索/删除/重建的组织隔离、文件上传路径穿越与 MinIO 删除、API Key 掩码、Web 抓取 SSRF 防护、工作流归属隔离、Kafka 不可用时的进程内文档处理、本地启动脚本、敏感产物移出 git 跟踪。
-- 安全加固（1.20）：Agent 沙箱逃逸封堵（下划线属性拦截 + 长度/输出上限）、execute_sql 租户过滤与 UNION/子查询拦截、disabled_tools 服务端强制合并、mcp 子进程环境变量白名单、注册禁自选组织、角色变更同组织校验、登录失败锁定 + 用户枚举时序防护、refresh token 轮换、WS 仅接受 access token、PII 掩码全链路（上下文+流式）、GraphRAG 组织分区、/files 代理归属校验、RAG 缓存按组织失效、Alembic 001 FK 类型修复 + 005 补齐 15 张表、compose 凭据/端口收紧、24 个安全回归测试（446 单测通过）。
-- 架构收敛：文档解析/向量化/ES 索引统一为单一 Processor；聊天核心管线从路由下沉到 `services/chat_service.py`；新增统一文档授权辅助层。
-- 加固收口（已完成）：Agent 记忆接口按用户隔离、`/files` 代理鉴权（非公开对象需登录 + 组织归属校验）、纯 ASGI 监控与限流中间件、移除 legacy `ci.yml`。
-
-已知限制：
-- 工作流代码节点默认关闭，需显式设置 `ENABLE_WORKFLOW_CODE_NODES=true`，且必须通过 Docker 沙箱执行。
-- GraphRAG 图谱、Agent 记忆中的长期/反思记忆、指标快照与实时计数已支持 Redis 持久化（短期/工作记忆为进程内，不跨进程或重启）；实时计数按实例写入并在读取时聚合，适合多实例部署。
-- 前端 `knowledge/index.vue`、`profile/index.vue`、`workflow/editor.vue` 均已拆分到组件/组合式函数，不再有千行级单文件页面。
-
----
-
-## 质量与门禁
-
-「不静默回退」不是口号，而是一组可核对的机制：
-
-- **评测门禁进 CI（Eval Gate）**：检索质量由零容差门禁逐 PR 守护——Eval v1.5 共 **80 条 golden set（60 正例 + 20 负例）**，ClauseHit@1/@3/@5、MRR、EmptyAcc、NearMiss@5、errors 七项指标容差为 0，任何下跌即红、fail-closed。`make eval-ci`（`mode=fake`，2026-10-24，语料 commit `d867a2b3`）实测 ClauseHit@1 **70.0%** / @3 **76.7%** / @5 **80.0%**、NearMiss@5 **25.0%**、MRR **0.74**、EmptyAcc **100%**、errors **0**（来源 PR #525，已合并，squash 552efaad；与 v1 的 28 条基线不可混比）。基线更新是显式 PR 行为（规则见 `backend/docs/eval-gate-phase1.md`；数字口径见 `docs/METRICS.md`）。
-- **历史快照与当前口径分离**：`docs/legacy/` 归档旧评测产物（如 2026-06-15 的 `eval_first_report_2026-06-15.json`：10 场景 0 通过），仅用于历史对照、**不代表当前质量**，也不参与门禁；性质与沿革见 [`docs/legacy/README.md`](docs/legacy/README.md)。
-- **棘轮只缩不涨**：后端覆盖率下限 `--cov-fail-under=42`＋前端四道基线棘轮（硬编码中文 / i18n 完备性 / 命名一致 / 用键定义）——只拦下滑、不追高分，新增长即红。
-- **静默假成功清零（#301）**：全仓 ~551 处异常捕获全量审计，32 条静默假成功全部闭环（登出 fail-closed、检索三态、文档状态机诚实化、统计端点降级身份……），修复均带回归测试。
-- **先红后绿＋变异验证**：每笔修复先写失败测试；修复后注入缺陷必须「精确变红」，证明测试真的有判别力。
-- **文档数字不变量**：SSE 事件数、端点模块数、前端路由数、工具数由源码派生，期望值统一存放在 `docs/facts.json`，对外口径（值 / 口径 / 命令 / 日期 / 备注）统一登记在 `docs/METRICS.md`；`backend/scripts/check_doc_facts.py` 在 CI 逐 PR 校验「代码 ↔ facts JSON ↔ METRICS.md ↔ 文档」一致。前端路由按两种口径记录：34 条路由记录（含顶层与 redirect 记录）/ 29 条具名路由（有 name 的路由）。
-
----
-
-## 系统架构
+## 三分钟看懂
 
 ```
-┌── 前端 ──────────────────────────────────────┐
-│  Vue 3 · TypeScript · Naive UI · ECharts     │
-│  Vue Flow 工作流编辑器 · Pinia · UnoCSS      │
-├── API 网关 ──────────────────────────────────┤
-│  FastAPI · JWT + RBAC · CORS · SSE · GZip    │
-│  WebSocket 实时推送 · Request ID 追踪        │
-├── AI Agent 核心 ─────────────────────────────┤
-│  PER Loop  (Planner → Executor → Reflector)  │
-│  Tool Registry (31) · RunReport · Reviewer  │
-│  经验记忆 · 执行回放                         │
-├── RAG 管线 ──────────────────────────────────┤
-│  HybridRetriever (BM25 + 向量 + RRF 融合)    │
-│  Query Processor · Reranker · Context Comp.   │
-│  二级缓存 (精确 + 语义) · PII 掩码           │
-├── LLM ───────────────────────────────────────┤
-│  DeepSeek · OpenAI 兼容 API · Langfuse 追踪  │
-├── 数据层 ────────────────────────────────────┤
-│  MySQL 8 · Elasticsearch 8 · Redis 7         │
-│  Kafka · MinIO (S3 兼容对象存储)             │
-└──────────────────────────────────────────────┘
+┌── 前端 ─────────────────────────────────────────────┐
+│  Vue 3 · TypeScript · Naive UI · Vue Flow 工作流     │
+├── API 网关 ─────────────────────────────────────────┤
+│  FastAPI · JWT + RBAC · SSE · WebSocket · 请求 ID    │
+├── AI Agent 核心 ────────────────────────────────────┤
+│  PER Loop (Planner → Executor → Reflector)          │
+│  Tool Registry (31) · RunReport · Hooks · 回放        │
+├── RAG 管线 ─────────────────────────────────────────┤
+│  HybridRetriever (BM25 + 向量 + RRF) · Reranker      │
+│  二级缓存 · PII 掩码 · 原文/检索文本分离(O/E)          │
+├── 数据层 ───────────────────────────────────────────┤
+│  MySQL 8 · Elasticsearch 8 · Redis 7 · Kafka · MinIO │
+└─────────────────────────────────────────────────────┘
 ```
 
----
-
-## 核心模块详解
-
-### 🤖 PER Agent 系统 (`backend/app/agent/`)
-
-自主 AI Agent，支持多步骤任务规划与执行。工作流：
+一次 RAG 请求的生命周期：
 
 ```
-用户指令
-  → Planner   — 任务分解为 DAG/Serial 步骤，推荐工具，评估风险等级
-  → Executor  — 依赖感知调度，并行执行独立步骤，内置超时/重试/回退
-  → Reflector — 验证输出质量，检测幻觉/遗漏/矛盾，触发修正或结束
-  → RunReport — 汇总整次运行：做了什么、为何这么做、结果如何
+上传 → 解析(原文 O 与检索文本 E 分离落库) → 分块 → 嵌入 → ES 索引
+提问 → 意图/复杂度分类 → 混合检索 → 重排 → 上下文压缩 → LLM 流式生成
+     → 引用只展示 parser 原文(O)；legacy 文档显式 409，绝不回退增强文本
 ```
 
-| 模块 | 文件 | 功能 |
-|------|------|------|
-| 主循环 | `loop.py` | PER 三阶段编排，SSE 事件流，RunReport 生成 |
-| 规划器 | `planner.py` | LLM 规划 + 结构化规则模板（coarse/normal/fine） |
-| 执行器 | `executor.py` | DAG 拓扑排序 + 并行组调度，超时/重试/fallback |
-| 反思器 | `reflector.py` | 输出质量评估，自动修正建议 |
-| Reviewer | `reviewer.py` | 对抗式审查，发现问题提出改进 |
-| 工具注册 | `registry.py` | 集中式工具命名空间 + 标签筛选 |
-| 上下文引擎 | `context.py` | 令牌预算管理，消息窗口构建 |
-| 配置 | `config.py` | AgentConfig（模型/温度/最大步骤/阶段开关） |
+合同核验的端到端路径：
 
-**31 个内置工具**（`core_tools.py` 11 个 + `tools/` 20 个；默认注入 10 个工具，终端/飞书/委派/扩展工具按 settings 或显式 `tool_tags` 门控；口径见 `docs/METRICS.md`）：
+```
+注册版本身份 → readiness 门禁 → 建案(blocked/ready + 原因码) → 证据快照(quote+哈希+定位)
+→ 规则抽取/对齐 → 人工逐项决策 → 生成核验单(版本/哈希/覆盖范围/需人工项)
+```
+
+## 核心能力
+
+| 方向 | 能力 | 关键事实 |
+|------|------|----------|
+| 知识库 / RAG | 多格式解析（含 OCR）、语义分块、混合检索、重排、查询改写/HyDE、语义缓存、严格模式 | 检索评分按增强文本、**证据出口只放 parser 原文**；不可用文档显式 `SOURCE_ORIGINAL_UNAVAILABLE` |
+| Agent | PER 三阶段循环、DAG 并行调度、超时/重试/回退、对抗式 Reviewer、RunReport、执行回放、经验记忆 | **31 个内置工具**（默认注入 10 个工具，终端/飞书/委派按门控开放） |
+| 合同核验 | 文档角色/版本族/版本序/内容哈希、readiness、核验案件、原文证据快照、确定性抽取与对齐 | 只输出文本事实与差异类型（modified/renumbered/…），不输出任何法律结论；未识别不猜值 |
+| 平台化 | 多租户组织隔离、RBAC + API Key scope、审计日志、Prometheus/Grafana、OpenTelemetry、24 种 SSE 事件 | 组织隔离贯穿检索/会话/文档/缓存/WS；失败语义可判定（4xx + error_code） |
+
+<details>
+<summary><b>31 个内置工具一览</b>（点击展开）</summary>
+
+`core_tools.py` 11 个 + `tools/` 20 个，默认注入 10 个；口径见 `docs/METRICS.md`。兼容口径：`disabled_tools` 中的旧工具名按**能力粒度**生效（如 `calculate` 只禁用 `utility` 的 calculate operation），写规范名则禁用整个工具。
 
 | 类别 | 工具 | 说明 |
 |------|------|------|
@@ -133,88 +101,133 @@ DocMind 是一个全栈企业级 AI 知识库系统，围绕 **PER（Plan-Execut
 | 外部 | `mcp_call`, `feishu_bitable_query` | MCP 协议桥接、飞书多维表格（默认门控） |
 | 技能 | `load_skill_reference`, `deep_research`, `document_comparison`, `knowledge_analysis` | 技能加载、复合分析（后三者扩展面） |
 
-> 兼容口径：`disabled_tools` 中的**旧工具名按能力粒度生效**（如 `calculate` 只禁用 `utility` 的 calculate operation，`vector_search` 只禁用 `mode=vector`），不会隐藏整个规范工具；写规范名则禁用整个工具。旧名调用本身同样被阻断。
+</details>
 
-**自我进化系统** (实验性)：
+---
 
-| 子系统 | 目录 | 功能 |
-|--------|------|------|
-| 经验记忆 | `experience/` | 从失败运行中自动提取经验教训，注入 Planner |
-| 执行回放 | `replay/` | 完整执行快照保存与回放，支持 diff 对比 |
+## 工程质量：五个可验证的承诺
 
-**Hooks 扩展点**（issue #474，默认关闭）：
+「不静默回退」不是口号，而是一组可以在 CI 里核对的机制：
 
-进程内事件总线，覆盖 agent 轮次与工具执行；`waterfall`（可改写/短路）与
-`serial`（顺序观察）两种语义。配置文件 `backend/config/hooks.yaml`，总开关
-`HOOKS_ENABLED=true`（关闭时不读文件、零行为变化）：
+1. **评测门禁进 CI（Eval Gate）** — 检索质量由零容差门禁逐 PR 守护：Eval v1.5 共 **80 条 golden set（60 正例 + 20 负例）**，ClauseHit@1/@3/@5、MRR、EmptyAcc、NearMiss@5、errors 七项指标容差为 0，任何下跌即红、fail-closed。`make eval-ci`（`mode=fake`，2026-10-24，语料 commit `d867a2b3`）实测 ClauseHit@1 **70.0%** / @3 **76.7%** / @5 **80.0%**、NearMiss@5 **25.0%**、MRR **0.74**、EmptyAcc **100%**、errors **0**（来源 PR #525，已合并，squash 552efaad；与 v1 的 28 条基线不可混比）。基线更新是显式 PR 行为（规则见 `backend/docs/eval-gate-phase1.md`，数字口径见 `docs/METRICS.md`）。
+2. **静默假成功清零（#301）** — 全仓 ~551 处异常捕获全量审计，32 条静默假成功全部闭环（登出 fail-closed、检索三态、文档状态机诚实化、统计端点降级身份……），每条修复都带回归测试。
+3. **先红后绿 + 变异验证** — 每笔修复先写失败测试；修复后注入缺陷必须「精确变红」，证明测试真的有判别力，而不是顺手写个能过的断言。
+4. **文档数字不变量** — SSE 事件数、端点模块数、前端路由数、工具数由源码派生，期望值统一放在 `docs/facts.json`，对外口径（值/口径/命令/日期/备注）登记在 `docs/METRICS.md`；`backend/scripts/check_doc_facts.py` 在 CI 逐 PR 校验「代码 ↔ facts JSON ↔ METRICS ↔ 文档」一致。前端路由按两种口径记录：34 条路由记录（29 条具名路由，含顶层与 redirect 记录）。
+5. **棘轮只缩不涨** — 后端覆盖率下限 `--cov-fail-under=42` + 前端四道基线棘轮（硬编码中文 / i18n 完备性 / 命名一致 / 用键定义）：只拦下滑、不追高分，新增长即红。
 
-```yaml
-hooks:
-  - name: audit_tool_calls
-    event: tools/pre_execute        # agent/turn_start | agent/pre_step | agent/post_step
-    module: app.agent.hooks.builtin.audit_tool_calls   # 必须 app.agent.hooks.*
-    enabled: true
-    priority: 100                   # 越小越先执行
-    timeout_seconds: 2.0            # 0.1–30
-    failure_policy: fail_open       # fail_open | fail_closed
+加固收口（已完成）：Agent 记忆接口按用户隔离、`/files` 代理鉴权（非公开对象需登录 + 组织归属校验）、纯 ASGI 监控与限流中间件、移除 legacy `ci.yml`；另有工作流归属隔离、API Key 掩码、Web 抓取 SSRF 防护、上传路径穿越与 MinIO 删除、Agent 沙箱逃逸封堵、`execute_sql` 租户过滤、MCP 子进程环境变量白名单、登录失败锁定 + 用户枚举时序防护、PII 全链路掩码等安全修复。
+
+历史快照与当前口径分离：`docs/legacy/` 归档旧评测产物（如 2026-06-15 的 `eval_first_report_2026-06-15.json`），仅用于对照，**不代表当前质量**，不参与门禁；沿革见 [`docs/legacy/README.md`](docs/legacy/README.md)。
+
+---
+
+## 合同核验：从一个真实业务场景切入
+
+通用「聊天 + 知识库」很难验收；合同核验是一个能定义完成标准的窄场景：
+
+**输入**：一份制度（或模板）+ 同一份合同的 V1 与 V2（有文本层的 PDF/DOCX）。
+**固定核验项**：付款期限、起算条件、验收/发票前提、例外/暂缓/另有约定——只做这四类，不宣称「全合同审查」。
+**系统做的事**：
+
+- `PUT /documents/{id}/review-meta`：注册文档角色、版本族/版本序、生效期，服务端从 MinIO 对象流式计算 SHA-256；
+- `GET /documents/{id}/readiness`：`reviewable/blocked` + 原因码（legacy/未索引/解析失败/缺版本身份/无原文）；
+- `POST /reviews`：三份文档同组织、角色正确、版本序递增才能 `ready`；否则 `blocked` 落库并带 `side:reason`；
+- 证据快照：建案/选择时把 parser 原文的 quote、哈希、条款/页码/字符区间固化成行——文档 later 被重建或删除，快照仍可读，并用 chunk 指纹 + 文档处理指纹标注 `live_source_stale`；
+- `POST /reviews/{id}/analyze`：纯规则抽取（期限值/单位、起算事件、条件、例外/交叉引用）+ V1↔V2 对齐（unchanged/modified/added/removed/renumbered/unidentified）；日期片段与保修/质保期不会被误认为账期，单位存疑标 `ambiguous` 不猜值；
+- 后续批次：逐项人工决策、导出带版本/哈希/覆盖范围的核验单（进行中）。
+
+**明确不做**：不输出「合法/违法/合规/无风险/可签」等法律结论；`needs_human`/`insufficient` 不算完成；没有证据就不给结论。设计动机与已知缺口以模块注释与批次 PR 描述为准。
+
+---
+
+## 快速开始
+
+### 前置要求
+
+Docker Desktop（推荐），或手动安装：Python 3.11+ · Node.js 18+ · MySQL 8 · Redis 7 · Elasticsearch 8 · Kafka · MinIO。
+
+### 1. 克隆并配置
+
+```bash
+git clone https://github.com/sijie-Z/DocMind-RAG.git
+cd DocMind-RAG/backend
+
+# 本地开发（应用在宿主机跑）
+cp .env.example .env               # Windows: copy .env.example .env
+# 必填：SECRET_KEY / JWT_SECRET_KEY（生成: python -c "import secrets; print(secrets.token_hex(32))"）
+
+# 只要用到 Docker（含仅启动基础设施），都需要 .env.docker：
+cp .env.docker.example .env.docker
 ```
 
-handler 签名 `async def handler(ctx, next)`：`await next(payload)` 继续链路；
-不调用即短路；返回 `HookDecision(action="deny"|"modify"|"ask", ...)`。
-`tools/pre_execute` 的 `ask` 走既有 HITL 审批门，hook 不能绕过审批；
-hook 失败产出 `hook_error` SSE + `docmind_hook_*` 指标。详见
-`docs/decisions/ADR-004-hooks.md`。
+`.env.docker` 的必填项（不提供默认密码，全部自行生成）：`MYSQL_ROOT_PASSWORD`、`MYSQL_PASSWORD`、`MINIO_ACCESS_KEY`、`MINIO_SECRET_KEY`、`GRAFANA_PASSWORD`；后端启动必填 `SECRET_KEY`、`JWT_SECRET_KEY`，Chat 需要 `DEEPSEEK_API_KEY`。Embedding 默认走本机 Ollama（nomic-embed-text / 768 维，复用 Chat Key），云端 Embedding 再配置 `EMBEDDING_API_KEY` / `EMBEDDING_API_URL`。Compose 的**全文件插值**先于服务选择：即使不启用 Grafana，`GRAFANA_PASSWORD` 仍为必填。
 
-### 📚 RAG 管线 (`backend/app/rag/`)
+### 2. 启动基础设施
 
-多阶段检索增强生成管道，从用户提问到流式回答：
-
-```
-查询进入
-  → QueryIntentClassifier    — 意图分类（事实/程序/定义/因果）
-  → QueryComplexityClassifier — 复杂度分级，决定检索策略
-  → 改写/HyDE                 — 查询重写 + 假设文档嵌入（可选）
-  → HybridRetriever           — 关键词（模糊 + 通配符 + multi_match）
-                                + 向量（script_score cosineSimilarity）
-                                + RRF 倒数排序融合（k=60）
-  → MMR 选择                  — 最大边际相关性去重
-  → Reranker                  — 交叉编码器重排序（本地 BGE 或 API）
-  → ContextCompressor         — 关键词句子抽取压缩（规则式，无 LLM 调用）
-  → 缓存检查                  — 精确匹配缓存（TTL 600s）+ 语义缓存
-  → LLM 生成                  — 流式 SSE 输出，严格模式可选，PII 掩码
+```bash
+docker compose --env-file .env.docker up -d mysql redis elasticsearch minio kafka zookeeper
 ```
 
-| 文件 | 功能 |
+### 3. 启动后端（含迁移）
+
+```bash
+python -m venv venv && source venv/bin/activate   # Windows: venv\Scripts\activate
+pip install -r requirements.txt
+alembic upgrade head                              # schema guard 会在版本落后时拒绝启动（issue #495）
+python -m app --profile web                       # 统一入口：web | worker | headless | sdk | acp
+```
+
+`python -m app --profile web` 会在启动期比对 `alembic_version` 与迁移 head，落后时打印 `current=... head=...` 与修复命令并以退出码 2 结束，而不是带病提供 500（`SCHEMA_GUARD`，`AUTO_MIGRATE` 默认关闭）。`uvicorn app.main:app` / `python run.py` 保留为兼容入口。
+
+### 4. 启动前端
+
+```bash
+cd ../frontend && npm install && npm run dev      # http://localhost:5173
+```
+
+### 访问
+
+| 地址 | 说明 |
 |------|------|
-| `pipeline.py` | 管道编排器，串联所有阶段 |
-| `retriever.py` | HybridRetriever — 3 策略（关键词/混合/HyDE）+ RRF + MMR |
-| `reranker.py` | 交叉编码器重排序（本地 BAAI/bge-reranker-base / API） |
-| `query_processor.py` | HyDE 生成、LLM 查询改写、意图/复杂度分类、查询分解 |
-| `cache.py` | RetrievalCache（精确 TTL）+ SemanticCache（向量余弦相似度） |
-| `context_compressor.py` | 基于查询关键词的句子抽取压缩（规则式，无 LLM 调用） |
-| `context_window.py` | RAG 聊天的令牌预算消息构建器 |
-| `evaluator.py` / `metrics.py` | RAG 质量指标（基础性、相关性） |
+| http://localhost:5173 | 前端界面 |
+| http://localhost:8000/docs | Swagger API 文档 |
+| http://localhost:8000/health | 健康检查（诊断视图） |
+| http://localhost:8000/readyz | 就绪探针（DB/Redis/ES 依赖健康） |
+| http://localhost:8000/metrics | Prometheus 指标 |
 
-### 🔧 基础设施 (`backend/app/core/`)
+演示账号：`guest`（随机生成，首次创建时打印一次，或 `DEMO_PASSWORD` 指定，`ENABLE_DEMO_ACCOUNT=true` 时启用）；`admin` 通过 `reset_admin.py`（`ADMIN_PASSWORD`）创建。
 
-| 模块 | 文件 | 功能 |
-|------|------|------|
-| 配置 | `config/` | Pydantic Settings（Base/Database/AI/Security），环境变量驱动 |
-| 数据库 | `database.py` | SQLAlchemy 异步引擎，Alembic 迁移 |
-| 缓存 | `redis.py` | 延迟连接代理模式，RedisTools 缓存封装 |
-| 搜索 | `elasticsearch.py` | ES 客户端代理，dense_vector 索引，IK 分析器 |
-| 存储 | `minio_client.py` | MinIO S3 兼容客户端 |
-| 消息 | `kafka_client.py` | aiokafka 生产者 |
-| 认证 | `security.py` | JWT + bcrypt，get_current_user 依赖，RBAC 辅助 |
-| 中间件 | `middleware.py` | 指标收集（请求数/延迟/错误率） |
-| 熔断 | `circuit_breaker.py` | 熔断器模式——**状态机 API 已接 LLM 步骤路径（跨请求熔断 + 半开恢复，issue #242）；只覆盖 executor 每步主 LLM 调用，不含 planner（stream）/ synthesis / reflector / loop 直答 路径**；未使用的装饰器降级路径已删除（issue #467，状态机 API 为唯一契约） |
-| LLM 快速失败 | `llm_failfast.py` | 连接级不可达判定（连接被拒/DNS/连接阶段超时）+ 独立短连接超时 + 有限瞬时重试 + 按端点的负缓存；读/写慢与连接建立后的传输中断不判不可达（issue #467） |
-| 步骤执行 | `step_runner.py` | 带重试/回退的安全步骤执行 |
-| 链路追踪 | `tracing.py` | OpenTelemetry OTLP gRPC 导出 |
-| 追踪日志 | `trace_logger.py` | Agent 执行追踪 JSONL 记录（dev-only：仅未挂载的独立测试 app `agent_api.py`:8010 使用，仓库内无读者） |
-| 指标 | `prometheus.py` | 自定义计数器/直方图（检索延迟、LLM token、缓存命中、RAG 质量） |
-| WebSocket | `notification_ws.py` | 通知实时推送连接管理器 |
-| 请求 ID | `request_id.py` | X-Request-ID 注入 |
+---
+
+## 目录结构
+
+```
+DocMind/
+├── backend/
+│   ├── app/
+│   │   ├── main.py                  # FastAPI 兼容入口（组装在 bootstrap.py）
+│   │   ├── agent/                   # PER Agent：loop / planner / executor / reflector
+│   │   │   ├── events.py            #   SSE 事件类型（24 种）
+│   │   │   ├── core_tools.py        #   基础工具（11 个）
+│   │   │   └── tools/               #   扩展工具（20 个；合计 31 个内置工具）
+│   │   ├── rag/                     # 检索管线：retriever / reranker / pipeline / cache
+│   │   ├── api/v1/
+│   │   │   ├── router.py            # 主路由（注册 29 个模块）
+│   │   │   └── endpoints/           # 端点实现（29 个文件）
+│   │   ├── services/                # 业务服务层（29 个服务）
+│   │   ├── models/                  # ORM 模型（21 个模型文件）
+│   │   ├── core/                    # 配置 / DB / Redis / ES / MinIO / Kafka / JWT
+│   │   └── worker/                  # Kafka 消费者（解析 → 分块 → 嵌入 → 索引）
+│   ├── tests/                       # 后端测试（单测 + API + 集成）
+│   ├── alembic/                     # 数据库迁移
+│   ├── benchmark/                   # 评测框架（eval gate）
+│   └── docker-compose.yml           # 基础设施与全量编排
+├── frontend/
+│   └── src/
+│       ├── views/                   # 页面（23 个页面模块，34 条路由记录 / 29 条具名路由）
+│       ├── components/ · api/ · stores/ · router/ · composables/ · locales/
+└── docs/                            # 架构页 / 使用手册 / 决策记录 / 指标口径
+```
 
 ### 🌐 API 层 (`backend/app/api/v1/`)
 
@@ -252,329 +265,62 @@ hook 失败产出 `hook_error` SSE + `docmind_hook_*` 指标。详见
 | Webhook 规则 | `/webhooks` | 入站 Webhook 规则管理、HMAC 验签投递与 outbox 处理（issue #478） |
 | 示例数据 | `/demo` | 演示文档与数据填充 |
 
-Swagger 文档：`http://localhost:8000/docs`
-
-### 🖥 前端 (`frontend/src/`)
-
-Vue 3 + TypeScript + Naive UI 单页应用，34 条路由记录（29 条具名路由；下表为主要页面）：
-
-| 页面 | 路由 | 功能 |
-|------|------|------|
-| 仪表盘 | `/dashboard` | KPI 卡片、统计图表、快速入口 |
-| AI 对话 | `/chat` | RAG + Agent 双模式，SSE 实时流式 |
-| 会话历史 | `/conversations` | 历史会话列表与管理 |
-| 知识库 | `/knowledge` | 文档上传、解析、搜索、知识图谱 |
-| 搜索 | `/search` | 全局独立搜索 |
-| 提示词 | `/prompts` | 提示词模板管理 |
-| 工作流 | `/workflow` | 可视化 DAG 编辑器（Vue Flow） |
-| Agent 配置 | `/agent` | 模型/温度/工具/记忆开关配置 |
-| 组织管理 | `/organizations` | 组织 CRUD、成员管理（管理员） |
-| 用户管理 | `/users` | 用户 CRUD、角色分配（管理员） |
-| 审计日志 | `/audit-logs` | 用户活动审计（管理员） |
-| 系统监控 | `/monitoring` | 性能图表、健康状态（管理员） |
-| 个人设置 | `/profile` | 个人信息、密码修改 |
-| 通知中心 | `/notifications` | 实时通知列表 |
-| 系统帮助 | `/system-help` | 使用帮助文档 |
-| 关于 | `/system-about` | 系统信息 |
-
-### 🧰 服务层 (`backend/app/services/`)
-
-| 服务 | 文件 | 功能 |
-|------|------|------|
-| 认证服务 | `auth_service.py` | JWT 创建/验证、bcrypt 哈希、Token 黑名单（jti） |
-| 文档解析 | `document_parser.py` | 解析 PDF/Word/Excel/CSV/TXT/MD 与图片（OCR），文本提取与分块 |
-| RAG 服务 | `rag_service.py` | RAG 管线 Facade |
-| 文件服务 | `file_service.py` | 文件存储与检索 |
-| 知识库服务 | `knowledge_service.py` | 知识库业务逻辑 |
-| 权限服务 | `permission_service.py` | RBAC 权限初始化与管理 |
-| 审计服务 | `audit_service.py` | 审计日志写入与查询 |
-| 工作流引擎 | `workflow_engine.py` | 工作流执行引擎 |
-| 组织服务 | `organization_service.py` | 多租户组织管理 |
-| 记忆服务 | `memory_service.py` | Agent 记忆 CRUD |
-| PII 掩码 | `masking_service.py` | 敏感信息脱敏 |
-| 语义分块 | `semantic_chunker.py` | 语义感知的文本分块 |
-| 图谱服务 | `graph_rag_service.py` | 知识图谱构建、查询与可视化（不参与 RAG 检索链路） |
-
-### 🔄 异步处理 (`backend/app/worker/`)
-
-Kafka 消费者独立进程（`python -m app --profile worker`；旧脚本 `start_worker.py` 仍兼容），监听 `file-processing` 主题，处理文档解析 → 分块 → 嵌入 → ES 索引入库。
-
-如果 Kafka 不可用，`/documents/upload` 与知识库重建接口会自动切换为进程内处理，本地开发不会因为缺少消息队列而停在 pending。
+Swagger 文档：`http://localhost:8000/docs`（OpenAPI：`/api/v1/openapi.json`）。
 
 ---
 
-## 快速开始
+## 设计取舍（面试最常问的五个问题）
 
-### 前置要求
+1. **为什么是 PER，而不是单轮 ReAct？** 企业任务需要「先规划、可回放、能解释」。Planner 产出可审阅的步骤 DAG，Executor 依赖感知并行执行，Reflector 在结束前自检；每次运行都有 RunReport 与回放快照——出问题能复盘，而不是只剩一段聊天记录。
+2. **为什么把 `original_text` 和检索增强文本分开？** 检索要的是召回率，引用要的是可核验。长文档会拼接摘要增强文本（E）参与评分，但证据出口只放解析原文（O），并用 `text_provenance` 标记来源；legacy 文档显式 409 `SOURCE_ORIGINAL_UNAVAILABLE`，绝不把增强文本伪装成原文。
+3. **为什么「不能核验」是一个状态，而不是一个异常？** 合同核验里「文档缺版本身份/是 legacy/跨版本族」都是业务事实，必须让用户看到原因码（`side:reason`）并阻止流程继续；异常只留给真正的程序错误。`blocked` 案件不能选择证据、不能完成，更不会被导出成「已核验」。
+4. **为什么评测门禁要进 CI？** 检索/生成质量的退化是静默的。把 80 条 golden set 的七项指标做成零容差门禁，任何下跌直接红；基线更新必须走显式 PR——把「质量不可静默回退」变成流程约束，而不是人的自觉。
+5. **为什么合同核验先做规则 + 人工，而不是 LLM 抽取？** 先建立可判定的 gold 与证据链：规则只输出「期限值/单位、起算事件、条件、例外」这类可逐字段比对的文本事实，无法确定就标 `ambiguous`/`not_found`；人工逐项决策并留痕。等 golden 稳定后，再考虑用模型增强，而不是让模型直接产出不可复核的结论。
 
-Docker Desktop（推荐），或手动安装：
-- Python 3.11+ · Node.js 18+ · MySQL 8 · Redis 7 · Elasticsearch 8 · Kafka · MinIO
-
-### 1. 克隆
-
-```bash
-git clone https://github.com/sijie-Z/DocMind-RAG.git
-cd DocMind-RAG
-```
-
-### 2. 配置
-
-环境变量文件要在启动任何服务**之前**创建——缺少 `backend/.env.docker` 时，compose 的任意命令都会直接报错。
-
-```bash
-cd backend
-
-# 本地开发（应用在宿主机跑，见第 4/5 步）
-cp .env.example .env               # Windows: copy .env.example .env
-# 必填：SECRET_KEY / JWT_SECRET_KEY（生成: python -c "import secrets; print(secrets.token_hex(32))"）
-# 按需填写 DEEPSEEK_API_KEY / EMBEDDING_API_KEY 等（LLM / Embedding 凭据）
-
-# 只要使用 Docker（含第 3 步的纯基础设施），都需要本文件（否则 compose 直接报错）：
-cp .env.docker.example .env.docker
-# 按下述必填项编辑 .env.docker；不要把真实密钥提交到仓库。
-```
-
-- **Compose 插值必填**：`MYSQL_ROOT_PASSWORD`、`MYSQL_PASSWORD`、`MINIO_ACCESS_KEY`、
-  `MINIO_SECRET_KEY`、`GRAFANA_PASSWORD`，均须自行生成并填写，不提供默认密码。
-- **后端启动必填**：`SECRET_KEY`、`JWT_SECRET_KEY`；Chat 还需要 `DEEPSEEK_API_KEY`。
-  Embedding 默认走本机 Ollama（nomic-embed-text / 768 维），复用 Chat Key；云端
-  Embedding 再配置 `EMBEDDING_API_KEY` / `EMBEDDING_API_URL`。
-- Compose 的**全文件插值**先于服务选择：即使不选择 Grafana，`GRAFANA_PASSWORD`
-  仍为必填。这里只说明现状，不新增默认密码，也不放宽 Grafana 的安全校验。
-- `.env.example` 面向“宿主应用 + Docker 基础设施”，默认连接
-  `localhost:3308/docmind` 与 Redis `localhost:6390`。全 Docker 时 compose 仍覆盖为
-  容器内 `docmind-mysql:3306/docmind`、`docmind-redis:6379`，不要改用宿主发布端口。
-- 若 MySQL/Redis 也全部直接安装在本机，必须按实际地址、端口和库名修改 `.env`
-  （常见本机端口是 3306/6379，但以你的服务配置为准）。
-
-### 3. 启动基础设施
-
-```bash
-cd backend && docker compose --env-file .env.docker up -d mysql redis elasticsearch minio kafka zookeeper
-# 只启动基础设施容器（应用继续在宿主机跑，见下）；不用 Docker 的话跳过本步，按 SETUP.md 用本机服务替代
-# 完整 Docker 部署（应用也在容器里）：见「部署」一节
-```
-
-### 4. 启动后端
-
-Windows 可直接使用仓库根目录的 `start_windows.bat`（自动识别 `.venv` 或 `venv`）。手动启动：
-
-```bash
-cd backend
-python -m venv venv && source venv/bin/activate   # Windows: venv\Scripts\activate
-pip install -r requirements.txt
-
-# 先执行数据库迁移（issue #495：schema guard 会在版本落后时拒绝启动；
-# 初次启动与每次拉取含迁移的更新后都要跑）
-alembic upgrade head          # 或 make db-migrate（已激活 venv 时）
-
-python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
-```
-
-推荐使用统一入口（issue #479）：
-
-```bash
-# profile = web | worker | headless | sdk | acp（缺省 web）
-python -m app --profile web
-# 按顺序叠加 patch 文件
-python -m app --profile web --patch config/patches/local.yaml
-# 打印 profile/bundle/patch 合并后的最终配置（键排序、secret 打码）
-python -m app --profile web --dump-config
-```
-
-配置分层：`backend/config/base.yaml` → profile 声明的 `bundles/*.yaml` → `profiles/<profile>.yaml` → `--patch` → 环境变量（`.env` 归入环境层）。`uvicorn app.main:app` 与 `python run.py` 保留为兼容入口；reload 场景继续用 `python run.py`。
-
-**数据库迁移与 schema guard（issue #495）**：标准启动方式（compose、`python -m app`、K8s）都要求数据库已处于迁移 head。`python -m app --profile web` 在启动期比对 `alembic_version` 与迁移 head，落后时打印 `current=... head=...` 与修复命令并以**退出码 2** 结束，而不是带病提供 500。相关开关：
-
-| 变量 | 默认 | 说明 |
-|------|------|------|
-| `SCHEMA_GUARD` | `true` | 启动期校验数据库版本；`false` 仅作逃生门 |
-| `AUTO_MIGRATE` | `false` | 显式设 `true` 才允许启动期兜底执行 `alembic upgrade head`（并发副本勿开） |
-
-迁移命令：本地 `make db-migrate` / `alembic upgrade head`；容器 `docker compose run --rm migrate`（`docker compose up` 会自动先跑一次性 `migrate` 服务）。兼容入口 `uvicorn app.main:app` / `python run.py` 不执行该 guard。
-
-### 5. 启动前端
-
-```bash
-cd frontend && npm install && npm run dev          # http://localhost:5173
-```
-
-### 访问
-
-| 地址 | 说明 |
-|------|------|
-| http://localhost:5173 | 前端界面 |
-| http://localhost:8000/docs | Swagger API 文档 |
-| http://localhost:8000/health | 健康检查 |
-| http://localhost:8000/metrics | Prometheus 指标 |
-
-### 演示账号
-
-| 用户名 | 密码 | 角色 |
-|--------|------|------|
-| `guest` | 随机生成（首次创建时打印一次，或 `DEMO_PASSWORD` 指定） | 普通用户（`ENABLE_DEMO_ACCOUNT=true` 时） |
-| `admin` | 通过 `reset_admin.py`（`ADMIN_PASSWORD` 环境变量）创建 | 管理员 |
-
----
-
-## 项目结构
-
-```
-DocMind/
-├── backend/
-│   ├── app/
-│   │   ├── main.py                  # FastAPI 入口，生命周期管理
-│   │   ├── agent_api.py             # 独立 Agent 测试 API（dev-only，端口 8010，不随生产部署）
-│   │   ├── dependencies.py          # 依赖注入容器
-│   │   ├── exceptions.py            # 自定义异常层次结构
-│   │   ├── api/v1/
-│   │   │   ├── router.py            # 主路由（注册 29 个模块）
-│   │   │   └── endpoints/           # 端点实现（29 个文件）
-│   │   ├── agent/                   # PER Agent 核心
-│   │   │   ├── loop.py              #   PER 主循环
-│   │   │   ├── planner.py           #   规划器（LLM + 结构化规则）
-│   │   │   ├── executor.py          #   执行器（DAG/Serial + 重试）
-│   │   │   ├── reflector.py         #   反思器
-│   │   │   ├── reviewer.py          #   对抗式 Reviewer
-│   │   │   ├── run_report.py        #   RunReport（运行摘要）
-│   │   │   ├── orchestrator.py      #   确定性编排器
-│   │   │   ├── service.py           #   AgentService（Facade）
-│   │   │   ├── config.py            #   AgentConfig
-│   │   │   ├── exec_context.py      #   ExecutionContext
-│   │   │   ├── registry.py          #   工具注册表
-│   │   │   ├── memory_bridge.py     #   记忆桥接
-│   │   │   ├── events.py            #   SSE 事件类型（24 种）
-│   │   │   ├── message.py           #   Agent 间消息总线
-│   │   │   ├── tracing.py           #   执行追踪记录（dev-only：评测/离线；生产不写）
-│   │   │   ├── core_tools.py        #   基础工具（11 个）
-│   │   │   ├── tools/               #   扩展工具（20 个；合计 31 个内置工具）
-│   │   │   │   ├── web_search.py    #   网络搜索
-│   │   │   │   ├── code_execution.py #  Python/SQL 沙箱
-│   │   │   │   ├── data_analysis.py #   数据分析
-│   │   │   │   ├── translation.py   #   翻译
-│   │   │   │   ├── skills.py        #   技能学习
-│   │   │   │   ├── utility.py       #   通用工具
-│   │   │   │   ├── mcp_bridge.py    #   MCP 协议桥接
-│   │   │   │   └── feishu/          #   飞书集成
-│   │   │   ├── experience/          #   经验记忆
-│   │   │   │   ├── extractor.py     #   经验提取器
-│   │   │   │   ├── store.py         #   经验存储
-│   │   │   │   ├── models.py        #   数据模型
-│   │   │   │   └── run_extract.py   #   经验引导提取（dev-only：benchmark 跑批后手动执行）
-│   │   │   └── replay/              #   执行回放
-│   │   │       └── engine.py        #   回放引擎
-│   │   ├── core/                    # 基础设施
-│   │   │   ├── config/              #   配置（Base/DB/AI/Security）
-│   │   │   ├── database.py          #   SQLAlchemy 引擎
-│   │   │   ├── redis.py             #   Redis 代理
-│   │   │   ├── elasticsearch.py     #   ES 代理
-│   │   │   ├── minio_client.py      #   MinIO 客户端
-│   │   │   ├── kafka_client.py      #   Kafka 生产者
-│   │   │   ├── security.py          #   JWT + RBAC
-│   │   │   ├── middleware.py         #   指标收集
-│   │   │   ├── circuit_breaker.py   #   熔断器
-│   │   │   ├── step_runner.py       #   步骤执行器
-│   │   │   ├── tracing.py           #   OpenTelemetry
-│   │   │   ├── trace_logger.py      #   JSONL 追踪日志
-│   │   │   ├── prometheus.py        #   Prometheus 指标
-│   │   │   ├── notification_ws.py   #   WebSocket 管理
-│   │   │   ├── request_id.py        #   Request ID
-│   │   │   ├── response.py          #   统一响应
-│   │   │   └── ensure_demo_user.py  #   演示账号初始化
-│   │   ├── rag/                     # RAG 管道
-│   │   │   ├── pipeline.py          #   管道编排器
-│   │   │   ├── retriever.py         #   混合检索器
-│   │   │   ├── reranker.py          #   重排序器
-│   │   │   ├── query_processor.py   #   查询处理（意图/复杂度/HyDE）
-│   │   │   ├── cache.py             #   二级缓存
-│   │   │   ├── context_compressor.py #  上下文压缩
-│   │   │   ├── context_window.py    #   令牌预算管理
-│   │   │   └── evaluator.py         #   质量评估
-│   │   ├── services/                # 业务服务层（29 个服务）
-│   │   ├── models/                  # ORM 模型（21 个模型文件）
-│   │   ├── schemas/                 # Pydantic 请求/响应模式
-│   │   └── worker/                  # Kafka 消费者
-│   ├── tests/                       # 2223 个后端测试（前端另有 861 个）
-│   ├── benchmark/                   # 评测框架
-│   ├── alembic/                     # 数据库迁移
-│   ├── scripts/                     # 工具脚本
-│   ├── docker/                      # Docker 初始化 SQL
-│   ├── config/                      # Prometheus/Grafana 配置
-│   └── docker-compose.yml           # 10 服务编排
-├── frontend/
-│   └── src/
-│       ├── views/                   # 页面（23 个页面模块，34 条路由记录 / 29 条具名路由）
-│       ├── components/              # 共享组件
-│       ├── api/                     # Axios API 客户端
-│       ├── stores/                  # Pinia 状态管理
-│       ├── router/                  # Vue Router 配置
-│       ├── composables/             # 组合式函数
-│       ├── locales/                 # i18n 国际化
-│       └── utils/                   # 工具函数
-└── docs/                            # 设计文档
-```
+**Hooks 扩展点**（默认关闭）：进程内事件总线，`waterfall`（可改写/短路）与 `serial`（顺序观察）两种语义，`tools/pre_execute` 的 `ask` 复用 HITL 审批门且不可绕过；语义与边界见 [`docs/decisions/ADR-004-hooks.md`](docs/decisions/ADR-004-hooks.md)。更多决策记录见 [`docs/decisions/`](docs/decisions/)。
 
 ---
 
 ## 配置说明
 
-环境变量通过 `.env` 文件配置，核心配置项：
-
 | 变量 | 说明 | 默认值 |
 |------|------|--------|
 | `DEEPSEEK_API_KEY` | LLM API Key | 必填 |
 | `DEEPSEEK_API_URL` | LLM API 地址 | `https://api.deepseek.com` |
-| `DEEPSEEK_MODEL` | Chat 模型 | `deepseek-v4-flash` |
 | `EMBEDDING_API_KEY` | Embedding API Key | 留空时复用 `DEEPSEEK_API_KEY` |
-| `EMBEDDING_API_URL` | Embedding API 地址 | `http://localhost:11434/v1`（本机 Ollama） |
-| `EMBEDDING_MODEL` | Embedding 模型 | `nomic-embed-text` |
-| `DATABASE_URL` | MySQL 连接串 | `mysql+aiomysql://...`（部署时必填） |
+| `EMBEDDING_API_URL` | Embedding API 地址 | 本机 Ollama |
+| `DATABASE_URL` | MySQL 连接串 | 部署时必填 |
 | `VECTOR_DIMENSION` | 向量维度 | `768` |
+| `SCHEMA_GUARD` / `AUTO_MIGRATE` | 启动期 schema 校验 / 兜底迁移 | `true` / `false` |
 | `ENABLE_TRACING` | OpenTelemetry 开关 | `false` |
 | `ENABLE_DEMO_ACCOUNT` | 启用演示账号 | `false` |
-| `ENABLE_WORKFLOW_CODE_NODES` | 允许工作流代码节点（存在安全风险，默认关闭） | `false` |
-| `APP_VERSION` | 应用版本 | `1.22.1-rc.1` |
+| `ENABLE_WORKFLOW_CODE_NODES` | 允许工作流代码节点（安全风险，默认关闭） | `false` |
 
-> 模型/向量维度默认值以代码真源 `backend/app/core/config/ai.py` 为准。未显式设置
-> `EMBEDDING_MODEL` / `VECTOR_DIMENSION` 时还会按硬件档位自动选择：CPU 档
-> `bge-m3` / 1024，8G 显存档 `Qwen3-Embedding-4B` / 2048，16G 显存档
-> `Qwen3-Embedding-8B` / 4096。显式配置（如上述模板）优先于自动档位。
-
-完整配置见 `backend/.env.example` 和 `backend/.env.docker.example`。
+完整配置见 `backend/.env.example` 与 `backend/.env.docker.example`；模型/向量维度默认值以 `backend/app/core/config/ai.py` 为真源（CPU/8G/16G 显存自动档位，显式配置优先）。
 
 ---
 
-## 测试
+## 测试与评测
 
 ```bash
 cd backend
-
-# 运行全部测试
-python -m pytest tests/ -v --tb=short
-
-# 生成覆盖率报告
+python -m pytest tests/ -v --tb=short          # 全部后端测试
 python -m pytest tests/ --cov=app --cov-report=html
-
-# 前端测试
-cd ../frontend && npm run test
+make eval-ci                                    # 评测门禁（CI 同口径）
+cd ../frontend && npm run test                  # 前端测试
 ```
+
+测试基线（冻结快照 2026-10-15）：后端 `pytest tests/` **2223 passed / 51 skipped**（0 failed）；前端 **861 passed**（128 个测试文件）+ `vue-tsc --noEmit` 0 错误。数字随 CI 实时演进——CI 是唯一真源，本页只记录冻结快照；口径见 `docs/METRICS.md`。
 
 ---
 
 ## 部署
 
-### Docker Compose
-
-前置：按「快速开始 · 2. 配置」创建并填写好 `backend/.env.docker`——缺失时 compose 的任意命令都会直接报错。
-
 ```bash
 cd backend && docker compose --env-file .env.docker up -d
-# 启动 11 个服务：migrate, backend, worker, mysql, redis, elasticsearch, minio,
-# zookeeper, kafka, prometheus, grafana
-# migrate 是一次性迁移服务：backend/worker 等它成功退出（alembic upgrade head）后才启动。
+# 启动 migrate + backend + worker + mysql + redis + elasticsearch + minio
+# + zookeeper + kafka + prometheus + grafana；migrate 成功退出后应用才启动
 ```
-
-### 基础设施端口
 
 | 服务 | 端口 |
 |------|------|
@@ -585,17 +331,31 @@ cd backend && docker compose --env-file .env.docker up -d
 | Elasticsearch | 9200 |
 | MinIO API / Console | 9000 / 9001 |
 | Kafka | 9092 / 29092 (内部) |
-| Prometheus | 9090 |
-| Grafana | 3001 |
+| Prometheus / Grafana | 9090 / 3001 |
+
+K8s manifests 与部署说明见 [`deploy/`](deploy/)；Kafka 不可用时 `/documents/upload` 与重建接口自动降级为进程内处理，本地开发不会卡在 pending。
 
 ---
 
-## 链接
+## 已知边界
 
-- **研究仓库**：https://github.com/sijie-Z/DocMind-Agent-Causal-Study
-- **GitHub**：https://github.com/sijie-Z/DocMind-RAG
-- **API 文档**：http://localhost:8000/docs
-- **Issues**：https://github.com/sijie-Z/DocMind-RAG/issues
+- 工作流代码节点默认关闭，必须 `ENABLE_WORKFLOW_CODE_NODES=true` 且经 Docker 沙箱执行。
+- GraphRAG 图谱不参与 RAG 检索链路；上下文压缩为规则式，无 LLM 调用；Agent 的短期/工作记忆为进程内，长期/反思记忆走 Redis。
+- 合同核验当前覆盖 4 类固定核验项的中文合同；证据引用是 chunk 级 quote + 条款/页码/字符区间，不是 PDF 高亮。
+- 评测 `mode=fake` 的指标用于门禁回归，不代表真实模型在线效果。
+
+---
+
+## 文档地图
+
+| 文档 | 内容 |
+|------|------|
+| [`docs/USER_GUIDE.md`](docs/USER_GUIDE.md) | 5 分钟启动 → 上传第一份文档 → 带引用的回答 → Agent 工作台 |
+| [`docs/architecture.html`](docs/architecture.html) | 交互式架构图（GitHub Pages：[sijie-z.github.io/DocMind-RAG](https://sijie-z.github.io/DocMind-RAG/)） |
+| [`docs/METRICS.md`](docs/METRICS.md) | 所有对外数字的口径（值/命令/日期/备注） |
+| [`docs/decisions/`](docs/decisions/) | ADR 决策记录 |
+| [`backend/docs/eval-gate-phase1.md`](backend/docs/eval-gate-phase1.md) | 评测门禁规则与基线更新流程 |
+| [研究仓库](https://github.com/sijie-Z/DocMind-Agent-Causal-Study) | 架构决策与实验数据 |
 
 ---
 
