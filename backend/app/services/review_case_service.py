@@ -33,6 +33,7 @@ from app.exceptions import (
     ValidationError,
 )
 from app.models.document import Document, DocumentChunk
+from app.models.organization import user_organization
 from app.models.review import (
     REVIEW_CASE_STATUSES,
     REVIEW_ITEM_KEYS,
@@ -92,6 +93,26 @@ def _case_document_id(case: ReviewCase, side: str) -> str:
     }[side]
 
 
+async def _user_in_organization(session: AsyncSession, user_id: int, org_id: int) -> bool:
+    """用户的主组织或多组织成员关系之一命中即可（与组织成员语义一致）。"""
+    primary = (
+        await session.execute(
+            select(User.id).where(User.id == user_id, User.organization_id == org_id)
+        )
+    ).scalar_one_or_none()
+    if primary is not None:
+        return True
+    membership = (
+        await session.execute(
+            select(user_organization.c.user_id).where(
+                user_organization.c.user_id == user_id,
+                user_organization.c.organization_id == org_id,
+            )
+        )
+    ).scalar_one_or_none()
+    return membership is not None
+
+
 async def get_case_for_user(session: AsyncSession, current_user: User, case_id: str) -> ReviewCase:
     """按 id 加载案件并做组织隔离；非超管跨组织一律 403（与文档口径一致）。"""
     case = await session.get(ReviewCase, case_id)
@@ -133,8 +154,15 @@ async def create_case(
     org_id = docs["base"].organization_id
     if any(doc.organization_id != org_id for doc in docs.values()):
         raise ValidationError("三份文档必须属于同一组织")
-    if assignee_id is not None and await session.get(User, assignee_id) is None:
-        raise ValidationError("assignee_id 指向的用户不存在", field="assignee_id")
+    if assignee_id is not None:
+        assignee = await session.get(User, assignee_id)
+        if (
+            assignee is None
+            or not assignee.is_active
+            or not await _user_in_organization(session, assignee_id, org_id)
+        ):
+            # 统一文案：不区分「不存在 / 外组织 / 停用」，避免跨租户用户 id 探测。
+            raise ValidationError("assignee_id 指向的用户不存在或不属于本组织", field="assignee_id")
 
     metas = {side: await get_review_meta(session, docs[side].id) for side in REVIEW_SIDES}
     readiness = {side: await compute_readiness(session, docs[side]) for side in REVIEW_SIDES}
@@ -232,6 +260,9 @@ def _document_snapshot(doc: Document, meta: Any, readiness: Any) -> dict[str, An
         "effective_from": meta_dict["effective_from"] if meta_dict else None,
         "effective_to": meta_dict["effective_to"] if meta_dict else None,
         "content_sha256": meta_dict["content_sha256"] if meta_dict else None,
+        # 文档处理指纹：即使某一侧没有任何证据行，rebuild 也能被发现。
+        "parsed_at": _iso(doc.parsed_at),
+        "indexed_at": _iso(doc.indexed_at),
         "readiness": {
             "status": readiness.status,
             "blocking_reasons": readiness.blocking_reasons,
@@ -527,8 +558,10 @@ async def case_detail(session: AsyncSession, case: ReviewCase) -> dict[str, Any]
             continue
         bucket[row.side].append(evidence_to_dict(row, stale=row.id in stale_by_evidence))
 
-    live_source_stale = bool(stale_by_evidence) or any(
-        entry["missing"] for entry in documents.values()
+    live_source_stale = (
+        bool(stale_by_evidence)
+        or any(entry["missing"] for entry in documents.values())
+        or any(entry["identity_changed"] for entry in documents.values())
     )
     return {
         "id": case.id,
@@ -561,8 +594,15 @@ async def _document_states(session: AsyncSession, case: ReviewCase) -> dict[str,
         document = await session.get(Document, document_id)
         entry["missing"] = document is None
         entry["live_status"] = document.status.value if document is not None else None
+        entry["identity_changed"] = False
         if document is not None:
             entry["live_filename"] = document.filename
+            if "indexed_at" in entry:
+                # 解析/索引时间在建案后变化 → 文档被重新处理过；即使这一侧
+                # 没有证据行（关键词零命中），也必须提示复核，不能静默当没变。
+                entry["identity_changed"] = _iso(document.indexed_at) != entry.get(
+                    "indexed_at"
+                ) or _iso(document.parsed_at) != entry.get("parsed_at")
         states[side] = entry
     return states
 

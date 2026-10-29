@@ -4,7 +4,7 @@
 >
 > 本文只做**引述**，不做第二套真源：
 > - 端口、凭据、服务编排以 `backend/docker-compose.yml` 与 `backend/.env.docker.example` 为准；
-> - 关键数字（31 个内置工具 / 默认注入 10 个工具 / 28 个端点模块 / 34 条前端路由 / 24 种 SSE 事件）以 `docs/facts.json` 为单一事实源；README、架构页等既有锚点由 `backend/scripts/check_doc_facts.py` 在 CI 逐 PR 校验，本文数字与之一致（工具/端点/路由/SSE 锚点已纳入 CI 校验）；
+> - 关键数字（31 个内置工具 / 默认注入 10 个工具 / 29 个端点模块 / 34 条前端路由 / 24 种 SSE 事件）以 `docs/facts.json` 为单一事实源；README、架构页等既有锚点由 `backend/scripts/check_doc_facts.py` 在 CI 逐 PR 校验，本文数字与之一致（工具/端点/路由/SSE 锚点已纳入 CI 校验）；
 > - 架构与设计动机见 `README.md`、`AGENT_ARCHITECTURE.md`、`docs/decisions/`。
 >
 > 英文版：[USER_GUIDE_EN.md](USER_GUIDE_EN.md)
@@ -664,6 +664,7 @@ API 前缀 `/api/v1/workflows`：工作流 CRUD、执行、调试、节点定义
 | documents | `/api/v1/documents` | 文档上传、解析、向量化、状态 |
 | chat | `/api/v1/chat` | 会话 CRUD、SSE 流式问答 |
 | knowledge | `/api/v1/knowledge` | 知识检索、统计、重建、图谱 |
+| reviews | `/api/v1/reviews` | 合同核验：案件/核验项/证据快照（parser 原文 + 版本哈希；Batch 2） |
 | organizations | `/api/v1/organizations` | 组织 CRUD、成员与角色 |
 | organization_settings | `/api/v1/organizations` | 组织级设置（与组织管理共用前缀） |
 | monitoring | `/api/v1/monitoring` | 性能指标、健康、告警、RAG 质量 |

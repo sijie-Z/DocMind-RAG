@@ -199,6 +199,8 @@ def test_architecture_numbers_match_code():
             "25 个路由模块",
             "26 API 模块",
             "26 个路由模块",
+            "28 API 模块",
+            "28 个路由模块",
             "39 个内置工具",
             "FastAPI · 19 模块",
             "Celery",
@@ -210,8 +212,8 @@ def test_architecture_numbers_match_code():
             "31 个内置工具",
             "默认注入 10 个工具",
             "基础工具（11 个）",
-            "28 API 模块",
-            "28 个路由模块",
+            "29 API 模块",
+            "29 个路由模块",
         ],
     )
     # 静态注册数 = 非隐藏 @register_tool 数（issue #509：hidden=True 的合并旧名

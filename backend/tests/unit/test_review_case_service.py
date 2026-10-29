@@ -3,12 +3,13 @@
 import hashlib
 import sqlite3
 import uuid
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
 from alembic.config import Config
 from alembic.script import ScriptDirectory
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 import app.models  # noqa: F401
@@ -17,7 +18,9 @@ from app.core.config import settings
 from app.core.database import Base
 from app.exceptions import ConflictError, NotFoundError, ValidationError
 from app.models.document import Document, DocumentChunk, DocumentStatus, DocumentType
+from app.models.organization import user_organization
 from app.models.review import ReviewEvidence, ReviewItem
+from app.models.user import User
 from app.rag.source_provenance import SourceProvenanceUnavailableError
 from app.services import review_case_service as svc
 
@@ -55,12 +58,12 @@ async def _seed_doc(factory, doc_id, *, status=DocumentStatus.INDEXED, org=ORG):
         await db.commit()
 
 
-def _meta_row(doc_id, *, role, family=None, label=None, seq=None, sha="a" * 64):
+def _meta_row(doc_id, *, role, family=None, label=None, seq=None, sha="a" * 64, org=ORG):
     from app.models.review import ReviewDocumentMeta
 
     return ReviewDocumentMeta(
         document_id=doc_id,
-        organization_id=ORG,
+        organization_id=org,
         doc_role=role,
         family_key=family,
         version_label=label,
@@ -244,6 +247,7 @@ async def test_case_detail_exposes_documents_items_and_fresh_snapshot(factory):
     assert detail["documents"]["revised"]["version_label"] == "V2"
     assert detail["documents"]["base"]["readiness"]["status"] == "reviewable"
     assert detail["documents"]["base"]["missing"] is False
+    assert detail["documents"]["base"]["identity_changed"] is False
     assert detail["live_source_stale"] is False
     assert detail["stale_evidence_count"] == 0
 
@@ -325,6 +329,52 @@ async def test_wrong_role_and_missing_meta_block_case(factory):
     case2 = await _create_case(factory, policy="doc-no-meta", title="missing meta")
     assert case2.status == "blocked"
     assert "policy:missing_version_meta" in case2.blocking_reasons
+
+
+@pytest.mark.asyncio
+async def test_readiness_reason_codes_parse_failed_not_indexed_wrong_org(factory):
+    await _seed_ready_case(factory)
+
+    await _seed_doc(factory, "doc-failed", status=DocumentStatus.FAILED)
+    await _seed_meta(factory, "doc-failed", role="contract", family="supplier-x", label="V9", seq=9)
+    await _seed_chunks(factory, "doc-failed", [{"original": "付款条款", "page": 1}])
+    case = await _create_case(factory, revised="doc-failed", title="parse failed")
+    assert case.status == "blocked"
+    assert "revised:parse_failed" in case.blocking_reasons
+
+    await _seed_doc(factory, "doc-pending", status=DocumentStatus.PENDING)
+    await _seed_meta(
+        factory, "doc-pending", role="contract", family="supplier-x", label="V8", seq=8
+    )
+    await _seed_chunks(factory, "doc-pending", [{"original": "付款条款", "page": 1}])
+    case2 = await _create_case(factory, revised="doc-pending", title="not indexed")
+    assert "revised:not_indexed" in case2.blocking_reasons
+
+    await _seed_doc(factory, "doc-wrong-org")
+    await _seed_meta(
+        factory,
+        "doc-wrong-org",
+        role="contract",
+        family="supplier-x",
+        label="V7",
+        seq=7,
+        org=2,
+    )
+    await _seed_chunks(factory, "doc-wrong-org", [{"original": "付款条款", "page": 1}])
+    case3 = await _create_case(factory, revised="doc-wrong-org", title="wrong org meta")
+    assert "revised:wrong_org" in case3.blocking_reasons
+
+
+@pytest.mark.asyncio
+async def test_template_role_allowed_on_policy_side(factory):
+    await _seed_ready_case(factory)
+    await _seed_doc(factory, "doc-template")
+    await _seed_meta(factory, "doc-template", role="template")
+    await _seed_chunks(
+        factory, "doc-template", [{"original": "模板：付款期限按附件填写。", "page": 1}]
+    )
+    case = await _create_case(factory, policy="doc-template", title="template policy")
+    assert case.status == "ready", case.blocking_reasons
 
 
 @pytest.mark.asyncio
@@ -479,6 +529,81 @@ async def test_select_evidence_snapshots_and_rejects_foreign_chunks(factory):
     async with factory() as db:
         with pytest.raises(NotFoundError):
             await svc.get_item_for_case(db, case, str(uuid.uuid4()))
+
+
+async def _seed_user(factory, user_id, *, org, active=True):
+    async with factory() as db:
+        db.add(
+            User(
+                id=user_id,
+                username=f"u{user_id}",
+                email=f"u{user_id}@example.com",
+                hashed_password="x",
+                role="user",
+                is_active=active,
+                organization_id=org,
+            )
+        )
+        await db.commit()
+
+
+@pytest.mark.asyncio
+async def test_assignee_must_be_active_member_of_case_org(factory):
+    await _seed_ready_case(factory)
+    await _seed_user(factory, 21, org=2)
+    await _seed_user(factory, 22, org=ORG, active=False)
+    await _seed_user(factory, 23, org=2)
+    async with factory() as db:
+        await db.execute(user_organization.insert().values(user_id=23, organization_id=ORG))
+        await db.commit()
+
+    with pytest.raises(ValidationError):
+        await _create_case(factory, assignee_id=21, title="foreign assignee")
+    with pytest.raises(ValidationError):
+        await _create_case(factory, assignee_id=22, title="inactive assignee")
+    with pytest.raises(ValidationError):
+        await _create_case(factory, assignee_id=999, title="missing assignee")
+
+    case = await _create_case(factory, assignee_id=23, title="member assignee")
+    assert case.status == "ready"
+    assert case.assignee_id == 23
+
+
+@pytest.mark.asyncio
+async def test_rebuild_without_evidence_marks_identity_changed(factory):
+    """某一侧零候选证据时，文档 rebuild 也必须被发现（不能依赖证据行）。"""
+    await _seed_ready_case(factory)
+    case = await _create_case(factory)
+    async with factory() as db:
+        await db.execute(
+            ReviewEvidence.__table__.delete().where(
+                ReviewEvidence.case_id == case.id, ReviewEvidence.side == "policy"
+            )
+        )
+        await db.commit()
+
+    async with factory() as db:
+        before = await svc.case_detail(db, case)
+    assert before["live_source_stale"] is False, "无变化的案件不得误报 stale"
+
+    async with factory() as db:
+        await db.execute(
+            DocumentChunk.__table__.delete().where(DocumentChunk.document_id == POLICY)
+        )
+        db.add(_chunk_row(POLICY, 0, original="采购制度新版本正文，不含旧关键词。"))
+        await db.execute(
+            update(Document).where(Document.id == POLICY).values(indexed_at=datetime.now(UTC))
+        )
+        await db.commit()
+
+    async with factory() as db:
+        after = await svc.case_detail(db, case)
+    assert after["documents"]["policy"]["identity_changed"] is True
+    assert after["live_source_stale"] is True
+    assert after["stale_evidence_count"] == 0, "该侧没有任何证据行，仍须靠文档指纹发现变化"
+    assert after["documents"]["policy"]["readiness"]["status"] == "reviewable", (
+        "建案快照不得被实时状态改写"
+    )
 
 
 @pytest.mark.asyncio
@@ -674,6 +799,19 @@ def test_022_migration_roundtrip(tmp_path, monkeypatch):
         "captured_at",
         "updated_at",
     }
+    orm_tables = {
+        "review_case": Base.metadata.tables["review_case"],
+        "review_item": Base.metadata.tables["review_item"],
+        "review_evidence": Base.metadata.tables["review_evidence"],
+    }
+    for name, pragma_cols in (
+        ("review_case", case_columns),
+        ("review_item", item_columns),
+        ("review_evidence", evidence_columns),
+    ):
+        assert set(pragma_cols) == {column.name for column in orm_tables[name].columns}, (
+            f"{name} 迁移列与 ORM 模型漂移"
+        )
     assert evidence_columns["document_id"][3] == 1, "quote/document 快照必须 NOT NULL"
     assert evidence_columns["quote_text"][3] == 1
     assert ("documents", "document_id") not in evidence_fks, (

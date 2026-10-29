@@ -25,6 +25,7 @@ from app.models.organization import Organization, user_organization
 from app.models.organization_settings import OrganizationSettings
 from app.models.prompt import PromptTemplate
 from app.models.rbac import ORG_ADMIN_ROLE_NAME, Role, user_organization_role_association
+from app.models.review import ReviewCase
 from app.models.scheduled_task import ScheduledTask
 from app.models.token_usage import TokenUsageRecord
 from app.models.user import User
@@ -352,6 +353,9 @@ class OrganizationService:
         ("工作流", Workflow),
         ("提示词模板", PromptTemplate),
         ("用量记录", TokenUsageRecord),
+        # 合同核验案件：证据快照必须在文档删除后存活，但组织删除仍必须先
+        # 转移/清理案件，否则 review_case.organization_id 外键会 1451。
+        ("核验案件", ReviewCase),
     )
 
     async def _assert_org_has_no_attached_data(self, db: AsyncSession, org_ids: list[int]) -> None:
