@@ -1,13 +1,15 @@
 # backend/app/api/v1/endpoints/reviews.py
-"""合同核验案件 API（Batch 2）：建案 / 列表 / 详情 / 人工选择证据。
+"""合同核验 API（Batch 2–4）：建案/列表/详情/证据选择/分析/决策/核验单导出。
 
 证据只来自 parser 原文快照；legacy 分块选择时与 Batch 1 同口径返回 409
 ``SOURCE_ORIGINAL_UNAVAILABLE``，绝不回退检索增强文本。
 """
 
+import json
 import logging
+from typing import Literal
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
@@ -22,9 +24,10 @@ from app.exceptions import AppError, AuthorizationError, ConflictError, NotFound
 from app.models.rbac import PermissionType
 from app.models.user import User
 from app.rag.source_provenance import SourceProvenanceUnavailableError
-from app.schemas.review import ReviewCaseCreate, ReviewEvidenceSelect
+from app.schemas.review import ReviewCaseCreate, ReviewDecisionUpsert, ReviewEvidenceSelect
 from app.services import review_analysis_service as analysis_service
 from app.services import review_case_service as case_service
+from app.services import review_export_service as export_service
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -177,3 +180,112 @@ async def analyze_review_case(
     except Exception as e:
         logger.error(f"Analyze review case failed: {type(e).__name__}: {e}")
         raise AppError("执行核验分析失败") from e
+
+
+@router.put("/{review_id}/items/{item_id}/decision", response_model=dict, dependencies=_WRITE_DEPS)
+async def decide_review_item(
+    review_id: str,
+    item_id: str,
+    body: ReviewDecisionUpsert,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """逐项人工决策（verified/needs_human/not_applicable）；completed 后改决策回 in_review。"""
+    try:
+        case = await case_service.get_case_for_user(db, current_user, review_id)
+        item = await case_service.get_item_for_case(db, case, item_id)
+        row = await export_service.decide_item(
+            db,
+            case,
+            item,
+            status=body.status,
+            note=body.note,
+            user_id=current_user.id,
+        )
+        return {"success": True, "data": export_service.decision_to_dict(row)}
+    except (NotFoundError, AuthorizationError):
+        raise
+    except AppError:
+        raise
+    except Exception as e:
+        logger.error(f"Decide review item failed: {type(e).__name__}: {e}")
+        raise AppError("提交核验决策失败") from e
+
+
+@router.post("/{review_id}/export", response_model=dict, dependencies=_WRITE_DEPS)
+async def export_review_case(
+    review_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """生成不可变核验单快照；未决项 409 REVIEW_EXPORT_BLOCKED。"""
+    try:
+        case = await case_service.get_case_for_user(db, current_user, review_id)
+        export = await export_service.export_case(db, case, user_id=current_user.id)
+        return {"success": True, "data": export_service.export_summary(export)}
+    except (NotFoundError, AuthorizationError):
+        raise
+    except AppError:
+        raise
+    except Exception as e:
+        logger.error(f"Export review case failed: {type(e).__name__}: {e}")
+        raise AppError("导出核验单失败") from e
+
+
+@router.get("/{review_id}/exports", response_model=dict, dependencies=_READ_DEPS)
+async def list_review_exports(
+    review_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """列出核验单导出历史（不可变快照）。"""
+    try:
+        case = await case_service.get_case_for_user(db, current_user, review_id)
+        exports = await export_service.list_exports(db, case)
+        return {
+            "success": True,
+            "data": {"items": [export_service.export_summary(row) for row in exports]},
+        }
+    except (NotFoundError, AuthorizationError):
+        raise
+    except AppError:
+        raise
+    except Exception as e:
+        logger.error(f"List review exports failed: {type(e).__name__}: {e}")
+        raise AppError("获取核验单导出历史失败") from e
+
+
+@router.get("/{review_id}/exports/{export_id}/download", dependencies=_READ_DEPS)
+async def download_review_export(
+    review_id: str,
+    export_id: str,
+    format: Literal["json", "markdown"] = Query("json"),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """下载核验单快照（JSON/Markdown）；按组织授权并写审计。"""
+    try:
+        case = await case_service.get_case_for_user(db, current_user, review_id)
+        export = await export_service.get_export_for_case(db, case, export_id)
+        await export_service.audit_download(db, case, export, user_id=current_user.id)
+        stem = f"review-{case.id[:8]}-{export.id[:8]}"
+        if format == "markdown":
+            content = export_service.render_markdown(export.payload)
+            media_type = "text/markdown; charset=utf-8"
+            filename = f"{stem}.md"
+        else:
+            content = json.dumps(export.payload, ensure_ascii=False, indent=2)
+            media_type = "application/json"
+            filename = f"{stem}.json"
+        return Response(
+            content=content,
+            media_type=media_type,
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
+    except (NotFoundError, AuthorizationError):
+        raise
+    except AppError:
+        raise
+    except Exception as e:
+        logger.error(f"Download review export failed: {type(e).__name__}: {e}")
+        raise AppError("下载核验单失败") from e

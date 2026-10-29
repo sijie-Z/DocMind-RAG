@@ -626,8 +626,21 @@ def _clause_by_locator(clauses: list[Clause], facts: dict[str, Any]) -> Clause |
     return None
 
 
+async def _lock_case(session: AsyncSession, case: ReviewCase) -> ReviewCase:
+    """与 review_export_service._lock_case 同口径：先结束只读事务再加锁。"""
+    await session.commit()
+    fresh = (
+        await session.execute(select(ReviewCase).where(ReviewCase.id == case.id).with_for_update())
+    ).scalar_one_or_none()
+    if fresh is None:
+        raise ConflictError("核验案件已被删除", error_code="REVIEW_CASE_NOT_FOUND")
+    await session.refresh(fresh)
+    return fresh
+
+
 async def analyze_case(session: AsyncSession, case: ReviewCase) -> dict[str, Any]:
     """对 ready/in_review 案件做确定性抽取与对齐，更新 items 并快照主条款证据。"""
+    case = await _lock_case(session, case)
     if case.status not in ("ready", "in_review"):
         raise ConflictError(
             "当前案件状态不允许执行核验分析",
@@ -721,7 +734,9 @@ async def analyze_case(session: AsyncSession, case: ReviewCase) -> dict[str, Any
         ) from exc
     # commit 后 onupdate 列（updated_at）可能处于过期状态；在**当前会话**里重载
     # 案件再组装详情，避免对游离对象 refresh 或同步属性访问触发隐式 IO。
-    fresh = await session.get(ReviewCase, case.id)
+    fresh = (
+        await session.execute(select(ReviewCase).where(ReviewCase.id == case.id).with_for_update())
+    ).scalar_one_or_none()
     if fresh is None:
         raise ConflictError("核验案件已被删除", error_code="REVIEW_CASE_NOT_FOUND")
     await session.refresh(fresh)

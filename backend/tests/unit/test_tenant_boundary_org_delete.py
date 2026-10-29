@@ -24,7 +24,7 @@ from app.models.agent_task import AgentTask
 from app.models.chat import ChatSession
 from app.models.document import Document, DocumentType
 from app.models.organization import Organization
-from app.models.review import ReviewCase
+from app.models.review import ReviewCase, ReviewExport
 from app.models.user import User
 from app.services.organization_service import organization_service
 
@@ -178,6 +178,49 @@ async def test_delete_org_with_review_cases_blocks():
         assert "核验案件 1 条" in str(excinfo.value)
         async with factory() as s:
             assert await s.get(Organization, 10) is not None, "409 时组织不得被删除"
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_delete_org_with_review_exports_blocks():
+    """核验单导出也属于组织挂载数据：存在导出时组织删除必须 409。"""
+    engine, factory = await _setup()
+    try:
+        async with factory() as s:
+            s.add(
+                ReviewCase(
+                    id="case-export-1",
+                    organization_id=10,
+                    title="case",
+                    policy_document_id="doc-p1",
+                    base_document_id="doc-b1",
+                    revised_document_id="doc-r1",
+                    checklist_version="v1",
+                    status="completed",
+                    created_by=20,
+                    lock_version=1,
+                )
+            )
+            s.add(
+                ReviewExport(
+                    id="export-1",
+                    case_id="case-export-1",
+                    organization_id=10,
+                    schema_version=1,
+                    payload={"schema_version": 1},
+                    payload_sha256="a" * 64,
+                    item_count=4,
+                    needs_human_count=0,
+                    unidentified_count=0,
+                    created_by=20,
+                )
+            )
+            await s.commit()
+        async with factory() as s:
+            with pytest.raises(ConflictError) as excinfo:
+                await organization_service.delete_organization_thoroughly(s, 10)
+        assert "核验单导出 1 条" in str(excinfo.value)
     finally:
         await engine.dispose()
 

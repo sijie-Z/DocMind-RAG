@@ -42,3 +42,12 @@ class ReviewEvidenceSelect(BaseModel):
         "main", description="证据角色"
     )
     selected: bool = Field(True, description="选中=true；取消选择=false")
+
+
+class ReviewDecisionUpsert(BaseModel):
+    """逐项人工决策：只允许三态之一，pending/insufficient 等不能手工选择。"""
+
+    status: Literal["verified", "needs_human", "not_applicable"] = Field(
+        ..., description="决策状态"
+    )
+    note: str | None = Field(None, max_length=2000, description="决策说明（可选）")
