@@ -6,6 +6,10 @@
 
 依赖真实 MySQL（CI Integration job 设置 RUN_INTEGRATION=1）；SQLite 忽略
 FOR UPDATE，无法验证该语义。
+
+注意：本用例**自建引擎**而不是复用全局 `AsyncSessionLocal`——pytest-asyncio
+为每个用例新建事件循环，全局连接池里指向旧循环的连接会抛
+「Future attached to a different loop」。
 """
 
 import os
@@ -13,9 +17,11 @@ import uuid
 
 import pytest
 from sqlalchemy import delete
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 import app.models  # noqa: F401
-from app.core.database import AsyncSessionLocal, Base, engine
+from app.core.config import settings
+from app.core.database import Base
 from app.models.organization import Organization
 from app.models.review import ReviewCase
 from app.models.user import User
@@ -29,49 +35,53 @@ pytestmark = pytest.mark.skipif(
 
 @pytest.mark.asyncio
 async def test_lock_case_sees_latest_commit_under_repeatable_read():
-    if engine.dialect.name != "mysql":
+    if "mysql" not in settings.DATABASE_URL:
         pytest.skip("需要 MySQL（SQLite 忽略 FOR UPDATE）")
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
 
+    engine = create_async_engine(settings.DATABASE_URL)
+    maker = async_sessionmaker(engine, expire_on_commit=False)
     suffix = uuid.uuid4().hex[:10]
     case_id = str(uuid.uuid4())
-    async with AsyncSessionLocal() as db:
-        user = User(
-            username=f"lock_probe_{suffix}",
-            email=f"lock_probe_{suffix}@example.com",
-            hashed_password="not-a-real-hash",
-            role="admin",
-            is_active=True,
-        )
-        db.add(user)
-        await db.flush()
-        org = Organization(name=f"lock-probe-{suffix}", owner_id=user.id)
-        db.add(org)
-        await db.flush()
-        db.add(
-            ReviewCase(
-                id=case_id,
-                organization_id=org.id,
-                title="lock probe",
-                policy_document_id="p",
-                base_document_id="b",
-                revised_document_id="r",
-                checklist_version="v1",
-                status="in_review",
-                created_by=user.id,
-                lock_version=1,
-            )
-        )
-        await db.commit()
-        user_id, org_id = user.id, org.id
-
+    user_id = org_id = None
     try:
-        async with AsyncSessionLocal() as reader:
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+
+        async with maker() as db:
+            user = User(
+                username=f"lock_probe_{suffix}",
+                email=f"lock_probe_{suffix}@example.com",
+                hashed_password="not-a-real-hash",
+                role="admin",
+                is_active=True,
+            )
+            db.add(user)
+            await db.flush()
+            org = Organization(name=f"lock-probe-{suffix}", owner_id=user.id)
+            db.add(org)
+            await db.flush()
+            db.add(
+                ReviewCase(
+                    id=case_id,
+                    organization_id=org.id,
+                    title="lock probe",
+                    policy_document_id="p",
+                    base_document_id="b",
+                    revised_document_id="r",
+                    checklist_version="v1",
+                    status="in_review",
+                    created_by=user.id,
+                    lock_version=1,
+                )
+            )
+            await db.commit()
+            user_id, org_id = user.id, org.id
+
+        async with maker() as reader:
             loaded = await reader.get(ReviewCase, case_id)  # 先建立 read view
             assert loaded is not None and loaded.status == "in_review"
 
-            async with AsyncSessionLocal() as writer:
+            async with maker() as writer:
                 row = await writer.get(ReviewCase, case_id)
                 row.status = "completed"
                 row.lock_version = 2
@@ -82,8 +92,11 @@ async def test_lock_case_sees_latest_commit_under_repeatable_read():
             assert locked.lock_version == 2
             await reader.commit()
     finally:
-        async with AsyncSessionLocal() as db:
+        async with maker() as db:
             await db.execute(delete(ReviewCase).where(ReviewCase.id == case_id))
-            await db.execute(delete(Organization).where(Organization.id == org_id))
-            await db.execute(delete(User).where(User.id == user_id))
+            if org_id is not None:
+                await db.execute(delete(Organization).where(Organization.id == org_id))
+            if user_id is not None:
+                await db.execute(delete(User).where(User.id == user_id))
             await db.commit()
+        await engine.dispose()
