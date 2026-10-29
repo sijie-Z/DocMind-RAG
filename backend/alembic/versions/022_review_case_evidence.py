@@ -127,11 +127,9 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.drop_index("ix_review_evidence_item_id", table_name="review_evidence")
-    op.drop_index("ix_review_evidence_case_id", table_name="review_evidence")
+    # 只删表：MySQL 里外键约束会绑定到 case_id/item_id 上的索引（显式建的
+    # ix_*_case_id 会替代自动索引），先 DROP INDEX 会报 1553 "needed in a
+    # foreign key constraint"；DROP TABLE 会连同索引与外键一起删除。
     op.drop_table("review_evidence")
-    op.drop_index("ix_review_item_case_id", table_name="review_item")
     op.drop_table("review_item")
-    op.drop_index("ix_review_case_org_status", table_name="review_case")
-    op.drop_index("ix_review_case_org_created", table_name="review_case")
     op.drop_table("review_case")
