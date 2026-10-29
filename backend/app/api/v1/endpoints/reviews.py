@@ -23,6 +23,7 @@ from app.models.rbac import PermissionType
 from app.models.user import User
 from app.rag.source_provenance import SourceProvenanceUnavailableError
 from app.schemas.review import ReviewCaseCreate, ReviewEvidenceSelect
+from app.services import review_analysis_service as analysis_service
 from app.services import review_case_service as case_service
 
 router = APIRouter()
@@ -151,3 +152,28 @@ async def select_review_evidence(
     except Exception as e:
         logger.error(f"Select review evidence failed: {type(e).__name__}: {e}")
         raise AppError("选择核验证据失败") from e
+
+
+@router.post("/{review_id}/analyze", response_model=dict, dependencies=_WRITE_DEPS)
+async def analyze_review_case(
+    review_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """确定性抽取 4 类文本事实并做 V1↔V2 对齐（不调用 LLM/网络，幂等）。"""
+    try:
+        case = await case_service.get_case_for_user(db, current_user, review_id)
+        return {"success": True, "data": await analysis_service.analyze_case(db, case)}
+    except (NotFoundError, AuthorizationError):
+        raise
+    except SourceProvenanceUnavailableError as e:
+        raise ConflictError(
+            "案件文档缺少 parser 原文，无法执行核验分析；请先重建文档",
+            error_code="SOURCE_ORIGINAL_UNAVAILABLE",
+            detail=e.as_dict(),
+        ) from e
+    except AppError:
+        raise
+    except Exception as e:
+        logger.error(f"Analyze review case failed: {type(e).__name__}: {e}")
+        raise AppError("执行核验分析失败") from e
