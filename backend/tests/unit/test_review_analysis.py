@@ -165,6 +165,60 @@ def test_dates_and_warranty_periods_are_not_payment_terms():
     assert (mixed["value"], mixed["unit"]) == (30, "day")
 
 
+def test_postfix_payment_phrasing_is_identified():
+    """中文合同常见语序：付款动词在期限数字之后（评审 A/B R2 阻断项）。"""
+    invoice = analysis.extract_payment_term([_clause("第八条 乙方应在收到发票后30天内支付货款。")])
+    assert invoice["status"] == "identified"
+    assert (invoice["value"], invoice["unit"]) == (30, "day")
+
+    workday = analysis.extract_payment_term([_clause("第八条 验收合格后30个工作日内支付尾款。")])
+    assert (workday["value"], workday["unit"]) == (30, "workday")
+
+    month = analysis.extract_payment_term([_clause("第八条 甲方应在2个月内付款。")])
+    assert (month["value"], month["unit"]) == (2, "month")
+
+    term = analysis.extract_payment_term([_clause("第八条 甲方给予乙方30天账期。")])
+    assert (term["value"], term["unit"]) == (30, "day")
+
+    effective = analysis.extract_payment_term([_clause("第八条 本合同生效后30天内支付首付款。")])
+    assert effective["status"] == "identified"
+
+    signed = analysis.extract_payment_term([_clause("第八条 合同签署后30天内支付首付款。")])
+    assert signed["status"] == "identified"
+
+
+def test_postfix_ri_is_ambiguous_not_not_found():
+    """「30日内支付」：期限能识别、单位存疑 → ambiguous，不是 not_found。"""
+    facts = analysis.extract_payment_term([_clause("第八条 甲方应在30日内支付货款。")])
+    assert facts["status"] == "ambiguous"
+    assert "unit_unclear" in facts["reason"]
+
+
+def test_overdue_condition_is_not_payment_term():
+    facts = analysis.extract_payment_term(
+        [_clause("第八条 逾期付款超过30天的，甲方有权解除合同。")]
+    )
+    assert facts == {"status": "not_found", "reason": "no_duration"}
+
+
+def test_cross_phrasing_30_vs_60_is_modified_not_removed():
+    """一侧前置、一侧后置语序：真实期限变化必须报 modified，不得报 removed。"""
+    base = analysis.extract_payment_term([_clause("第八条 付款期限为30天。", clause_no=[8])])
+    revised = analysis.extract_payment_term(
+        [_clause("第八条 收到发票后60天内支付货款。", clause_no=[8])]
+    )
+    assert base["status"] == "identified" and revised["status"] == "identified"
+    assert analysis.align_item("payment_term", base, revised) == "modified"
+
+    both_base = analysis.extract_payment_term(
+        [_clause("第八条 收到发票后30天内支付货款。", clause_no=[8])]
+    )
+    both_revised = analysis.extract_payment_term(
+        [_clause("第八条 收到发票后60天内支付货款。", clause_no=[8])]
+    )
+    assert analysis.align_item("payment_term", both_base, both_revised) == "modified"
+
+
 def test_negation_and_subject_change_is_modified_not_unchanged():
     """事实词元相同但文本变化（否定/主体/限定语）必须报 modified（评审 F2）。"""
     base = analysis.extract_acceptance_invoice([_clause("第八条 经甲方验收合格后支付价款。")])
@@ -509,7 +563,6 @@ async def test_analyze_keeps_manual_selection(factory):
         refreshed = await db.get(ReviewEvidence, row.id)
     assert refreshed.selected is True
     assert refreshed.role == "main"
-    assert refreshed.capture == row.id if False else True
 
 
 @pytest.mark.asyncio
@@ -596,3 +649,17 @@ async def test_analyze_allows_in_review_status(factory):
         await db.commit()
         detail = await analysis.analyze_case(db, case)
     assert detail["items"]
+
+
+@pytest.mark.asyncio
+async def test_analyze_missing_meta_fails_closed(factory):
+    case = await _seed_case(factory)
+    async with factory() as db:
+        await db.execute(
+            ReviewDocumentMeta.__table__.delete().where(ReviewDocumentMeta.document_id == REVISED)
+        )
+        await db.commit()
+    async with factory() as db:
+        with pytest.raises(ConflictError) as excinfo:
+            await analysis.analyze_case(db, case)
+    assert excinfo.value.error_code == "REVIEW_META_MISSING"

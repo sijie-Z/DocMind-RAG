@@ -13,8 +13,8 @@
 - 对齐 = 文本事实 + 归一化主条款文本哈希：事实不同 → modified；事实相同但
   文本变化（否定/主体/限定语）→ modified；事实与文本相同、条号变化 →
   renumbered；完全相同 → unchanged；无法判定/扫描截断 → unidentified；
-- 条款/事件的先后顺序不算事实差异（按集合比较）；仅顺序变化时由主条款文本
-  哈希体现为 modified —— moved 类型 v1 不产出，绝不报 unchanged；
+- 条款/事件的先后顺序不产生事实差异（按集合比较，仅顺序变化 → unchanged）；
+  moved 类型 v1 不产出；
 - 纯规则实现：不调用 LLM、不访问网络、不依赖 ES；同一输入重复运行结果一致；
 - 主条款以 candidate 证据快照落库（已存在的同一 item/side/chunk 不重复写入，
   不触碰人工已选/角色）。
@@ -65,17 +65,19 @@ NON_PAYMENT_CONTEXT = (
     "审核",
     "有效期",
     "保密期",
-    "签订",
-    "签署",
-    "生效",
     "到期",
     "保证金",
     "押金",
+    "逾期",
+    "违约",
+    "滞纳",
+    "罚息",
 )
 # 「天」按自然日；单独「日」无法判定自然日/工作日 → ambiguous。
 DURATION_RE = re.compile(r"(\d+)\s*(个)?\s*(工作日|自然日|日历日|天|日)")
 MONTH_RE = re.compile(r"(\d+)\s*个\s*月")
 SENTENCE_SPLIT_RE = re.compile(r"[。；;！!？?\n]+")
+FRAGMENT_SPLIT_RE = re.compile(r"[，,、]")
 UNIT_MAP = {"工作日": "workday", "自然日": "day", "日历日": "day", "天": "day"}
 START_EVENTS = (
     "收到发票",
@@ -179,18 +181,89 @@ def _iter_sentences(text: str):
     yield text[start:]
 
 
-def _last_anchor_index(prefix: str, anchors: tuple[str, ...]) -> int:
-    return max(
-        (prefix.rfind(anchor) + len(anchor) for anchor in anchors if anchor in prefix),
-        default=-1,
-    )
+def _anchor_distance(sentence: str, start: int, end: int, anchors: tuple[str, ...]) -> int | None:
+    """最近的锚点到 [start, end) 的字符距离；锚点在数字前后都算。"""
+    best: int | None = None
+    for anchor in anchors:
+        index = sentence.find(anchor)
+        while index != -1:
+            anchor_start, anchor_end = index, index + len(anchor)
+            if anchor_end <= start:
+                distance = start - anchor_end
+            elif anchor_start >= end:
+                distance = anchor_start - end
+            else:  # 理论上不会与纯数字区间重叠
+                distance = 0
+            if best is None or distance < best:
+                best = distance
+            index = sentence.find(anchor, index + 1)
+    return best
 
 
-def _duration_context_ok(sentence_prefix: str) -> bool:
-    """付款锚点必须比保修/签署/生效等排除锚点更靠近该期限数字。"""
-    payment = _last_anchor_index(sentence_prefix, PAYMENT_KEYWORDS)
-    excluded = _last_anchor_index(sentence_prefix, NON_PAYMENT_CONTEXT)
-    return payment > excluded
+def _iter_fragments(sentence: str):
+    """按逗号/顿号切分句内片段，yield (片段文本, 起始偏移)。"""
+    start = 0
+    for match in FRAGMENT_SPLIT_RE.finditer(sentence):
+        yield sentence[start : match.start()], start
+        start = match.end()
+    yield sentence[start:], start
+
+
+def _adjacent_to_exclusion(fragment: str, start: int, end: int) -> bool:
+    for exclusion in NON_PAYMENT_CONTEXT:
+        index = fragment.find(exclusion)
+        while index != -1:
+            exclusion_start, exclusion_end = index, index + len(exclusion)
+            if start <= exclusion_end + 1 and exclusion_start <= end + 1:
+                return True
+            index = fragment.find(exclusion, index + 1)
+    return False
+
+
+def _payment_anchor_distance(fragment: str, start: int, end: int) -> int | None:
+    """最近的付款锚点距离；与排除锚点相邻的付款词（如「逾期付款」）不算。"""
+    best: int | None = None
+    for anchor in PAYMENT_KEYWORDS:
+        index = fragment.find(anchor)
+        while index != -1:
+            anchor_start, anchor_end = index, index + len(anchor)
+            if not _adjacent_to_exclusion(fragment, anchor_start, anchor_end):
+                if anchor_end <= start:
+                    distance = start - anchor_end
+                elif anchor_start >= end:
+                    distance = anchor_start - end
+                else:
+                    distance = 0
+                if best is None or distance < best:
+                    best = distance
+            index = fragment.find(anchor, index + 1)
+    return best
+
+
+def _duration_context_ok(sentence: str, start: int, end: int) -> bool:
+    """期限只归属它所在的分句片段（中文「保修期为12个月，付款时扣留」
+    里的付款动作不能把保修期认成账期）。
+
+    - 片段内有付款锚点：与排除锚点（保修/逾期/违约…）按距离裁决，付款
+      更近或没有排除锚点才接受——覆盖「收到发票后 30 天内支付」这类
+      付款动词在数字之后的常见语序；
+    - 片段内没有付款锚点：仅当上一分句有付款锚点且本片段没有排除锚点
+      时接受（如「关于付款，期限为 30 天」）。
+    """
+    previous_text = ""
+    for fragment, offset in _iter_fragments(sentence):
+        fragment_end = offset + len(fragment)
+        if start >= offset and end <= fragment_end:
+            local_start, local_end = start - offset, end - offset
+            payment = _payment_anchor_distance(fragment, local_start, local_end)
+            excluded = _anchor_distance(fragment, local_start, local_end, NON_PAYMENT_CONTEXT)
+            if payment is not None:
+                return excluded is None or payment < excluded
+            if excluded is not None:
+                return False
+            return _anchor_distance(previous_text, 0, 0, PAYMENT_KEYWORDS) is not None
+        previous_text = fragment
+    return False
 
 
 def _is_date_fragment(text: str, start: int, unit_raw: str) -> bool:
@@ -210,8 +283,7 @@ def extract_payment_term(clauses: list[Clause]) -> dict[str, Any]:
         for sentence in _iter_sentences(clause.text):
             for match in DURATION_RE.finditer(sentence):
                 unit_raw = match.group(3)
-                prefix = sentence[: match.start()]
-                if not _duration_context_ok(prefix):
+                if not _duration_context_ok(sentence, match.start(), match.end()):
                     continue
                 if _is_date_fragment(sentence, match.start(), unit_raw):
                     continue
@@ -225,8 +297,7 @@ def extract_payment_term(clauses: list[Clause]) -> dict[str, Any]:
                     }
                 )
             for match in MONTH_RE.finditer(sentence):
-                prefix = sentence[: match.start()]
-                if not _duration_context_ok(prefix):
+                if not _duration_context_ok(sentence, match.start(), match.end()):
                     continue
                 if _is_date_fragment(sentence, match.start(), "月"):
                     continue
@@ -250,7 +321,7 @@ def extract_payment_term(clauses: list[Clause]) -> dict[str, Any]:
             distinct.append(hit)
     matched_clauses = [hit["_clause"] for hit in hits]
     text_sha = _matched_text_sha(matched_clauses)
-    clause_no = _clause_no_union(matched_clauses)
+    clause_no_union = _clause_no_union(matched_clauses)
     if len(distinct) == 1 and not ambiguous_units:
         hit = distinct[0]
         return {
@@ -260,7 +331,7 @@ def extract_payment_term(clauses: list[Clause]) -> dict[str, Any]:
             "raw": hit["raw"],
             "text_sha256": text_sha,
             **_primary_locator(hit["_clause"]),
-            "clause_no": clause_no,
+            "clause_no_union": clause_no_union,
         }
     reasons: list[str] = []
     if ambiguous_units:
@@ -275,7 +346,7 @@ def extract_payment_term(clauses: list[Clause]) -> dict[str, Any]:
         ],
         "text_sha256": text_sha,
         **_primary_locator(distinct[0]["_clause"]),
-        "clause_no": clause_no,
+        "clause_no_union": clause_no_union,
     }
 
 
@@ -300,7 +371,7 @@ def extract_start_condition(clauses: list[Clause]) -> dict[str, Any]:
         "events": [event["event"] for event in events],
         "text_sha256": _matched_text_sha(matched_clauses),
         **locator,
-        "clause_no": _clause_no_union(matched_clauses),
+        "clause_no_union": _clause_no_union(matched_clauses),
     }
 
 
@@ -323,7 +394,7 @@ def _collect_terms(clauses: list[Clause], terms: tuple[str, ...]) -> dict[str, A
         "terms": [hit["term"] for hit in hits],
         "text_sha256": _matched_text_sha(matched_clauses),
         **locator,
-        "clause_no": _clause_no_union(matched_clauses),
+        "clause_no_union": _clause_no_union(matched_clauses),
     }
 
 
@@ -388,7 +459,9 @@ def align_item(
         if base_sha and revised_sha and base_sha != revised_sha:
             # 事实词元相同但文本变了（否定/主体/限定语）：必须报差异。
             result = "modified"
-        elif (base.get("clause_no") or []) != (revised.get("clause_no") or []):
+        elif (base.get("clause_no_union") or base.get("clause_no") or []) != (
+            revised.get("clause_no_union") or revised.get("clause_no") or []
+        ):
             result = "renumbered"
         else:
             result = "unchanged"
