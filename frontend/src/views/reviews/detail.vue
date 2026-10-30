@@ -646,7 +646,7 @@ async function runExport() {
       const items = (detailBlock?.items || [])
         .map(
           (item) =>
-            `${item.item_key || '?'}(${(item.reasons || [])
+            `${itemLabel(String(item.item_key || '?'))}(${(item.reasons || [])
               .map((reason) => reasonLabel(t, String(reason)))
               .join(' / ')})`
         )

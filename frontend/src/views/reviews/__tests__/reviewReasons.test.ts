@@ -4,17 +4,37 @@
 import { describe, it, expect } from 'vitest'
 import { createI18n } from 'vue-i18n'
 import zh from '@/locales/zh'
+import en from '@/locales/en'
 import { reasonLabel, reasonsLabel } from '../reviewReasons'
 
 const i18n = createI18n({ legacy: false, locale: 'zh', messages: { zh } })
 const t = i18n.global.t as unknown as (key: string) => string
+const i18nEn = createI18n({ legacy: false, locale: 'en', messages: { en } })
+const tEn = i18nEn.global.t as unknown as (key: string) => string
 
 describe('核验原因码本地化', () => {
-  it('文档 readiness 原因码映射为业务文案', () => {
-    expect(reasonLabel(t, 'no_original_text')).toContain('缺少 parser 原文')
-    expect(reasonLabel(t, 'legacy_unverified')).toContain('旧版分块未迁移')
-    expect(reasonLabel(t, 'missing_version_meta')).toContain('未登记核验身份')
-    expect(reasonLabel(t, 'wrong_role')).toContain('角色')
+  // 表驱动：后端全部原因码逐一断言（漏映射/错映射必须红）
+  const CASES: Array<[string, string]> = [
+    ['parse_failed', '文档解析失败'],
+    ['not_indexed', '尚未完成索引'],
+    ['no_chunks', '没有可用的文档分块'],
+    ['no_original_text', '缺少 parser 原文'],
+    ['legacy_unverified', '旧版分块未迁移'],
+    ['missing_version_meta', '未登记或未补全核验身份'],
+    ['wrong_org', '核验身份记录的组织不一致'],
+    ['wrong_role', '文档角色'],
+    ['family_mismatch', '版本族不一致'],
+    ['version_order', '版本序'],
+    ['undecided', '存在未决核验项'],
+    ['not_analyzed', '尚未执行分析'],
+    ['unit_unclear', '单位无法判定'],
+    ['multiple_durations', '多个期限候选']
+  ]
+
+  it.each(CASES)('%s → 业务文案且不出现原始码', (code, expected) => {
+    const text = reasonLabel(t, code)
+    expect(text).toContain(expected)
+    expect(text).not.toContain(code)
   })
 
   it('side 前缀渲染为文档侧标签 + 原因', () => {
@@ -23,6 +43,8 @@ describe('核验原因码本地化', () => {
     )
     expect(reasonLabel(t, 'base:missing_version_meta')).toContain('合同基准版：')
     expect(reasonLabel(t, 'policy:wrong_role')).toContain('制度/模板：')
+    // 分隔符按 locale：en 用半角冒号+空格
+    expect(reasonLabel(tEn, 'base:missing_version_meta')).toContain('Contract base: ')
   })
 
   it('跨文档约束与导出阻断原因本地化', () => {

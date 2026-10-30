@@ -7,7 +7,7 @@
  * 3. 建案载荷 = 三份文档 id + 标题 + checklist v1，成功后跳详情；
  * 4. 三份文档重复时不提交；合同身份缺版本族/标签/序时不提交；
  * 5. 身份可原地登记/编辑；角色按侧锁定；登记后不匹配该侧的选择被清空；
- * 6. 跨文档约束（family_mismatch / version_order）在建案前预告；
+ * 6. 跨文档约束（版本族/版本序）在建案前预告（文案不含机器码）；
  * 7. 候选加载失败可重试；超过 200 篇时给出截断提示。
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
@@ -381,8 +381,9 @@ describe('新建核验建案弹窗', () => {
     )
     await vm.loadCandidates()
     await flushPromises()
-    expect(vm.crossDocWarning).toContain('family_mismatch')
-    expect(wrapper.text()).toContain('family_mismatch')
+    expect(vm.crossDocWarning).toContain('版本族不一致')
+    expect(wrapper.text()).toContain('版本族不一致')
+    expect(wrapper.text()).not.toContain('family_mismatch')
 
     api.candidates.mockResolvedValue(
       candidatesResponse([
@@ -394,7 +395,7 @@ describe('新建核验建案弹窗', () => {
     )
     await vm.loadCandidates()
     await flushPromises()
-    expect(vm.crossDocWarning).toContain('version_order')
+    expect(vm.crossDocWarning).toContain('版本序不小于')
   })
 
   it('其他侧已选的文档不再出现在本侧选项里', async () => {

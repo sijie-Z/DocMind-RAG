@@ -521,3 +521,55 @@ async def test_upsert_self_heals_mismatched_meta_organization(factory, monkeypat
     meta = await _register_meta(factory, monkeypatch)
 
     assert meta.organization_id == ORG
+
+
+@pytest.mark.asyncio
+async def test_upsert_self_heal_conflicts_when_target_slot_taken(factory, monkeypatch):
+    """自愈把行搬回目标组织时，目标槽位已被占用必须 409 且不半写。"""
+    await _seed_doc(factory)
+    async with factory() as db:
+        db.add(
+            Document(
+                id="doc-slot-occupied",
+                filename="other.pdf",
+                file_path="1/doc-slot-occupied.pdf",
+                file_size=100,
+                file_type=DocumentType.PDF,
+                status=DocumentStatus.INDEXED,
+                organization_id=ORG,
+                uploaded_by=1,
+            )
+        )
+        db.add(
+            ReviewDocumentMeta(
+                document_id="doc-slot-occupied",
+                organization_id=ORG,
+                doc_role="contract",
+                family_key="supplier-x",
+                version_label="v1",
+                version_seq=1,
+                content_sha256="b" * 64,
+                registered_by=1,
+            )
+        )
+        db.add(
+            ReviewDocumentMeta(
+                document_id=DOC,
+                organization_id=999,
+                doc_role="contract",
+                family_key="supplier-x",
+                version_label="v1",
+                version_seq=1,
+                content_sha256="z" * 64,
+                registered_by=1,
+            )
+        )
+        await db.commit()
+
+    with pytest.raises(ConflictError) as excinfo:
+        await _register_meta(factory, monkeypatch)
+
+    assert excinfo.value.error_code == "REVIEW_META_DUPLICATE"
+    async with factory() as db:
+        meta = await db.get(ReviewDocumentMeta, DOC)
+    assert meta.organization_id == 999, "冲突时不得半写自愈"

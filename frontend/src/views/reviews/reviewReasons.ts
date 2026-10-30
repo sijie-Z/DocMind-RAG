@@ -55,7 +55,9 @@ export function reasonLabel(t: TranslateFn, code: string): string {
         const side = part.slice(0, colon)
         const rest = part.slice(colon + 1)
         const sideKey = SIDE_KEYS[side]
-        if (sideKey) return `${t(sideKey)}：${singleLabel(t, rest)}`
+        if (sideKey) {
+          return `${t(sideKey)}${t('reviews.reasonSideSeparator')}${singleLabel(t, rest)}`
+        }
       }
       return singleLabel(t, part)
     })

@@ -1484,8 +1484,8 @@ export default {
     metaFailed: '保存核验身份失败',
     metaRequired: '合同身份需填写版本族、版本标签与版本序',
     editMeta: '编辑身份',
-    warnFamilyMismatch: '基准版与修订版的版本族不一致：建案将阻断（family_mismatch）',
-    warnVersionOrder: '基准版版本序不小于修订版：建案将阻断（version_order）',
+    warnFamilyMismatch: '基准版与修订版的版本族不一致：建案将阻断',
+    warnVersionOrder: '基准版版本序不小于修订版：建案将阻断',
     candidateTruncated: '共 {total} 篇文档，仅加载前 {shown} 篇（已登记身份的优先）',
     metaSeqNeedsLabel: '填写版本序时必须同时填写版本标签',
     archiveCase: '归档案件',
@@ -1503,12 +1503,13 @@ export default {
     reasonNoChunks: '没有可用的文档分块',
     reasonNoOriginalText: '缺少 parser 原文（需重建文档）',
     reasonLegacyUnverified: '旧版分块未迁移（需重建文档）',
-    reasonMissingVersionMeta: '未登记核验身份',
-    reasonWrongOrg: '文档与案件不属于同一组织',
+    reasonMissingVersionMeta: '未登记或未补全核验身份',
+    reasonWrongOrg: '文档与其核验身份记录的组织不一致',
     reasonWrongRole: '文档角色与该侧要求不符',
     reasonFamilyMismatch: '基准版与修订版版本族不一致',
     reasonVersionOrder: '基准版版本序不小于修订版',
     reasonUndecided: '存在未决核验项',
-    reasonNotAnalyzed: '尚未执行分析'
+    reasonNotAnalyzed: '尚未执行分析',
+    reasonSideSeparator: '：',
   }
 };
