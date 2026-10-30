@@ -843,3 +843,20 @@ async def test_archive_requires_update_permission(factory, monkeypatch):
     async with _Ctx(_user(org=ORG), factory) as ac:
         denied = await ac.post(f"/api/v1/reviews/{blocked['id']}/archive")
     assert denied.status_code == 403, denied.text
+
+
+@pytest.mark.asyncio
+async def test_archived_case_rejects_evidence_selection(factory):
+    # 归档先于状态门：blocked 案件正常报 NOT_READY，归档后必须报 ARCHIVED。
+    async with _Ctx(_user(superuser=True), factory) as ac:
+        case = (await ac.post("/api/v1/reviews", json=_case_payload(revised=LEGACY))).json()["data"]
+        assert case["status"] == "blocked"
+        archived = await ac.post(f"/api/v1/reviews/{case['id']}/archive")
+        assert archived.status_code == 200, archived.text
+        item = case["items"][0]
+        put = await ac.put(
+            f"/api/v1/reviews/{case['id']}/items/{item['id']}/evidence",
+            json={"side": "base", "chunk_id": "any-chunk"},
+        )
+        assert put.status_code == 409, put.text
+        assert put.json()["error_code"] == "REVIEW_CASE_ARCHIVED"
