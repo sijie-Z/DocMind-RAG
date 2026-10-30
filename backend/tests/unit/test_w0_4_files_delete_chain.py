@@ -79,12 +79,25 @@ class _RecordingSession:
         self.selects.append(stmt)
         if len(self.selects) == 1:
             return _DocResult(self._doc)
+        if len(self.selects) == 2:
+            # Batch 5：删除前的核验案件引用检查（无引用时放行）
+            return _CaseGuardResult()
         return _CountResult(self._other_refs)
 
     async def commit(self):
         self.commit_count += 1
         self.deletes_before_commit = len(self.deletes)
         self.events.append("commit")
+
+
+class _CaseGuardResult:
+    """核验案件引用检查：空结果表示没有案件引用该文档。"""
+
+    def scalars(self):
+        return self
+
+    def all(self):
+        return []
 
 
 class _FakeES:
@@ -161,13 +174,15 @@ async def test_unified_chain_cleans_children_es_and_caches_in_order(monkeypatch)
     assert ORG_ID in select_params.values()
 
     # 1b. 共享对象引用计数查询：同一 file_path、排除当前文档
-    assert len(session.selects) == 2
-    ref_params = session.selects[1].compile().params
+    assert len(session.selects) == 3
+    # 第 2 条 select 是核验案件引用检查（必须在任何删除副作用之前）
+    assert "review_case" in str(session.selects[1])
+    ref_params = session.selects[2].compile().params
     assert "7/shared-object.pdf" in ref_params.values()
     assert DOC_ID in ref_params.values()
     # 谓词方向也要钉住（只查同一 file_path 的「其他」文档）——否则把
     # `==` 写成 `!=`、或漏掉 `id !=` 时参数里同样有这两个值（假绿）。
-    ref_sql = str(session.selects[1])
+    ref_sql = str(session.selects[2])
     assert "documents.file_path = " in ref_sql
     assert "documents.id != " in ref_sql
 

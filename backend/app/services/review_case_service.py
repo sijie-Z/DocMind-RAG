@@ -172,6 +172,29 @@ async def create_case(
         side: _document_snapshot(docs[side], metas[side], readiness[side]) for side in REVIEW_SIDES
     }
 
+    # Batch 5 并发收口：在插入案件行之前对三份文档做加锁复核（当前读）。
+    # 先锁 documents 再写 review_case，与删除侧的锁序一致（documents →
+    # review_case），避免与并发删除形成锁环；锁持有到 commit 保证互斥。
+    locked_ids = set(
+        (
+            await session.execute(
+                select(Document.id)
+                .where(Document.id.in_([docs[side].id for side in REVIEW_SIDES]))
+                .with_for_update()
+            )
+        )
+        .scalars()
+        .all()
+    )
+    missing = [side for side in REVIEW_SIDES if docs[side].id not in locked_ids]
+    if missing:
+        await session.rollback()
+        raise ConflictError(
+            "案件引用的文档已被删除，请重新选择文档建案",
+            error_code="REVIEW_DOCUMENT_UNAVAILABLE",
+            detail={"missing_sides": missing},
+        )
+
     case = ReviewCase(
         id=str(uuid.uuid4()),
         organization_id=org_id,
