@@ -226,6 +226,10 @@ async def upsert_review_meta(
             doc_role=data.doc_role,
         )
         session.add(meta)
+    else:
+        # 自愈：组织错配的 meta 行（仅手工改库可达）在重新登记时归位，
+        # 与 candidates/readiness 的 wrong_org 口径彻底对齐。
+        meta.organization_id = document.organization_id
     meta.doc_role = data.doc_role
     meta.family_key = family_key
     meta.version_label = version_label

@@ -192,8 +192,11 @@ describe('合同核验工作台', () => {
     const wrapper = mountDetail()
     await flushPromises()
 
-    expect(wrapper.text()).toContain('base:legacy_unverified')
-    expect(wrapper.text()).toContain('revised:missing_version_meta')
+    expect(wrapper.text()).toContain('合同基准版：旧版分块未迁移')
+    expect(wrapper.text()).toContain('合同修订版：未登记或未补全核验身份')
+    expect(wrapper.text()).not.toContain('revised:missing_version_meta')
+    // 原始码保留在横幅 title 属性里供排障
+    expect(wrapper.find('[title*="base:legacy_unverified"]').exists()).toBe(true)
     const analyzeButton = wrapper
       .findAll('button')
       .find((button) => button.text().includes('执行分析'))
@@ -339,6 +342,39 @@ describe('合同核验工作台 · 导出与草稿', () => {
     await exportButton!.trigger('click')
     await flushPromises()
     expect(api.exportCase).toHaveBeenCalledWith('case-1')
+
+    // 409 提示本地化：item 业务名 + 原因文案，且不再出现机器码
+    const toast = document.body.textContent || ''
+    expect(toast).toContain('付款期限')
+    expect(toast).toContain('存在未决核验项')
+    expect(toast).not.toContain('undecided')
+    expect(toast).not.toContain('payment_term')
+  })
+
+  it('歧义事实走原因码注册表：组合码本地化、未知码透传', async () => {
+    const base = makeDetail()
+    api.get.mockResolvedValue({
+      data: {
+        data: makeDetail({
+          items: [
+            {
+              ...base.items[0],
+              facts: {
+                base: { status: 'ambiguous', reason: 'unit_unclear+multiple_durations' },
+                revised: { status: 'ambiguous', reason: 'some_future_code' },
+                policy: { status: 'not_found' }
+              }
+            }
+          ]
+        })
+      }
+    } as never)
+    const wrapper = mountDetail()
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('单位无法判定')
+    expect(wrapper.text()).toContain('多个期限候选')
+    expect(wrapper.text()).toContain('some_future_code')
   })
 
   it('顺带刷新（选证据）保留未保存的决策草稿', async () => {

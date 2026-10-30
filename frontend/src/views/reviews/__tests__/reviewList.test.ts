@@ -67,7 +67,11 @@ describe('合同核验列表页', () => {
       page_size: 20
     })
     expect(wrapper.text()).toContain('采购合同 V1/V2 核验')
-    expect(wrapper.text()).toContain('base:legacy_unverified')
+    // 列表把原因码本地化展示；原始码保留在 title 属性里供排障。
+    expect(wrapper.text()).toContain('合同基准版：旧版分块未迁移')
+    expect(wrapper.text()).not.toContain('base:legacy_unverified')
+    // 原始码保留在 title 属性里供排障
+    expect(wrapper.find('span[title*="base:legacy_unverified"]').exists()).toBe(true)
     expect(wrapper.text()).toContain('已阻断')
   })
 

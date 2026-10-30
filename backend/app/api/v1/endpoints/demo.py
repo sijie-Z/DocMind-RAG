@@ -8,7 +8,7 @@ import uuid
 from datetime import UTC, datetime, timedelta
 
 from fastapi import APIRouter, Depends
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
@@ -22,8 +22,15 @@ from app.models.chat import (
     DeletedChatSession,
     MessageType,
 )
-from app.models.document import Document, DocumentChunk, DocumentStatus, DocumentType
-from app.models.review import ReviewDocumentMeta
+from app.models.document import (
+    Document,
+    DocumentChunk,
+    DocumentStatus,
+    DocumentTag,
+    DocumentType,
+)
+from app.models.knowledge_job import KnowledgeProcessingJob
+from app.models.review import ReviewCase, ReviewDocumentMeta
 from app.models.user import User
 from app.services.document_status import mark_document_failed, mark_document_indexed
 from app.services.embedding_service import embedding_service
@@ -189,7 +196,8 @@ async def seed_demo_data(
                 Document.description == "示例数据 - DocMind 首次体验",
             )
         )
-        if existing.scalar() and existing.scalar() > 0:
+        existing_count = existing.scalar() or 0
+        if existing_count > 0:
             return {"success": True, "message": "示例数据已存在", "skipped": True}
 
         created_doc_ids = []
@@ -424,15 +432,66 @@ async def clear_demo_data(
     """清除当前用户的示例数据。"""
     try:
         # 查找示例文档
-        result = await db.execute(
-            select(Document).where(
-                Document.uploaded_by == current_user.id,
-                Document.description == "示例数据 - DocMind 首次体验",
+        # 与建案/删除同一锁序（documents → review_case）：先锁示例文档行，
+        # 并发建案在拿到文档锁前无法跨过引用检查提交。
+        # 两段式：description 非索引列，直接锁定读会锁住该用户全部文档行，并
+        # 把锁持有到后续 ES 删除的网络 I/O；先普通查询取候选 id，再按主键 IN
+        # 加锁（与建案/删除的 PK 加锁形状一致），锁后复核过滤条件。
+        candidate_ids = (
+            (
+                await db.execute(
+                    select(Document.id).where(
+                        Document.uploaded_by == current_user.id,
+                        Document.description == "示例数据 - DocMind 首次体验",
+                    )
+                )
             )
+            .scalars()
+            .all()
         )
-        docs = result.scalars().all()
+        if candidate_ids:
+            result = await db.execute(
+                select(Document).where(Document.id.in_(candidate_ids)).with_for_update()
+            )
+            docs = [
+                doc
+                for doc in result.scalars().all()
+                if doc.uploaded_by == current_user.id
+                and doc.description == "示例数据 - DocMind 首次体验"
+            ]
+        else:
+            docs = []
 
+        # Batch 8：被核验案件（含已归档）引用的示例文档跳过删除并如实报告——
+        # 删除会把案件留成只能看到 missing 快照的悬空引用。
+        skipped_referenced: list[dict] = []
         for doc in docs:
+            referenced_cases = (
+                (
+                    await db.execute(
+                        select(ReviewCase.id)
+                        .where(
+                            or_(
+                                ReviewCase.policy_document_id == doc.id,
+                                ReviewCase.base_document_id == doc.id,
+                                ReviewCase.revised_document_id == doc.id,
+                            )
+                        )
+                        .with_for_update()
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            if referenced_cases:
+                skipped_referenced.append(
+                    {
+                        "document_id": doc.id,
+                        "filename": doc.filename,
+                        "case_count": len(referenced_cases),
+                    }
+                )
+                continue
             # 从 ES 删除
             try:
                 for i in range(doc.chunk_count):
@@ -448,6 +507,10 @@ async def clear_demo_data(
             await db.execute(
                 delete(ReviewDocumentMeta).where(ReviewDocumentMeta.document_id == doc.id)
             )
+            await db.execute(
+                delete(KnowledgeProcessingJob).where(KnowledgeProcessingJob.document_id == doc.id)
+            )
+            await db.execute(delete(DocumentTag).where(DocumentTag.document_id == doc.id))
             await db.delete(doc)
 
         # 删除示例对话
@@ -462,8 +525,7 @@ async def clear_demo_data(
             await db.execute(
                 select(ChatSession).where(ChatSession.id == session.id).with_for_update()
             )
-            for msg in session.messages:
-                await db.delete(msg)
+            await db.execute(delete(ChatMessage).where(ChatMessage.session_id == session.id))
             await db.delete(session)
             await db.execute(
                 delete(DeletedChatSession).where(DeletedChatSession.session_id == session.id)
@@ -478,7 +540,24 @@ async def clear_demo_data(
 
         await db.commit()
 
-        return {"success": True, "message": "示例数据已清除"}
+        deleted_count = len(docs) - len(skipped_referenced)
+        if skipped_referenced and deleted_count == 0:
+            message = (
+                f"示例对话已清除；{len(skipped_referenced)} 篇示例文档因被核验案件引用"
+                "而保留（未删除）"
+            )
+        elif skipped_referenced:
+            message = f"示例数据已清除（{len(skipped_referenced)} 篇文档因被核验案件引用而保留）"
+        else:
+            message = "示例数据已清除"
+        return {
+            "success": True,
+            "message": message,
+            "data": {
+                "documents_deleted": deleted_count,
+                "documents_skipped_referenced": skipped_referenced,
+            },
+        }
 
     except Exception as e:
         logger.error(f"Failed to clear demo data: {e}")
