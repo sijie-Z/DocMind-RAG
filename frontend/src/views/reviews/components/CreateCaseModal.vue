@@ -5,6 +5,8 @@
     :title="t('reviews.createCase')"
     class="max-w-2xl"
     :mask-closable="!submitting"
+    :closable="!submitting"
+    :close-on-esc="!submitting"
     @update:show="onShowChange"
   >
     <n-alert v-if="candidatesError" type="error" class="mb-3" :bordered="false">
@@ -14,33 +16,37 @@
 
     <div class="flex flex-col gap-3">
       <div>
-        <div class="mb-1 text-xs font-medium text-gray-500">{{ t('reviews.createTitle') }}</div>
+        <div class="mb-1 text-xs font-medium text-gray-500 dark:text-gray-400">
+          {{ t('reviews.createTitle') }}
+        </div>
         <n-input
           v-model:value="form.title"
           :placeholder="t('reviews.createTitlePlaceholder')"
+          :aria-label="t('reviews.createTitle')"
           maxlength="255"
           data-testid="create-case-title"
         />
       </div>
 
       <div v-for="side in SIDES" :key="side">
-        <div class="mb-1 flex items-center justify-between text-xs font-medium text-gray-500">
+        <div class="mb-1 flex items-center justify-between text-xs font-medium text-gray-500 dark:text-gray-400">
           <span>{{ sideLabel[side] }}</span>
           <n-button
-            v-if="selectedCandidate[side] && !selectedCandidate[side]?.meta"
+            v-if="selectedCandidate[side]"
             text
-            size="tiny"
+            size="small"
             type="primary"
             :data-testid="`register-meta-${side}`"
             @click="openMeta(side)"
           >
-            {{ t('reviews.registerMeta') }}
+            {{ selectedCandidate[side]?.meta ? t('reviews.editMeta') : t('reviews.registerMeta') }}
           </n-button>
         </div>
         <n-select
           v-model:value="sideSelection[side]"
           :options="optionsFor(side)"
           :placeholder="t('reviews.createSelectDoc')"
+          :aria-label="sideLabel[side]"
           filterable
           clearable
           :data-testid="`create-select-${side}`"
@@ -58,7 +64,7 @@
           </n-tag>
           <span
             v-if="readiness[side]?.status === 'blocked'"
-            class="text-red-500"
+            class="text-red-500 dark:text-red-400"
             :data-testid="`readiness-blocked-${side}`"
           >
             {{ (readiness[side]?.blocking_reasons || []).join(' · ') }}
@@ -66,7 +72,15 @@
         </div>
       </div>
 
-      <div v-if="anyBlocked" class="text-[11px] text-amber-600">{{ t('reviews.createBlockedHint') }}</div>
+      <div v-if="crossDocWarning" class="text-[11px] text-amber-600 dark:text-amber-400" data-testid="cross-doc-warning">
+        {{ crossDocWarning }}
+      </div>
+      <div v-if="anyBlocked" class="text-[11px] text-amber-600 dark:text-amber-400">
+        {{ t('reviews.createBlockedHint') }}
+      </div>
+      <div v-if="candidateTotal > candidates.length" class="text-[11px] text-gray-400 dark:text-gray-500">
+        {{ t('reviews.candidateTruncated', { total: candidateTotal, shown: candidates.length }) }}
+      </div>
     </div>
 
     <template #footer>
@@ -92,26 +106,38 @@
     preset="card"
     :title="t('reviews.metaDialogTitle')"
     class="max-w-md"
+    :closable="!metaSaving"
+    :close-on-esc="!metaSaving"
+    :mask-closable="!metaSaving"
     data-testid="meta-dialog"
     @update:show="(value: boolean) => (!value ? (metaSide = null) : undefined)"
   >
     <div v-if="metaSide" class="flex flex-col gap-3">
-      <div class="text-xs text-gray-500">{{ metaDocument?.filename }}</div>
+      <div class="text-xs text-gray-500 dark:text-gray-400">{{ metaDocument?.filename }}</div>
       <div>
-        <div class="mb-1 text-xs font-medium text-gray-500">{{ t('reviews.metaRole') }}</div>
-        <n-select v-model:value="metaForm.doc_role" :options="roleOptions" />
+        <div class="mb-1 text-xs font-medium text-gray-500 dark:text-gray-400">{{ t('reviews.metaRole') }}</div>
+        <n-select v-model:value="metaForm.doc_role" :options="roleOptions" :aria-label="t('reviews.metaRole')" />
       </div>
       <div>
-        <div class="mb-1 text-xs font-medium text-gray-500">{{ t('reviews.metaFamily') }}</div>
-        <n-input v-model:value="metaForm.family_key" maxlength="128" />
+        <div class="mb-1 text-xs font-medium text-gray-500 dark:text-gray-400">{{ t('reviews.metaFamily') }}</div>
+        <n-input v-model:value="metaForm.family_key" :aria-label="t('reviews.metaFamily')" maxlength="128" />
       </div>
       <div>
-        <div class="mb-1 text-xs font-medium text-gray-500">{{ t('reviews.metaVersionLabel') }}</div>
-        <n-input v-model:value="metaForm.version_label" maxlength="64" />
+        <div class="mb-1 text-xs font-medium text-gray-500 dark:text-gray-400">
+          {{ t('reviews.metaVersionLabel') }}
+        </div>
+        <n-input v-model:value="metaForm.version_label" :aria-label="t('reviews.metaVersionLabel')" maxlength="64" />
       </div>
       <div>
-        <div class="mb-1 text-xs font-medium text-gray-500">{{ t('reviews.metaVersionSeq') }}</div>
-        <n-input-number v-model:value="metaForm.version_seq" :min="1" class="w-full" />
+        <div class="mb-1 text-xs font-medium text-gray-500 dark:text-gray-400">{{ t('reviews.metaVersionSeq') }}</div>
+        <n-input-number
+          v-model:value="metaForm.version_seq"
+          :min="1"
+          :max="2147483647"
+          :precision="0"
+          :aria-label="t('reviews.metaVersionSeq')"
+          class="w-full"
+        />
       </div>
     </div>
     <template #footer>
@@ -145,6 +171,7 @@ import {
   type ReviewSide
 } from '@/api/reviews'
 import { apiUnwrap } from '@/utils/apiUnwrap'
+import { getErrorMessage } from '@/utils/apiError'
 
 const props = defineProps<{ show: boolean }>()
 const emit = defineEmits<{
@@ -164,6 +191,7 @@ const sideSelection = reactive<Record<ReviewSide, string | null>>({
   revised: null
 })
 const candidates = ref<ReviewCandidate[]>([])
+const candidateTotal = ref(0)
 const candidatesError = ref(false)
 const readiness = reactive<Partial<Record<ReviewSide, ReviewReadiness>>>({})
 const submitting = ref(false)
@@ -183,11 +211,16 @@ const sideLabel = computed<Record<ReviewSide, string>>(() => ({
   revised: t('reviews.docRevised')
 }))
 
-const roleOptions = computed(() => [
-  { value: 'policy', label: t('reviews.metaRolePolicy') },
-  { value: 'template', label: t('reviews.metaRoleTemplate') },
-  { value: 'contract', label: t('reviews.metaRoleContract') }
-])
+// 角色按侧锁定：制度侧只能是 policy/template，合同侧只能是 contract。
+// 否则误登记会让文档从另一侧永久消失（无纠错入口）。
+const roleOptions = computed(() =>
+  metaSide.value === 'policy'
+    ? [
+        { value: 'policy', label: t('reviews.metaRolePolicy') },
+        { value: 'template', label: t('reviews.metaRoleTemplate') }
+      ]
+    : [{ value: 'contract', label: t('reviews.metaRoleContract') }]
+)
 
 function roleText(role: string) {
   if (role === 'policy') return t('reviews.metaRolePolicy')
@@ -207,7 +240,13 @@ function optionLabel(candidate: ReviewCandidate) {
 
 function optionsFor(side: ReviewSide) {
   const wanted = side === 'policy' ? ['policy', 'template'] : ['contract']
+  const taken = new Set(
+    SIDES.filter((other) => other !== side)
+      .map((other) => sideSelection[other])
+      .filter((id): id is string => !!id)
+  )
   return candidates.value
+    .filter((candidate) => !taken.has(candidate.document_id))
     .filter((candidate) => !candidate.meta || wanted.includes(String(candidate.meta.doc_role)))
     .map((candidate) => ({ value: candidate.document_id, label: optionLabel(candidate) }))
 }
@@ -225,13 +264,34 @@ const anyBlocked = computed(() =>
   SIDES.some((side) => readiness[side]?.status === 'blocked')
 )
 
+// 后端建案时的两条跨文档约束（family_mismatch / version_order）用候选 meta 镜像预检，
+// 避免「两侧全绿、建案即阻断」。
+const crossDocWarning = computed(() => {
+  const base = selectedCandidate.value.base?.meta
+  const revised = selectedCandidate.value.revised?.meta
+  if (!base || !revised) return ''
+  if (String(base.doc_role) !== 'contract' || String(revised.doc_role) !== 'contract') return ''
+  const baseFamily = (base.family_key || '').trim()
+  const revisedFamily = (revised.family_key || '').trim()
+  if (baseFamily && revisedFamily && baseFamily !== revisedFamily) return t('reviews.warnFamilyMismatch')
+  if (
+    base.version_seq != null &&
+    revised.version_seq != null &&
+    base.version_seq >= revised.version_seq
+  ) {
+    return t('reviews.warnVersionOrder')
+  }
+  return ''
+})
+
 async function loadCandidates() {
   candidatesError.value = false
   try {
-    const data = apiUnwrap<{ items: ReviewCandidate[] }>(
+    const data = apiUnwrap<{ items: ReviewCandidate[]; total?: number }>(
       await reviewsApi.candidates({ page: 1, page_size: 200 })
     )
     candidates.value = data?.items ?? []
+    candidateTotal.value = data?.total ?? candidates.value.length
   } catch {
     candidatesError.value = true
   }
@@ -298,7 +358,14 @@ function openMeta(side: ReviewSide) {
   const candidate = selectedCandidate.value[side]
   if (!candidate) return
   metaSide.value = side
-  metaForm.doc_role = side === 'policy' ? 'policy' : 'contract'
+  const allowed: Array<'policy' | 'template' | 'contract'> =
+    side === 'policy' ? ['policy', 'template'] : ['contract']
+  const existing = candidate.meta ? String(candidate.meta.doc_role) : ''
+  metaForm.doc_role = (
+    allowed.includes(existing as 'policy' | 'template' | 'contract')
+      ? existing
+      : allowed[0]
+  ) as 'policy' | 'template' | 'contract'
   metaForm.family_key = candidate.meta?.family_key || ''
   metaForm.version_label = candidate.meta?.version_label || ''
   metaForm.version_seq = candidate.meta?.version_seq ?? null
@@ -322,9 +389,9 @@ async function saveMeta() {
   } else {
     if (metaForm.family_key.trim()) payload.family_key = metaForm.family_key.trim()
     if (metaForm.version_label.trim()) payload.version_label = metaForm.version_label.trim()
-    if (metaForm.version_seq) payload.version_seq = metaForm.version_seq
-    if (payload.version_seq && !payload.version_label) {
-      message.warning(t('reviews.metaRequired'))
+    if (metaForm.version_seq != null) payload.version_seq = metaForm.version_seq
+    if (payload.version_seq != null && !payload.version_label) {
+      message.warning(t('reviews.metaSeqNeedsLabel'))
       return
     }
   }
@@ -334,8 +401,8 @@ async function saveMeta() {
     message.success(t('reviews.metaSaved'))
     metaSide.value = null
     await loadCandidates()
-  } catch {
-    message.error(t('reviews.metaFailed'))
+  } catch (error) {
+    message.error(getErrorMessage(error, t('reviews.metaFailed')))
   } finally {
     metaSaving.value = false
   }
@@ -369,8 +436,8 @@ async function submit() {
     )
     emit('created', created.id)
     emit('update:show', false)
-  } catch {
-    message.error(t('reviews.createFailed'))
+  } catch (error) {
+    message.error(getErrorMessage(error, t('reviews.createFailed')))
   } finally {
     submitting.value = false
   }
@@ -380,8 +447,12 @@ defineExpose({
   form,
   sideSelection,
   candidates,
+  candidateTotal,
+  candidatesError,
   readiness,
   selectedCandidate,
+  crossDocWarning,
+  roleOptions,
   optionLabel,
   optionsFor,
   submit,

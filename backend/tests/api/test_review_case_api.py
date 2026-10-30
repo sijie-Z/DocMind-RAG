@@ -670,3 +670,29 @@ async def test_candidates_keyword_filter_and_route_not_shadowed_by_case_id(facto
         data = r.json()["data"]
         assert [item["document_id"] for item in data["items"]] == [NOMETA]
         assert data["total"] == 1
+        # 枚举小写 value 与分页回显口径
+        assert data["items"][0]["status"] == "indexed"
+        assert data["items"][0]["file_type"] == "pdf"
+        assert (data["page"], data["page_size"]) == (1, 50)
+
+
+@pytest.mark.asyncio
+async def test_candidates_q_matches_title_and_escapes_like_wildcards(factory):
+    async with _Ctx(_user(superuser=True), factory) as ac:
+        # title 命中（filename 不含该关键字）
+        async with factory() as db:
+            doc = await db.get(Document, BASE)
+            doc.title = "年度采购框架协议"
+            await db.commit()
+        by_title = await ac.get("/api/v1/reviews/candidates", params={"q": "框架协议"})
+        assert by_title.status_code == 200, by_title.text
+        assert [i["document_id"] for i in by_title.json()["data"]["items"]] == [BASE]
+
+        # LIKE 通配符必须按字面处理：q="100%" 不得变成「匹配一切」
+        async with factory() as db:
+            doc = await db.get(Document, REVISED)
+            doc.filename = "100%付款条款.pdf"
+            await db.commit()
+        wildcard = await ac.get("/api/v1/reviews/candidates", params={"q": "100%"})
+        assert wildcard.status_code == 200, wildcard.text
+        assert [i["document_id"] for i in wildcard.json()["data"]["items"]] == [REVISED]

@@ -1403,6 +1403,11 @@ export default {
     metaSubmit: 'Enregistrer l’identité',
     metaSaved: 'Identité d’examen enregistrée',
     metaFailed: 'Échec de l’enregistrement de l’identité',
-    metaRequired: 'L’identité du contrat exige famille, libellé et séquence'
+    metaRequired: 'L’identité du contrat exige famille, libellé et séquence',
+    editMeta: 'Modifier l’identité',
+    warnFamilyMismatch: 'Base et révisé appartiennent à des familles de versions différentes : le dossier sera bloqué (family_mismatch)',
+    warnVersionOrder: 'La séquence de version de la base n’est pas inférieure à celle du révisé : le dossier sera bloqué (version_order)',
+    candidateTruncated: '{total} documents au total, seuls les {shown} premiers sont chargés (identités enregistrées d’abord)',
+    metaSeqNeedsLabel: 'La séquence de version nécessite un libellé de version'
   }
 };

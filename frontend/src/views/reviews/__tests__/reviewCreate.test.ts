@@ -1,11 +1,14 @@
 /**
  * 新建核验（建案弹窗）契约测试。
  *
- * 守护四件事：
+ * 守护：
  * 1. 打开弹窗才加载候选文档；未登记身份的文档有显式标记与登记入口；
- * 2. 选满三份文档后按需做 readiness 预检，受限文档显示原因码；
+ * 2. 选满三份文档后才做 readiness 预检，受限文档显示原因码；旧响应不落地；
  * 3. 建案载荷 = 三份文档 id + 标题 + checklist v1，成功后跳详情；
- * 4. 三份文档重复时不提交；合同身份登记缺少版本族/标签/序时不提交。
+ * 4. 三份文档重复时不提交；合同身份缺版本族/标签/序时不提交；
+ * 5. 身份可原地登记/编辑；角色按侧锁定；登记后不匹配该侧的选择被清空；
+ * 6. 跨文档约束（family_mismatch / version_order）在建案前预告；
+ * 7. 候选加载失败可重试；超过 200 篇时给出截断提示。
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
@@ -80,15 +83,24 @@ function mountIndex() {
   )
 }
 
+type CandidateLike = { document_id: string; filename: string; status: string; meta: unknown }
+type OptionLike = { value: string; label: string }
+
 type ModalVm = {
   form: { title: string }
   sideSelection: Record<'policy' | 'base' | 'revised', string | null>
-  candidates: typeof POLICY[]
+  candidates: CandidateLike[]
+  candidateTotal: number
+  candidatesError: boolean
   readiness: Record<string, { status: string; blocking_reasons: string[] } | undefined>
+  crossDocWarning: string
+  roleOptions: Array<{ value: string; label: string }>
   optionLabel: (candidate: unknown) => string
+  optionsFor: (side: 'policy' | 'base' | 'revised') => OptionLike[]
   openMeta: (side: 'policy' | 'base' | 'revised') => void
   saveMeta: () => Promise<void>
   submit: () => Promise<void>
+  loadCandidates: () => Promise<void>
 }
 
 async function openModal() {
@@ -100,12 +112,14 @@ async function openModal() {
   return { wrapper, modal, vm: modal.vm as unknown as ModalVm }
 }
 
+function candidatesResponse(items: CandidateLike[], total?: number) {
+  return { data: { data: { items, total: total ?? items.length } } } as never
+}
+
 beforeEach(() => {
   vi.clearAllMocks()
   api.list.mockResolvedValue({ data: { data: { items: [], total: 0 } } } as never)
-  api.candidates.mockResolvedValue({
-    data: { data: { items: [POLICY, BASE, REVISED, NOMETA] } }
-  } as never)
+  api.candidates.mockResolvedValue(candidatesResponse([POLICY, BASE, REVISED, NOMETA]))
   api.readiness.mockImplementation(
     async (id: string) =>
       ({
@@ -131,15 +145,18 @@ describe('新建核验建案弹窗', () => {
     await flushPromises()
 
     expect(api.candidates).toHaveBeenCalledTimes(1)
-    const { vm } = { vm: wrapper.findComponent(CreateCaseModal).vm as unknown as ModalVm }
+    const vm = wrapper.findComponent(CreateCaseModal).vm as unknown as ModalVm
     expect(vm.candidates).toHaveLength(4)
     expect(vm.optionLabel(NOMETA)).toContain('未登记核验身份')
     expect(vm.optionLabel(BASE)).toContain('合同 V1 (fam)')
   })
 
-  it('选满三份文档后做 readiness 预检，受限文档显示原因码', async () => {
+  it('选满三份文档后才做 readiness 预检，受限文档显示原因码', async () => {
     const { vm } = await openModal()
     vm.sideSelection.policy = 'p1'
+    await flushPromises()
+    expect(api.readiness).not.toHaveBeenCalled()
+
     vm.sideSelection.base = 'b1'
     vm.sideSelection.revised = 'r1'
     await flushPromises()
@@ -148,6 +165,42 @@ describe('新建核验建案弹窗', () => {
     expect(vm.readiness.base?.status).toBe('reviewable')
     expect(vm.readiness.revised?.status).toBe('blocked')
     expect(vm.readiness.revised?.blocking_reasons).toEqual(['revised:no_original_text'])
+  })
+
+  it('readiness 竞态：旧一批响应不覆盖新选择的结果', async () => {
+    const deferred: Array<{ id: string; resolve: (v: unknown) => void }> = []
+    api.readiness.mockImplementation(
+      (id: string) =>
+        new Promise((resolve) => {
+          deferred.push({ id, resolve })
+        }) as never
+    )
+    const { vm } = await openModal()
+    vm.sideSelection.policy = 'p1'
+    vm.sideSelection.base = 'b1'
+    vm.sideSelection.revised = 'r1'
+    await flushPromises()
+    expect(deferred.map((d) => d.id).sort()).toEqual(['b1', 'p1', 'r1'])
+
+    vm.sideSelection.revised = 'r2'
+    await flushPromises()
+    const second = deferred.slice(3)
+    expect(second.map((d) => d.id).sort()).toEqual(['b1', 'p1', 'r2'])
+
+    const respond = (batch: typeof deferred, status: string) => {
+      for (const entry of batch) {
+        entry.resolve({
+          data: { data: { document_id: entry.id, status, blocking_reasons: [], warnings: [] } }
+        })
+      }
+    }
+    // 新一批先返回；旧一批随后返回也不得覆盖。
+    respond(second, 'reviewable')
+    await flushPromises()
+    respond(deferred.slice(0, 3), 'blocked')
+    await flushPromises()
+    expect(vm.readiness.base?.status).toBe('reviewable')
+    expect(vm.readiness.revised?.status).toBe('reviewable')
   })
 
   it('提交建案携带三份文档 id 与标题并跳转详情页', async () => {
@@ -223,7 +276,135 @@ describe('新建核验建案弹窗', () => {
       version_label: 'V3',
       version_seq: 3
     })
-    // 保存后刷新候选，让选中项拿到新身份
     expect(api.candidates).toHaveBeenCalledTimes(2)
+  })
+
+  it('角色按侧锁定：制度侧只能 policy/template，合同侧只能 contract', async () => {
+    const { vm } = await openModal()
+    vm.sideSelection.policy = 'p1'
+    vm.sideSelection.base = 'b1'
+    await flushPromises()
+
+    vm.openMeta('policy')
+    await flushPromises()
+    expect(vm.roleOptions.map((option) => option.value)).toEqual(['policy', 'template'])
+
+    vm.openMeta('base')
+    await flushPromises()
+    expect(vm.roleOptions.map((option) => option.value)).toEqual(['contract'])
+  })
+
+  it('已登记身份的文档可编辑身份，弹窗预填现有值', async () => {
+    const { vm } = await openModal()
+    vm.sideSelection.base = 'b1'
+    await flushPromises()
+
+    vm.openMeta('base')
+    await flushPromises()
+    const modalVm = vm as unknown as {
+      metaForm: {
+        doc_role: string
+        family_key: string
+        version_label: string
+        version_seq: number | null
+      }
+    }
+    expect(modalVm.metaForm.family_key).toBe('fam')
+    expect(modalVm.metaForm.version_label).toBe('V1')
+    expect(modalVm.metaForm.version_seq).toBe(1)
+
+    modalVm.metaForm.version_label = 'V1b'
+    api.putDocumentMeta.mockResolvedValue({ data: { data: {} } } as never)
+    await vm.saveMeta()
+
+    expect(api.putDocumentMeta).toHaveBeenCalledWith('b1', {
+      doc_role: 'contract',
+      family_key: 'fam',
+      version_label: 'V1b',
+      version_seq: 1
+    })
+  })
+
+  it('身份变更后不再匹配该侧角色的已选项被清空', async () => {
+    const { vm } = await openModal()
+    vm.sideSelection.policy = 'n1'
+    await flushPromises()
+
+    api.candidates.mockResolvedValue(
+      candidatesResponse([
+        POLICY,
+        BASE,
+        REVISED,
+        {
+          ...NOMETA,
+          meta: { doc_role: 'contract', family_key: 'fam2', version_label: 'V9', version_seq: 9 }
+        }
+      ])
+    )
+    await vm.loadCandidates()
+    await flushPromises()
+
+    expect(vm.sideSelection.policy).toBeNull()
+  })
+
+  it('跨文档约束在建案前预告：版本族不一致与版本序倒挂', async () => {
+    const { vm } = await openModal()
+    vm.sideSelection.base = 'b1'
+    vm.sideSelection.revised = 'r1'
+    await flushPromises()
+    expect(vm.crossDocWarning).toBe('')
+
+    api.candidates.mockResolvedValue(
+      candidatesResponse([
+        POLICY,
+        BASE,
+        { ...REVISED, meta: { ...REVISED.meta, family_key: 'famB' } },
+        NOMETA
+      ])
+    )
+    await vm.loadCandidates()
+    await flushPromises()
+    expect(vm.crossDocWarning).toContain('family_mismatch')
+
+    api.candidates.mockResolvedValue(
+      candidatesResponse([
+        POLICY,
+        BASE,
+        { ...REVISED, meta: { ...REVISED.meta, version_seq: 1 } },
+        NOMETA
+      ])
+    )
+    await vm.loadCandidates()
+    await flushPromises()
+    expect(vm.crossDocWarning).toContain('version_order')
+  })
+
+  it('其他侧已选的文档不再出现在本侧选项里', async () => {
+    const { vm } = await openModal()
+    vm.sideSelection.policy = 'p1'
+    await flushPromises()
+
+    const baseOptions = vm.optionsFor('base').map((option) => option.value)
+    expect(baseOptions).not.toContain('p1')
+    expect(baseOptions).toContain('b1')
+  })
+
+  it('候选加载失败给出内联错误并可重试', async () => {
+    api.candidates.mockRejectedValueOnce(new Error('boom'))
+    const { vm } = await openModal()
+    expect(vm.candidatesError).toBe(true)
+    expect(vm.candidates).toHaveLength(0)
+
+    await vm.loadCandidates()
+    await flushPromises()
+    expect(vm.candidatesError).toBe(false)
+    expect(vm.candidates).toHaveLength(4)
+  })
+
+  it('候选超过加载上限时给出截断提示', async () => {
+    api.candidates.mockResolvedValue(candidatesResponse([POLICY, BASE], 321))
+    const { vm } = await openModal()
+    expect(vm.candidateTotal).toBe(321)
+    expect(vm.candidates).toHaveLength(2)
   })
 })

@@ -183,22 +183,27 @@ export interface DecisionPayload {
 
 /**
  * 合同核验 API：证据只读事件里返回的原文快照，绝不调用 /documents/{id}/content。
+ *
+ * E14/D1：建案弹窗的调用点自行呈递错误（X-Silent-Error + getErrorMessage），
+ * 避免全局拦截器与弹窗重复弹 toast。
  */
+const SILENT_HEADERS = { headers: { 'X-Silent-Error': '1' } } as const
+
 export const reviewsApi = {
   list(params?: { status?: string; page?: number; page_size?: number }) {
     return request.get('/reviews', { params })
   },
   candidates(params?: { q?: string; page?: number; page_size?: number }) {
-    return request.get('/reviews/candidates', { params })
+    return request.get('/reviews/candidates', { params, ...SILENT_HEADERS })
   },
   createCase(payload: ReviewCaseCreatePayload) {
-    return request.post('/reviews', payload)
+    return request.post('/reviews', payload, SILENT_HEADERS)
   },
   readiness(documentId: string) {
-    return request.get(`/documents/${documentId}/readiness`)
+    return request.get(`/documents/${documentId}/readiness`, SILENT_HEADERS)
   },
   putDocumentMeta(documentId: string, payload: ReviewMetaPayload) {
-    return request.put(`/documents/${documentId}/review-meta`, payload)
+    return request.put(`/documents/${documentId}/review-meta`, payload, SILENT_HEADERS)
   },
   get(id: string) {
     return request.get(`/reviews/${id}`)

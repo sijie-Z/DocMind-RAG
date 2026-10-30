@@ -1482,6 +1482,11 @@ export default {
     metaSubmit: '保存身份',
     metaSaved: '核验身份已保存',
     metaFailed: '保存核验身份失败',
-    metaRequired: '合同身份需填写版本族、版本标签与版本序'
+    metaRequired: '合同身份需填写版本族、版本标签与版本序',
+    editMeta: '编辑身份',
+    warnFamilyMismatch: '基准版与修订版的版本族不一致：建案将阻断（family_mismatch）',
+    warnVersionOrder: '基准版版本序不小于修订版：建案将阻断（version_order）',
+    candidateTruncated: '共 {total} 篇文档，仅加载前 {shown} 篇（已登记身份的优先）',
+    metaSeqNeedsLabel: '填写版本序时必须同时填写版本标签'
   }
 };

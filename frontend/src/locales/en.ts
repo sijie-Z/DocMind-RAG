@@ -1475,6 +1475,11 @@ export default {
     metaSubmit: 'Save identity',
     metaSaved: 'Review identity saved',
     metaFailed: 'Failed to save review identity',
-    metaRequired: 'Contract identity requires family, version label and sequence'
+    metaRequired: 'Contract identity requires family, version label and sequence',
+    editMeta: 'Edit identity',
+    warnFamilyMismatch: 'Base and revised belong to different version families: the case will be blocked (family_mismatch)',
+    warnVersionOrder: 'Base version sequence is not lower than revised: the case will be blocked (version_order)',
+    candidateTruncated: '{total} documents in total, only the first {shown} are loaded (registered identities first)',
+    metaSeqNeedsLabel: 'Version sequence requires a version label'
   }
 };

@@ -19,7 +19,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import case, func, or_, select
+from sqlalchemy import and_, case, func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -427,9 +427,14 @@ async def list_candidates(
     if q:
         keyword = q.strip()
         if keyword:
-            like = f"%{keyword}%"
+            # 与 chat.py（issue #476）同口径：转义 LIKE 通配符，避免 % / _ / \ 改变过滤语义。
+            escaped = keyword.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+            like = f"%{escaped}%"
             conditions.append(
-                or_(Document.filename.ilike(like), Document.title.ilike(like))
+                or_(
+                    Document.filename.ilike(like, escape="\\"),
+                    Document.title.ilike(like, escape="\\"),
+                )
             )
     total = int(
         (await session.execute(select(func.count(Document.id)).where(*conditions))).scalar() or 0
@@ -437,7 +442,15 @@ async def list_candidates(
     rows = (
         await session.execute(
             select(Document, ReviewDocumentMeta)
-            .outerjoin(ReviewDocumentMeta, ReviewDocumentMeta.document_id == Document.id)
+            .outerjoin(
+                ReviewDocumentMeta,
+                and_(
+                    ReviewDocumentMeta.document_id == Document.id,
+                    # 防御性口径：组织不一致的 meta 行不当作本组织的核验身份
+                    #（与 compute_readiness 的 wrong_org 阻断对齐）。
+                    ReviewDocumentMeta.organization_id == organization_id,
+                ),
+            )
             .where(*conditions)
             .order_by(
                 case((ReviewDocumentMeta.document_id.is_(None), 1), else_=0),

@@ -1389,9 +1389,9 @@ export default {
     createDocsDistinct: '3つのドキュメントは重複できません',
     createBlockedHint: '一部のドキュメントはレビュー不可です：案件はブロック状態で作成され、理由は詳細ページに表示されます',
     candidatesLoadFailed: '候補ドキュメントの読み込みに失敗しました',
-    candidateNoMeta: 'レビュー身元未登録',
-    registerMeta: '身元を登録',
-    metaDialogTitle: 'レビュー身元の登録',
+    candidateNoMeta: 'レビュー属性未登録',
+    registerMeta: '属性を登録',
+    metaDialogTitle: 'レビュー属性の登録',
     metaRole: 'ドキュメントのロール',
     metaRolePolicy: '規程',
     metaRoleTemplate: 'テンプレート',
@@ -1399,9 +1399,14 @@ export default {
     metaFamily: 'バージョン系列',
     metaVersionLabel: 'バージョンラベル',
     metaVersionSeq: 'バージョン順序',
-    metaSubmit: '身元を保存',
-    metaSaved: 'レビュー身元を保存しました',
-    metaFailed: 'レビュー身元の保存に失敗しました',
-    metaRequired: '契約の身元には系列・ラベル・順序が必要です'
+    metaSubmit: '属性を保存',
+    metaSaved: 'レビュー属性を保存しました',
+    metaFailed: 'レビュー属性の保存に失敗しました',
+    metaRequired: '契約の身元には系列・ラベル・順序が必要です',
+    editMeta: '属性を編集',
+    warnFamilyMismatch: '基準版と改訂版のバージョン系列が不一致：案件はブロックされます（family_mismatch）',
+    warnVersionOrder: '基準版のバージョン順序が改訂版以上です：案件はブロックされます（version_order）',
+    candidateTruncated: '全 {total} 件のドキュメントのうち先頭 {shown} 件のみ読み込み（属性登録済みを優先）',
+    metaSeqNeedsLabel: 'バージョン順序を入力するにはバージョンラベルも必要です'
   }
 };
