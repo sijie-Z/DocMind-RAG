@@ -18,6 +18,7 @@
           <n-select
             v-model:value="archivedFilter"
             :options="archivedOptions"
+            :input-props="{ 'aria-label': t('reviews.archivedFilterLabel') }"
             class="w-36"
             data-testid="archived-filter"
             @update:value="applyFilter"

@@ -1487,8 +1487,9 @@ export default {
     archiveFailed: 'Failed to archive the case',
     archived: 'Archived',
     archivedBanner: 'This case is archived (read-only): decisions, analysis and exports are frozen, and it no longer blocks deletion of referenced documents.',
-    filterActive: 'Active',
+    filterActive: 'Not archived',
     filterAll: 'All',
-    emptyArchived: 'No archived cases yet'
+    emptyArchived: 'No archived cases yet',
+    archivedFilterLabel: 'Archive filter',
   }
 };

@@ -1415,8 +1415,9 @@ export default {
     archiveFailed: 'Échec de l’archivage du dossier',
     archived: 'Archivé',
     archivedBanner: 'Ce dossier est archivé (lecture seule) : décisions, analyses et exports sont gelés, et il ne bloque plus la suppression des documents référencés.',
-    filterActive: 'En cours',
+    filterActive: 'Non archivés',
     filterAll: 'Tous',
-    emptyArchived: 'Aucun dossier archivé pour l’instant'
+    emptyArchived: 'Aucun dossier archivé pour l’instant',
+    archivedFilterLabel: 'Filtre d’archivage',
   }
 };

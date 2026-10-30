@@ -401,6 +401,7 @@ const canArchive = computed(
     !detail.value.archived_at &&
     ['blocked', 'completed'].includes(detail.value.status)
 )
+// 归档态只可能是 blocked/completed（状态门已挡），archived 判据是纵深防御。
 const canAnalyze = computed(
   () =>
     !!detail.value &&
@@ -623,6 +624,12 @@ async function archiveCase() {
     await load(false)
   } catch (error) {
     message.error(getErrorMessage(error, t('reviews.archiveFailed')))
+    // 页面陈旧（他人已归档）：收敛到最新状态，避免继续展示归档按钮。
+    const code = (error as { response?: { data?: { error_code?: string } } })?.response?.data
+      ?.error_code
+    if (code === 'REVIEW_CASE_ALREADY_ARCHIVED') {
+      await load(false)
+    }
   } finally {
     archiving.value = false
   }

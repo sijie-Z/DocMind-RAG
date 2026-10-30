@@ -1494,8 +1494,9 @@ export default {
     archiveFailed: '归档案件失败',
     archived: '已归档',
     archivedBanner: '该案件已归档（只读）：不可继续决策/分析/导出，且不再阻止相关文档删除。',
-    filterActive: '进行中',
+    filterActive: '未归档',
     filterAll: '全部',
-    emptyArchived: '还没有已归档案件'
+    emptyArchived: '还没有已归档案件',
+    archivedFilterLabel: '归档筛选',
   }
 };

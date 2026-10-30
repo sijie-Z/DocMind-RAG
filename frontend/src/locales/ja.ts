@@ -1414,8 +1414,9 @@ export default {
     archiveFailed: '案件のアーカイブに失敗しました',
     archived: 'アーカイブ済み',
     archivedBanner: 'この案件はアーカイブ済み（読み取り専用）です：決定・分析・エクスポートは凍結され、関連ドキュメントの削除も妨げません。',
-    filterActive: '進行中',
+    filterActive: '未アーカイブ',
     filterAll: 'すべて',
-    emptyArchived: 'アーカイブ済みの案件はまだありません'
+    emptyArchived: 'アーカイブ済みの案件はまだありません',
+    archivedFilterLabel: 'アーカイブの絞り込み',
   }
 };

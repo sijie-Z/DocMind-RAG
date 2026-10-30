@@ -169,3 +169,20 @@ describe('归档过滤与标记（Batch 7）', () => {
     expect(wrapper.text()).toContain('还没有已归档案件')
   })
 })
+
+describe('归档筛选的事件接线', () => {
+  it('NSelect update:value 触发 applyFilter 并按新参数取数', async () => {
+    const wrapper = mountList()
+    await flushPromises()
+    const selects = wrapper.findAllComponents(NSelect)
+    // 头部两个下拉：0=状态筛选，1=归档筛选
+    selects[1].vm.$emit('update:value', 'archived')
+    await flushPromises()
+    expect(api.list).toHaveBeenLastCalledWith({
+      status: undefined,
+      archived: 'archived',
+      page: 1,
+      page_size: 20
+    })
+  })
+})
