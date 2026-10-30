@@ -58,6 +58,8 @@ from app.services.review_document_service import (
 CHECKLIST_VERSIONS = ("v1",)
 # 允许选择/改选证据的案件状态；blocked 必须先把文档/身份问题修好。
 SELECTABLE_CASE_STATUSES = ("ready", "in_review")
+# 归档出口（Batch 7）：只有终态可归档；归档后写操作冻结、不再阻止文档删除。
+ARCHIVABLE_CASE_STATUSES = ("blocked", "completed")
 # 每个（核验项, 文档侧）建案时最多抓多少条候选证据：候选只是发现线索，
 # 人工选择由后续工作台完成；上限保证建案扫描有界。
 EVIDENCE_CANDIDATES_PER_ITEM_SIDE = 3
@@ -536,19 +538,61 @@ async def get_item_for_case(session: AsyncSession, case: ReviewCase, item_id: st
     return item
 
 
+async def archive_case(session: AsyncSession, case: ReviewCase, *, user_id: int) -> ReviewCase:
+    """归档案件（只读终态）。仅 blocked/completed 可归档；归档不删除任何快照。
+
+    MySQL RR 下先 commit 结束只读事务重建 read view，再加行锁读取最新行
+    （与 Batch 4 ``_lock_case`` 同一原因：普通 SELECT 建立旧快照后 FOR UPDATE
+    仍可能读到旧行）。
+    """
+    case_id = case.id
+    await session.commit()
+    fresh = (
+        await session.execute(select(ReviewCase).where(ReviewCase.id == case_id).with_for_update())
+    ).scalar_one_or_none()
+    if fresh is None:
+        raise ConflictError("核验案件已被删除", error_code="REVIEW_CASE_NOT_FOUND")
+    await session.refresh(fresh)
+    if fresh.archived_at is not None:
+        raise ConflictError(
+            "案件已归档",
+            error_code="REVIEW_CASE_ALREADY_ARCHIVED",
+            detail={"case_id": fresh.id, "archived_at": _iso(fresh.archived_at)},
+        )
+    if fresh.status not in ARCHIVABLE_CASE_STATUSES:
+        raise ConflictError(
+            "当前状态不允许归档（仅 blocked/completed 可归档）",
+            error_code="REVIEW_CASE_NOT_ARCHIVABLE",
+            detail={"case_id": fresh.id, "status": fresh.status},
+        )
+    fresh.archived_at = datetime.now(UTC)
+    fresh.archived_by = user_id
+    fresh.lock_version = (fresh.lock_version or 1) + 1
+    await session.commit()
+    await session.refresh(fresh)
+    return fresh
+
+
 async def list_cases(
     session: AsyncSession,
     *,
     organization_id: int,
     status: str | None = None,
+    archived: str = "active",
     page: int = 1,
     page_size: int = 20,
 ) -> dict[str, Any]:
     if status is not None and status not in REVIEW_CASE_STATUSES:
         raise ValidationError(f"未知案件状态: {status!r}", field="status")
+    if archived not in ("active", "archived", "all"):
+        raise ValidationError(f"未知归档过滤: {archived!r}", field="archived")
     conditions = [ReviewCase.organization_id == organization_id]
     if status is not None:
         conditions.append(ReviewCase.status == status)
+    if archived == "active":
+        conditions.append(ReviewCase.archived_at.is_(None))
+    elif archived == "archived":
+        conditions.append(ReviewCase.archived_at.is_not(None))
     total = int(
         (await session.execute(select(func.count(ReviewCase.id)).where(*conditions))).scalar() or 0
     )
@@ -590,6 +634,8 @@ def _case_summary(case: ReviewCase) -> dict[str, Any]:
         "assignee_id": case.assignee_id,
         "created_at": _iso(case.created_at),
         "completed_at": _iso(case.completed_at),
+        "archived_at": _iso(case.archived_at),
+        "archived_by": case.archived_by,
     }
 
 
@@ -648,6 +694,8 @@ async def case_detail(session: AsyncSession, case: ReviewCase) -> dict[str, Any]
         "updated_at": _iso(case.updated_at),
         "completed_at": _iso(case.completed_at),
         "completed_by": case.completed_by,
+        "archived_at": _iso(case.archived_at),
+        "archived_by": case.archived_by,
         "lock_version": case.lock_version,
         "documents": documents,
         "items": [_item_to_dict(item, evidence_by_item.get(item.id, {})) for item in items],

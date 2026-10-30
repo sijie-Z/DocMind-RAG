@@ -1408,6 +1408,12 @@ export default {
     warnFamilyMismatch: 'Base et révisé appartiennent à des familles de versions différentes : le dossier sera bloqué (family_mismatch)',
     warnVersionOrder: 'La séquence de version de la base n’est pas inférieure à celle du révisé : le dossier sera bloqué (version_order)',
     candidateTruncated: '{total} documents au total, seuls les {shown} premiers sont chargés (identités enregistrées d’abord)',
-    metaSeqNeedsLabel: 'La séquence de version nécessite un libellé de version'
+    metaSeqNeedsLabel: 'La séquence de version nécessite un libellé de version',
+    archiveCase: 'Archiver le dossier',
+    archiveConfirm: 'L’archivage rend le dossier en lecture seule : plus de décisions, d’analyses ni d’exports, et il ne bloque plus la suppression des documents référencés. Archiver maintenant ?',
+    archiveDone: 'Dossier archivé',
+    archiveFailed: 'Échec de l’archivage du dossier',
+    archived: 'Archivé',
+    archivedBanner: 'Ce dossier est archivé (lecture seule) : décisions, analyses et exports sont gelés, et il ne bloque plus la suppression des documents référencés.'
   }
 };

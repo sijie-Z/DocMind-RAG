@@ -16,6 +16,7 @@ import {
   NIcon,
   NInput,
   NMessageProvider,
+  NPopconfirm,
   NRadioButton,
   NRadioGroup,
   NSpin,
@@ -40,7 +41,8 @@ vi.mock('@/api/reviews', () => ({
     decide: vi.fn(),
     exportCase: vi.fn(),
     exports: vi.fn(),
-    download: vi.fn()
+    download: vi.fn(),
+    archive: vi.fn()
   }
 }))
 
@@ -161,6 +163,7 @@ function mountDetail() {
           NEmpty,
           NIcon,
           NInput,
+          NPopconfirm,
           NRadioButton,
           NRadioGroup,
           NSpin,
@@ -361,5 +364,59 @@ describe('合同核验工作台 · 导出与草稿', () => {
       .findAll('input')
       .find((input) => input.attributes('placeholder') === '决策说明')
     expect((refreshedInput!.element as HTMLInputElement).value).toBe('尚未保存的草稿')
+  })
+})
+
+
+describe('归档出口（Batch 7）', () => {
+  const archivedDetail = (status: string) =>
+    makeDetail({
+      status,
+      archived_at: '2026-10-30T00:00:00Z',
+      archived_by: 1
+    })
+
+  it('blocked 案件显示归档入口；确认后调用归档接口并刷新', async () => {
+    api.get.mockResolvedValue({
+      data: { data: makeDetail({ status: 'blocked', blocking_reasons: ['base:legacy_unverified'] }) }
+    } as never)
+    api.archive.mockResolvedValue({ data: { data: archivedDetail('blocked') } } as never)
+    const wrapper = mountDetail()
+    await flushPromises()
+
+    expect(wrapper.find('[data-testid="archive-case"]').exists()).toBe(true)
+    const vm = wrapper.findComponent(ReviewDetail).vm as unknown as {
+      archiveCase: () => Promise<void>
+    }
+    await vm.archiveCase()
+    await flushPromises()
+
+    expect(api.archive).toHaveBeenCalledWith('case-1')
+    expect(api.get).toHaveBeenCalledTimes(2)
+  })
+
+  it('已归档案件显示只读横幅，无归档入口，分析/导出/决策禁用', async () => {
+    api.get.mockResolvedValue({ data: { data: archivedDetail('completed') } } as never)
+    const wrapper = mountDetail()
+    await flushPromises()
+
+    expect(wrapper.find('[data-testid="archived-banner"]').exists()).toBe(true)
+    expect(wrapper.text()).toContain('该案件已归档（只读）')
+    expect(wrapper.find('[data-testid="archive-case"]').exists()).toBe(false)
+
+    const buttons = wrapper.findAll('button')
+    const analyzeBtn = buttons.find((b) => b.text().includes('执行分析'))
+    expect(analyzeBtn?.attributes('disabled')).toBeDefined()
+    const exportBtn = buttons.find((b) => b.text().includes('导出核验单'))
+    expect(exportBtn?.attributes('disabled')).toBeDefined()
+    const saveBtn = buttons.find((b) => b.text().includes('保存决策'))
+    expect(saveBtn?.attributes('disabled')).toBeDefined()
+  })
+
+  it('ready/in_review 案件不显示归档入口', async () => {
+    api.get.mockResolvedValue({ data: { data: makeDetail() } } as never)
+    const wrapper = mountDetail()
+    await flushPromises()
+    expect(wrapper.find('[data-testid="archive-case"]').exists()).toBe(false)
   })
 })

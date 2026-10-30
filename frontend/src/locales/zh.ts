@@ -1487,6 +1487,12 @@ export default {
     warnFamilyMismatch: '基准版与修订版的版本族不一致：建案将阻断（family_mismatch）',
     warnVersionOrder: '基准版版本序不小于修订版：建案将阻断（version_order）',
     candidateTruncated: '共 {total} 篇文档，仅加载前 {shown} 篇（已登记身份的优先）',
-    metaSeqNeedsLabel: '填写版本序时必须同时填写版本标签'
+    metaSeqNeedsLabel: '填写版本序时必须同时填写版本标签',
+    archiveCase: '归档案件',
+    archiveConfirm: '归档后案件变为只读：不能继续决策/分析/导出，也不再阻止相关文档删除。确认归档？',
+    archiveDone: '案件已归档',
+    archiveFailed: '归档案件失败',
+    archived: '已归档',
+    archivedBanner: '该案件已归档（只读）：不可继续决策/分析/导出，且不再阻止相关文档删除。'
   }
 };

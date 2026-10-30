@@ -140,6 +140,8 @@ export interface ReviewCaseDetail {
   updated_at?: string | null
   completed_at?: string | null
   completed_by?: number | null
+  archived_at?: string | null
+  archived_by?: number | null
   lock_version: number
   documents: Record<ReviewSide, ReviewDocumentState>
   items: ReviewItem[]
@@ -162,6 +164,8 @@ export interface ReviewCaseSummary {
   assignee_id?: number | null
   created_at?: string | null
   completed_at?: string | null
+  archived_at?: string | null
+  archived_by?: number | null
 }
 
 export interface ReviewExportSummary {
@@ -190,7 +194,12 @@ export interface DecisionPayload {
 const SILENT_HEADERS = { headers: { 'X-Silent-Error': '1' } } as const
 
 export const reviewsApi = {
-  list(params?: { status?: string; page?: number; page_size?: number }) {
+  list(params?: {
+    status?: string
+    archived?: 'active' | 'archived' | 'all'
+    page?: number
+    page_size?: number
+  }) {
     return request.get('/reviews', { params })
   },
   candidates(params?: { q?: string; page?: number; page_size?: number }) {
@@ -226,6 +235,9 @@ export const reviewsApi = {
   },
   exports(caseId: string) {
     return request.get(`/reviews/${caseId}/exports`)
+  },
+  archive(caseId: string) {
+    return request.post(`/reviews/${caseId}/archive`)
   },
   async download(caseId: string, exportId: string, format: 'json' | 'markdown') {
     const response = await request.get(`/reviews/${caseId}/exports/${exportId}/download`, {

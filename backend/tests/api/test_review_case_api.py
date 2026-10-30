@@ -718,3 +718,86 @@ async def test_candidates_q_matches_title_and_escapes_like_wildcards(factory):
         only_percent = await ac.get("/api/v1/reviews/candidates", params={"q": "%"})
         assert only_percent.status_code == 200, only_percent.text
         assert [i["document_id"] for i in only_percent.json()["data"]["items"]] == [REVISED]
+
+
+# ── 归档出口（Batch 7） ─────────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_archive_blocked_case_releases_list_filters(factory):
+    async with _Ctx(_user(superuser=True), factory) as ac:
+        blocked = (await ac.post("/api/v1/reviews", json=_case_payload(revised=LEGACY))).json()[
+            "data"
+        ]
+        assert blocked["status"] == "blocked"
+        assert blocked["archived_at"] is None
+
+        r = await ac.post(f"/api/v1/reviews/{blocked['id']}/archive")
+        assert r.status_code == 200, r.text
+        archived = r.json()["data"]
+        assert archived["archived_at"] is not None
+        assert archived["archived_by"] == 1
+        assert archived["status"] == "blocked", "归档是正交标志，不覆盖原状态"
+
+        default_list = (await ac.get("/api/v1/reviews")).json()["data"]
+        assert default_list["total"] == 0, "默认列表不含已归档案件"
+        archived_list = (await ac.get("/api/v1/reviews", params={"archived": "archived"})).json()[
+            "data"
+        ]
+        assert archived_list["total"] == 1
+        all_list = (await ac.get("/api/v1/reviews", params={"archived": "all"})).json()["data"]
+        assert all_list["total"] == 1
+
+        again = await ac.post(f"/api/v1/reviews/{blocked['id']}/archive")
+        assert again.status_code == 409
+        assert again.json()["error_code"] == "REVIEW_CASE_ALREADY_ARCHIVED"
+
+
+@pytest.mark.asyncio
+async def test_archive_rejects_active_case(factory):
+    async with _Ctx(_user(superuser=True), factory) as ac:
+        case = await _create_case(ac)
+        r = await ac.post(f"/api/v1/reviews/{case['id']}/archive")
+        assert r.status_code == 409
+        body = r.json()
+        assert body["error_code"] == "REVIEW_CASE_NOT_ARCHIVABLE"
+        assert body["detail"]["status"] == "ready"
+
+
+@pytest.mark.asyncio
+async def test_archived_completed_case_is_read_only(factory):
+    async with _Ctx(_user(superuser=True), factory) as ac:
+        case = await _create_case(ac)
+        assert (await ac.post(f"/api/v1/reviews/{case['id']}/analyze")).status_code == 200
+        for it in case["items"]:
+            decided = await ac.put(
+                f"/api/v1/reviews/{case['id']}/items/{it['id']}/decision",
+                json={"status": "verified"},
+            )
+            assert decided.status_code == 200, decided.text
+        export = await ac.post(f"/api/v1/reviews/{case['id']}/export")
+        assert export.status_code == 200, export.text
+
+        r = await ac.post(f"/api/v1/reviews/{case['id']}/archive")
+        assert r.status_code == 200, r.text
+        assert r.json()["data"]["status"] == "completed"
+
+        decide = await ac.put(
+            f"/api/v1/reviews/{case['id']}/items/{case['items'][0]['id']}/decision",
+            json={"status": "needs_human"},
+        )
+        assert decide.status_code == 409
+        assert decide.json()["error_code"] == "REVIEW_CASE_ARCHIVED"
+        export_again = await ac.post(f"/api/v1/reviews/{case['id']}/export")
+        assert export_again.status_code == 409
+        assert export_again.json()["error_code"] == "REVIEW_CASE_ARCHIVED"
+        analyze = await ac.post(f"/api/v1/reviews/{case['id']}/analyze")
+        assert analyze.status_code == 409
+        assert analyze.json()["error_code"] == "REVIEW_CASE_ARCHIVED"
+
+        # 归档后仍可读详情与既有导出
+        detail = await ac.get(f"/api/v1/reviews/{case['id']}")
+        assert detail.status_code == 200
+        assert detail.json()["data"]["archived_at"] is not None
+        exports = await ac.get(f"/api/v1/reviews/{case['id']}/exports")
+        assert exports.status_code == 200, exports.text

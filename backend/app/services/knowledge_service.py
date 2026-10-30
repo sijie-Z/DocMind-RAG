@@ -362,11 +362,12 @@ class KnowledgeService:
                         await session.execute(
                             select(ReviewCase.id)
                             .where(
+                                ReviewCase.archived_at.is_(None),  # 已归档案件不再阻止删除
                                 or_(
                                     ReviewCase.policy_document_id == document_id,
                                     ReviewCase.base_document_id == document_id,
                                     ReviewCase.revised_document_id == document_id,
-                                )
+                                ),
                             )
                             # 当前读：必须看见并发建案已提交的行，而不是旧快照
                             .with_for_update()

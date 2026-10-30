@@ -147,6 +147,12 @@ class ReviewCase(Base):
     __table_args__ = (
         Index("ix_review_case_org_created", "organization_id", "created_at"),
         Index("ix_review_case_org_status", "organization_id", "status"),
+        # 归档出口（Batch 7）：默认列表只看活跃案件；归档案件不再阻止文档删除。
+        Index("ix_review_case_org_archived", "organization_id", "archived_at"),
+        # 删除守卫按三份文档引用反查案件（OR 三列），单列索引让 index merge 可用。
+        Index("ix_review_case_policy_document_id", "policy_document_id"),
+        Index("ix_review_case_base_document_id", "base_document_id"),
+        Index("ix_review_case_revised_document_id", "revised_document_id"),
     )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
@@ -167,6 +173,14 @@ class ReviewCase(Base):
     assignee_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("users.id"))
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     completed_by: Mapped[int | None] = mapped_column(Integer, ForeignKey("users.id"))
+    # 归档出口（Batch 7）：只读终态。归档后不可再决策/分析/导出，
+    # 且不再阻止其引用文档的物理删除；案件与导出快照仍可读。
+    archived_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), comment="归档时间（只读终态）"
+    )
+    archived_by: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("users.id"), comment="归档人"
+    )
     lock_version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), comment="创建时间"

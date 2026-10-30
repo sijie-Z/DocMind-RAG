@@ -46,6 +46,14 @@
           >
             {{ exporting ? t('reviews.exporting') : t('reviews.export') }}
           </n-button>
+          <n-popconfirm v-if="canArchive" @positive-click="archiveCase">
+            <template #trigger>
+              <n-button secondary type="warning" :loading="archiving" data-testid="archive-case">
+                {{ t('reviews.archiveCase') }}
+              </n-button>
+            </template>
+            {{ t('reviews.archiveConfirm') }}
+          </n-popconfirm>
         </div>
       </div>
 
@@ -58,6 +66,9 @@
           <n-alert v-if="detail.status === 'blocked'" type="error" class="mb-3" :bordered="false">
             {{ t('reviews.blockedHint') }}
             <div class="mt-1 text-xs">{{ detail.blocking_reasons.join(' · ') }}</div>
+          </n-alert>
+          <n-alert v-if="detail.archived_at" type="info" class="mb-3" :bordered="false" data-testid="archived-banner">
+            {{ t('reviews.archivedBanner') }}
           </n-alert>
           <n-alert v-if="detail.live_source_stale" type="warning" class="mb-3" :bordered="false">
             {{ t('reviews.liveSourceStale') }}
@@ -239,7 +250,7 @@
                 <n-button
                   size="small"
                   type="primary"
-                  :disabled="detail.status === 'blocked' || !item.change_type || !canSaveDecision(item)"
+                  :disabled="detail.status === 'blocked' || !!detail.archived_at || !item.change_type || !canSaveDecision(item)"
                   :loading="decidingItem === item.id"
                   @click="saveDecision(item)"
                 >
@@ -309,6 +320,7 @@ import {
   type ReviewSide
 } from '@/api/reviews'
 import { apiUnwrap } from '@/utils/apiUnwrap'
+import { getErrorMessage } from '@/utils/apiError'
 
 const SIDES: ReviewSide[] = ['policy', 'base', 'revised']
 
@@ -324,6 +336,7 @@ const loading = ref(false)
 const loadError = ref(false)
 const analyzing = ref(false)
 const exporting = ref(false)
+const archiving = ref(false)
 const decidingItem = ref('')
 
 const decisions = reactive<
@@ -378,12 +391,21 @@ const itemStatusTagType: Record<ReviewItemStatus, 'default' | 'success' | 'warni
   }
 
 const analyzed = computed(() => !!detail.value?.items.every((item) => item.change_type !== null))
+const canArchive = computed(
+  () =>
+    !!detail.value &&
+    !detail.value.archived_at &&
+    ['blocked', 'completed'].includes(detail.value.status)
+)
 const canAnalyze = computed(
-  () => !!detail.value && ['ready', 'in_review'].includes(detail.value.status)
+  () =>
+    !!detail.value &&
+    !detail.value.archived_at &&
+    ['ready', 'in_review'].includes(detail.value.status)
 )
 const canExport = computed(() => {
   const current = detail.value
-  if (!current || current.status === 'blocked' || !analyzed.value) return false
+  if (!current || current.archived_at || current.status === 'blocked' || !analyzed.value) return false
   return current.items.every((item) =>
     ['verified', 'needs_human', 'not_applicable'].includes(item.status)
   )
@@ -585,6 +607,20 @@ async function runAnalyze() {
     message.error(t('reviews.analysisFailed'))
   } finally {
     analyzing.value = false
+  }
+}
+
+async function archiveCase() {
+  if (!caseId.value) return
+  archiving.value = true
+  try {
+    await reviewsApi.archive(caseId.value)
+    message.success(t('reviews.archiveDone'))
+    await load(false)
+  } catch (error) {
+    message.error(getErrorMessage(error, t('reviews.archiveFailed')))
+  } finally {
+    archiving.value = false
   }
 }
 

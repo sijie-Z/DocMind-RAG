@@ -29,6 +29,7 @@ from app.services import review_analysis_service as analysis_service
 from app.services import review_case_service as case_service
 from app.services import review_document_service as document_service
 from app.services import review_export_service as export_service
+from app.services.audit_service import audit_service
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -77,18 +78,22 @@ async def create_review_case(
 @router.get("", response_model=dict, dependencies=_READ_DEPS)
 async def list_review_cases(
     status: str | None = Query(None, max_length=16, description="按状态过滤"),
+    archived: Literal["active", "archived", "all"] = Query(
+        "active", description="归档过滤：默认只看活跃案件"
+    ),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """列出本组织的核验案件（按创建时间倒序）。"""
+    """列出本组织的核验案件（按创建时间倒序；默认不含已归档）。"""
     try:
         org_id = await require_organization(current_user, db)
         data = await case_service.list_cases(
             db,
             organization_id=org_id,
             status=status,
+            archived=archived,
             page=page,
             page_size=page_size,
         )
@@ -258,6 +263,34 @@ async def export_review_case(
     except Exception as e:
         logger.error(f"Export review case failed: {type(e).__name__}: {e}")
         raise AppError("导出核验单失败") from e
+
+
+@router.post("/{review_id}/archive", response_model=dict, dependencies=_WRITE_DEPS)
+async def archive_review_case(
+    review_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """归档案件（只读终态）：仅 blocked/completed；归档后不再阻止引用文档删除。"""
+    try:
+        case = await case_service.get_case_for_user(db, current_user, review_id)
+        archived = await case_service.archive_case(db, case, user_id=current_user.id)
+        await audit_service.log_activity(
+            user_id=current_user.id,
+            action="archive_review_case",
+            target_type="review_case",
+            target_id=archived.id,
+            detail=f"status={archived.status}; title={archived.title}",
+            db=db,
+        )
+        return {"success": True, "data": await case_service.case_detail(db, archived)}
+    except (NotFoundError, AuthorizationError):
+        raise
+    except AppError:
+        raise
+    except Exception as e:
+        logger.error(f"Archive review case failed: {type(e).__name__}: {e}")
+        raise AppError("归档核验案件失败") from e
 
 
 @router.get("/{review_id}/exports", response_model=dict, dependencies=_READ_DEPS)
