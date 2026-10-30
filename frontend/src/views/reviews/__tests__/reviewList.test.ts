@@ -60,7 +60,12 @@ describe('合同核验列表页', () => {
     const wrapper = mountList()
     await flushPromises()
 
-    expect(api.list).toHaveBeenCalledWith({ status: undefined, page: 1, page_size: 20 })
+    expect(api.list).toHaveBeenCalledWith({
+      status: undefined,
+      archived: 'active',
+      page: 1,
+      page_size: 20
+    })
     expect(wrapper.text()).toContain('采购合同 V1/V2 核验')
     expect(wrapper.text()).toContain('base:legacy_unverified')
     expect(wrapper.text()).toContain('已阻断')
@@ -80,7 +85,12 @@ describe('合同核验列表页', () => {
     vm.statusFilter = 'ready'
     await (wrapper.vm as unknown as { applyFilter: () => void }).applyFilter()
     await flushPromises()
-    expect(api.list).toHaveBeenLastCalledWith({ status: 'ready', page: 1, page_size: 20 })
+    expect(api.list).toHaveBeenLastCalledWith({
+      status: 'ready',
+      archived: 'active',
+      page: 1,
+      page_size: 20
+    })
   })
 
   it('翻页时按新页码取数', async () => {
@@ -90,7 +100,12 @@ describe('合同核验列表页', () => {
     vm.page = 2
     await vm.load()
     await flushPromises()
-    expect(api.list).toHaveBeenLastCalledWith({ status: undefined, page: 2, page_size: 20 })
+    expect(api.list).toHaveBeenLastCalledWith({
+      status: undefined,
+      archived: 'active',
+      page: 2,
+      page_size: 20
+    })
   })
 
   it('点击行跳转到详情页', async () => {
@@ -100,5 +115,74 @@ describe('合同核验列表页', () => {
     expect(row.exists()).toBe(true)
     await row.trigger('click')
     expect(push).toHaveBeenCalledWith('/reviews/case-abc12345')
+  })
+})
+
+describe('归档过滤与标记（Batch 7）', () => {
+  it('切换到已归档/全部时按 archived 参数取数并回到第一页', async () => {
+    const wrapper = mountList()
+    await flushPromises()
+    const vm = wrapper.vm as unknown as {
+      archivedFilter: string
+      page: number
+      applyFilter: () => void
+    }
+    vm.page = 3
+    vm.archivedFilter = 'archived'
+    vm.applyFilter()
+    await flushPromises()
+    expect(api.list).toHaveBeenLastCalledWith({
+      status: undefined,
+      archived: 'archived',
+      page: 1,
+      page_size: 20
+    })
+
+    vm.archivedFilter = 'all'
+    vm.applyFilter()
+    await flushPromises()
+    expect(api.list).toHaveBeenLastCalledWith({
+      status: undefined,
+      archived: 'all',
+      page: 1,
+      page_size: 20
+    })
+  })
+
+  it('已归档行渲染行内标记（data-testid 区分筛选文案）', async () => {
+    api.list.mockResolvedValue({
+      data: { data: { items: [{ ...ROW, archived_at: '2026-10-30T00:00:00Z' }], total: 1 } }
+    } as never)
+    const wrapper = mountList()
+    await flushPromises()
+    expect(wrapper.find('[data-testid="row-archived-tag"]').exists()).toBe(true)
+  })
+
+  it('已归档视图空态使用独立文案', async () => {
+    api.list.mockResolvedValue({ data: { data: { items: [], total: 0 } } } as never)
+    const wrapper = mountList()
+    await flushPromises()
+    const vm = wrapper.vm as unknown as { archivedFilter: string; applyFilter: () => void }
+    vm.archivedFilter = 'archived'
+    vm.applyFilter()
+    await flushPromises()
+    expect(wrapper.text()).toContain('还没有已归档案件')
+  })
+})
+
+describe('归档筛选的事件接线', () => {
+  it('NSelect update:value 触发 applyFilter 并按新参数取数', async () => {
+    const wrapper = mountList()
+    await flushPromises()
+    const selects = wrapper.findAllComponents(NSelect)
+    // 头部两个下拉：0=状态筛选，1=归档筛选
+    selects[1].vm.$emit('update:value', 'archived')
+    await flushPromises()
+    expect(api.list).toHaveBeenLastCalledWith({
+      status: undefined,
+      archived: 'archived',
+      page: 1,
+      page_size: 20
+    })
   })
 })

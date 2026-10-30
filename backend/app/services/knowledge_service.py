@@ -354,19 +354,21 @@ class KnowledgeService:
                     # 跨 org 的 id 在这里同样落空：无副作用，不会泄漏或误删他人文档。
                     return DeleteOutcome(success=True)
 
-                # Batch 5 生命周期保护：被核验案件引用的文档禁止物理删除 ——
-                # 删除会让案件只能看到 stale 快照，且没有归档/恢复出口。
-                # 该检查在任何副作用（ES/DB/对象存储）之前执行，fail closed。
+                # Batch 5 生命周期保护：被活跃核验案件引用的文档禁止物理删除 ——
+                # 删除会让活跃案件只能看到 stale 快照。Batch 7 起归档案件不再
+                # 阻止删除（只读终态，快照保留）。该检查在任何副作用
+                # （ES/DB/对象存储）之前执行，fail closed。
                 referenced_cases = (
                     (
                         await session.execute(
                             select(ReviewCase.id)
                             .where(
+                                ReviewCase.archived_at.is_(None),  # 已归档案件不再阻止删除
                                 or_(
                                     ReviewCase.policy_document_id == document_id,
                                     ReviewCase.base_document_id == document_id,
                                     ReviewCase.revised_document_id == document_id,
-                                )
+                                ),
                             )
                             # 当前读：必须看见并发建案已提交的行，而不是旧快照
                             .with_for_update()

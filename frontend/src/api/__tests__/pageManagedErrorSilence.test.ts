@@ -24,6 +24,7 @@ import { getPrompts, deletePrompt, createPrompt } from '../prompt'
 import { getNotifications, getNotificationSummary, deleteNotification, batchDeleteNotifications } from '../notification'
 import { getMonitoringDashboard, getMonitoringAlerts, getMetrics, getNotificationStatus } from '../monitoring'
 import { getOrganizationSettingsAudit, updateOrganizationSettings } from '../organization'
+import { reviewsApi } from '../reviews'
 
 const silentHeader = (config: unknown) =>
   (config as { headers?: Record<string, unknown> } | undefined)?.headers?.['X-Silent-Error']
@@ -145,5 +146,31 @@ describe('组织设置页：保存/审计错误由页面自行呈现 → 请求�
     await getOrganizationSettingsAudit(7)
     expect(mocks.get.mock.calls[0][0]).toBe('/organizations/7/settings/audit')
     expect(silentHeader(mocks.get.mock.calls[0][1])).toBe('1')
+  })
+})
+
+
+describe('合同核验：弹窗/归档调用点自身呈递错误 → 请求静默', () => {
+  it('candidates/readiness/createCase/putDocumentMeta/archive 全部带 X-Silent-Error', async () => {
+    await reviewsApi.candidates({ page: 1 })
+    expect(silentHeader(mocks.get.mock.calls[0][1])).toBe('1')
+
+    await reviewsApi.readiness('doc-1')
+    expect(silentHeader(mocks.get.mock.calls[1][1])).toBe('1')
+
+    await reviewsApi.createCase({
+      title: 't',
+      policy_document_id: 'p',
+      base_document_id: 'b',
+      revised_document_id: 'r'
+    })
+    expect(silentHeader(mocks.post.mock.calls[0][2])).toBe('1')
+
+    await reviewsApi.putDocumentMeta('doc-1', { doc_role: 'policy' })
+    expect(silentHeader(mocks.put.mock.calls[0][2])).toBe('1')
+
+    await reviewsApi.archive('case-1')
+    expect(mocks.post.mock.calls[1][0]).toBe('/reviews/case-1/archive')
+    expect(silentHeader(mocks.post.mock.calls[1][2])).toBe('1')
   })
 })

@@ -740,6 +740,7 @@ def test_022_migration_roundtrip(tmp_path, monkeypatch):
         case_fks = {
             (row[2], row[3]) for row in conn.execute("PRAGMA foreign_key_list('review_case')")
         }
+        case_indexes = {row[1] for row in conn.execute("PRAGMA index_list('review_case')")}
 
     assert set(case_columns) == {
         "id",
@@ -756,6 +757,8 @@ def test_022_migration_roundtrip(tmp_path, monkeypatch):
         "assignee_id",
         "completed_at",
         "completed_by",
+        "archived_at",
+        "archived_by",
         "lock_version",
         "created_at",
         "updated_at",
@@ -821,6 +824,16 @@ def test_022_migration_roundtrip(tmp_path, monkeypatch):
     assert ("review_item", "item_id") in evidence_fks
     assert ("review_case", "case_id") not in case_fks
     assert ("organizations", "organization_id") in case_fks
+    # Batch 7 归档出口：两列可空 + 删除守卫/默认列表所需索引
+    assert case_columns["archived_at"][3] == 0
+    assert case_columns["archived_by"][3] == 0
+    for index_name in (
+        "ix_review_case_org_archived",
+        "ix_review_case_policy_document_id",
+        "ix_review_case_base_document_id",
+        "ix_review_case_revised_document_id",
+    ):
+        assert index_name in case_indexes, f"缺少索引 {index_name}"
     unique_columns = set()
     with sqlite3.connect(str(db_path)) as conn:
         for name, row in evidence_indexes.items():

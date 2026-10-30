@@ -6,13 +6,23 @@
           <h1 class="text-3xl font-bold text-gray-800 dark:text-white">{{ t('menu.reviews') }}</h1>
           <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">{{ t('reviews.subtitle') }}</p>
         </div>
-        <div class="flex items-center gap-3">
+        <div class="flex flex-wrap items-center gap-3">
           <n-select
             v-model:value="statusFilter"
             :options="statusOptions"
             :placeholder="t('reviews.allStatuses')"
             clearable
             class="w-44"
+            @update:value="applyFilter"
+          />
+          <span class="text-xs text-gray-500 dark:text-gray-400">
+            {{ t('reviews.archivedFilterLabel') }}
+          </span>
+          <n-select
+            v-model:value="archivedFilter"
+            :options="archivedOptions"
+            class="w-36"
+            data-testid="archived-filter"
             @update:value="applyFilter"
           />
           <n-button type="primary" data-testid="create-case-open" @click="createVisible = true">
@@ -27,7 +37,13 @@
       </n-alert>
 
       <n-spin :show="loading">
-        <n-empty v-if="!loading && rows.length === 0" :description="t('reviews.empty')" class="py-20" />
+        <n-empty
+          v-if="!loading && rows.length === 0"
+          :description="
+            archivedFilter === 'archived' ? t('reviews.emptyArchived') : t('reviews.empty')
+          "
+          class="py-20"
+        />
         <div v-else>
           <n-data-table
             :columns="columns"
@@ -72,6 +88,7 @@ const statusFilter = ref<ReviewCaseStatus | null>(null)
 const page = ref(1)
 const pageSize = 20
 const createVisible = ref(false)
+const archivedFilter = ref<'active' | 'archived' | 'all'>('active')
 
 const statusLabel = computed<Record<ReviewCaseStatus, string>>(() => ({
   blocked: t('reviews.statusBlocked'),
@@ -85,6 +102,11 @@ const statusTagType: Record<ReviewCaseStatus, 'error' | 'info' | 'warning' | 'su
   in_review: 'warning',
   completed: 'success'
 }
+const archivedOptions = computed(() => [
+  { value: 'active', label: t('reviews.filterActive') },
+  { value: 'archived', label: t('reviews.archived') },
+  { value: 'all', label: t('reviews.filterAll') }
+])
 const statusOptions = computed(() =>
   (Object.keys(statusLabel.value) as ReviewCaseStatus[]).map((value) => ({
     value,
@@ -98,6 +120,7 @@ async function load() {
   try {
     const response = await reviewsApi.list({
       status: statusFilter.value ?? undefined,
+      archived: archivedFilter.value,
       page: page.value,
       page_size: pageSize
     })
@@ -129,9 +152,18 @@ const columns = computed(() => [
     title: t('reviews.statusColumn'),
     key: 'status',
     render: (row: ReviewCaseSummary) =>
-      h(NTag, { type: statusTagType[row.status], size: 'small' }, {
-        default: () => statusLabel.value[row.status]
-      })
+      h('div', { class: 'flex flex-wrap gap-1' }, [
+        h(NTag, { type: statusTagType[row.status], size: 'small' }, {
+          default: () => statusLabel.value[row.status]
+        }),
+        row.archived_at
+          ? h('span', { 'data-testid': 'row-archived-tag' }, [
+              h(NTag, { type: 'default', size: 'small' }, {
+                default: () => t('reviews.archived')
+              })
+            ])
+          : null
+      ])
   },
   {
     title: t('reviews.baseVersion'),

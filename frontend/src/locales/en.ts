@@ -1480,6 +1480,16 @@ export default {
     warnFamilyMismatch: 'Base and revised belong to different version families: the case will be blocked (family_mismatch)',
     warnVersionOrder: 'Base version sequence is not lower than revised: the case will be blocked (version_order)',
     candidateTruncated: '{total} documents in total, only the first {shown} are loaded (registered identities first)',
-    metaSeqNeedsLabel: 'Version sequence requires a version label'
+    metaSeqNeedsLabel: 'Version sequence requires a version label',
+    archiveCase: 'Archive case',
+    archiveConfirm: 'Archiving makes the case read-only: no further decisions, analysis or exports, and it no longer blocks deletion of referenced documents. Archiving cannot be undone. Archive now?',
+    archiveDone: 'Case archived',
+    archiveFailed: 'Failed to archive the case',
+    archived: 'Archived',
+    archivedBanner: 'This case is archived (read-only): decisions, analysis and exports are frozen, and it no longer blocks deletion of referenced documents.',
+    filterActive: 'Not archived',
+    filterAll: 'All',
+    emptyArchived: 'No archived cases yet',
+    archivedFilterLabel: 'Archive filter',
   }
 };

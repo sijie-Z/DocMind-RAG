@@ -1407,6 +1407,16 @@ export default {
     warnFamilyMismatch: '基準版と改訂版のバージョン系列が不一致：案件はブロックされます（family_mismatch）',
     warnVersionOrder: '基準版のバージョン順序が改訂版以上です：案件はブロックされます（version_order）',
     candidateTruncated: '全 {total} 件のドキュメントのうち先頭 {shown} 件のみ読み込み（属性登録済みを優先）',
-    metaSeqNeedsLabel: 'バージョン順序を入力するにはバージョンラベルも必要です'
+    metaSeqNeedsLabel: 'バージョン順序を入力するにはバージョンラベルも必要です',
+    archiveCase: '案件をアーカイブ',
+    archiveConfirm: 'アーカイブ後は読み取り専用になります：決定・分析・エクスポートはできず、関連ドキュメントの削除も妨げません。アーカイブは元に戻せません。アーカイブしますか？',
+    archiveDone: '案件をアーカイブしました',
+    archiveFailed: '案件のアーカイブに失敗しました',
+    archived: 'アーカイブ済み',
+    archivedBanner: 'この案件はアーカイブ済み（読み取り専用）です：決定・分析・エクスポートは凍結され、関連ドキュメントの削除も妨げません。',
+    filterActive: '未アーカイブ',
+    filterAll: 'すべて',
+    emptyArchived: 'アーカイブ済みの案件はまだありません',
+    archivedFilterLabel: 'アーカイブの絞り込み',
   }
 };

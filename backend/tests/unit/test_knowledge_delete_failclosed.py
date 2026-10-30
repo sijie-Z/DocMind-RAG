@@ -14,6 +14,7 @@
 不连接真实 MySQL/ES/Redis/MinIO，也不删除任何真实数据。
 """
 
+from datetime import UTC, datetime
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -372,6 +373,7 @@ async def test_es_delete_failure_preserves_db_and_blocks_success(
         "chunks": 1,
         "jobs": 1,
     }
+
     delete_file.assert_not_awaited()
     audit.assert_not_awaited()
     delete_harness.retrieval_clear.assert_not_awaited()
@@ -848,4 +850,43 @@ async def test_referenced_document_delete_is_refused_before_side_effects(
         "documents": 1,
         "chunks": 1,
         "jobs": 1,
+    }
+
+
+@pytest.mark.asyncio
+async def test_archived_case_no_longer_blocks_document_delete(delete_harness, monkeypatch):
+    """Batch 7：归档是只读终态，归档案件不再阻止其引用文档的物理删除。"""
+    document_id = "doc-archived-case"
+    await _seed_document(delete_harness.factory, document_id)
+    async with delete_harness.factory() as session:
+        session.add(
+            ReviewCase(
+                id="case-archived",
+                organization_id=ORG_ID,
+                title="archived",
+                checklist_version="v1",
+                status="blocked",
+                created_by=1,
+                lock_version=1,
+                policy_document_id=document_id,
+                base_document_id="other-base",
+                revised_document_id="other-revised",
+                archived_at=datetime.now(UTC),
+                archived_by=1,
+            )
+        )
+        await session.commit()
+
+    fake_es = _FakeES([_es_chunk(document_id)], {})
+    _wire_es(monkeypatch, fake_es)
+    service = ks_mod.KnowledgeService()
+
+    outcome = await service.delete_knowledge_thoroughly(document_id, ORG_ID)
+
+    assert outcome.success is True
+    assert fake_es.delete_calls, "归档案件不应再阻止 ES 清理"
+    assert await _database_state(delete_harness.factory, document_id) == {
+        "documents": 0,
+        "chunks": 0,
+        "jobs": 0,
     }

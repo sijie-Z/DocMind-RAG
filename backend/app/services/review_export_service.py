@@ -120,6 +120,12 @@ async def decide_item(
     if status not in DECISION_STATUSES:
         raise ValidationError(f"未知决策状态: {status!r}", field="status")
     case = await _lock_case(session, case)
+    if case.archived_at is not None:
+        raise ConflictError(
+            "案件已归档：不能再变更决策",
+            error_code="REVIEW_CASE_ARCHIVED",
+            detail={"case_id": case.id, "status": case.status},
+        )
     if case.status not in ("ready", "in_review", "completed"):
         raise ConflictError(
             "当前案件状态不允许决策",
@@ -225,6 +231,12 @@ def _build_payload(case: ReviewCase, detail: dict[str, Any]) -> dict[str, Any]:
 async def export_case(session: AsyncSession, case: ReviewCase, *, user_id: int) -> ReviewExport:
     """生成不可变核验单快照；未决项阻止导出。"""
     case = await _lock_case(session, case)
+    if case.archived_at is not None:
+        raise ConflictError(
+            "案件已归档：不能再导出核验单",
+            error_code="REVIEW_CASE_ARCHIVED",
+            detail={"case_id": case.id, "status": case.status},
+        )
     if case.status not in ("ready", "in_review", "completed"):
         raise ConflictError(
             "当前案件状态不允许导出",

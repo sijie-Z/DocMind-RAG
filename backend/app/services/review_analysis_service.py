@@ -641,6 +641,12 @@ async def _lock_case(session: AsyncSession, case: ReviewCase) -> ReviewCase:
 async def analyze_case(session: AsyncSession, case: ReviewCase) -> dict[str, Any]:
     """对 ready/in_review 案件做确定性抽取与对齐，更新 items 并快照主条款证据。"""
     case = await _lock_case(session, case)
+    if case.archived_at is not None:
+        raise ConflictError(
+            "案件已归档：不能再执行核验分析",
+            error_code="REVIEW_CASE_ARCHIVED",
+            detail={"case_id": case.id, "status": case.status},
+        )
     if case.status not in ("ready", "in_review"):
         raise ConflictError(
             "当前案件状态不允许执行核验分析",
