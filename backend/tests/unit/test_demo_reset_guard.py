@@ -22,7 +22,13 @@ from app.models.chat import (
     DeletedChatSession,
     MessageType,
 )
-from app.models.document import Document, DocumentChunk, DocumentStatus, DocumentType
+from app.models.document import (
+    Document,
+    DocumentChunk,
+    DocumentStatus,
+    DocumentTag,
+    DocumentType,
+)
 from app.models.knowledge_job import KnowledgeProcessingJob
 from app.models.review import ReviewCase, ReviewDocumentMeta
 
@@ -79,6 +85,8 @@ async def factory(tmp_path):
                     trigger_type="upload",
                 )
             )
+        for doc_id in DEMO_DOCS:
+            db.add(DocumentTag(id=f"tag-row-{doc_id}", document_id=doc_id, tag_id="tag-1"))
         db.add(
             ReviewDocumentMeta(
                 document_id=POLICY_REF,
@@ -192,11 +200,23 @@ async def test_clear_demo_skips_referenced_documents_and_reports(factory, monkey
                 .all()
             )
             assert jobs, "保留文档的 processing job 不得被清理"
+            tags = (
+                (await db.execute(select(DocumentTag).where(DocumentTag.document_id == doc_id)))
+                .scalars()
+                .all()
+            )
+            assert tags, "保留文档的标签不得被清理"
+        assert await db.get(ReviewDocumentMeta, POLICY_REF) is not None, (
+            "保留文档的核验身份不得被清理"
+        )
         assert await db.get(Document, FREE) is None
         assert (
             await db.execute(
                 select(KnowledgeProcessingJob).where(KnowledgeProcessingJob.document_id == FREE)
             )
+        ).scalars().all() == []
+        assert (
+            await db.execute(select(DocumentTag).where(DocumentTag.document_id == FREE))
         ).scalars().all() == []
         # 消息与会话被批量删除，墓碑行写入
         assert (

@@ -22,7 +22,13 @@ from app.models.chat import (
     DeletedChatSession,
     MessageType,
 )
-from app.models.document import Document, DocumentChunk, DocumentStatus, DocumentType
+from app.models.document import (
+    Document,
+    DocumentChunk,
+    DocumentStatus,
+    DocumentTag,
+    DocumentType,
+)
 from app.models.knowledge_job import KnowledgeProcessingJob
 from app.models.review import ReviewCase, ReviewDocumentMeta
 from app.models.user import User
@@ -428,15 +434,33 @@ async def clear_demo_data(
         # 查找示例文档
         # 与建案/删除同一锁序（documents → review_case）：先锁示例文档行，
         # 并发建案在拿到文档锁前无法跨过引用检查提交。
-        result = await db.execute(
-            select(Document)
-            .where(
-                Document.uploaded_by == current_user.id,
-                Document.description == "示例数据 - DocMind 首次体验",
+        # 两段式：description 非索引列，直接锁定读会锁住该用户全部文档行，并
+        # 把锁持有到后续 ES 删除的网络 I/O；先普通查询取候选 id，再按主键 IN
+        # 加锁（与建案/删除的 PK 加锁形状一致），锁后复核过滤条件。
+        candidate_ids = (
+            (
+                await db.execute(
+                    select(Document.id).where(
+                        Document.uploaded_by == current_user.id,
+                        Document.description == "示例数据 - DocMind 首次体验",
+                    )
+                )
             )
-            .with_for_update()
+            .scalars()
+            .all()
         )
-        docs = result.scalars().all()
+        if candidate_ids:
+            result = await db.execute(
+                select(Document).where(Document.id.in_(candidate_ids)).with_for_update()
+            )
+            docs = [
+                doc
+                for doc in result.scalars().all()
+                if doc.uploaded_by == current_user.id
+                and doc.description == "示例数据 - DocMind 首次体验"
+            ]
+        else:
+            docs = []
 
         # Batch 8：被核验案件（含已归档）引用的示例文档跳过删除并如实报告——
         # 删除会把案件留成只能看到 missing 快照的悬空引用。
@@ -486,6 +510,7 @@ async def clear_demo_data(
             await db.execute(
                 delete(KnowledgeProcessingJob).where(KnowledgeProcessingJob.document_id == doc.id)
             )
+            await db.execute(delete(DocumentTag).where(DocumentTag.document_id == doc.id))
             await db.delete(doc)
 
         # 删除示例对话
