@@ -4,6 +4,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
+from sqlalchemy import select
 
 import app.services.knowledge_service as ks_mod
 from app.exceptions import ConflictError
@@ -159,3 +160,101 @@ def test_review_case_document_columns_are_plain_strings():
     for column in ("policy_document_id", "base_document_id", "revised_document_id"):
         assert column in ReviewCase.__table__.columns
         assert not ReviewCase.__table__.columns[column].foreign_keys
+
+
+# ── 建案侧：提交前加锁复核（文档在建案途中被删 → 拒绝且不落库） ──────────────
+
+
+async def _seed_case_docs(factory):
+    import uuid
+
+    from app.models.document import Document, DocumentChunk, DocumentStatus, DocumentType
+    from app.models.review import ReviewDocumentMeta
+
+    async with factory() as db:
+        for doc_id, role, family, label, seq in (
+            ("lc-policy", "policy", None, None, None),
+            ("lc-base", "contract", "lc-family", "V1", 1),
+            ("lc-revised", "contract", "lc-family", "V2", 2),
+        ):
+            db.add(
+                Document(
+                    id=doc_id,
+                    filename=f"{doc_id}.pdf",
+                    file_path=f"1/{doc_id}.pdf",
+                    file_size=1,
+                    file_type=DocumentType.PDF,
+                    status=DocumentStatus.INDEXED,
+                    organization_id=1,
+                    uploaded_by=1,
+                )
+            )
+            db.add(
+                ReviewDocumentMeta(
+                    document_id=doc_id,
+                    organization_id=1,
+                    doc_role=role,
+                    family_key=family,
+                    version_label=label,
+                    version_seq=seq,
+                    content_sha256=doc_id[0] * 64,
+                    registered_by=1,
+                )
+            )
+            db.add(
+                DocumentChunk(
+                    id=str(uuid.uuid4()),
+                    document_id=doc_id,
+                    chunk_index=0,
+                    chunk_text="付款期限为30天。",
+                    original_text="付款期限为30天。",
+                    chunk_length=8,
+                    page_number=1,
+                    meta_data={"text_provenance": "parser_original"},
+                )
+            )
+        await db.commit()
+
+
+@pytest.mark.asyncio
+async def test_create_case_rejects_document_deleted_before_commit(tmp_path):
+    from sqlalchemy import delete
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+    from app.core.database import Base
+    from app.models.document import Document
+    from app.models.review import ReviewCase
+    from app.services import review_case_service as case_service
+
+    engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 'lc-create.db'}")
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+    try:
+        await _seed_case_docs(factory)
+        async with factory() as db:
+            docs = {
+                "policy": await db.get(Document, "lc-policy"),
+                "base": await db.get(Document, "lc-base"),
+                "revised": await db.get(Document, "lc-revised"),
+            }
+            # 模拟并发删除：建案会话读取文档后，另一事务删掉 base 文档行。
+            async with factory() as other:
+                await other.execute(delete(Document).where(Document.id == "lc-base"))
+                await other.commit()
+            with pytest.raises(ConflictError) as excinfo:
+                await case_service.create_case(
+                    db,
+                    docs=docs,
+                    title="concurrent delete",
+                    checklist_version="v1",
+                    created_by=1,
+                )
+        assert excinfo.value.error_code == "REVIEW_DOCUMENT_UNAVAILABLE"
+        assert excinfo.value.detail["missing_sides"] == ["base"]
+        async with factory() as db:
+            assert (await db.execute(select(ReviewCase.id))).scalars().all() == [], (
+                "复核失败时案件不得落库"
+            )
+    finally:
+        await engine.dispose()

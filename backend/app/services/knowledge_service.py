@@ -342,7 +342,11 @@ class KnowledgeService:
                 conditions = [Document.id == document_id]
                 if organization_id is not None:
                     conditions.append(Document.organization_id == organization_id)
-                result = await session.execute(select(Document).where(*conditions))
+                # 当前读 + 行锁：与建案侧的提交前加锁复核互斥，闭合「检查-删除」
+                # 与并发建案之间的竞态（MySQL；SQLite 忽略 FOR UPDATE）。
+                result = await session.execute(
+                    select(Document).where(*conditions).with_for_update()
+                )
                 doc = result.scalar_one_or_none()
                 if not doc:
                     # 幂等：目标状态（无此文档）已达成。直接删除不存在的文档是成功而非失败
@@ -356,13 +360,16 @@ class KnowledgeService:
                 referenced_cases = (
                     (
                         await session.execute(
-                            select(ReviewCase.id).where(
+                            select(ReviewCase.id)
+                            .where(
                                 or_(
                                     ReviewCase.policy_document_id == document_id,
                                     ReviewCase.base_document_id == document_id,
                                     ReviewCase.revised_document_id == document_id,
                                 )
                             )
+                            # 当前读：必须看见并发建案已提交的行，而不是旧快照
+                            .with_for_update()
                         )
                     )
                     .scalars()
@@ -374,6 +381,7 @@ class KnowledgeService:
                         error_code="REVIEW_DOCUMENT_IN_USE",
                         detail={
                             "document_id": document_id,
+                            "case_count": len(referenced_cases),
                             "case_ids": sorted(referenced_cases)[:50],
                         },
                     )

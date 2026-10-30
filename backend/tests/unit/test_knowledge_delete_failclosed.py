@@ -24,7 +24,7 @@ from sqlalchemy.pool import StaticPool
 
 import app.services.knowledge_service as ks_mod
 from app.core.database import Base
-from app.exceptions import AppError, ServiceUnavailableError
+from app.exceptions import AppError, ConflictError, ServiceUnavailableError
 from app.models.document import Document, DocumentChunk, DocumentStatus, DocumentTag, DocumentType
 from app.models.knowledge_job import KnowledgeProcessingJob
 from app.models.review import ReviewCase, ReviewDocumentMeta
@@ -797,3 +797,55 @@ async def test_delete_removes_review_meta(delete_harness, monkeypatch):
     assert outcome.success is True
     async with delete_harness.factory() as session:
         assert await session.get(ReviewDocumentMeta, document_id) is None
+
+
+# ── Batch 5：被核验案件引用的文档在任何副作用之前被拒绝（DB 级真值） ──────────
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("side", ["policy", "base", "revised"])
+async def test_referenced_document_delete_is_refused_before_side_effects(
+    delete_harness, monkeypatch, side
+):
+    document_id = f"doc-in-case-{side}"
+    await _seed_document(delete_harness.factory, document_id)
+    refs = {
+        "policy_document_id": f"other-policy-{side}",
+        "base_document_id": f"other-base-{side}",
+        "revised_document_id": f"other-revised-{side}",
+    }
+    refs[f"{side}_document_id"] = document_id
+    async with delete_harness.factory() as session:
+        session.add(
+            ReviewCase(
+                id=f"case-{side}",
+                organization_id=ORG_ID,
+                title="referenced",
+                checklist_version="v1",
+                status="ready",
+                created_by=1,
+                lock_version=1,
+                **refs,
+            )
+        )
+        await session.commit()
+
+    fake_es = _FakeES([_es_chunk(document_id)], {})
+    _wire_es(monkeypatch, fake_es)
+    service = ks_mod.KnowledgeService()
+
+    with pytest.raises(ConflictError) as excinfo:
+        await service.delete_knowledge_thoroughly(document_id, ORG_ID)
+
+    err = excinfo.value
+    assert err.status_code == 409
+    assert err.error_code == "REVIEW_DOCUMENT_IN_USE"
+    assert err.detail["case_count"] == 1
+    assert err.detail["case_ids"] == [f"case-{side}"]
+    assert fake_es.delete_calls == [], "引用检查必须先于 ES 删除"
+    assert delete_harness.state.commits == [], "引用检查必须先于 commit"
+    assert await _database_state(delete_harness.factory, document_id) == {
+        "documents": 1,
+        "chunks": 1,
+        "jobs": 1,
+    }

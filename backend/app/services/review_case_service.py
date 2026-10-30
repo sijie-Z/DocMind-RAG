@@ -201,6 +201,27 @@ async def create_case(
         items[item_key] = item
     if case.status == "ready":
         await _capture_candidates(session, case, items, docs, metas)
+    # Batch 5 并发收口：提交前对三份文档做加锁复核（当前读）。若并发删除已
+    # 删掉其中一份，必须失败而不是落下悬空引用。SQLite 忽略 FOR UPDATE。
+    locked_ids = set(
+        (
+            await session.execute(
+                select(Document.id)
+                .where(Document.id.in_([docs[side].id for side in REVIEW_SIDES]))
+                .with_for_update()
+            )
+        )
+        .scalars()
+        .all()
+    )
+    missing = [side for side in REVIEW_SIDES if docs[side].id not in locked_ids]
+    if missing:
+        await session.rollback()
+        raise ConflictError(
+            "案件引用的文档已被删除，请重新选择文档建案",
+            error_code="REVIEW_DOCUMENT_UNAVAILABLE",
+            detail={"missing_sides": missing},
+        )
     try:
         await session.commit()
     except IntegrityError as exc:
