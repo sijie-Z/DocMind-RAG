@@ -369,6 +369,36 @@ describe('合同核验工作台 · 导出与草稿', () => {
 
 
 describe('归档出口（Batch 7）', () => {
+  it('陈旧页归档遇 409 ALREADY_ARCHIVED 自动收敛到只读态', async () => {
+    const archived = makeDetail({
+      status: 'completed',
+      completed_at: '2026-10-30T00:00:00Z',
+      completed_by: 7,
+      archived_at: '2026-10-30T00:00:00Z',
+      archived_by: 1
+    })
+    api.get
+      .mockResolvedValueOnce({
+        data: { data: makeDetail({ status: 'blocked', blocking_reasons: ['base:legacy'] }) }
+      } as never)
+      .mockResolvedValue({ data: { data: archived } } as never)
+    api.archive.mockRejectedValue({
+      response: { status: 409, data: { error_code: 'REVIEW_CASE_ALREADY_ARCHIVED' } }
+    } as never)
+    const wrapper = mountDetail()
+    await flushPromises()
+
+    const vm = wrapper.findComponent(ReviewDetail).vm as unknown as {
+      archiveCase: () => Promise<void>
+    }
+    await vm.archiveCase()
+    await flushPromises()
+
+    expect(api.get).toHaveBeenCalledTimes(2), '409 后必须重新拉取收敛'
+    expect(wrapper.find('[data-testid="archived-banner"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="archive-case"]').exists()).toBe(false)
+  })
+
   const baseDetail = (overrides: Record<string, unknown> = {}) =>
     makeDetail({
       status: 'completed',

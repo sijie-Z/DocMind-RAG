@@ -15,10 +15,12 @@
             class="w-44"
             @update:value="applyFilter"
           />
+          <span class="text-xs text-gray-500 dark:text-gray-400">
+            {{ t('reviews.archivedFilterLabel') }}
+          </span>
           <n-select
             v-model:value="archivedFilter"
             :options="archivedOptions"
-            :input-props="{ 'aria-label': t('reviews.archivedFilterLabel') }"
             class="w-36"
             data-testid="archived-filter"
             @update:value="applyFilter"
