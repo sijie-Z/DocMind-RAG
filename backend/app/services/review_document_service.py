@@ -19,7 +19,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import func, select
+from sqlalchemy import and_, case, func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -408,6 +408,72 @@ def readiness_to_dict(readiness: ReviewReadiness) -> dict[str, Any]:
         "legacy_chunk_count": readiness.legacy_chunk_count,
         "meta": readiness.meta,
     }
+
+
+async def list_candidates(
+    session: AsyncSession,
+    *,
+    organization_id: int,
+    q: str | None = None,
+    page: int = 1,
+    page_size: int = 50,
+) -> dict[str, Any]:
+    """建案候选文档：本组织文档 + 已登记核验身份（未登记也返回，前端提示先登记）。
+
+    只做只读列举，不在此处算 readiness（那是逐文档的重活）；前端对选中的
+    三份文档按需查询。已登记身份的排前面，便于在建案弹窗里优先看到。
+    """
+    conditions = [Document.organization_id == organization_id]
+    if q:
+        keyword = q.strip()
+        if keyword:
+            # 与 chat.py（issue #476）同口径：转义 LIKE 通配符，避免 % / _ / \ 改变过滤语义。
+            escaped = keyword.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+            like = f"%{escaped}%"
+            conditions.append(
+                or_(
+                    Document.filename.ilike(like, escape="\\"),
+                    Document.title.ilike(like, escape="\\"),
+                )
+            )
+    total = int(
+        (await session.execute(select(func.count(Document.id)).where(*conditions))).scalar() or 0
+    )
+    rows = (
+        await session.execute(
+            select(Document, ReviewDocumentMeta)
+            .outerjoin(
+                ReviewDocumentMeta,
+                and_(
+                    ReviewDocumentMeta.document_id == Document.id,
+                    # 防御性口径：组织不一致的 meta 行不当作本组织的核验身份
+                    # （与 compute_readiness 的 wrong_org 阻断对齐）。
+                    ReviewDocumentMeta.organization_id == organization_id,
+                ),
+            )
+            .where(*conditions)
+            .order_by(
+                case((ReviewDocumentMeta.document_id.is_(None), 1), else_=0),
+                Document.created_at.desc(),
+                Document.id.desc(),
+            )
+            .offset((page - 1) * page_size)
+            .limit(page_size)
+        )
+    ).all()
+    items = [
+        {
+            "document_id": doc.id,
+            "filename": doc.filename,
+            "title": doc.title,
+            "file_type": getattr(doc.file_type, "value", doc.file_type),
+            "status": getattr(doc.status, "value", doc.status),
+            "created_at": doc.created_at.isoformat() if doc.created_at else None,
+            "meta": meta_to_dict(meta),
+        }
+        for doc, meta in rows
+    ]
+    return {"items": items, "total": total, "page": page, "page_size": page_size}
 
 
 async def query_evidence(

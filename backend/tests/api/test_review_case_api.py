@@ -18,10 +18,14 @@ from app.models.review import ReviewDocumentMeta
 from app.models.user_audit import UserActivityLog
 
 ORG = 1
+OTHER_ORG = 2
 POLICY = "doc-api-policy"
 BASE = "doc-api-base"
 REVISED = "doc-api-revised"
 LEGACY = "doc-api-legacy"
+NOMETA = "doc-api-nometa"
+FOREIGN = "doc-api-foreign"
+MISMETA = "doc-api-mismeta"
 
 
 @pytest.fixture
@@ -32,17 +36,26 @@ async def factory(tmp_path):
     maker = async_sessionmaker(engine, expire_on_commit=False)
     async with maker() as db:
         db.add(Organization(id=ORG, name="Org", owner_id=0))
+        db.add(Organization(id=OTHER_ORG, name="Other", owner_id=0))
         docs = []
-        for doc_id in (POLICY, BASE, REVISED, LEGACY):
+        for doc_id, org_id in (
+            (POLICY, ORG),
+            (BASE, ORG),
+            (REVISED, ORG),
+            (LEGACY, ORG),
+            (NOMETA, ORG),
+            (MISMETA, ORG),
+            (FOREIGN, OTHER_ORG),
+        ):
             docs.append(
                 Document(
                     id=doc_id,
                     filename=f"{doc_id}.pdf",
-                    file_path=f"1/{doc_id}.pdf",
+                    file_path=f"{org_id}/{doc_id}.pdf",
                     file_size=100,
                     file_type=DocumentType.PDF,
                     status=DocumentStatus.INDEXED,
-                    organization_id=ORG,
+                    organization_id=org_id,
                     uploaded_by=1,
                 )
             )
@@ -84,6 +97,18 @@ async def factory(tmp_path):
                     version_label="V3",
                     version_seq=3,
                     content_sha256="l" * 64,
+                    registered_by=1,
+                ),
+                # 防御性口径：meta 组织与文档组织不一致的行不得当作本组织身份
+                # （经 API 不可构造，只能直接写库；守卫见 list_candidates 的 join）。
+                ReviewDocumentMeta(
+                    document_id=MISMETA,
+                    organization_id=OTHER_ORG,
+                    doc_role="contract",
+                    family_key="supplier-x",
+                    version_label="V4",
+                    version_seq=4,
+                    content_sha256="m" * 64,
                     registered_by=1,
                 ),
             ]
@@ -628,3 +653,68 @@ async def test_read_only_can_download_exports_but_not_decide(factory, monkeypatc
         post = await ac.post(f"/api/v1/reviews/{case['id']}/export")
     assert put.status_code == 403, put.text
     assert post.status_code == 403, post.text
+
+
+# ── 建案候选文档（GET /reviews/candidates） ──────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_candidates_lists_org_documents_with_optional_identity(factory):
+    async with _Ctx(_user(superuser=True), factory) as ac:
+        r = await ac.get("/api/v1/reviews/candidates")
+        assert r.status_code == 200, r.text
+        data = r.json()["data"]
+        ids = [item["document_id"] for item in data["items"]]
+        assert set(ids) == {POLICY, BASE, REVISED, LEGACY, NOMETA, MISMETA}
+        assert FOREIGN not in ids, "候选文档必须限定在本组织"
+        by_id = {item["document_id"]: item for item in data["items"]}
+        assert by_id[POLICY]["meta"]["doc_role"] == "policy"
+        assert by_id[BASE]["meta"]["family_key"] == "supplier-x"
+        assert by_id[BASE]["meta"]["version_label"] == "V1"
+        assert by_id[NOMETA]["meta"] is None
+        assert by_id[NOMETA]["filename"] == f"{NOMETA}.pdf"
+        # 组织不一致的 meta 行必须按「未登记」处理（防御性 join 条件）
+        assert by_id[MISMETA]["meta"] is None, "meta 组织与文档组织不一致时不得带出身份"
+        registered = {POLICY, BASE, REVISED, LEGACY}
+        assert set(ids[: len(registered)]) == registered, "已登记身份的文档应排在前面"
+        assert set(ids[len(registered) :]) == {NOMETA, MISMETA}
+
+
+@pytest.mark.asyncio
+async def test_candidates_keyword_filter_and_route_not_shadowed_by_case_id(factory):
+    async with _Ctx(_user(superuser=True), factory) as ac:
+        r = await ac.get("/api/v1/reviews/candidates", params={"q": "nometa"})
+        assert r.status_code == 200, r.text
+        data = r.json()["data"]
+        assert [item["document_id"] for item in data["items"]] == [NOMETA]
+        assert data["total"] == 1
+        # 枚举小写 value 与分页回显口径
+        assert data["items"][0]["status"] == "indexed"
+        assert data["items"][0]["file_type"] == "pdf"
+        assert (data["page"], data["page_size"]) == (1, 50)
+
+
+@pytest.mark.asyncio
+async def test_candidates_q_matches_title_and_escapes_like_wildcards(factory):
+    async with _Ctx(_user(superuser=True), factory) as ac:
+        # title 命中（filename 不含该关键字）
+        async with factory() as db:
+            doc = await db.get(Document, BASE)
+            doc.title = "年度采购框架协议"
+            await db.commit()
+        by_title = await ac.get("/api/v1/reviews/candidates", params={"q": "框架协议"})
+        assert by_title.status_code == 200, by_title.text
+        assert [i["document_id"] for i in by_title.json()["data"]["items"]] == [BASE]
+
+        # LIKE 通配符必须按字面处理：q="100%" 不得变成「匹配一切」
+        async with factory() as db:
+            doc = await db.get(Document, REVISED)
+            doc.filename = "100%付款条款.pdf"
+            await db.commit()
+        wildcard = await ac.get("/api/v1/reviews/candidates", params={"q": "100%"})
+        assert wildcard.status_code == 200, wildcard.text
+        assert [i["document_id"] for i in wildcard.json()["data"]["items"]] == [REVISED]
+        # 只含字面 % 才能被 q="%" 命中：若转义回退成通配符，这里会返回全部文档
+        only_percent = await ac.get("/api/v1/reviews/candidates", params={"q": "%"})
+        assert only_percent.status_code == 200, only_percent.text
+        assert [i["document_id"] for i in only_percent.json()["data"]["items"]] == [REVISED]
