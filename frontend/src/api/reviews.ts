@@ -237,7 +237,9 @@ export const reviewsApi = {
     return request.get(`/reviews/${caseId}/exports`)
   },
   archive(caseId: string) {
-    return request.post(`/reviews/${caseId}/archive`)
+    // E14/D1：归档失败由调用点用 getErrorMessage 呈现，避免全局拦截器双 toast
+    //（409 detail 为对象，拦截器会渲染成 "[object Object]"）。
+    return request.post(`/reviews/${caseId}/archive`, undefined, SILENT_HEADERS)
   },
   async download(caseId: string, exportId: string, format: 'json' | 'markdown') {
     const response = await request.get(`/reviews/${caseId}/exports/${exportId}/download`, {

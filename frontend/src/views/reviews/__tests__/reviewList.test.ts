@@ -4,7 +4,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import { createI18n } from 'vue-i18n'
-import { NButton, NCheckbox, NDataTable, NEmpty, NPagination, NSpin, NTag, NSelect } from 'naive-ui'
+import { NButton, NDataTable, NEmpty, NPagination, NSpin, NTag, NSelect } from 'naive-ui'
 
 import ReviewsIndex from '../index.vue'
 import { reviewsApi } from '@/api/reviews'
@@ -43,7 +43,7 @@ function mountList() {
   return mount(ReviewsIndex, {
     global: {
       plugins: [i18n],
-      components: { NButton, NCheckbox, NDataTable, NEmpty, NPagination, NSelect, NSpin, NTag },
+      components: { NButton, NDataTable, NEmpty, NPagination, NSelect, NSpin, NTag },
       // 列表页用例不测建案弹窗；桩掉以免依赖 NMessageProvider 与候选接口。
       stubs: { CreateCaseModal: true }
     }
@@ -119,15 +119,16 @@ describe('合同核验列表页', () => {
 })
 
 describe('归档过滤与标记（Batch 7）', () => {
-  it('切换「已归档」后按 archived 参数取数并回到第一页', async () => {
+  it('切换到已归档/全部时按 archived 参数取数并回到第一页', async () => {
     const wrapper = mountList()
     await flushPromises()
     const vm = wrapper.vm as unknown as {
-      showArchived: boolean
+      archivedFilter: string
       page: number
       applyFilter: () => void
     }
-    vm.showArchived = true
+    vm.page = 3
+    vm.archivedFilter = 'archived'
     vm.applyFilter()
     await flushPromises()
     expect(api.list).toHaveBeenLastCalledWith({
@@ -136,14 +137,35 @@ describe('归档过滤与标记（Batch 7）', () => {
       page: 1,
       page_size: 20
     })
+
+    vm.archivedFilter = 'all'
+    vm.applyFilter()
+    await flushPromises()
+    expect(api.list).toHaveBeenLastCalledWith({
+      status: undefined,
+      archived: 'all',
+      page: 1,
+      page_size: 20
+    })
   })
 
-  it('已归档行在状态列显示「已归档」标记', async () => {
+  it('已归档行渲染行内标记（data-testid 区分筛选文案）', async () => {
     api.list.mockResolvedValue({
       data: { data: { items: [{ ...ROW, archived_at: '2026-10-30T00:00:00Z' }], total: 1 } }
     } as never)
     const wrapper = mountList()
     await flushPromises()
-    expect(wrapper.text()).toContain('已归档')
+    expect(wrapper.find('[data-testid="row-archived-tag"]').exists()).toBe(true)
+  })
+
+  it('已归档视图空态使用独立文案', async () => {
+    api.list.mockResolvedValue({ data: { data: { items: [], total: 0 } } } as never)
+    const wrapper = mountList()
+    await flushPromises()
+    const vm = wrapper.vm as unknown as { archivedFilter: string; applyFilter: () => void }
+    vm.archivedFilter = 'archived'
+    vm.applyFilter()
+    await flushPromises()
+    expect(wrapper.text()).toContain('还没有已归档案件')
   })
 })

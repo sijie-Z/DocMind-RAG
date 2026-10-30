@@ -369,35 +369,70 @@ describe('合同核验工作台 · 导出与草稿', () => {
 
 
 describe('归档出口（Batch 7）', () => {
-  const archivedDetail = (status: string) =>
+  const baseDetail = (overrides: Record<string, unknown> = {}) =>
     makeDetail({
-      status,
-      archived_at: '2026-10-30T00:00:00Z',
-      archived_by: 1
+      status: 'completed',
+      completed_at: '2026-10-30T00:00:00Z',
+      completed_by: 7,
+      ...overrides
     })
 
-  it('blocked 案件显示归档入口；确认后调用归档接口并刷新', async () => {
+  const completedDetail = (overrides: Record<string, unknown> = {}) => {
+    const detail = baseDetail(overrides)
+    detail.items = detail.items.map((item) => ({
+      ...item,
+      status: 'verified',
+      decided_by: 7,
+      decided_at: '2026-10-30T00:00:00Z',
+      decision_note: '已核对'
+    })) as unknown as typeof detail.items
+    return detail
+  }
+
+  it('blocked 案件显示归档入口；popconfirm 确认后调用归档接口并刷新', async () => {
     api.get.mockResolvedValue({
-      data: { data: makeDetail({ status: 'blocked', blocking_reasons: ['base:legacy_unverified'] }) }
+      data: {
+        data: makeDetail({ status: 'blocked', blocking_reasons: ['base:legacy_unverified'] })
+      }
     } as never)
-    api.archive.mockResolvedValue({ data: { data: archivedDetail('blocked') } } as never)
+    api.archive.mockResolvedValue({ data: { data: completedDetail() } } as never)
     const wrapper = mountDetail()
     await flushPromises()
 
     expect(wrapper.find('[data-testid="archive-case"]').exists()).toBe(true)
-    const vm = wrapper.findComponent(ReviewDetail).vm as unknown as {
-      archiveCase: () => Promise<void>
-    }
-    await vm.archiveCase()
+    // 走真实接线：NPopconfirm 的 positive-click → archiveCase（删掉绑定会红）
+    wrapper.findComponent(NPopconfirm).vm.$emit('positive-click')
     await flushPromises()
 
     expect(api.archive).toHaveBeenCalledWith('case-1')
     expect(api.get).toHaveBeenCalledTimes(2)
   })
 
-  it('已归档案件显示只读横幅，无归档入口，分析/导出/决策禁用', async () => {
-    api.get.mockResolvedValue({ data: { data: archivedDetail('completed') } } as never)
+  it('completed（未归档）案件也有归档入口，且控件处于可编辑态', async () => {
+    api.get.mockResolvedValue({ data: { data: completedDetail() } } as never)
     const wrapper = mountDetail()
+    await flushPromises()
+
+    expect(wrapper.find('[data-testid="archive-case"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="archived-banner"]').exists()).toBe(false)
+    const buttons = wrapper.findAll('button')
+    const exportBtn = buttons.find((b) => b.text().includes('导出核验单'))
+    expect(exportBtn?.attributes('disabled')).toBeUndefined()
+    expect(wrapper.find('input[type="radio"]').attributes('disabled')).toBeUndefined()
+    expect(wrapper.find('input[placeholder="决策说明"]').attributes('disabled')).toBeUndefined()
+  })
+
+  it('已归档案件：只读横幅、无归档入口，决策/备注/导出真实禁用', async () => {
+    api.get.mockResolvedValue({
+      data: { data: completedDetail({ archived_at: '2026-10-30T00:00:00Z', archived_by: 1 }) }
+    } as never)
+    const wrapper = mountDetail()
+    await flushPromises()
+    const vm = wrapper.findComponent(ReviewDetail).vm as unknown as {
+      decisions: Record<string, { status: string | null; note: string }>
+    }
+    // 制造草稿改动：没有归档冻结时，保存按钮本应可用
+    vm.decisions['item-1'].status = 'needs_human'
     await flushPromises()
 
     expect(wrapper.find('[data-testid="archived-banner"]').exists()).toBe(true)
@@ -405,12 +440,12 @@ describe('归档出口（Batch 7）', () => {
     expect(wrapper.find('[data-testid="archive-case"]').exists()).toBe(false)
 
     const buttons = wrapper.findAll('button')
-    const analyzeBtn = buttons.find((b) => b.text().includes('执行分析'))
-    expect(analyzeBtn?.attributes('disabled')).toBeDefined()
     const exportBtn = buttons.find((b) => b.text().includes('导出核验单'))
     expect(exportBtn?.attributes('disabled')).toBeDefined()
     const saveBtn = buttons.find((b) => b.text().includes('保存决策'))
     expect(saveBtn?.attributes('disabled')).toBeDefined()
+    expect(wrapper.find('input[type="radio"]').attributes('disabled')).toBeDefined()
+    expect(wrapper.find('input[placeholder="决策说明"]').attributes('disabled')).toBeDefined()
   })
 
   it('ready/in_review 案件不显示归档入口', async () => {

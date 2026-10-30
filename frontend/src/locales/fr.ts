@@ -1410,10 +1410,13 @@ export default {
     candidateTruncated: '{total} documents au total, seuls les {shown} premiers sont chargés (identités enregistrées d’abord)',
     metaSeqNeedsLabel: 'La séquence de version nécessite un libellé de version',
     archiveCase: 'Archiver le dossier',
-    archiveConfirm: 'L’archivage rend le dossier en lecture seule : plus de décisions, d’analyses ni d’exports, et il ne bloque plus la suppression des documents référencés. Archiver maintenant ?',
+    archiveConfirm: 'L’archivage rend le dossier en lecture seule : plus de décisions, d’analyses ni d’exports, et il ne bloque plus la suppression des documents référencés. L’archivage est irréversible. Archiver maintenant ?',
     archiveDone: 'Dossier archivé',
     archiveFailed: 'Échec de l’archivage du dossier',
     archived: 'Archivé',
-    archivedBanner: 'Ce dossier est archivé (lecture seule) : décisions, analyses et exports sont gelés, et il ne bloque plus la suppression des documents référencés.'
+    archivedBanner: 'Ce dossier est archivé (lecture seule) : décisions, analyses et exports sont gelés, et il ne bloque plus la suppression des documents référencés.',
+    filterActive: 'En cours',
+    filterAll: 'Tous',
+    emptyArchived: 'Aucun dossier archivé pour l’instant'
   }
 };

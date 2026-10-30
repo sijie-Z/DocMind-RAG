@@ -1489,10 +1489,13 @@ export default {
     candidateTruncated: '共 {total} 篇文档，仅加载前 {shown} 篇（已登记身份的优先）',
     metaSeqNeedsLabel: '填写版本序时必须同时填写版本标签',
     archiveCase: '归档案件',
-    archiveConfirm: '归档后案件变为只读：不能继续决策/分析/导出，也不再阻止相关文档删除。确认归档？',
+    archiveConfirm: '归档后案件变为只读：不能继续决策/分析/导出，也不再阻止相关文档删除。归档不可撤销。确认归档？',
     archiveDone: '案件已归档',
     archiveFailed: '归档案件失败',
     archived: '已归档',
-    archivedBanner: '该案件已归档（只读）：不可继续决策/分析/导出，且不再阻止相关文档删除。'
+    archivedBanner: '该案件已归档（只读）：不可继续决策/分析/导出，且不再阻止相关文档删除。',
+    filterActive: '进行中',
+    filterAll: '全部',
+    emptyArchived: '还没有已归档案件'
   }
 };

@@ -46,7 +46,11 @@
           >
             {{ exporting ? t('reviews.exporting') : t('reviews.export') }}
           </n-button>
-          <n-popconfirm v-if="canArchive" @positive-click="archiveCase">
+          <n-popconfirm
+            v-if="canArchive"
+            :positive-button-props="{ loading: archiving, disabled: archiving }"
+            @positive-click="archiveCase"
+          >
             <template #trigger>
               <n-button secondary type="warning" :loading="archiving" data-testid="archive-case">
                 {{ t('reviews.archiveCase') }}
@@ -229,7 +233,7 @@
                 <n-radio-group
                   v-model:value="decisionOf(item).status"
                   size="small"
-                  :disabled="detail.status === 'blocked' || !item.change_type"
+                  :disabled="detail.status === 'blocked' || !!detail.archived_at || !item.change_type"
                 >
                   <n-radio-button value="verified">{{ t('reviews.statusVerified') }}</n-radio-button>
                   <n-radio-button value="needs_human">
@@ -245,7 +249,7 @@
                   class="flex-1"
                   :placeholder="t('reviews.decisionNote')"
                   :maxlength="2000"
-                  :disabled="detail.status === 'blocked'"
+                  :disabled="detail.status === 'blocked' || !!detail.archived_at"
                 />
                 <n-button
                   size="small"
@@ -611,7 +615,7 @@ async function runAnalyze() {
 }
 
 async function archiveCase() {
-  if (!caseId.value) return
+  if (!caseId.value || archiving.value) return
   archiving.value = true
   try {
     await reviewsApi.archive(caseId.value)

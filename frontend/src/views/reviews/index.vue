@@ -15,9 +15,13 @@
             class="w-44"
             @update:value="applyFilter"
           />
-          <n-checkbox v-model:checked="showArchived" data-testid="archived-toggle" @update:checked="applyFilter">
-            {{ t('reviews.archived') }}
-          </n-checkbox>
+          <n-select
+            v-model:value="archivedFilter"
+            :options="archivedOptions"
+            class="w-36"
+            data-testid="archived-filter"
+            @update:value="applyFilter"
+          />
           <n-button type="primary" data-testid="create-case-open" @click="createVisible = true">
             {{ t('reviews.createCase') }}
           </n-button>
@@ -30,7 +34,13 @@
       </n-alert>
 
       <n-spin :show="loading">
-        <n-empty v-if="!loading && rows.length === 0" :description="t('reviews.empty')" class="py-20" />
+        <n-empty
+          v-if="!loading && rows.length === 0"
+          :description="
+            archivedFilter === 'archived' ? t('reviews.emptyArchived') : t('reviews.empty')
+          "
+          class="py-20"
+        />
         <div v-else>
           <n-data-table
             :columns="columns"
@@ -59,7 +69,7 @@
 import { computed, h, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
-import { NButton, NCheckbox, NPagination, NTag } from 'naive-ui'
+import { NButton, NPagination, NTag } from 'naive-ui'
 import { reviewsApi, type ReviewCaseStatus, type ReviewCaseSummary } from '@/api/reviews'
 import { apiUnwrap } from '@/utils/apiUnwrap'
 import CreateCaseModal from './components/CreateCaseModal.vue'
@@ -75,7 +85,7 @@ const statusFilter = ref<ReviewCaseStatus | null>(null)
 const page = ref(1)
 const pageSize = 20
 const createVisible = ref(false)
-const showArchived = ref(false)
+const archivedFilter = ref<'active' | 'archived' | 'all'>('active')
 
 const statusLabel = computed<Record<ReviewCaseStatus, string>>(() => ({
   blocked: t('reviews.statusBlocked'),
@@ -89,6 +99,11 @@ const statusTagType: Record<ReviewCaseStatus, 'error' | 'info' | 'warning' | 'su
   in_review: 'warning',
   completed: 'success'
 }
+const archivedOptions = computed(() => [
+  { value: 'active', label: t('reviews.filterActive') },
+  { value: 'archived', label: t('reviews.archived') },
+  { value: 'all', label: t('reviews.filterAll') }
+])
 const statusOptions = computed(() =>
   (Object.keys(statusLabel.value) as ReviewCaseStatus[]).map((value) => ({
     value,
@@ -102,7 +117,7 @@ async function load() {
   try {
     const response = await reviewsApi.list({
       status: statusFilter.value ?? undefined,
-      archived: showArchived.value ? 'archived' : 'active',
+      archived: archivedFilter.value,
       page: page.value,
       page_size: pageSize
     })
@@ -139,9 +154,11 @@ const columns = computed(() => [
           default: () => statusLabel.value[row.status]
         }),
         row.archived_at
-          ? h(NTag, { type: 'default', size: 'small' }, {
-              default: () => t('reviews.archived')
-            })
+          ? h('span', { 'data-testid': 'row-archived-tag' }, [
+              h(NTag, { type: 'default', size: 'small' }, {
+                default: () => t('reviews.archived')
+              })
+            ])
           : null
       ])
   },
