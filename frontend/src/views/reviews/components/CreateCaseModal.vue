@@ -250,8 +250,10 @@ const roleOptions = computed(() => {
 
 function errorText(error: unknown, fallback: string) {
   const text = getErrorMessage(error, fallback)
-  // 401 续期失败会抛内部标记（refresh_token_missing），不得作为英文串上屏。
-  return text === 'refresh_token_missing' ? fallback : text
+  // 401 续期失败会抛内部标记（refresh_token_missing / refresh_access_token_missing），
+  // 不得作为英文串上屏。
+  const internalMarkers = new Set(['refresh_token_missing', 'refresh_access_token_missing'])
+  return internalMarkers.has(text) ? fallback : text
 }
 
 function roleText(role: string) {
