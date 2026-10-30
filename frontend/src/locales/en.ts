@@ -1491,5 +1491,17 @@ export default {
     filterAll: 'All',
     emptyArchived: 'No archived cases yet',
     archivedFilterLabel: 'Archive filter',
+    reasonParseFailed: 'Document parsing failed',
+    reasonNotIndexed: 'Document is not indexed yet',
+    reasonNoChunks: 'No document chunks available',
+    reasonNoOriginalText: 'Missing parser original text (rebuild required)',
+    reasonLegacyUnverified: 'Legacy chunks not migrated (rebuild required)',
+    reasonMissingVersionMeta: 'Review identity not registered',
+    reasonWrongOrg: 'Document belongs to another organization',
+    reasonWrongRole: 'Document role does not match this side',
+    reasonFamilyMismatch: 'Base and revised use different version families',
+    reasonVersionOrder: 'Base version sequence is not lower than revised',
+    reasonUndecided: 'Some review items are undecided',
+    reasonNotAnalyzed: 'Analysis has not been run yet'
   }
 };

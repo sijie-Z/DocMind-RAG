@@ -192,8 +192,9 @@ describe('合同核验工作台', () => {
     const wrapper = mountDetail()
     await flushPromises()
 
-    expect(wrapper.text()).toContain('base:legacy_unverified')
-    expect(wrapper.text()).toContain('revised:missing_version_meta')
+    expect(wrapper.text()).toContain('合同基准版：旧版分块未迁移')
+    expect(wrapper.text()).toContain('合同修订版：未登记核验身份')
+    expect(wrapper.text()).not.toContain('revised:missing_version_meta')
     const analyzeButton = wrapper
       .findAll('button')
       .find((button) => button.text().includes('执行分析'))

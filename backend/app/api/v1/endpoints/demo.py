@@ -8,7 +8,7 @@ import uuid
 from datetime import UTC, datetime, timedelta
 
 from fastapi import APIRouter, Depends
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
@@ -23,7 +23,7 @@ from app.models.chat import (
     MessageType,
 )
 from app.models.document import Document, DocumentChunk, DocumentStatus, DocumentType
-from app.models.review import ReviewDocumentMeta
+from app.models.review import ReviewCase, ReviewDocumentMeta
 from app.models.user import User
 from app.services.document_status import mark_document_failed, mark_document_indexed
 from app.services.embedding_service import embedding_service
@@ -432,7 +432,34 @@ async def clear_demo_data(
         )
         docs = result.scalars().all()
 
+        # Batch 8：被核验案件（含已归档）引用的示例文档跳过删除并如实报告——
+        # 删除会把案件留成只能看到 missing 快照的悬空引用。
+        skipped_referenced: list[dict] = []
         for doc in docs:
+            referenced_cases = (
+                (
+                    await db.execute(
+                        select(ReviewCase.id).where(
+                            or_(
+                                ReviewCase.policy_document_id == doc.id,
+                                ReviewCase.base_document_id == doc.id,
+                                ReviewCase.revised_document_id == doc.id,
+                            )
+                        )
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            if referenced_cases:
+                skipped_referenced.append(
+                    {
+                        "document_id": doc.id,
+                        "filename": doc.filename,
+                        "case_count": len(referenced_cases),
+                    }
+                )
+                continue
             # 从 ES 删除
             try:
                 for i in range(doc.chunk_count):
@@ -478,7 +505,19 @@ async def clear_demo_data(
 
         await db.commit()
 
-        return {"success": True, "message": "示例数据已清除"}
+        deleted_count = len(docs) - len(skipped_referenced)
+        if skipped_referenced:
+            message = f"示例数据已清除（{len(skipped_referenced)} 篇文档因被核验案件引用而保留）"
+        else:
+            message = "示例数据已清除"
+        return {
+            "success": True,
+            "message": message,
+            "data": {
+                "documents_deleted": deleted_count,
+                "documents_skipped_referenced": skipped_referenced,
+            },
+        }
 
     except Exception as e:
         logger.error(f"Failed to clear demo data: {e}")

@@ -65,9 +65,10 @@
           <span
             v-if="readiness[side]?.status === 'blocked'"
             class="text-red-500 dark:text-red-400"
+            :title="(readiness[side]?.blocking_reasons || []).join(' · ')"
             :data-testid="`readiness-blocked-${side}`"
           >
-            {{ (readiness[side]?.blocking_reasons || []).join(' · ') }}
+            {{ reasonsLabel(t, readiness[side]?.blocking_reasons) }}
           </span>
         </div>
       </div>
@@ -184,6 +185,7 @@ import {
 } from '@/api/reviews'
 import { apiUnwrap } from '@/utils/apiUnwrap'
 import { getErrorMessage } from '@/utils/apiError'
+import { reasonsLabel } from '../reviewReasons'
 
 const props = defineProps<{ show: boolean }>()
 const emit = defineEmits<{

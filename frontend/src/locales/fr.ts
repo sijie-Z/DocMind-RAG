@@ -1419,5 +1419,17 @@ export default {
     filterAll: 'Tous',
     emptyArchived: 'Aucun dossier archivé pour l’instant',
     archivedFilterLabel: 'Filtre d’archivage',
+    reasonParseFailed: 'Échec de l’analyse du document',
+    reasonNotIndexed: 'Document pas encore indexé',
+    reasonNoChunks: 'Aucun fragment de document disponible',
+    reasonNoOriginalText: 'Texte original du parser manquant (reconstruction requise)',
+    reasonLegacyUnverified: 'Fragments hérités non migrés (reconstruction requise)',
+    reasonMissingVersionMeta: 'Identité d’examen non enregistrée',
+    reasonWrongOrg: 'Le document appartient à une autre organisation',
+    reasonWrongRole: 'Le rôle du document ne correspond pas à ce côté',
+    reasonFamilyMismatch: 'Base et révisé utilisent des familles de versions différentes',
+    reasonVersionOrder: 'La séquence de version de la base n’est pas inférieure à celle du révisé',
+    reasonUndecided: 'Certains éléments d’examen ne sont pas décidés',
+    reasonNotAnalyzed: 'L’analyse n’a pas encore été exécutée'
   }
 };

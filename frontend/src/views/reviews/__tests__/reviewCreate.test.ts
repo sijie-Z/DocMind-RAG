@@ -154,7 +154,7 @@ describe('新建核验建案弹窗', () => {
   })
 
   it('选满三份文档后才做 readiness 预检，受限文档显示原因码', async () => {
-    const { vm } = await openModal()
+    const { wrapper, vm } = await openModal()
     vm.sideSelection.policy = 'p1'
     await flushPromises()
     expect(api.readiness).not.toHaveBeenCalled()
@@ -167,6 +167,8 @@ describe('新建核验建案弹窗', () => {
     expect(vm.readiness.base?.status).toBe('reviewable')
     expect(vm.readiness.revised?.status).toBe('blocked')
     expect(vm.readiness.revised?.blocking_reasons).toEqual(['revised:no_original_text'])
+    // 预检原因码本地化上屏（详情页口径一致）
+    expect(wrapper.text()).toContain('缺少 parser 原文')
   })
 
   it('readiness 竞态：旧一批响应不覆盖新选择的结果', async () => {

@@ -1418,5 +1418,17 @@ export default {
     filterAll: 'すべて',
     emptyArchived: 'アーカイブ済みの案件はまだありません',
     archivedFilterLabel: 'アーカイブの絞り込み',
+    reasonParseFailed: 'ドキュメントの解析に失敗しました',
+    reasonNotIndexed: 'インデックスが未完了です',
+    reasonNoChunks: '利用可能なチャンクがありません',
+    reasonNoOriginalText: 'parser 原文がありません（再構築が必要）',
+    reasonLegacyUnverified: '旧版チャンクが未移行です（再構築が必要）',
+    reasonMissingVersionMeta: 'レビュー属性が未登録です',
+    reasonWrongOrg: 'ドキュメントが案件と別の組織に属しています',
+    reasonWrongRole: 'ドキュメントのロールがこの側の要件と一致しません',
+    reasonFamilyMismatch: '基準版と改訂版のバージョン系列が不一致です',
+    reasonVersionOrder: '基準版のバージョン順序が改訂版以上です',
+    reasonUndecided: '未決のレビュー項目があります',
+    reasonNotAnalyzed: '分析が未実行です'
   }
 };

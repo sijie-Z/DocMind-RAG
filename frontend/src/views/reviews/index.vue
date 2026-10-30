@@ -75,6 +75,7 @@ import { useI18n } from 'vue-i18n'
 import { NButton, NPagination, NTag } from 'naive-ui'
 import { reviewsApi, type ReviewCaseStatus, type ReviewCaseSummary } from '@/api/reviews'
 import { apiUnwrap } from '@/utils/apiUnwrap'
+import { reasonsLabel } from './reviewReasons'
 import CreateCaseModal from './components/CreateCaseModal.vue'
 
 const { t } = useI18n()
@@ -180,7 +181,14 @@ const columns = computed(() => [
     key: 'blocking_reasons',
     render: (row: ReviewCaseSummary) =>
       row.blocking_reasons.length
-        ? h('span', { class: 'text-xs text-red-500' }, row.blocking_reasons.join(' · '))
+        ? h(
+            'span',
+            {
+              class: 'text-xs text-red-500 dark:text-red-400',
+              title: row.blocking_reasons.join(' · ')
+            },
+            reasonsLabel(t, row.blocking_reasons)
+          )
         : '—'
   },
   {

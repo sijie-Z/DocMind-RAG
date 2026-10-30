@@ -497,3 +497,27 @@ async def test_readiness_warns_when_evidence_scan_is_limited(factory, monkeypatc
         readiness = await svc.compute_readiness(db, await db.get(Document, DOC))
 
     assert "evidence_scan_limited" in readiness.warnings
+
+
+@pytest.mark.asyncio
+async def test_upsert_self_heals_mismatched_meta_organization(factory, monkeypatch):
+    """组织错配的 meta 行（仅手工改库可达）在重新登记时归位到文档组织。"""
+    await _seed_doc(factory)
+    async with factory() as db:
+        db.add(
+            ReviewDocumentMeta(
+                document_id=DOC,
+                organization_id=999,
+                doc_role="contract",
+                family_key="supplier-x",
+                version_label="v1",
+                version_seq=1,
+                content_sha256="z" * 64,
+                registered_by=1,
+            )
+        )
+        await db.commit()
+
+    meta = await _register_meta(factory, monkeypatch)
+
+    assert meta.organization_id == ORG

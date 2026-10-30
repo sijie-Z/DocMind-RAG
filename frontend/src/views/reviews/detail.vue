@@ -69,7 +69,9 @@
         <template v-if="detail">
           <n-alert v-if="detail.status === 'blocked'" type="error" class="mb-3" :bordered="false">
             {{ t('reviews.blockedHint') }}
-            <div class="mt-1 text-xs">{{ detail.blocking_reasons.join(' · ') }}</div>
+            <div class="mt-1 text-xs" :title="detail.blocking_reasons.join(' · ')">
+              {{ reasonsLabel(t, detail.blocking_reasons) }}
+            </div>
           </n-alert>
           <n-alert v-if="detail.archived_at" type="info" class="mb-3" :bordered="false" data-testid="archived-banner">
             {{ t('reviews.archivedBanner') }}
@@ -325,6 +327,7 @@ import {
 } from '@/api/reviews'
 import { apiUnwrap } from '@/utils/apiUnwrap'
 import { getErrorMessage } from '@/utils/apiError'
+import { reasonLabel, reasonsLabel } from './reviewReasons'
 
 const SIDES: ReviewSide[] = ['policy', 'base', 'revised']
 
@@ -495,17 +498,8 @@ function factLines(item: ReviewItem): Array<{ side: ReviewSide; text: string }> 
       }
       lines.push({ side, text: parts.join(' · ') || t('reviews.factsNone') })
     } else if (status === 'ambiguous') {
-      const reasonMap: Record<string, string> = {
-        unit_unclear: t('reviews.ambiguousUnit'),
-        multiple_durations: t('reviews.ambiguousMultiple')
-      }
-      // 后端可能给出组合码（unit_unclear+multiple_durations）。
-      const reasonText =
-        String(fact.reason || '')
-          .split('+')
-          .filter(Boolean)
-          .map((code) => reasonMap[code] || code)
-          .join(' · ') || String(fact.reason || '')
+      // 组合码（unit_unclear+multiple_durations）与未知码统一走原因码注册表。
+      const reasonText = fact.reason ? reasonLabel(t, String(fact.reason)) : ''
       const candidates = Array.isArray(fact.candidates)
         ? (
             fact.candidates as Array<{
@@ -650,7 +644,12 @@ async function runExport() {
         }
       )?.detail
       const items = (detailBlock?.items || [])
-        .map((item) => `${item.item_key || '?'}(${(item.reasons || []).join('/')})`)
+        .map(
+          (item) =>
+            `${item.item_key || '?'}(${(item.reasons || [])
+              .map((reason) => reasonLabel(t, String(reason)))
+              .join(' / ')})`
+        )
         .join(', ')
       message.error(
         items ? t('reviews.exportBlockedDetail', { items }) : t('reviews.exportBlocked')

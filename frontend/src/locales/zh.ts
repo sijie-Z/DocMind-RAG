@@ -1498,5 +1498,17 @@ export default {
     filterAll: '全部',
     emptyArchived: '还没有已归档案件',
     archivedFilterLabel: '归档筛选',
+    reasonParseFailed: '文档解析失败',
+    reasonNotIndexed: '尚未完成索引',
+    reasonNoChunks: '没有可用的文档分块',
+    reasonNoOriginalText: '缺少 parser 原文（需重建文档）',
+    reasonLegacyUnverified: '旧版分块未迁移（需重建文档）',
+    reasonMissingVersionMeta: '未登记核验身份',
+    reasonWrongOrg: '文档与案件不属于同一组织',
+    reasonWrongRole: '文档角色与该侧要求不符',
+    reasonFamilyMismatch: '基准版与修订版版本族不一致',
+    reasonVersionOrder: '基准版版本序不小于修订版',
+    reasonUndecided: '存在未决核验项',
+    reasonNotAnalyzed: '尚未执行分析'
   }
 };
