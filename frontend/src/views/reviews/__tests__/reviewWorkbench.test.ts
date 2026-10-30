@@ -394,7 +394,7 @@ describe('归档出口（Batch 7）', () => {
     await vm.archiveCase()
     await flushPromises()
 
-    expect(api.get).toHaveBeenCalledTimes(2), '409 后必须重新拉取收敛'
+    expect(api.get, '409 后必须重新拉取收敛').toHaveBeenCalledTimes(2)
     expect(wrapper.find('[data-testid="archived-banner"]').exists()).toBe(true)
     expect(wrapper.find('[data-testid="archive-case"]').exists()).toBe(false)
   })
