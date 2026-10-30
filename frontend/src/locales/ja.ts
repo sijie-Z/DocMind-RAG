@@ -1402,7 +1402,7 @@ export default {
     metaSubmit: '属性を保存',
     metaSaved: 'レビュー属性を保存しました',
     metaFailed: 'レビュー属性の保存に失敗しました',
-    metaRequired: '契約の身元には系列・ラベル・順序が必要です',
+    metaRequired: '契約の属性には系列・ラベル・順序が必要です',
     editMeta: '属性を編集',
     warnFamilyMismatch: '基準版と改訂版のバージョン系列が不一致：案件はブロックされます（family_mismatch）',
     warnVersionOrder: '基準版のバージョン順序が改訂版以上です：案件はブロックされます（version_order）',

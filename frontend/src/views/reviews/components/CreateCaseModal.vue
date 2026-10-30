@@ -22,7 +22,7 @@
         <n-input
           v-model:value="form.title"
           :placeholder="t('reviews.createTitlePlaceholder')"
-          :aria-label="t('reviews.createTitle')"
+          :input-props="{ 'aria-label': t('reviews.createTitle') }"
           maxlength="255"
           data-testid="create-case-title"
         />
@@ -46,7 +46,7 @@
           v-model:value="sideSelection[side]"
           :options="optionsFor(side)"
           :placeholder="t('reviews.createSelectDoc')"
-          :aria-label="sideLabel[side]"
+          :input-props="{ 'aria-label': sideLabel[side] }"
           filterable
           clearable
           :data-testid="`create-select-${side}`"
@@ -116,17 +116,29 @@
       <div class="text-xs text-gray-500 dark:text-gray-400">{{ metaDocument?.filename }}</div>
       <div>
         <div class="mb-1 text-xs font-medium text-gray-500 dark:text-gray-400">{{ t('reviews.metaRole') }}</div>
-        <n-select v-model:value="metaForm.doc_role" :options="roleOptions" :aria-label="t('reviews.metaRole')" />
+        <n-select
+          v-model:value="metaForm.doc_role"
+          :options="roleOptions"
+          :input-props="{ 'aria-label': t('reviews.metaRole') }"
+        />
       </div>
       <div>
         <div class="mb-1 text-xs font-medium text-gray-500 dark:text-gray-400">{{ t('reviews.metaFamily') }}</div>
-        <n-input v-model:value="metaForm.family_key" :aria-label="t('reviews.metaFamily')" maxlength="128" />
+        <n-input
+          v-model:value="metaForm.family_key"
+          :input-props="{ 'aria-label': t('reviews.metaFamily') }"
+          maxlength="128"
+        />
       </div>
       <div>
         <div class="mb-1 text-xs font-medium text-gray-500 dark:text-gray-400">
           {{ t('reviews.metaVersionLabel') }}
         </div>
-        <n-input v-model:value="metaForm.version_label" :aria-label="t('reviews.metaVersionLabel')" maxlength="64" />
+        <n-input
+          v-model:value="metaForm.version_label"
+          :input-props="{ 'aria-label': t('reviews.metaVersionLabel') }"
+          maxlength="64"
+        />
       </div>
       <div>
         <div class="mb-1 text-xs font-medium text-gray-500 dark:text-gray-400">{{ t('reviews.metaVersionSeq') }}</div>
@@ -135,7 +147,7 @@
           :min="1"
           :max="2147483647"
           :precision="0"
-          :aria-label="t('reviews.metaVersionSeq')"
+          :input-props="{ 'aria-label': t('reviews.metaVersionSeq') }"
           class="w-full"
         />
       </div>
@@ -211,16 +223,36 @@ const sideLabel = computed<Record<ReviewSide, string>>(() => ({
   revised: t('reviews.docRevised')
 }))
 
-// 角色按侧锁定：制度侧只能是 policy/template，合同侧只能是 contract。
-// 否则误登记会让文档从另一侧永久消失（无纠错入口）。
-const roleOptions = computed(() =>
-  metaSide.value === 'policy'
-    ? [
-        { value: 'policy', label: t('reviews.metaRolePolicy') },
-        { value: 'template', label: t('reviews.metaRoleTemplate') }
-      ]
-    : [{ value: 'contract', label: t('reviews.metaRoleContract') }]
-)
+// 角色按侧锁定（首次登记）：制度侧只能 policy/template，合同侧只能 contract，
+// 防止把合同误登记成制度后从另一侧消失。编辑已有身份时放开全部角色——
+// 「选错侧先登记」或历史错误角色需要一条 UI 内的修复路径（upsert 覆盖）。
+const ALL_ROLE_OPTIONS = computed(() => [
+  { value: 'policy', label: t('reviews.metaRolePolicy') },
+  { value: 'template', label: t('reviews.metaRoleTemplate') },
+  { value: 'contract', label: t('reviews.metaRoleContract') }
+])
+
+const editingExistingMeta = computed(() => {
+  const side = metaSide.value
+  return !!(side && selectedCandidate.value[side]?.meta)
+})
+
+const roleOptions = computed(() => {
+  if (editingExistingMeta.value) return ALL_ROLE_OPTIONS.value
+  if (metaSide.value === 'policy') {
+    return [
+      { value: 'policy', label: t('reviews.metaRolePolicy') },
+      { value: 'template', label: t('reviews.metaRoleTemplate') }
+    ]
+  }
+  return [{ value: 'contract', label: t('reviews.metaRoleContract') }]
+})
+
+function errorText(error: unknown, fallback: string) {
+  const text = getErrorMessage(error, fallback)
+  // 401 续期失败会抛内部标记（refresh_token_missing），不得作为英文串上屏。
+  return text === 'refresh_token_missing' ? fallback : text
+}
 
 function roleText(role: string) {
   if (role === 'policy') return t('reviews.metaRolePolicy')
@@ -271,9 +303,11 @@ const crossDocWarning = computed(() => {
   const revised = selectedCandidate.value.revised?.meta
   if (!base || !revised) return ''
   if (String(base.doc_role) !== 'contract' || String(revised.doc_role) !== 'contract') return ''
-  const baseFamily = (base.family_key || '').trim()
-  const revisedFamily = (revised.family_key || '').trim()
-  if (baseFamily && revisedFamily && baseFamily !== revisedFamily) return t('reviews.warnFamilyMismatch')
+  // 与后端 _collect_blocking_reasons 逐字同口径：先比较 family（任一侧为空也算不一致），
+  // 再比较版本序（base.version_seq >= revised.version_seq → version_order）。
+  const baseFamily = String(base.family_key ?? '').trim()
+  const revisedFamily = String(revised.family_key ?? '').trim()
+  if (baseFamily !== revisedFamily) return t('reviews.warnFamilyMismatch')
   if (
     base.version_seq != null &&
     revised.version_seq != null &&
@@ -358,14 +392,10 @@ function openMeta(side: ReviewSide) {
   const candidate = selectedCandidate.value[side]
   if (!candidate) return
   metaSide.value = side
-  const allowed: Array<'policy' | 'template' | 'contract'> =
-    side === 'policy' ? ['policy', 'template'] : ['contract']
-  const existing = candidate.meta ? String(candidate.meta.doc_role) : ''
-  metaForm.doc_role = (
-    allowed.includes(existing as 'policy' | 'template' | 'contract')
-      ? existing
-      : allowed[0]
-  ) as 'policy' | 'template' | 'contract'
+  const known: Array<'policy' | 'template' | 'contract'> = ['policy', 'template', 'contract']
+  const existing = candidate.meta ? (String(candidate.meta.doc_role) as 'policy' | 'template' | 'contract') : null
+  const sideDefault: 'policy' | 'contract' = side === 'policy' ? 'policy' : 'contract'
+  metaForm.doc_role = existing && known.includes(existing) ? existing : sideDefault
   metaForm.family_key = candidate.meta?.family_key || ''
   metaForm.version_label = candidate.meta?.version_label || ''
   metaForm.version_seq = candidate.meta?.version_seq ?? null
@@ -402,7 +432,7 @@ async function saveMeta() {
     metaSide.value = null
     await loadCandidates()
   } catch (error) {
-    message.error(getErrorMessage(error, t('reviews.metaFailed')))
+    message.error(errorText(error, t('reviews.metaFailed')))
   } finally {
     metaSaving.value = false
   }
@@ -437,7 +467,7 @@ async function submit() {
     emit('created', created.id)
     emit('update:show', false)
   } catch (error) {
-    message.error(getErrorMessage(error, t('reviews.createFailed')))
+    message.error(errorText(error, t('reviews.createFailed')))
   } finally {
     submitting.value = false
   }

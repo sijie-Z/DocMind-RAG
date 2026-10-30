@@ -77,7 +77,9 @@ function mountIndex() {
     {
       global: {
         plugins: [i18n],
-        components: { NButton, NDataTable, NEmpty, NPagination, NSelect, NSpin, NTag }
+        components: { NButton, NDataTable, NEmpty, NPagination, NSelect, NSpin, NTag },
+        // 弹窗内容 teleport 到 body；测试里就地渲染以便 wrapper.text() 断言。
+        stubs: { teleport: true }
       }
     }
   )
@@ -279,25 +281,38 @@ describe('新建核验建案弹窗', () => {
     expect(api.candidates).toHaveBeenCalledTimes(2)
   })
 
-  it('角色按侧锁定：制度侧只能 policy/template，合同侧只能 contract', async () => {
+  it('首次登记角色按侧锁定；编辑已有身份放开三角色（修复路径）', async () => {
     const { vm } = await openModal()
-    vm.sideSelection.policy = 'p1'
-    vm.sideSelection.base = 'b1'
+    vm.sideSelection.policy = 'n1'
+    vm.sideSelection.base = 'n1'
     await flushPromises()
 
+    // 未登记：制度侧只能 policy/template，合同侧只能 contract
     vm.openMeta('policy')
     await flushPromises()
     expect(vm.roleOptions.map((option) => option.value)).toEqual(['policy', 'template'])
-
     vm.openMeta('base')
     await flushPromises()
     expect(vm.roleOptions.map((option) => option.value)).toEqual(['contract'])
+
+    // 已登记：编辑时放开全部角色，允许纠正错误登记
+    vm.sideSelection.base = 'b1'
+    await flushPromises()
+    vm.openMeta('base')
+    await flushPromises()
+    expect(vm.roleOptions.map((option) => option.value)).toEqual([
+      'policy',
+      'template',
+      'contract'
+    ])
   })
 
   it('已登记身份的文档可编辑身份，弹窗预填现有值', async () => {
-    const { vm } = await openModal()
+    const { wrapper, vm } = await openModal()
     vm.sideSelection.base = 'b1'
     await flushPromises()
+    // 已登记文档也要有编辑入口（防死胡同回归）
+    expect(wrapper.text()).toContain('编辑身份')
 
     vm.openMeta('base')
     await flushPromises()
@@ -348,7 +363,7 @@ describe('新建核验建案弹窗', () => {
   })
 
   it('跨文档约束在建案前预告：版本族不一致与版本序倒挂', async () => {
-    const { vm } = await openModal()
+    const { wrapper, vm } = await openModal()
     vm.sideSelection.base = 'b1'
     vm.sideSelection.revised = 'r1'
     await flushPromises()
@@ -365,6 +380,7 @@ describe('新建核验建案弹窗', () => {
     await vm.loadCandidates()
     await flushPromises()
     expect(vm.crossDocWarning).toContain('family_mismatch')
+    expect(wrapper.text()).toContain('family_mismatch')
 
     api.candidates.mockResolvedValue(
       candidatesResponse([
@@ -381,11 +397,12 @@ describe('新建核验建案弹窗', () => {
 
   it('其他侧已选的文档不再出现在本侧选项里', async () => {
     const { vm } = await openModal()
-    vm.sideSelection.policy = 'p1'
+    // 用未登记文档（能通过角色过滤）才能真正锁住跨侧剔除
+    vm.sideSelection.policy = 'n1'
     await flushPromises()
 
     const baseOptions = vm.optionsFor('base').map((option) => option.value)
-    expect(baseOptions).not.toContain('p1')
+    expect(baseOptions).not.toContain('n1')
     expect(baseOptions).toContain('b1')
   })
 
@@ -403,8 +420,66 @@ describe('新建核验建案弹窗', () => {
 
   it('候选超过加载上限时给出截断提示', async () => {
     api.candidates.mockResolvedValue(candidatesResponse([POLICY, BASE], 321))
-    const { vm } = await openModal()
+    const { wrapper, vm } = await openModal()
     expect(vm.candidateTotal).toBe(321)
     expect(vm.candidates).toHaveLength(2)
+    expect(wrapper.text()).toContain('共 321 篇')
+  })
+})
+
+describe('身份纠错闭环（修复路径）', () => {
+  it('选错侧首次登记后可从同一侧改回正确角色', async () => {
+    const { vm } = await openModal()
+    vm.sideSelection.policy = 'n1'
+    await flushPromises()
+
+    // 第一次登记：把合同误选进制度侧，登记为 policy
+    const policyN1 = { ...NOMETA, meta: { doc_role: 'policy' } }
+    api.candidates.mockResolvedValue(candidatesResponse([POLICY, BASE, REVISED, policyN1]))
+    api.putDocumentMeta.mockResolvedValue({ data: { data: {} } } as never)
+    vm.openMeta('policy')
+    await flushPromises()
+    await vm.saveMeta()
+    await flushPromises()
+    expect(api.putDocumentMeta).toHaveBeenLastCalledWith('n1', { doc_role: 'policy' })
+    expect(vm.sideSelection.policy).toBe('n1')
+
+    // 再编辑：编辑已有身份放开三角色，改回 contract 并补齐版本信息
+    const contractN1 = {
+      ...NOMETA,
+      meta: { doc_role: 'contract', family_key: 'fam', version_label: 'V1', version_seq: 1 }
+    }
+    api.candidates.mockResolvedValue(candidatesResponse([POLICY, BASE, REVISED, contractN1]))
+    vm.openMeta('policy')
+    await flushPromises()
+    expect(vm.roleOptions.map((option) => option.value)).toEqual([
+      'policy',
+      'template',
+      'contract'
+    ])
+    const modalVm = vm as unknown as {
+      metaForm: {
+        doc_role: string
+        family_key: string
+        version_label: string
+        version_seq: number | null
+      }
+    }
+    modalVm.metaForm.doc_role = 'contract'
+    modalVm.metaForm.family_key = 'fam'
+    modalVm.metaForm.version_label = 'V1'
+    modalVm.metaForm.version_seq = 1
+    await vm.saveMeta()
+    await flushPromises()
+
+    expect(api.putDocumentMeta).toHaveBeenLastCalledWith('n1', {
+      doc_role: 'contract',
+      family_key: 'fam',
+      version_label: 'V1',
+      version_seq: 1
+    })
+    // 刷新后制度侧选择被清空，文档转入合同侧候选池
+    expect(vm.sideSelection.policy).toBeNull()
+    expect(vm.optionsFor('base').map((option) => option.value)).toContain('n1')
   })
 })
