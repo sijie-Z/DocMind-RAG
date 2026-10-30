@@ -677,7 +677,7 @@ async def test_candidates_lists_org_documents_with_optional_identity(factory):
         assert by_id[MISMETA]["meta"] is None, "meta 组织与文档组织不一致时不得带出身份"
         registered = {POLICY, BASE, REVISED, LEGACY}
         assert set(ids[: len(registered)]) == registered, "已登记身份的文档应排在前面"
-        assert set(ids[len(registered):]) == {NOMETA, MISMETA}
+        assert set(ids[len(registered) :]) == {NOMETA, MISMETA}
 
 
 @pytest.mark.asyncio

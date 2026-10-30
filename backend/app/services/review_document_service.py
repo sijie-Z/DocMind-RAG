@@ -447,7 +447,7 @@ async def list_candidates(
                 and_(
                     ReviewDocumentMeta.document_id == Document.id,
                     # 防御性口径：组织不一致的 meta 行不当作本组织的核验身份
-                    #（与 compute_readiness 的 wrong_org 阻断对齐）。
+                    # （与 compute_readiness 的 wrong_org 阻断对齐）。
                     ReviewDocumentMeta.organization_id == organization_id,
                 ),
             )
