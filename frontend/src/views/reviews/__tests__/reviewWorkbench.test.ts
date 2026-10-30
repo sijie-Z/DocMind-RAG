@@ -195,6 +195,8 @@ describe('合同核验工作台', () => {
     expect(wrapper.text()).toContain('合同基准版：旧版分块未迁移')
     expect(wrapper.text()).toContain('合同修订版：未登记或未补全核验身份')
     expect(wrapper.text()).not.toContain('revised:missing_version_meta')
+    // 原始码保留在横幅 title 属性里供排障
+    expect(wrapper.find('[title*="base:legacy_unverified"]').exists()).toBe(true)
     const analyzeButton = wrapper
       .findAll('button')
       .find((button) => button.text().includes('执行分析'))

@@ -169,6 +169,7 @@ describe('新建核验建案弹窗', () => {
     expect(vm.readiness.revised?.blocking_reasons).toEqual(['revised:no_original_text'])
     // 预检原因码本地化上屏（详情页口径一致）
     expect(wrapper.text()).toContain('缺少 parser 原文')
+    expect(wrapper.find('[title*="revised:no_original_text"]').exists()).toBe(true)
   })
 
   it('readiness 竞态：旧一批响应不覆盖新选择的结果', async () => {
