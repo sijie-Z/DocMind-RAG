@@ -43,6 +43,7 @@ from app.models.review import (
     ReviewItem,
 )
 from app.models.user import User
+from app.models.user_audit import UserActivityLog
 from app.rag.source_provenance import PARSER_ORIGINAL, SourceProvenanceUnavailableError
 from app.services.clause_refs import extract_clause_fields
 from app.services.review_document_service import (
@@ -407,6 +408,15 @@ async def select_evidence(
     selected: bool,
 ) -> ReviewEvidence:
     """人工选择/改选某条证据：从 realtime 分块抓原文并快照（legacy 显式拒绝）。"""
+    # 与其他写路径一致：当前读锁定案件行后再校验，避免「载入时未归档、写入前被归档」
+    # 的窄竞态绕过只读不变量；锁持有到本次证据写入 commit。
+    case = await _lock_case_current(session, case)
+    if case.archived_at is not None:
+        raise ConflictError(
+            "案件已归档：不能再选择证据",
+            error_code="REVIEW_CASE_ARCHIVED",
+            detail={"case_id": case.id, "status": case.status},
+        )
     if case.status not in SELECTABLE_CASE_STATUSES:
         raise ConflictError(
             "当前案件状态不允许选择证据",
@@ -538,12 +548,11 @@ async def get_item_for_case(session: AsyncSession, case: ReviewCase, item_id: st
     return item
 
 
-async def archive_case(session: AsyncSession, case: ReviewCase, *, user_id: int) -> ReviewCase:
-    """归档案件（只读终态）。仅 blocked/completed 可归档；归档不删除任何快照。
+async def _lock_case_current(session: AsyncSession, case: ReviewCase) -> ReviewCase:
+    """当前读锁定案件行并返回最新值（MySQL RR 的 read view 规避）。
 
-    MySQL RR 下先 commit 结束只读事务重建 read view，再加行锁读取最新行
-    （与 Batch 4 ``_lock_case`` 同一原因：普通 SELECT 建立旧快照后 FOR UPDATE
-    仍可能读到旧行）。
+    先 commit 结束只读事务重建 read view，再 FOR UPDATE 读取最新行（与 Batch 4
+    ``_lock_case`` 同一原因：普通 SELECT 建立旧快照后 FOR UPDATE 仍可能读到旧行）。
     """
     case_id = case.id
     await session.commit()
@@ -553,6 +562,12 @@ async def archive_case(session: AsyncSession, case: ReviewCase, *, user_id: int)
     if fresh is None:
         raise ConflictError("核验案件已被删除", error_code="REVIEW_CASE_NOT_FOUND")
     await session.refresh(fresh)
+    return fresh
+
+
+async def archive_case(session: AsyncSession, case: ReviewCase, *, user_id: int) -> ReviewCase:
+    """归档案件（只读终态）。仅 blocked/completed 可归档；归档不删除任何快照。"""
+    fresh = await _lock_case_current(session, case)
     if fresh.archived_at is not None:
         raise ConflictError(
             "案件已归档",
@@ -568,6 +583,18 @@ async def archive_case(session: AsyncSession, case: ReviewCase, *, user_id: int)
     fresh.archived_at = datetime.now(UTC)
     fresh.archived_by = user_id
     fresh.lock_version = (fresh.lock_version or 1) + 1
+    # 审计与归档同事务（与 review_export_service 的 _audit 同模式）：独立
+    # audit_service 会话在测试/多库环境下与请求会话不同源，且归档审计不应
+    # 与状态变更脱节。
+    session.add(
+        UserActivityLog(
+            user_id=user_id,
+            action="archive_review_case",
+            target_type="review_case",
+            target_id=fresh.id,
+            detail=f"status={fresh.status}; title={fresh.title}",
+        )
+    )
     await session.commit()
     await session.refresh(fresh)
     return fresh

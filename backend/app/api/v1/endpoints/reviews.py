@@ -29,7 +29,6 @@ from app.services import review_analysis_service as analysis_service
 from app.services import review_case_service as case_service
 from app.services import review_document_service as document_service
 from app.services import review_export_service as export_service
-from app.services.audit_service import audit_service
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -275,14 +274,6 @@ async def archive_review_case(
     try:
         case = await case_service.get_case_for_user(db, current_user, review_id)
         archived = await case_service.archive_case(db, case, user_id=current_user.id)
-        await audit_service.log_activity(
-            user_id=current_user.id,
-            action="archive_review_case",
-            target_type="review_case",
-            target_id=archived.id,
-            detail=f"status={archived.status}; title={archived.title}",
-            db=db,
-        )
         return {"success": True, "data": await case_service.case_detail(db, archived)}
     except (NotFoundError, AuthorizationError):
         raise

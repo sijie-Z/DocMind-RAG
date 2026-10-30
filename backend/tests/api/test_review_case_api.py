@@ -337,6 +337,9 @@ async def test_cross_org_access_is_forbidden(factory, monkeypatch):
         )
         assert put.status_code == 403, put.text
 
+        archive = await ac.post(f"/api/v1/reviews/{case['id']}/archive")
+        assert archive.status_code == 403, archive.text
+
         # 列表按调用者组织过滤：别的组织看不到本案件，返回空而不是泄露。
         listed = await ac.get("/api/v1/reviews")
         assert listed.status_code == 200
@@ -566,6 +569,7 @@ async def test_decision_export_permission_and_scope(factory, monkeypatch):
         )
     assert put.status_code == 403, put.text
     assert post.status_code == 403, post.text
+
     assert download.status_code == 403, download.text
 
     async def _read_only(_db, _user_obj, organization_id=None):
@@ -752,6 +756,22 @@ async def test_archive_blocked_case_releases_list_filters(factory):
         assert again.status_code == 409
         assert again.json()["error_code"] == "REVIEW_CASE_ALREADY_ARCHIVED"
 
+    async with factory() as db:
+        logs = (
+            (
+                await db.execute(
+                    select(UserActivityLog).where(
+                        UserActivityLog.action == "archive_review_case",
+                        UserActivityLog.target_id == blocked["id"],
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+    assert len(logs) == 1, "归档必须写一条审计"
+    assert "status=blocked" in (logs[0].detail or "")
+
 
 @pytest.mark.asyncio
 async def test_archive_rejects_active_case(factory):
@@ -795,9 +815,31 @@ async def test_archived_completed_case_is_read_only(factory):
         assert analyze.status_code == 409
         assert analyze.json()["error_code"] == "REVIEW_CASE_ARCHIVED"
 
-        # 归档后仍可读详情与既有导出
+        # 归档后仍可读详情与既有导出（含下载）
         detail = await ac.get(f"/api/v1/reviews/{case['id']}")
         assert detail.status_code == 200
         assert detail.json()["data"]["archived_at"] is not None
         exports = await ac.get(f"/api/v1/reviews/{case['id']}/exports")
         assert exports.status_code == 200, exports.text
+        export_id = export.json()["data"]["id"]
+        download = await ac.get(
+            f"/api/v1/reviews/{case['id']}/exports/{export_id}/download",
+            params={"format": "json"},
+        )
+        assert download.status_code == 200, download.text
+
+
+@pytest.mark.asyncio
+async def test_archive_requires_update_permission(factory, monkeypatch):
+    async with _Ctx(_user(superuser=True), factory) as ac:
+        blocked = (await ac.post("/api/v1/reviews", json=_case_payload(revised=LEGACY))).json()[
+            "data"
+        ]
+
+    async def _read_only(_db, _user_obj, organization_id=None):
+        return {PermissionType.DOCUMENT_READ.value}
+
+    monkeypatch.setattr("app.core.security.permission_service.get_user_permissions", _read_only)
+    async with _Ctx(_user(org=ORG), factory) as ac:
+        denied = await ac.post(f"/api/v1/reviews/{blocked['id']}/archive")
+    assert denied.status_code == 403, denied.text
