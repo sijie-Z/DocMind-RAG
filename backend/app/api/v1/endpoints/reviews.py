@@ -27,6 +27,7 @@ from app.rag.source_provenance import SourceProvenanceUnavailableError
 from app.schemas.review import ReviewCaseCreate, ReviewDecisionUpsert, ReviewEvidenceSelect
 from app.services import review_analysis_service as analysis_service
 from app.services import review_case_service as case_service
+from app.services import review_document_service as document_service
 from app.services import review_export_service as export_service
 
 router = APIRouter()
@@ -99,6 +100,33 @@ async def list_review_cases(
     except Exception as e:
         logger.error(f"List review cases failed: {type(e).__name__}: {e}")
         raise AppError("获取核验案件列表失败") from e
+
+
+@router.get("/candidates", response_model=dict, dependencies=_READ_DEPS)
+async def list_review_candidates(
+    q: str | None = Query(None, max_length=200, description="按文件名/标题模糊过滤"),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, ge=1, le=200),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """建案候选文档：本组织文档 + 核验身份；未登记身份的也返回（前端提示登记）。
+
+    注意：本路由必须声明在 ``/{review_id}`` 之前，否则 "candidates" 会被当成案件 id。
+    """
+    try:
+        org_id = await require_organization(current_user, db)
+        data = await document_service.list_candidates(
+            db, organization_id=org_id, q=q, page=page, page_size=page_size
+        )
+        return {"success": True, "data": data}
+    except (NotFoundError, AuthorizationError):
+        raise
+    except AppError:
+        raise
+    except Exception as e:
+        logger.error(f"List review candidates failed: {type(e).__name__}: {e}")
+        raise AppError("获取候选文档失败") from e
 
 
 @router.get("/{review_id}", response_model=dict, dependencies=_READ_DEPS)

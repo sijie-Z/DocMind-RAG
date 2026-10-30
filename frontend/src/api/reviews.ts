@@ -20,6 +20,7 @@ export type ReviewDecisionStatus = 'verified' | 'needs_human' | 'not_applicable'
 export type ReviewEvidenceRole = 'main' | 'condition' | 'exception' | 'cross_ref'
 
 export interface ReviewReadiness {
+  document_id?: string
   status: 'reviewable' | 'blocked'
   blocking_reasons: string[]
   warnings: string[]
@@ -28,6 +29,47 @@ export interface ReviewReadiness {
   page_number_chunks?: number
   clause_candidate_chunks?: number
   legacy_chunk_count?: number
+  meta?: ReviewCandidateMeta | null
+}
+
+/** 文档核验身份（review_document_meta）；合同必带版本族/版本标签/版本序。 */
+export interface ReviewCandidateMeta {
+  doc_role: 'policy' | 'template' | 'contract' | string
+  family_key?: string | null
+  version_label?: string | null
+  version_seq?: number | null
+  supersedes_document_id?: string | null
+  effective_from?: string | null
+  effective_to?: string | null
+  content_sha256?: string | null
+  registered_by?: number | null
+}
+
+/** 建案候选文档：本组织文档 + 可选核验身份（null=未登记）。 */
+export interface ReviewCandidate {
+  document_id: string
+  filename: string
+  title?: string | null
+  file_type?: string | null
+  status: string
+  created_at?: string | null
+  meta?: ReviewCandidateMeta | null
+}
+
+export interface ReviewCaseCreatePayload {
+  title: string
+  policy_document_id: string
+  base_document_id: string
+  revised_document_id: string
+  checklist_version?: string
+  assignee_id?: number | null
+}
+
+export interface ReviewMetaPayload {
+  doc_role: 'policy' | 'template' | 'contract'
+  family_key?: string | null
+  version_label?: string | null
+  version_seq?: number | null
 }
 
 export interface ReviewDocumentState {
@@ -145,6 +187,18 @@ export interface DecisionPayload {
 export const reviewsApi = {
   list(params?: { status?: string; page?: number; page_size?: number }) {
     return request.get('/reviews', { params })
+  },
+  candidates(params?: { q?: string; page?: number; page_size?: number }) {
+    return request.get('/reviews/candidates', { params })
+  },
+  createCase(payload: ReviewCaseCreatePayload) {
+    return request.post('/reviews', payload)
+  },
+  readiness(documentId: string) {
+    return request.get(`/documents/${documentId}/readiness`)
+  },
+  putDocumentMeta(documentId: string, payload: ReviewMetaPayload) {
+    return request.put(`/documents/${documentId}/review-meta`, payload)
   },
   get(id: string) {
     return request.get(`/reviews/${id}`)

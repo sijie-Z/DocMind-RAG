@@ -43,7 +43,9 @@ function mountList() {
   return mount(ReviewsIndex, {
     global: {
       plugins: [i18n],
-      components: { NButton, NDataTable, NEmpty, NPagination, NSelect, NSpin, NTag }
+      components: { NButton, NDataTable, NEmpty, NPagination, NSelect, NSpin, NTag },
+      // 列表页用例不测建案弹窗；桩掉以免依赖 NMessageProvider 与候选接口。
+      stubs: { CreateCaseModal: true }
     }
   })
 }

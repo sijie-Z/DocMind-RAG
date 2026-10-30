@@ -6,14 +6,19 @@
           <h1 class="text-3xl font-bold text-gray-800 dark:text-white">{{ t('menu.reviews') }}</h1>
           <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">{{ t('reviews.subtitle') }}</p>
         </div>
-        <n-select
-          v-model:value="statusFilter"
-          :options="statusOptions"
-          :placeholder="t('reviews.allStatuses')"
-          clearable
-          class="w-44"
-          @update:value="applyFilter"
-        />
+        <div class="flex items-center gap-3">
+          <n-select
+            v-model:value="statusFilter"
+            :options="statusOptions"
+            :placeholder="t('reviews.allStatuses')"
+            clearable
+            class="w-44"
+            @update:value="applyFilter"
+          />
+          <n-button type="primary" data-testid="create-case-open" @click="createVisible = true">
+            {{ t('reviews.createCase') }}
+          </n-button>
+        </div>
       </div>
 
       <n-alert v-if="loadError" type="error" class="mb-4" :bordered="false">
@@ -43,6 +48,7 @@
         </div>
       </n-spin>
     </div>
+    <CreateCaseModal v-model:show="createVisible" @created="onCreated" />
   </div>
 </template>
 
@@ -53,6 +59,7 @@ import { useI18n } from 'vue-i18n'
 import { NButton, NPagination, NTag } from 'naive-ui'
 import { reviewsApi, type ReviewCaseStatus, type ReviewCaseSummary } from '@/api/reviews'
 import { apiUnwrap } from '@/utils/apiUnwrap'
+import CreateCaseModal from './components/CreateCaseModal.vue'
 
 const { t } = useI18n()
 const router = useRouter()
@@ -64,6 +71,7 @@ const loadError = ref(false)
 const statusFilter = ref<ReviewCaseStatus | null>(null)
 const page = ref(1)
 const pageSize = 20
+const createVisible = ref(false)
 
 const statusLabel = computed<Record<ReviewCaseStatus, string>>(() => ({
   blocked: t('reviews.statusBlocked'),
@@ -169,6 +177,11 @@ function rowProps(row: ReviewCaseSummary) {
 function applyFilter() {
   page.value = 1
   load()
+}
+
+function onCreated(caseId: string) {
+  createVisible.value = false
+  router.push(`/reviews/${caseId}`)
 }
 
 onMounted(load)

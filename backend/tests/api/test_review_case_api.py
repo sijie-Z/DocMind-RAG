@@ -18,10 +18,13 @@ from app.models.review import ReviewDocumentMeta
 from app.models.user_audit import UserActivityLog
 
 ORG = 1
+OTHER_ORG = 2
 POLICY = "doc-api-policy"
 BASE = "doc-api-base"
 REVISED = "doc-api-revised"
 LEGACY = "doc-api-legacy"
+NOMETA = "doc-api-nometa"
+FOREIGN = "doc-api-foreign"
 
 
 @pytest.fixture
@@ -32,17 +35,25 @@ async def factory(tmp_path):
     maker = async_sessionmaker(engine, expire_on_commit=False)
     async with maker() as db:
         db.add(Organization(id=ORG, name="Org", owner_id=0))
+        db.add(Organization(id=OTHER_ORG, name="Other", owner_id=0))
         docs = []
-        for doc_id in (POLICY, BASE, REVISED, LEGACY):
+        for doc_id, org_id in (
+            (POLICY, ORG),
+            (BASE, ORG),
+            (REVISED, ORG),
+            (LEGACY, ORG),
+            (NOMETA, ORG),
+            (FOREIGN, OTHER_ORG),
+        ):
             docs.append(
                 Document(
                     id=doc_id,
                     filename=f"{doc_id}.pdf",
-                    file_path=f"1/{doc_id}.pdf",
+                    file_path=f"{org_id}/{doc_id}.pdf",
                     file_size=100,
                     file_type=DocumentType.PDF,
                     status=DocumentStatus.INDEXED,
-                    organization_id=ORG,
+                    organization_id=org_id,
                     uploaded_by=1,
                 )
             )
@@ -628,3 +639,34 @@ async def test_read_only_can_download_exports_but_not_decide(factory, monkeypatc
         post = await ac.post(f"/api/v1/reviews/{case['id']}/export")
     assert put.status_code == 403, put.text
     assert post.status_code == 403, post.text
+
+
+# ── 建案候选文档（GET /reviews/candidates） ──────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_candidates_lists_org_documents_with_optional_identity(factory):
+    async with _Ctx(_user(superuser=True), factory) as ac:
+        r = await ac.get("/api/v1/reviews/candidates")
+        assert r.status_code == 200, r.text
+        data = r.json()["data"]
+        ids = [item["document_id"] for item in data["items"]]
+        assert set(ids) == {POLICY, BASE, REVISED, LEGACY, NOMETA}
+        assert FOREIGN not in ids, "候选文档必须限定在本组织"
+        by_id = {item["document_id"]: item for item in data["items"]}
+        assert by_id[POLICY]["meta"]["doc_role"] == "policy"
+        assert by_id[BASE]["meta"]["family_key"] == "supplier-x"
+        assert by_id[BASE]["meta"]["version_label"] == "V1"
+        assert by_id[NOMETA]["meta"] is None
+        assert by_id[NOMETA]["filename"] == f"{NOMETA}.pdf"
+        assert ids[-1] == NOMETA, "已登记身份的文档应排在未登记的前面"
+
+
+@pytest.mark.asyncio
+async def test_candidates_keyword_filter_and_route_not_shadowed_by_case_id(factory):
+    async with _Ctx(_user(superuser=True), factory) as ac:
+        r = await ac.get("/api/v1/reviews/candidates", params={"q": "nometa"})
+        assert r.status_code == 200, r.text
+        data = r.json()["data"]
+        assert [item["document_id"] for item in data["items"]] == [NOMETA]
+        assert data["total"] == 1

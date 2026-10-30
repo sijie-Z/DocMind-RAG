@@ -17,7 +17,7 @@
 | sse_event_types | 24 | live：`EventType = Literal[...]` 闭集（含 agent 事件子集 16；不含 `ThinkingType` 等非事件 Literal） | `cd backend && python scripts/check_doc_facts.py --print-derived` | 2026-10-24 | `docs/facts.json` 同值；源码 `backend/app/agent/events.py` |
 | endpoint_modules | 29 | live：`ROUTER_SPECS` 字典键（声明顺序、去重；不含嵌套 router 内部子模块） | `cd backend && python scripts/check_doc_facts.py --print-derived` | 2026-10-29 | `docs/facts.json` 同值；源码 `backend/app/api/v1/router.py` |
 | frontend_routes | 36 | live：`routes` 数组 `path:` 字面量（**含 `children` 嵌套**；注释与 redirect 回调内对象不计） | `cd backend && python scripts/check_doc_facts.py --print-derived` | 2026-10-30 | `docs/facts.json` 同值；12 条顶层 + 24 条页面子路由；**31 条具名路由是另一口径** |
-| http_route_decorators | 219 | live：`@router.get/post/put/patch/delete/head/options` 装饰器总数（`app/api/v1/endpoints/**`，含子目录） | `cd backend && python scripts/check_doc_facts.py --print-derived` | 2026-10-29 | `docs/facts.json` 同值；不与 `endpoint_modules` 混用 |
+| http_route_decorators | 220 | live：`@router.get/post/put/patch/delete/head/options` 装饰器总数（`app/api/v1/endpoints/**`，含子目录） | `cd backend && python scripts/check_doc_facts.py --print-derived` | 2026-10-30 | `docs/facts.json` 同值；不与 `endpoint_modules` 混用 |
 | websocket_route_decorators | 3 | live：`@router.websocket` 装饰器数（`app/api/v1/endpoints/**`；与 HTTP 分开计） | `cd backend && python scripts/check_doc_facts.py --print-derived` | 2026-10-24 | `docs/facts.json` 同值 |
 
 ## 2. 检索评测（Eval v1.5）
