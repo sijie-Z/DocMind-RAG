@@ -92,7 +92,7 @@
         {{ t('reviews.candidateNoMatch') }}
       </div>
       <div
-        v-if="dropdownOpen && candidateTotal > candidates.length"
+        v-if="(!activeQuery || dropdownOpen) && candidateTotal > candidates.length"
         class="text-[11px] text-gray-400 dark:text-gray-500"
         data-testid="candidate-truncated"
       >
@@ -481,6 +481,7 @@ watch(
       void loadCandidates()
     } else {
       clearSearchDebounce()
+      dropdownOpen.value = false
     }
   }
 )
