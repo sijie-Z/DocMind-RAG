@@ -1479,7 +1479,7 @@ export default {
     editMeta: 'Edit identity',
     warnFamilyMismatch: 'Base and revised use different version families: the case will be blocked',
     warnVersionOrder: 'Base version sequence is not lower than revised: the case will be blocked',
-    candidateTruncated: '{total} documents in total, only the first {shown} are loaded (registered identities first)',
+    candidateTruncated: '{total} documents in total, showing {shown}; type a keyword to search all',
     metaSeqNeedsLabel: 'Version sequence requires a version label',
     archiveCase: 'Archive case',
     archiveConfirm: 'Archiving makes the case read-only: no further decisions, analysis or exports, and it no longer blocks deletion of referenced documents. Archiving cannot be undone. Archive now?',

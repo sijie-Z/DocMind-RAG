@@ -1406,7 +1406,7 @@ export default {
     editMeta: '属性を編集',
     warnFamilyMismatch: '基準版と改訂版のバージョン系列が不一致：案件はブロックされます',
     warnVersionOrder: '基準版のバージョン順序が改訂版以上です：案件はブロックされます',
-    candidateTruncated: '全 {total} 件のドキュメントのうち先頭 {shown} 件のみ読み込み（属性登録済みを優先）',
+    candidateTruncated: '全 {total} 件のドキュメントのうち {shown} 件を表示中。キーワードで全体を検索できます',
     metaSeqNeedsLabel: 'バージョン順序を入力するにはバージョンラベルも必要です',
     archiveCase: '案件をアーカイブ',
     archiveConfirm: 'アーカイブ後は読み取り専用になります：決定・分析・エクスポートはできず、関連ドキュメントの削除も妨げません。アーカイブは元に戻せません。アーカイブしますか？',

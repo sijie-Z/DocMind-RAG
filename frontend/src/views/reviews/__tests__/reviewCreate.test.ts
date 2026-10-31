@@ -99,10 +99,11 @@ type ModalVm = {
   roleOptions: Array<{ value: string; label: string }>
   optionLabel: (candidate: unknown) => string
   optionsFor: (side: 'policy' | 'base' | 'revised') => OptionLike[]
+  selectedCandidate: Record<'policy' | 'base' | 'revised', unknown>
   openMeta: (side: 'policy' | 'base' | 'revised') => void
   saveMeta: () => Promise<void>
   submit: () => Promise<void>
-  loadCandidates: () => Promise<void>
+  loadCandidates: (query?: string) => Promise<void>
 }
 
 async function openModal() {
@@ -485,5 +486,76 @@ describe('身份纠错闭环（修复路径）', () => {
     // 刷新后制度侧选择被清空，文档转入合同侧候选池
     expect(vm.sideSelection.policy).toBeNull()
     expect(vm.optionsFor('base').map((option) => option.value)).toContain('n1')
+  })
+})
+
+
+describe('候选远程搜索（Batch 9）', () => {
+  it('NSelect 的 search 事件经 300ms 防抖后按 q 取数，快速输入只发一次', async () => {
+    vi.useFakeTimers()
+    try {
+      const { wrapper, modal } = await openModal()
+      expect(api.candidates).toHaveBeenCalledTimes(1)
+      expect(api.candidates).toHaveBeenLastCalledWith({ q: undefined, page: 1, page_size: 200 })
+
+      const selects = modal.findAllComponents(NSelect)
+      expect(selects.length).toBeGreaterThanOrEqual(3)
+      selects[0].vm.$emit('search', '2026')
+      await vi.advanceTimersByTimeAsync(100)
+      selects[0].vm.$emit('search', '2026 采购')
+      await vi.advanceTimersByTimeAsync(300)
+      await flushPromises()
+
+      expect(api.candidates).toHaveBeenCalledTimes(2)
+      expect(api.candidates).toHaveBeenLastCalledWith({ q: '2026 采购', page: 1, page_size: 200 })
+      expect(wrapper.find('[data-testid="create-case-open"]').exists()).toBe(true)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('搜索结果替换后，已选中文档的标签仍然可取到（不落回原始 id）', async () => {
+    const { vm } = await openModal()
+    vm.sideSelection.policy = 'p1'
+    await flushPromises()
+
+    api.candidates.mockResolvedValue(
+      candidatesResponse([{ document_id: 'p9', filename: '另一个制度.pdf', status: 'indexed', meta: { doc_role: 'policy' } }])
+    )
+    await vm.loadCandidates('另一个')
+    await flushPromises()
+
+    // 当前结果集不含 p1，但选中项仍在 known 缓存里：标签可渲染
+    expect(vm.optionsFor('policy').map((option) => option.value)).toContain('p1')
+    expect(vm.optionLabel(vm.selectedCandidate.policy)).toContain('制度.pdf')
+  })
+
+  it('保存身份后缓存立即反映服务端 meta（搜索态下不依赖列表重载）', async () => {
+    const { vm } = await openModal()
+    vm.sideSelection.base = 'n1'
+    await flushPromises()
+    vm.openMeta('base')
+    const modalVm = vm as unknown as {
+      metaForm: {
+        doc_role: string
+        family_key: string
+        version_label: string
+        version_seq: number | null
+      }
+    }
+    modalVm.metaForm.family_key = 'fam'
+    modalVm.metaForm.version_label = 'V3'
+    modalVm.metaForm.version_seq = 3
+    api.putDocumentMeta.mockResolvedValue({
+      data: { data: { doc_role: 'contract', family_key: 'fam', version_label: 'V3', version_seq: 3 } }
+    } as never)
+    // 列表重载返回的仍是旧状态（模拟搜索态下该文档不在当前结果里）
+    api.candidates.mockResolvedValue(candidatesResponse([POLICY, BASE, REVISED]))
+    await vm.saveMeta()
+    await flushPromises()
+
+    const known = (vm as unknown as { knownCandidates: Map<string, { meta: unknown }> })
+      .knownCandidates
+    expect(known.get('n1')?.meta).toBeTruthy()
   })
 })

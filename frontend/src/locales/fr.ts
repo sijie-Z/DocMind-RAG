@@ -1407,7 +1407,7 @@ export default {
     editMeta: 'Modifier l’identité',
     warnFamilyMismatch: 'Base et révisé utilisent des familles de versions différentes : le dossier sera bloqué',
     warnVersionOrder: 'La séquence de version de la base n’est pas inférieure à celle du révisé : le dossier sera bloqué',
-    candidateTruncated: '{total} documents au total, seuls les {shown} premiers sont chargés (identités enregistrées d’abord)',
+    candidateTruncated: '{total} documents au total, {shown} affichés ; saisissez un mot-clé pour tout rechercher',
     metaSeqNeedsLabel: 'La séquence de version nécessite un libellé de version',
     archiveCase: 'Archiver le dossier',
     archiveConfirm: 'L’archivage rend le dossier en lecture seule : plus de décisions, d’analyses ni d’exports, et il ne bloque plus la suppression des documents référencés. L’archivage est irréversible. Archiver maintenant ?',

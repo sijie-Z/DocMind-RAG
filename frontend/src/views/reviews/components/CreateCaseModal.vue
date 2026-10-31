@@ -11,7 +11,7 @@
   >
     <n-alert v-if="candidatesError" type="error" class="mb-3" :bordered="false">
       {{ t('reviews.candidatesLoadFailed') }}
-      <n-button text type="primary" class="ml-2" @click="loadCandidates">{{ t('reviews.retry') }}</n-button>
+      <n-button text type="primary" class="ml-2" @click="loadCandidates()">{{ t('reviews.retry') }}</n-button>
     </n-alert>
 
     <div class="flex flex-col gap-3">
@@ -48,8 +48,11 @@
           :placeholder="t('reviews.createSelectDoc')"
           :input-props="{ 'aria-label': sideLabel[side] }"
           filterable
+          remote
           clearable
+          :loading="candidatesLoading"
           :data-testid="`create-select-${side}`"
+          @search="onSearch"
         />
         <div v-if="readiness[side]" class="mt-1 flex items-center gap-2 text-[11px]">
           <n-tag
@@ -179,6 +182,7 @@ import { NAlert, NButton, NInput, NInputNumber, NModal, NSelect, NTag, useMessag
 import {
   reviewsApi,
   type ReviewCandidate,
+  type ReviewCandidateMeta,
   type ReviewMetaPayload,
   type ReviewReadiness,
   type ReviewSide
@@ -205,8 +209,13 @@ const sideSelection = reactive<Record<ReviewSide, string | null>>({
   revised: null
 })
 const candidates = ref<ReviewCandidate[]>([])
+// 见过的候选（含当前选中项）：远程搜索会替换结果集，选中项的标签必须仍可取到。
+const knownCandidates = ref<Map<string, ReviewCandidate>>(new Map())
 const candidateTotal = ref(0)
 const candidatesError = ref(false)
+const candidatesLoading = ref(false)
+let candidatesToken = 0
+let searchDebounce: ReturnType<typeof setTimeout> | null = null
 const readiness = reactive<Partial<Record<ReviewSide, ReviewReadiness>>>({})
 const submitting = ref(false)
 
@@ -281,14 +290,14 @@ function optionsFor(side: ReviewSide) {
       .map((other) => sideSelection[other])
       .filter((id): id is string => !!id)
   )
-  return candidates.value
+  return [...knownCandidates.value.values()]
     .filter((candidate) => !taken.has(candidate.document_id))
     .filter((candidate) => !candidate.meta || wanted.includes(String(candidate.meta.doc_role)))
     .map((candidate) => ({ value: candidate.document_id, label: optionLabel(candidate) }))
 }
 
 const selectedCandidate = computed<Record<ReviewSide, ReviewCandidate | null>>(() => {
-  const byId = new Map(candidates.value.map((candidate) => [candidate.document_id, candidate]))
+  const byId = knownCandidates.value
   return {
     policy: sideSelection.policy ? byId.get(sideSelection.policy) ?? null : null,
     base: sideSelection.base ? byId.get(sideSelection.base) ?? null : null,
@@ -322,28 +331,44 @@ const crossDocWarning = computed(() => {
   return ''
 })
 
-async function loadCandidates() {
+async function loadCandidates(query = '') {
+  const token = ++candidatesToken
+  candidatesLoading.value = true
   candidatesError.value = false
   try {
     const data = apiUnwrap<{ items: ReviewCandidate[]; total?: number }>(
-      await reviewsApi.candidates({ page: 1, page_size: 200 })
+      await reviewsApi.candidates({ q: query || undefined, page: 1, page_size: 200 })
     )
+    if (token !== candidatesToken) return
+    const merged = new Map(knownCandidates.value)
+    for (const item of data?.items ?? []) merged.set(item.document_id, item)
+    knownCandidates.value = merged
     candidates.value = data?.items ?? []
     candidateTotal.value = data?.total ?? candidates.value.length
   } catch {
-    candidatesError.value = true
+    if (token === candidatesToken) candidatesError.value = true
+  } finally {
+    if (token === candidatesToken) candidatesLoading.value = false
   }
   // 身份登记/刷新后，已选文档可能不再匹配该侧角色（如合同被登记成制度）。
   for (const side of SIDES) {
     const id = sideSelection[side]
     if (!id) continue
-    const candidate = candidates.value.find((item) => item.document_id === id)
+    const candidate = knownCandidates.value.get(id)
     const wanted = side === 'policy' ? ['policy', 'template'] : ['contract']
     if (!candidate || (candidate.meta && !wanted.includes(String(candidate.meta.doc_role)))) {
       sideSelection[side] = null
     }
   }
   await refreshReadiness()
+}
+
+/** remote 搜索（300ms 防抖）；清空查询回到首屏列表。 */
+function onSearch(query: string) {
+  if (searchDebounce) clearTimeout(searchDebounce)
+  searchDebounce = setTimeout(() => {
+    void loadCandidates(query)
+  }, 300)
 }
 
 let readinessToken = 0
@@ -383,7 +408,11 @@ watch(
       sideSelection.policy = null
       sideSelection.base = null
       sideSelection.revised = null
+      knownCandidates.value = new Map()
       void loadCandidates()
+    } else if (searchDebounce) {
+      clearTimeout(searchDebounce)
+      searchDebounce = null
     }
   }
 )
@@ -431,7 +460,15 @@ async function saveMeta() {
   }
   metaSaving.value = true
   try {
-    await reviewsApi.putDocumentMeta(metaDocument.value.document_id, payload)
+    const savedMeta = apiUnwrap<ReviewCandidateMeta>(
+      await reviewsApi.putDocumentMeta(metaDocument.value.document_id, payload)
+    )
+    const known = knownCandidates.value.get(metaDocument.value.document_id)
+    if (known && savedMeta) {
+      const merged = new Map(knownCandidates.value)
+      merged.set(known.document_id, { ...known, meta: savedMeta })
+      knownCandidates.value = merged
+    }
     message.success(t('reviews.metaSaved'))
     metaSide.value = null
     await loadCandidates()
