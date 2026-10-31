@@ -426,6 +426,8 @@ describe('新建核验建案弹窗', () => {
   it('候选超过加载上限时给出截断提示', async () => {
     api.candidates.mockResolvedValue(candidatesResponse([POLICY, BASE], 321))
     const { wrapper, vm } = await openModal()
+    ;(vm as unknown as { dropdownOpen: boolean }).dropdownOpen = true
+    await flushPromises()
     expect(vm.candidateTotal).toBe(321)
     expect(vm.candidates).toHaveLength(2)
     expect(wrapper.text()).toContain('共 321 篇')
@@ -605,6 +607,7 @@ describe('远程搜索可见性（R1）', () => {
 
   it('空结果显示无匹配提示；命中超限显示细化文案', async () => {
     const { wrapper, vm } = await openModal()
+    ;(vm as unknown as { dropdownOpen: boolean }).dropdownOpen = true
     api.candidates.mockResolvedValue(candidatesResponse([], 0))
     await vm.loadCandidates('不存在')
     await flushPromises()
@@ -671,5 +674,90 @@ describe('远程搜索可见性（R1）', () => {
         meta: null
       })
     ).toContain('年度采购框架协议')
+  })
+})
+
+
+describe('远程搜索 R2 收口', () => {
+  it('菜单打开（update:show=true）重置为首屏查询', async () => {
+    const { modal, vm } = await openModal()
+    api.candidates.mockResolvedValue(
+      candidatesResponse([
+        { document_id: 'p9', filename: '采购制度 2026.pdf', status: 'indexed', meta: { doc_role: 'policy' } }
+      ])
+    )
+    await vm.loadCandidates('2026')
+    expect(api.candidates).toHaveBeenLastCalledWith({ q: '2026', page: 1, page_size: 200 })
+
+    modal.findAllComponents(NSelect)[0].vm.$emit('update:show', true)
+    await flushPromises()
+    expect(api.candidates).toHaveBeenLastCalledWith({ q: undefined, page: 1, page_size: 200 })
+  })
+
+  it('搜索态下保存身份后按当前查询重载（不重置首屏）', async () => {
+    const { vm } = await openModal()
+    vm.sideSelection.base = 'n1'
+    await flushPromises()
+    api.candidates.mockResolvedValue(candidatesResponse([NOMETA]))
+    await vm.loadCandidates('未登记')
+    expect(api.candidates).toHaveBeenLastCalledWith({ q: '未登记', page: 1, page_size: 200 })
+
+    vm.openMeta('base')
+    const modalVm = vm as unknown as {
+      metaForm: {
+        doc_role: string
+        family_key: string
+        version_label: string
+        version_seq: number | null
+      }
+    }
+    modalVm.metaForm.family_key = 'fam'
+    modalVm.metaForm.version_label = 'V3'
+    modalVm.metaForm.version_seq = 3
+    api.putDocumentMeta.mockResolvedValue({
+      data: { data: { doc_role: 'contract', family_key: 'fam', version_label: 'V3', version_seq: 3 } }
+    } as never)
+    await vm.saveMeta()
+    await flushPromises()
+
+    expect(api.candidates).toHaveBeenLastCalledWith({ q: '未登记', page: 1, page_size: 200 })
+  })
+
+  it('候选加载期间 loading 翻转（deferred 请求）', async () => {
+    const { vm } = await openModal()
+    const deferred: Array<(value: unknown) => void> = []
+    api.candidates.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          deferred.push(resolve as (value: unknown) => void)
+        }) as never
+    )
+    const loadingRef = (vm as unknown as { candidatesLoading: boolean }).candidatesLoading
+    void vm.loadCandidates('x')
+    await flushPromises()
+    expect((vm as unknown as { candidatesLoading: boolean }).candidatesLoading).toBe(true)
+    deferred[0](candidatesResponse([POLICY]))
+    await flushPromises()
+    expect((vm as unknown as { candidatesLoading: boolean }).candidatesLoading).toBe(false)
+    expect(loadingRef).toBe(false)
+  })
+})
+
+
+describe('远程搜索失败重试', () => {
+  it('重试按钮按失败时的查询重发（不重置首屏）', async () => {
+    const { wrapper, vm } = await openModal()
+    api.candidates.mockRejectedValueOnce(new Error('boom'))
+    await vm.loadCandidates('网断了')
+    await flushPromises()
+
+    const retry = wrapper
+      .findAll('button')
+      .find((button) => button.text().trim() === '重试')
+    expect(retry).toBeTruthy()
+    await retry!.trigger('click')
+    await flushPromises()
+
+    expect(api.candidates).toHaveBeenLastCalledWith({ q: '网断了', page: 1, page_size: 200 })
   })
 })

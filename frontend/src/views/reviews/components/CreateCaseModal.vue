@@ -85,14 +85,14 @@
         {{ t('reviews.createBlockedHint') }}
       </div>
       <div
-        v-if="activeQuery && !candidatesLoading && candidates.length === 0"
+        v-if="dropdownOpen && activeQuery && !candidatesLoading && !candidatesError && candidates.length === 0"
         class="text-[11px] text-gray-400 dark:text-gray-500"
         data-testid="candidate-no-match"
       >
         {{ t('reviews.candidateNoMatch') }}
       </div>
       <div
-        v-if="candidateTotal > candidates.length"
+        v-if="dropdownOpen && candidateTotal > candidates.length"
         class="text-[11px] text-gray-400 dark:text-gray-500"
         data-testid="candidate-truncated"
       >
@@ -424,8 +424,12 @@ function onClear() {
   void loadCandidates('')
 }
 
+// 提示文案只在菜单展开期间显示（关闭后 activeQuery 的结果仍在，提示会失真）。
+const dropdownOpen = ref(false)
+
 /** 打开下拉时重置为首屏（并取消在途防抖搜索）。 */
 function onMenuToggle(open: boolean) {
+  dropdownOpen.value = open
   if (!open) return
   clearSearchDebounce()
   if (activeQuery.value) void loadCandidates('')
@@ -471,6 +475,9 @@ watch(
       sideSelection.base = null
       sideSelection.revised = null
       knownCandidates.value = new Map()
+      candidates.value = []
+      candidateTotal.value = 0
+      activeQuery.value = ''
       void loadCandidates()
     } else {
       clearSearchDebounce()
