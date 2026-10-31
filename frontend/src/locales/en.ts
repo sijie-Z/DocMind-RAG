@@ -1480,6 +1480,8 @@ export default {
     warnFamilyMismatch: 'Base and revised use different version families: the case will be blocked',
     warnVersionOrder: 'Base version sequence is not lower than revised: the case will be blocked',
     candidateTruncated: '{total} documents in total, showing {shown}; type a keyword to search all',
+    candidateTruncatedSearch: '{total} matches, showing {shown}; refine the keyword to narrow down',
+    candidateNoMatch: 'No matching documents; try another keyword',
     metaSeqNeedsLabel: 'Version sequence requires a version label',
     archiveCase: 'Archive case',
     archiveConfirm: 'Archiving makes the case read-only: no further decisions, analysis or exports, and it no longer blocks deletion of referenced documents. Archiving cannot be undone. Archive now?',

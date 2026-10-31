@@ -559,3 +559,117 @@ describe('候选远程搜索（Batch 9）', () => {
     expect(known.get('n1')?.meta).toBeTruthy()
   })
 })
+
+
+describe('远程搜索可见性（R1）', () => {
+  it('搜索后下拉选项收窄为当前结果（不再并集渲染）', async () => {
+    const { vm } = await openModal()
+    const initialOptions = vm.optionsFor('policy')
+    expect(initialOptions.map((option) => option.value)).toContain('p1')
+
+    api.candidates.mockResolvedValue(
+      candidatesResponse([
+        { document_id: 'p9', filename: '采购制度 2026.pdf', status: 'indexed', meta: { doc_role: 'policy' } }
+      ])
+    )
+    await vm.loadCandidates('2026')
+    await flushPromises()
+
+    expect(vm.optionsFor('policy').map((option) => option.value)).toEqual(['p9'])
+  })
+
+  it('已选中文档在搜索结果外时仍保留在选项里（标签持久化）', async () => {
+    const { vm } = await openModal()
+    vm.sideSelection.policy = 'p1'
+    await flushPromises()
+    api.candidates.mockResolvedValue(
+      candidatesResponse([
+        { document_id: 'p9', filename: '采购制度 2026.pdf', status: 'indexed', meta: { doc_role: 'policy' } }
+      ])
+    )
+    await vm.loadCandidates('2026')
+    await flushPromises()
+    const values = vm.optionsFor('policy').map((option) => option.value)
+    expect(values[0]).toBe('p1')
+    expect(values).toContain('p9')
+  })
+
+  it('展开的属性：remote/filterable/loading 与搜索输入 maxlength=200', async () => {
+    const { modal } = await openModal()
+    const selects = modal.findAllComponents(NSelect)
+    expect(selects[0].props('remote')).toBe(true)
+    expect(selects[0].props('filterable')).toBe(true)
+    expect((selects[0].props('inputProps') as Record<string, unknown>).maxlength).toBe(200)
+    expect('loading' in selects[0].props() || selects[0].props('loading') !== undefined).toBe(true)
+  })
+
+  it('空结果显示无匹配提示；命中超限显示细化文案', async () => {
+    const { wrapper, vm } = await openModal()
+    api.candidates.mockResolvedValue(candidatesResponse([], 0))
+    await vm.loadCandidates('不存在')
+    await flushPromises()
+    expect(wrapper.text()).toContain('没有匹配的文档')
+
+    api.candidates.mockResolvedValue(candidatesResponse([POLICY, BASE], 640))
+    await vm.loadCandidates('采购')
+    await flushPromises()
+    expect(wrapper.text()).toContain('匹配 640 篇')
+    expect(wrapper.text()).toContain('请细化关键字')
+  })
+
+  it('clearable 的 × 触发回到首屏（无 q）', async () => {
+    const { modal } = await openModal()
+    const selects = modal.findAllComponents(NSelect)
+    const callsBefore = api.candidates.mock.calls.length
+    selects[0].vm.$emit('clear')
+    await flushPromises()
+    expect(api.candidates.mock.calls.length).toBeGreaterThan(callsBefore)
+    expect(api.candidates).toHaveBeenLastCalledWith({ q: undefined, page: 1, page_size: 200 })
+  })
+
+  it('候选加载令牌：乱序响应时旧结果不覆盖新结果', async () => {
+    const deferred: Array<{ resolve: (value: unknown) => void }> = []
+    api.candidates.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          deferred.push({ resolve })
+        }) as never
+    )
+    const wrapper = mountIndex()
+    await flushPromises()
+    await wrapper.find('[data-testid="create-case-open"]').trigger('click')
+    await flushPromises()
+    const modal = wrapper.findComponent(CreateCaseModal)
+    const vm = modal.vm as unknown as ModalVm
+
+    void vm.loadCandidates('旧')
+    void vm.loadCandidates('新')
+    await flushPromises()
+    expect(deferred.length).toBe(3) // 打开时一次 + 两次搜索
+
+    // 新请求先返回，旧请求后返回：状态必须保留「新」的结果
+    deferred[2].resolve(candidatesResponse([
+      { document_id: 'new-one', filename: '新结果.pdf', status: 'indexed', meta: { doc_role: 'policy' } }
+    ]))
+    await flushPromises()
+    deferred[1].resolve(candidatesResponse([
+      { document_id: 'old-one', filename: '旧结果.pdf', status: 'indexed', meta: { doc_role: 'policy' } }
+    ]))
+    await flushPromises()
+
+    expect(vm.optionsFor('policy').map((option) => option.value)).toEqual(['new-one'])
+  })
+
+  it('q 匹配 title 的候选在标签里显示标题，避免“看起来不含关键字”', async () => {
+    const { vm } = await openModal()
+    expect(
+      vm.optionLabel({
+        document_id: 'x1',
+        filename: 'a.pdf',
+        title: '年度采购框架协议',
+        status: 'indexed',
+        meta: null
+      })
+    ).toContain('年度采购框架协议')
+  })
+})

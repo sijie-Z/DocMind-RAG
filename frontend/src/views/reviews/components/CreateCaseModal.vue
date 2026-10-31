@@ -11,7 +11,7 @@
   >
     <n-alert v-if="candidatesError" type="error" class="mb-3" :bordered="false">
       {{ t('reviews.candidatesLoadFailed') }}
-      <n-button text type="primary" class="ml-2" @click="loadCandidates()">{{ t('reviews.retry') }}</n-button>
+      <n-button text type="primary" class="ml-2" @click="loadCandidates(activeQuery)">{{ t('reviews.retry') }}</n-button>
     </n-alert>
 
     <div class="flex flex-col gap-3">
@@ -46,13 +46,15 @@
           v-model:value="sideSelection[side]"
           :options="optionsFor(side)"
           :placeholder="t('reviews.createSelectDoc')"
-          :input-props="{ 'aria-label': sideLabel[side] }"
+          :input-props="{ 'aria-label': sideLabel[side], maxlength: 200 }"
           filterable
           remote
           clearable
           :loading="candidatesLoading"
           :data-testid="`create-select-${side}`"
           @search="onSearch"
+          @update:show="onMenuToggle"
+          @clear="onClear"
         />
         <div v-if="readiness[side]" class="mt-1 flex items-center gap-2 text-[11px]">
           <n-tag
@@ -82,8 +84,26 @@
       <div v-if="anyBlocked" class="text-[11px] text-amber-600 dark:text-amber-400">
         {{ t('reviews.createBlockedHint') }}
       </div>
-      <div v-if="candidateTotal > candidates.length" class="text-[11px] text-gray-400 dark:text-gray-500">
-        {{ t('reviews.candidateTruncated', { total: candidateTotal, shown: candidates.length }) }}
+      <div
+        v-if="activeQuery && !candidatesLoading && candidates.length === 0"
+        class="text-[11px] text-gray-400 dark:text-gray-500"
+        data-testid="candidate-no-match"
+      >
+        {{ t('reviews.candidateNoMatch') }}
+      </div>
+      <div
+        v-if="candidateTotal > candidates.length"
+        class="text-[11px] text-gray-400 dark:text-gray-500"
+        data-testid="candidate-truncated"
+      >
+        {{
+          activeQuery
+            ? t('reviews.candidateTruncatedSearch', {
+                total: candidateTotal,
+                shown: candidates.length
+              })
+            : t('reviews.candidateTruncated', { total: candidateTotal, shown: candidates.length })
+        }}
       </div>
     </div>
 
@@ -176,7 +196,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, reactive, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { NAlert, NButton, NInput, NInputNumber, NModal, NSelect, NTag, useMessage } from 'naive-ui'
 import {
@@ -214,6 +234,8 @@ const knownCandidates = ref<Map<string, ReviewCandidate>>(new Map())
 const candidateTotal = ref(0)
 const candidatesError = ref(false)
 const candidatesLoading = ref(false)
+// 当前结果集对应的查询（菜单打开重置为首屏；截断/重试按它取数）
+const activeQuery = ref('')
 let candidatesToken = 0
 let searchDebounce: ReturnType<typeof setTimeout> | null = null
 const readiness = reactive<Partial<Record<ReviewSide, ReviewReadiness>>>({})
@@ -275,12 +297,17 @@ function roleText(role: string) {
 }
 
 function optionLabel(candidate: ReviewCandidate) {
+  // 后端 q 同时匹配 filename/title：title 命中的候选必须能在标签里看到标题。
+  const title =
+    candidate.title && !String(candidate.filename).includes(String(candidate.title))
+      ? ` · ${candidate.title}`
+      : ''
   const meta = candidate.meta
-  if (!meta) return `${candidate.filename} · ${t('reviews.candidateNoMeta')}`
+  if (!meta) return `${candidate.filename}${title} · ${t('reviews.candidateNoMeta')}`
   const parts = [roleText(String(meta.doc_role))]
   if (meta.version_label) parts.push(String(meta.version_label))
   if (meta.family_key) parts.push(`(${meta.family_key})`)
-  return `${candidate.filename} · ${parts.join(' ')}`
+  return `${candidate.filename}${title} · ${parts.join(' ')}`
 }
 
 function optionsFor(side: ReviewSide) {
@@ -290,7 +317,20 @@ function optionsFor(side: ReviewSide) {
       .map((other) => sideSelection[other])
       .filter((id): id is string => !!id)
   )
-  return [...knownCandidates.value.values()]
+  const pool: ReviewCandidate[] = []
+  const seen = new Set<string>()
+  const selectedId = sideSelection[side]
+  const selected = selectedId ? knownCandidates.value.get(selectedId) : null
+  if (selected) {
+    pool.push(selected)
+    seen.add(selected.document_id)
+  }
+  for (const candidate of candidates.value) {
+    if (seen.has(candidate.document_id)) continue
+    pool.push(candidate)
+    seen.add(candidate.document_id)
+  }
+  return pool
     .filter((candidate) => !taken.has(candidate.document_id))
     .filter((candidate) => !candidate.meta || wanted.includes(String(candidate.meta.doc_role)))
     .map((candidate) => ({ value: candidate.document_id, label: optionLabel(candidate) }))
@@ -335,6 +375,7 @@ async function loadCandidates(query = '') {
   const token = ++candidatesToken
   candidatesLoading.value = true
   candidatesError.value = false
+  activeQuery.value = query
   try {
     const data = apiUnwrap<{ items: ReviewCandidate[]; total?: number }>(
       await reviewsApi.candidates({ q: query || undefined, page: 1, page_size: 200 })
@@ -360,7 +401,6 @@ async function loadCandidates(query = '') {
       sideSelection[side] = null
     }
   }
-  await refreshReadiness()
 }
 
 /** remote 搜索（300ms 防抖）；清空查询回到首屏列表。 */
@@ -369,6 +409,26 @@ function onSearch(query: string) {
   searchDebounce = setTimeout(() => {
     void loadCandidates(query)
   }, 300)
+}
+
+function clearSearchDebounce() {
+  if (searchDebounce) {
+    clearTimeout(searchDebounce)
+    searchDebounce = null
+  }
+}
+
+/** 点击 clearable 的 × 不会触发 search 事件：显式回到首屏。 */
+function onClear() {
+  clearSearchDebounce()
+  void loadCandidates('')
+}
+
+/** 打开下拉时重置为首屏（并取消在途防抖搜索）。 */
+function onMenuToggle(open: boolean) {
+  if (!open) return
+  clearSearchDebounce()
+  if (activeQuery.value) void loadCandidates('')
 }
 
 let readinessToken = 0
@@ -400,6 +460,8 @@ watch(
   }
 )
 
+onBeforeUnmount(clearSearchDebounce)
+
 watch(
   () => props.show,
   (value) => {
@@ -410,9 +472,8 @@ watch(
       sideSelection.revised = null
       knownCandidates.value = new Map()
       void loadCandidates()
-    } else if (searchDebounce) {
-      clearTimeout(searchDebounce)
-      searchDebounce = null
+    } else {
+      clearSearchDebounce()
     }
   }
 )
@@ -458,12 +519,13 @@ async function saveMeta() {
       return
     }
   }
+  const documentId = metaDocument.value.document_id
   metaSaving.value = true
   try {
     const savedMeta = apiUnwrap<ReviewCandidateMeta>(
-      await reviewsApi.putDocumentMeta(metaDocument.value.document_id, payload)
+      await reviewsApi.putDocumentMeta(documentId, payload)
     )
-    const known = knownCandidates.value.get(metaDocument.value.document_id)
+    const known = knownCandidates.value.get(documentId)
     if (known && savedMeta) {
       const merged = new Map(knownCandidates.value)
       merged.set(known.document_id, { ...known, meta: savedMeta })
@@ -471,7 +533,8 @@ async function saveMeta() {
     }
     message.success(t('reviews.metaSaved'))
     metaSide.value = null
-    await loadCandidates()
+    await loadCandidates(activeQuery.value)
+    await refreshReadiness()
   } catch (error) {
     message.error(errorText(error, t('reviews.metaFailed')))
   } finally {
