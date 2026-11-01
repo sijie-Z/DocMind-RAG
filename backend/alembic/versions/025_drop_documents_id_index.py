@@ -1,6 +1,6 @@
 """删除 documents.id 上的冗余二级索引（Batch 10）。
 
-Revision ID: 025_drop_redundant_documents_id_index
+Revision ID: 025_drop_documents_id_index
 Revises: 024_review_case_archive
 
 `ix_documents_id`（unique, on id）与 PRIMARY 完全冗余，删除它是纯卫生项。

@@ -11,6 +11,7 @@ import pytest
 from alembic.config import Config
 from alembic.script import ScriptDirectory
 from sqlalchemy import func, select, update
+from sqlalchemy.dialects import mysql
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
@@ -857,9 +858,11 @@ def test_022_migration_roundtrip(tmp_path, monkeypatch):
 # ── MySQL 1213 死锁映射（Batch 10） ─────────────────────────────────────────
 
 
-def test_is_mysql_deadlock_only_matches_1213():
+def test_is_retryable_mysql_conflict_codes():
+    # 1213 死锁与 1205 锁等待超时（innodb_deadlock_detect=OFF 的部署）都可重试
     assert svc._is_mysql_deadlock(OperationalError("stmt", {}, Exception(1213))) is True
-    assert svc._is_mysql_deadlock(OperationalError("stmt", {}, Exception(1205))) is False
+    assert svc._is_mysql_deadlock(OperationalError("stmt", {}, Exception(1205))) is True
+    assert svc._is_mysql_deadlock(OperationalError("stmt", {}, Exception(1317))) is False
     assert svc._is_mysql_deadlock(OperationalError("stmt", {}, Exception())) is False
 
 
@@ -890,8 +893,10 @@ async def test_create_case_maps_deadlock_to_retryable_conflict(monkeypatch):
     class _DeadlockSession:
         def __init__(self):
             self.rolled_back = False
+            self.statements = []
 
-        async def execute(self, *_args, **_kwargs):
+        async def execute(self, *args, **_kwargs):
+            self.statements.append(args[0])
             raise OperationalError("SELECT documents.id ... FOR UPDATE", {}, Exception(1213))
 
         async def rollback(self):
@@ -920,6 +925,11 @@ async def test_create_case_maps_deadlock_to_retryable_conflict(monkeypatch):
     assert excinfo.value.error_code == "REVIEW_CASE_CONFLICT"
     assert "重试" in excinfo.value.message
     assert session.rolled_back is True
+    # 根因修复的确定性守护：锁读必须在 MySQL 方言下渲染出 FORCE INDEX (PRIMARY)。
+    # 否则优化器可能改用二级索引驱动锁定读，与并发 DELETE 形成锁序颠倒（1213）。
+    compiled = str(session.statements[0].compile(dialect=mysql.dialect()))
+    assert "FORCE INDEX (PRIMARY)" in compiled
+    assert "FOR UPDATE" in compiled
 
 
 def test_all_alembic_revision_ids_fit_mysql_version_num():
@@ -931,3 +941,97 @@ def test_all_alembic_revision_ids_fit_mysql_version_num():
         rev.revision: len(rev.revision) for rev in script.walk_revisions() if len(rev.revision) > 32
     }
     assert too_long == {}
+
+
+@pytest.mark.asyncio
+async def test_create_case_reraises_non_retryable_operational_error(monkeypatch):
+    """非 1213/1205 的 OperationalError 不得被误映射为可重试 409。"""
+
+    async def _no_meta(_session, _doc_id):
+        return None
+
+    async def _ready(_session, _doc):
+        return SimpleNamespace(
+            status="reviewable",
+            blocking_reasons=[],
+            warnings=[],
+            meta=None,
+            document_id=_doc.id,
+            total_chunks=1,
+            original_text_chunks=1,
+            page_number_chunks=1,
+            clause_candidate_chunks=1,
+            legacy_chunk_count=0,
+        )
+
+    monkeypatch.setattr(svc, "get_review_meta", _no_meta)
+    monkeypatch.setattr(svc, "compute_readiness", _ready)
+
+    class _BrokenSession:
+        async def execute(self, *_args, **_kwargs):
+            raise OperationalError("SELECT ...", {}, Exception(1317))
+
+        async def rollback(self):
+            return None
+
+        def add(self, _obj):
+            return None
+
+    docs = {
+        side: SimpleNamespace(
+            id=f"nr-{side}",
+            organization_id=1,
+            filename=f"{side}.txt",
+            parsed_at=None,
+            indexed_at=None,
+        )
+        for side in ("policy", "base", "revised")
+    }
+
+    with pytest.raises(OperationalError):
+        await svc.create_case(
+            _BrokenSession(),
+            docs=docs,
+            title="non-retryable",
+            checklist_version="v1",
+            created_by=USER_ID,
+        )
+
+
+# ── 迁移 025 往返与幂等（SQLite） ───────────────────────────────────────────
+
+
+def _documents_indexes(db_path: Path) -> set[str]:
+    with sqlite3.connect(str(db_path)) as conn:
+        return {row[1] for row in conn.execute("PRAGMA index_list('documents')")}
+
+
+def test_025_migration_roundtrip_and_idempotent(tmp_path, monkeypatch):
+    db_path = tmp_path / "documents-025.db"
+    monkeypatch.setattr(settings, "DATABASE_URL", f"sqlite+aiosqlite:///{db_path.as_posix()}")
+    cfg = _cfg()
+
+    command.upgrade(cfg, "024_review_case_archive")
+    assert "ix_documents_id" in _documents_indexes(db_path)
+
+    command.upgrade(cfg, "head")
+    assert "ix_documents_id" not in _documents_indexes(db_path)
+
+    command.downgrade(cfg, "024_review_case_archive")
+    assert "ix_documents_id" in _documents_indexes(db_path)
+
+    command.upgrade(cfg, "head")
+    assert "ix_documents_id" not in _documents_indexes(db_path)
+
+
+def test_025_upgrade_is_idempotent_when_index_already_dropped(tmp_path, monkeypatch):
+    """MySQL DDL 非事务：上次已删索引但版本戳未推进时，重跑不得 1091 失败。"""
+    db_path = tmp_path / "documents-025-idem.db"
+    monkeypatch.setattr(settings, "DATABASE_URL", f"sqlite+aiosqlite:///{db_path.as_posix()}")
+    cfg = _cfg()
+
+    command.upgrade(cfg, "024_review_case_archive")
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.execute("DROP INDEX ix_documents_id")
+    command.upgrade(cfg, "head")
+    assert "ix_documents_id" not in _documents_indexes(db_path)

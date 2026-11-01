@@ -252,11 +252,16 @@ async def create_case(
     return case
 
 
+# 可安全重试的 MySQL 事务冲突：1213 死锁、1205 锁等待超时
+# （innodb_deadlock_detect=OFF 的部署只会报 1205）。
+_RETRYABLE_MYSQL_ERRS = frozenset({1205, 1213})
+
+
 def _is_mysql_deadlock(exc: OperationalError) -> bool:
-    """MySQL 1213（死锁）：可安全重试的事务冲突。"""
+    """MySQL 死锁/锁等待超时：可安全重试的事务冲突。"""
     orig = getattr(exc, "orig", None)
     args = getattr(orig, "args", ()) or ()
-    return bool(args) and args[0] == 1213
+    return bool(args) and args[0] in _RETRYABLE_MYSQL_ERRS
 
 
 def _collect_blocking_reasons(metas: dict[str, Any], readiness: dict[str, Any]) -> list[str]:

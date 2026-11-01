@@ -19,7 +19,7 @@ import uuid
 from types import SimpleNamespace
 
 import pytest
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 import app.models  # noqa: F401
@@ -117,7 +117,7 @@ async def _seed(factory, suffix: str) -> tuple[int, int, dict[str, Document]]:
         return user.id, org.id, docs
 
 
-async def _cleanup(factory, org_id: int, user_id: int, doc_ids: list[str]) -> None:
+async def _cleanup(factory, org_id: int, user_id: int) -> None:
     """按外键顺序清干净（review_evidence/item/export → case → 文档子表 → 文档 → 组织/用户）。"""
     async with factory() as db:
         case_ids = (
@@ -136,8 +136,9 @@ async def _cleanup(factory, org_id: int, user_id: int, doc_ids: list[str]) -> No
         await db.execute(
             delete(KnowledgeProcessingJob).where(KnowledgeProcessingJob.organization_id == org_id)
         )
-        await db.execute(delete(DocumentTag).where(DocumentTag.document_id.like("conc-%")))
-        await db.execute(delete(DocumentChunk).where(DocumentChunk.document_id.like("conc-%")))
+        org_docs = select(Document.id).where(Document.organization_id == org_id)
+        await db.execute(delete(DocumentTag).where(DocumentTag.document_id.in_(org_docs)))
+        await db.execute(delete(DocumentChunk).where(DocumentChunk.document_id.in_(org_docs)))
         await db.execute(delete(Document).where(Document.organization_id == org_id))
         await db.execute(delete(UserActivityLog).where(UserActivityLog.user_id == user_id))
         await db.execute(delete(Organization).where(Organization.id == org_id))
@@ -193,18 +194,26 @@ async def test_create_case_rejects_document_deleted_while_lock_contended():
             await deleter.execute(delete(Document).where(Document.id == docs["base"].id))
             await deleter.commit()
 
-            error = await asyncio.wait_for(task, timeout=15)
+            try:
+                error = await asyncio.wait_for(task, timeout=15)
+            except TimeoutError:
+                pytest.fail(
+                    "建案任务 15s 未返回：可能阻塞在文档行锁上（死锁/锁等待），请检查 InnoDB 状态"
+                )
 
         assert error is not None, "并发删除后建案必须失败而不是落库"
         assert error.error_code == "REVIEW_DOCUMENT_UNAVAILABLE"
-        assert error.detail["missing_sides"] == ["base"]
+        assert set(error.detail["missing_sides"]) == {"base"}
         async with factory() as db:
-            assert (
-                await db.execute(select(ReviewCase).where(ReviewCase.organization_id == org_id))
-            ).scalars().all() == []
+            case_count = (
+                await db.execute(
+                    select(func.count(ReviewCase.id)).where(ReviewCase.organization_id == org_id)
+                )
+            ).scalar()
+            assert case_count == 0, "复核失败时不得落库任何案件行"
     finally:
         if org_id is not None:
-            await _cleanup(factory, org_id, user_id, [docs["policy"].id, docs["revised"].id])
+            await _cleanup(factory, org_id, user_id)
         await engine.dispose()
 
 
@@ -267,7 +276,12 @@ async def test_demo_clear_then_create_case_cannot_reference_deleted_docs(monkeyp
             result = await demo_api.clear_demo_data(
                 current_user=SimpleNamespace(id=user_id), db=clearer
             )
-            error = await asyncio.wait_for(task, timeout=15)
+            try:
+                error = await asyncio.wait_for(task, timeout=15)
+            except TimeoutError:
+                pytest.fail(
+                    "建案任务 15s 未返回：可能阻塞在文档行锁上（死锁/锁等待），请检查 InnoDB 状态"
+                )
 
         assert result["data"]["documents_deleted"] == 3
         assert es_calls, "清理应触发 ES 删除"
@@ -275,10 +289,13 @@ async def test_demo_clear_then_create_case_cannot_reference_deleted_docs(monkeyp
         assert error.error_code == "REVIEW_DOCUMENT_UNAVAILABLE"
         assert set(error.detail["missing_sides"]) == {"policy", "base", "revised"}
         async with factory() as db:
-            assert (
-                await db.execute(select(ReviewCase).where(ReviewCase.organization_id == org_id))
-            ).scalars().all() == []
+            case_count = (
+                await db.execute(
+                    select(func.count(ReviewCase.id)).where(ReviewCase.organization_id == org_id)
+                )
+            ).scalar()
+            assert case_count == 0, "复核失败时不得落库任何案件行"
     finally:
         if org_id is not None:
-            await _cleanup(factory, org_id, user_id, [])
+            await _cleanup(factory, org_id, user_id)
         await engine.dispose()
