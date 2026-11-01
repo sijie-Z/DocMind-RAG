@@ -5,6 +5,14 @@ import logging
 from typing import Any
 
 from app.agent.registry import ToolResult, extended_surface_enabled, register_tool
+from app.core.config import settings
+from app.rag.source_provenance import (
+    LEGACY_UNVERIFIED,
+    PARSER_ORIGINAL,
+    STRICT,
+    normalize_mode,
+    original_text_of,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -163,6 +171,9 @@ async def compare_documents(
 
     from app.core.elasticsearch import ElasticsearchTools
 
+    strict_mode = normalize_mode(settings.RAG_SOURCE_PROVENANCE_MODE) == STRICT
+    missing_original_docs: list[str] = []
+    query_failed_docs: list[str] = []
     summaries = []
     for doc_id in document_ids:
         es_query = {
@@ -175,19 +186,49 @@ async def compare_documents(
                     ]
                 }
             },
-            "_source": ["chunk_text", "filename"],
+            "_source": ["chunk_text", "original_text", "text_provenance", "filename"],
         }
         try:
             res = await ElasticsearchTools.search_documents(es_query)
             hits = res.get("hits", {}).get("hits", [])
             if hits:
                 filename = hits[0].get("_source", {}).get("filename", doc_id)
-                text = " ".join(h.get("_source", {}).get("chunk_text", "")[:500] for h in hits[:10])
+                original_parts: list[str] = []
+                legacy_parts: list[str] = []
+                for hit in hits[:10]:
+                    source = hit.get("_source", {})
+                    original = original_text_of(source)
+                    if original is not None:
+                        original_parts.append(original[:500])
+                    else:
+                        legacy_parts.append(str(source.get("chunk_text") or "")[:500])
+                if original_parts:
+                    # 预览只纳入 O（legacy 片段被丢弃）：标签按「实际返回内容」标注，
+                    # 丢弃数量如实单列，避免用采样级 mixed 误导机器消费者。
+                    text = " ".join(original_parts)
+                    doc_provenance = PARSER_ORIGINAL
+                    legacy_hits_ignored = len(legacy_parts)
+                elif strict_mode:
+                    # strict：没有任何可验证原文的命中不得以增强文本替代
+                    missing_original_docs.append(doc_id)
+                    text = ""
+                    doc_provenance = LEGACY_UNVERIFIED
+                    legacy_hits_ignored = 0
+                else:
+                    # compat：允许回退检索增强文本，但逐段显式标记未验证
+                    text = " ".join(
+                        f"[{LEGACY_UNVERIFIED}] {part}" for part in legacy_parts if part
+                    )
+                    doc_provenance = LEGACY_UNVERIFIED
+                    legacy_hits_ignored = 0
                 summaries.append(
                     {
                         "id": doc_id,
                         "filename": filename,
                         "text": text[:2000],
+                        "text_provenance": doc_provenance,
+                        "sampled_hits": len(hits[:10]),
+                        "legacy_hits_ignored": legacy_hits_ignored,
                         "chunk_count": len(hits),
                     }
                 )
@@ -197,18 +238,47 @@ async def compare_documents(
                         "id": doc_id,
                         "filename": "Not found",
                         "text": "",
+                        "text_provenance": LEGACY_UNVERIFIED,
+                        "sampled_hits": 0,
+                        "legacy_hits_ignored": 0,
                         "chunk_count": 0,
                     }
                 )
         except Exception as e:
+            if strict_mode:
+                query_failed_docs.append(doc_id)
             summaries.append(
                 {
                     "id": doc_id,
                     "filename": f"Error: {e}",
                     "text": "",
+                    "text_provenance": LEGACY_UNVERIFIED,
+                    "sampled_hits": 0,
+                    "legacy_hits_ignored": 0,
                     "chunk_count": 0,
                 }
             )
+
+    if strict_mode and (missing_original_docs or query_failed_docs):
+        # 复用既有 ToolErrorType 契约：code 用 invalid_configuration，
+        # 机器可读的 provenance 状态放进 raw（与 core_tools._provenance_failure 同口径）。
+        detail_parts = []
+        if missing_original_docs:
+            detail_parts.append(f"缺少可验证原文：{', '.join(sorted(missing_original_docs))}")
+        if query_failed_docs:
+            detail_parts.append(f"查询失败：{', '.join(sorted(query_failed_docs))}")
+        return ToolResult.fail(
+            code="invalid_configuration",
+            message=(
+                "strict 模式不会把检索增强文本当作文档内容；" + "；".join(detail_parts) + "。"
+            ),
+            raw={
+                "code": "source_original_unavailable",
+                "status": "needs_rebuild",
+                "document_ids": sorted(missing_original_docs),
+                "query_failed_document_ids": sorted(query_failed_docs),
+            },
+        )
 
     # Build comparison output
     aspect_prompts = {
@@ -227,6 +297,9 @@ async def compare_documents(
         output_parts.append(
             f"\n### {s['filename']} ({s['id'][:8]}...)\n"
             f"Chunks: {s['chunk_count']}\n"
+            f"Sampled hits: {s['sampled_hits']}\n"
+            f"Provenance: {s['text_provenance']}\n"
+            f"Legacy hits ignored: {s['legacy_hits_ignored']}\n"
             f"Preview: {s['text'][:300]}..."
         )
 
