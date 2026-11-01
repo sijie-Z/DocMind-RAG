@@ -23,7 +23,7 @@ class KnowledgeJobStatus(enum.Enum):
 class KnowledgeProcessingJob(Base):
     __tablename__ = "knowledge_processing_jobs"
 
-    id: Mapped[int] = mapped_column(primary_key=True, index=True, autoincrement=True)
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     document_id: Mapped[str] = mapped_column(String(36), ForeignKey("documents.id"), index=True)
     organization_id: Mapped[int] = mapped_column(
         Integer, ForeignKey("organizations.id"), index=True

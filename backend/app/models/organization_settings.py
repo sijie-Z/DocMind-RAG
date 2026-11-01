@@ -40,7 +40,7 @@ class OrganizationSettings(Base):
     __tablename__ = "organization_settings"
     __table_args__ = (UniqueConstraint("organization_id", name="uq_organization_settings_org"),)
 
-    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    id: Mapped[int] = mapped_column(primary_key=True)
     organization_id: Mapped[int] = mapped_column(
         ForeignKey("organizations.id", ondelete="CASCADE"),
         nullable=False,

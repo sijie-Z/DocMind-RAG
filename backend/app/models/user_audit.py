@@ -15,7 +15,7 @@ from app.core.database import Base
 class UserLoginSession(Base):
     __tablename__ = "user_login_sessions"
 
-    id: Mapped[int] = mapped_column(primary_key=True, index=True, autoincrement=True)
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"), index=True)
     token_hash: Mapped[str] = mapped_column(String(128), unique=True, index=True)
     device_name: Mapped[str | None] = mapped_column(String(120))
@@ -32,7 +32,7 @@ class UserLoginSession(Base):
 class UserActivityLog(Base):
     __tablename__ = "user_activity_logs"
 
-    id: Mapped[int] = mapped_column(primary_key=True, index=True, autoincrement=True)
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"), index=True)
     action: Mapped[str] = mapped_column(String(100), index=True)
     target_type: Mapped[str | None] = mapped_column(String(80))

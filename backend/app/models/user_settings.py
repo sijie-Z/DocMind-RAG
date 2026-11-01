@@ -15,7 +15,7 @@ class UserSettings(Base):
 
     __tablename__ = "user_settings"
 
-    id: int = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    id: int = Column(Integer, primary_key=True, autoincrement=True)
     user_id: int = Column(Integer, ForeignKey("users.id"), unique=True, nullable=False, index=True)
     language: str = Column(String(10), default="zh")
     theme: str = Column(String(20), default="light")

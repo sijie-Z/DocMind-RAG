@@ -16,7 +16,7 @@ class PromptTemplateVersion(Base):
 
     __tablename__ = "prompt_template_versions"
 
-    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    id: Mapped[int] = mapped_column(primary_key=True)
     prompt_id: Mapped[int] = mapped_column(
         Integer, ForeignKey("prompt_templates.id", ondelete="CASCADE"), index=True, comment="模板ID"
     )

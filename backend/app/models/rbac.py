@@ -96,7 +96,7 @@ class Permission(Base):
 
     __tablename__ = "permissions"
 
-    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    id: Mapped[int] = mapped_column(primary_key=True)
     name: Mapped[str] = mapped_column(
         String(100), unique=True, index=True, comment="权限名称，例如 document:create"
     )
@@ -117,7 +117,7 @@ class Role(Base):
 
     __tablename__ = "roles"
 
-    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    id: Mapped[int] = mapped_column(primary_key=True)
     name: Mapped[str] = mapped_column(
         String(100), unique=True, index=True, comment="角色名称，例如 OrgAdmin"
     )
