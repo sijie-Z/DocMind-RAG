@@ -14,9 +14,10 @@ fail_count 后原因同样无处可见。修复后：
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from sqlalchemy.exc import OperationalError
 
 import app.services.knowledge_service as ks_mod
-from app.exceptions import AppError, NotFoundError
+from app.exceptions import AppError, ConflictError, NotFoundError
 
 
 def _svc():
@@ -185,3 +186,52 @@ async def test_endpoint_keeps_404_for_missing_document(monkeypatch):
         )
 
     assert exc_info.value.status_code == 404
+
+
+# ── MySQL 事务冲突：1205/1213 映射为可重试 409（Batch 11） ────────────────────
+
+
+class _ConflictSession(_ExplodingSession):
+    """第一条查询即抛指定错误码的 OperationalError（死锁/锁等待超时）。"""
+
+    def __init__(self, code: int):
+        self._code = code
+
+    async def execute(self, *args, **kwargs):
+        raise OperationalError("SELECT ... FOR UPDATE", {}, Exception(self._code))
+
+
+@pytest.mark.asyncio
+async def test_delete_deadlock_maps_to_retryable_conflict(monkeypatch):
+    """1213 死锁：删除应返回可重试 409，而不是 500 吞进通用文案。"""
+    monkeypatch.setattr(ks_mod, "AsyncSessionLocal", lambda: _ConflictSession(1213))
+
+    with pytest.raises(ConflictError) as exc_info:
+        await _svc().delete_knowledge_thoroughly("doc-1")
+
+    assert exc_info.value.status_code == 409
+    assert exc_info.value.error_code == "DOCUMENT_DELETE_CONFLICT"
+    assert "重试" in exc_info.value.message
+
+
+@pytest.mark.asyncio
+async def test_delete_lock_wait_timeout_maps_to_retryable_conflict(monkeypatch):
+    """1205 锁等待超时（innodb_deadlock_detect=OFF 部署）同样可重试。"""
+    monkeypatch.setattr(ks_mod, "AsyncSessionLocal", lambda: _ConflictSession(1205))
+
+    with pytest.raises(ConflictError) as exc_info:
+        await _svc().delete_knowledge_thoroughly("doc-1")
+
+    assert exc_info.value.error_code == "DOCUMENT_DELETE_CONFLICT"
+
+
+@pytest.mark.asyncio
+async def test_delete_non_retryable_operational_error_stays_500(monkeypatch):
+    """非 1205/1213 的 OperationalError 保持原 500 语义，不得误报为可重试。"""
+    monkeypatch.setattr(ks_mod, "AsyncSessionLocal", lambda: _ConflictSession(1317))
+
+    with pytest.raises(AppError) as exc_info:
+        await _svc().delete_knowledge_thoroughly("doc-1")
+
+    assert exc_info.value.status_code == 500
+    assert "OperationalError" in exc_info.value.message

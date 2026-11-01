@@ -8,9 +8,11 @@ from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import and_, delete, func, or_, select
+from sqlalchemy.exc import OperationalError
 
 from app.core.config import settings
 from app.core.database import AsyncSessionLocal
+from app.core.db_conflicts import is_retryable_mysql_conflict
 from app.core.elasticsearch import get_elasticsearch
 from app.core.log_safety import log_safe
 from app.exceptions import AppError, ConflictError, ServiceUnavailableError
@@ -454,6 +456,17 @@ class KnowledgeService:
                 return DeleteOutcome(success=True, file_cleanup_pending=file_cleanup_pending)
         except AppError:
             raise
+        except OperationalError as e:
+            if is_retryable_mysql_conflict(e):
+                # 与并发建案/删除竞争同一行时，InnoDB 会回滚一方（1213）或让其
+                # 锁等待超时（1205）：这是可重试的事务冲突，不应报成 500。
+                logger.warning(f"彻底删除文档遇到可重试的 MySQL 事务冲突: {type(e).__name__}: {e}")
+                raise ConflictError(
+                    "文档删除与并发操作冲突，请重试",
+                    error_code="DOCUMENT_DELETE_CONFLICT",
+                ) from e
+            logger.error(f"彻底删除文档失败: {type(e).__name__}: {e}")
+            raise AppError(f"删除文档失败: {type(e).__name__}: {e}") from e
         except Exception as e:
             # 不再 return False 吞掉原因：把原始错误类型与消息带给调用方，
             # 让 500 响应体能定位到问题（issue #174）。

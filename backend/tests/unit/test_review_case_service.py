@@ -855,15 +855,7 @@ def test_022_migration_roundtrip(tmp_path, monkeypatch):
         assert name not in tables
 
 
-# ── MySQL 1213 死锁映射（Batch 10） ─────────────────────────────────────────
-
-
-def test_is_retryable_mysql_conflict_codes():
-    # 1213 死锁与 1205 锁等待超时（innodb_deadlock_detect=OFF 的部署）都可重试
-    assert svc._is_mysql_deadlock(OperationalError("stmt", {}, Exception(1213))) is True
-    assert svc._is_mysql_deadlock(OperationalError("stmt", {}, Exception(1205))) is True
-    assert svc._is_mysql_deadlock(OperationalError("stmt", {}, Exception(1317))) is False
-    assert svc._is_mysql_deadlock(OperationalError("stmt", {}, Exception())) is False
+# ── MySQL 1213 死锁映射（Batch 10；判定工具已提取到 app.core.db_conflicts） ──
 
 
 @pytest.mark.asyncio
@@ -1035,3 +1027,16 @@ def test_025_upgrade_is_idempotent_when_index_already_dropped(tmp_path, monkeypa
         conn.execute("DROP INDEX ix_documents_id")
     command.upgrade(cfg, "head")
     assert "ix_documents_id" not in _documents_indexes(db_path)
+
+
+def test_025_downgrade_is_idempotent_when_index_already_exists(tmp_path, monkeypatch):
+    """对称方向：索引已被提前重建时，downgrade 不得因重复建索引（1061）失败。"""
+    db_path = tmp_path / "documents-025-down-idem.db"
+    monkeypatch.setattr(settings, "DATABASE_URL", f"sqlite+aiosqlite:///{db_path.as_posix()}")
+    cfg = _cfg()
+
+    command.upgrade(cfg, "head")
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.execute("CREATE UNIQUE INDEX ix_documents_id ON documents (id)")
+    command.downgrade(cfg, "024_review_case_archive")
+    assert "ix_documents_id" in _documents_indexes(db_path)
