@@ -3,7 +3,9 @@
 - GraphRAG 实体抽取（处理链 + 回填脚本）不得用检索增强文本 E 作为输入；
 - 搜索联想优先原文派生片段；
 - SQL 工具白名单提供 original_text，不再只能读 chunk_text；
-- 旧解析写入路径补齐 original_text 与 provenance 标记（与 worker 同口径）。
+- 旧解析写入路径补齐 original_text 与 provenance 标记（旧路径更严格：仅
+  marker=parser_original 且非空字符串 O 才写列；worker 写入口按列非空判定，
+  两者都满足「列非空 ⟹ 已证实」的不变式）。
 """
 
 from types import SimpleNamespace
@@ -84,11 +86,17 @@ async def test_backfill_fetch_text_requires_attested_original():
     session = _FakeSession()
     text = await fetch_document_text(session, "doc-1")
 
-    # SQL 本身必须同时取 original_text 与 meta_data（否则无法校验 marker）
+    # SQL 本身必须同时取 original_text 与 meta_data（否则无法校验 marker），
+    # 且列序固定为 (chunk_text, original_text, meta_data) —— 解包顺序依赖它
     compiled = str(session.statement.compile(dialect=sqlite.dialect()))
     assert "document_chunks.chunk_text" in compiled
     assert "document_chunks.original_text" in compiled
     assert "document_chunks.meta_data" in compiled
+    assert (
+        compiled.index("document_chunks.chunk_text")
+        < compiled.index("document_chunks.original_text")
+        < compiled.index("document_chunks.meta_data")
+    )
 
     assert O_SENTINEL in text
     assert "E-SENTINEL" not in text

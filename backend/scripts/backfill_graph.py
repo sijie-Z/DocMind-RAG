@@ -77,7 +77,8 @@ async def fetch_document_text(session, document_id: str) -> str:
     parts: list[str] = []
     for chunk_text, original_text, meta_data in rows:
         is_original = (
-            provenance_of(meta_data or {}) == PARSER_ORIGINAL
+            isinstance(meta_data, dict)
+            and provenance_of(meta_data) == PARSER_ORIGINAL
             and isinstance(original_text, str)
             and bool(original_text.strip())
         )
