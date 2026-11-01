@@ -783,7 +783,11 @@ class DocumentParser:
                             document_id=document_id,
                             chunk_index=chunk_data["chunk_index"],
                             chunk_text=chunk_data["chunk_text"],
-                            original_text=original_text,
+                            # 只有被标记证实的原文才入列：与 preview/review 的
+                            # 「列非空 ⟹ 写入方已证实」不变式保持一致。
+                            original_text=(
+                                original_text if provenance == PARSER_ORIGINAL else None
+                            ),
                             chunk_length=chunk_data["chunk_length"],
                             start_pos=chunk_data.get("start_pos"),
                             end_pos=chunk_data.get("end_pos"),

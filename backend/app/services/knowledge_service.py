@@ -229,11 +229,11 @@ class KnowledgeService:
             # 主搜索端点仍必须 409，不得把拒答伪装成空结果。
             logger.warning(f"Search suggestions degraded (source original unavailable): {e}")
             return []
-        # 建议文本优先使用原文派生片段（snippet/original_text），
-        # 只有 legacy 结果才回退增强文本 text，避免把生成背景摘要当文档内容。
+        # 展示用正文用格式化层搬运的 content（parser_original 时是 O 派生
+        # snippet；legacy 是检索文本 snippet）。text 恒为增强文本 E，只作最后回退。
         suggestions: list[str] = []
         for result in results:
-            text = result.get("snippet") or result.get("original_text") or result.get("text") or ""
+            text = result.get("content") or result.get("text") or ""
             if text:
                 suggestions.append(text[:50] + "...")
         return suggestions

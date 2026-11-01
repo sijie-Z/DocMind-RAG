@@ -9,6 +9,7 @@
 from types import SimpleNamespace
 
 import pytest
+from sqlalchemy.dialects import sqlite
 
 import app.services.document_parser as parser_mod
 from app.agent.tools.code_execution import _is_safe_select_sql
@@ -62,37 +63,76 @@ class _Rows:
 
 
 class _FakeSession:
-    async def execute(self, _stmt):
-        # (chunk_text, original_text) 行；legacy 行 original_text 为 NULL
-        return _Rows([(E_SENTINEL, O_SENTINEL), ("LEGACY-CHUNK", None)])
+    def __init__(self):
+        self.statement = None
+
+    async def execute(self, stmt):
+        self.statement = stmt
+        # (chunk_text, original_text, meta_data)；只有 marker 证实且非空才用 O
+        return _Rows(
+            [
+                (E_SENTINEL, O_SENTINEL, {"text_provenance": PARSER_ORIGINAL}),
+                ("LEGACY-CHUNK", None, {"text_provenance": LEGACY_UNVERIFIED}),
+                ("E-UNMARKED", "O-UNMARKED", {}),
+                ("E-BLANK-O", "   ", {"text_provenance": PARSER_ORIGINAL}),
+            ]
+        )
 
 
 @pytest.mark.asyncio
-async def test_backfill_fetch_text_prefers_original():
-    text = await fetch_document_text(_FakeSession(), "doc-1")
+async def test_backfill_fetch_text_requires_attested_original():
+    session = _FakeSession()
+    text = await fetch_document_text(session, "doc-1")
+
+    # SQL 本身必须同时取 original_text 与 meta_data（否则无法校验 marker）
+    compiled = str(session.statement.compile(dialect=sqlite.dialect()))
+    assert "document_chunks.chunk_text" in compiled
+    assert "document_chunks.original_text" in compiled
+    assert "document_chunks.meta_data" in compiled
 
     assert O_SENTINEL in text
     assert "E-SENTINEL" not in text
     assert "LEGACY-CHUNK" in text
+    # 无 marker 的 original_text 与空白 O 都不得当作原文
+    assert "O-UNMARKED" not in text
+    assert "E-UNMARKED" in text
+    assert "E-BLANK-O" in text
 
 
-# ── 2. 搜索联想：原文派生片段优先 ───────────────────────────────────────────
+# ── 2. 搜索联想：走真实格式化层，优先 O 派生 content ───────────────────────
 
 
 @pytest.mark.asyncio
-async def test_search_suggestions_prefer_original_derived_text(monkeypatch):
-    async def _search(self, query, organization_id, top_k=5, search_mode=None):
-        return [
-            {"text": "E1-TEXT", "snippet": "O1-SNIPPET"},
-            {"text": "E2-TEXT"},
-            {"text": "E3-TEXT", "snippet": "", "original_text": "O3-ORIG"},
-            {"text": ""},
-        ]
+async def test_search_suggestions_use_formatted_content(monkeypatch):
+    """search_knowledge 的真实返回结构：content = O 派生 snippet，text = E。"""
 
-    monkeypatch.setattr(KnowledgeService, "search_knowledge", _search)
+    async def _search(self, query, organization_id, top_k=5, search_mode=None, **kwargs):
+        return [
+            {
+                "document_id": "doc-1",
+                "text": E_SENTINEL,
+                "snippet": O_SENTINEL,
+                "text_provenance": PARSER_ORIGINAL,
+                "score": 1.0,
+                "filename": "a.txt",
+            },
+            {
+                "document_id": "doc-2",
+                "text": "LEGACY-TEXT",
+                "snippet": "",
+                "text_provenance": LEGACY_UNVERIFIED,
+                "score": 0.5,
+                "filename": "b.txt",
+            },
+        ], None
+
+    monkeypatch.setattr(RagServiceFacade, "search_knowledge_base", _search)
 
     suggestions = await KnowledgeService().get_search_suggestions("q", "1")
-    assert suggestions == ["O1-SNIPPET...", "E2-TEXT...", "O3-ORIG..."]
+
+    assert suggestions[0] == O_SENTINEL[:50] + "..."
+    assert "E-SENTINEL" not in suggestions[0]
+    assert suggestions[1] == "LEGACY-TEXT..."
 
 
 # ── 3. SQL 工具：白名单提供 original_text ───────────────────────────────────
@@ -187,6 +227,35 @@ async def test_legacy_process_document_writes_original_and_provenance(monkeypatc
                     "end_pos": 22,
                     "metadata": {},
                 },
+                {
+                    "chunk_index": 2,
+                    "chunk_text": "E-UNMARKED",
+                    "original_text": "O-UNMARKED",
+                    "chunk_length": 10,
+                    "start_pos": 22,
+                    "end_pos": 32,
+                    "metadata": {},
+                },
+                {
+                    "chunk_index": 3,
+                    "chunk_text": "E-BLANK-O",
+                    "original_text": "   ",
+                    "text_provenance": PARSER_ORIGINAL,
+                    "chunk_length": 10,
+                    "start_pos": 32,
+                    "end_pos": 42,
+                    "metadata": {},
+                },
+                {
+                    "chunk_index": 4,
+                    "chunk_text": "E-NONSTR-O",
+                    "original_text": 123,
+                    "text_provenance": PARSER_ORIGINAL,
+                    "chunk_length": 10,
+                    "start_pos": 42,
+                    "end_pos": 52,
+                    "metadata": {},
+                },
             ],
         }
 
@@ -196,8 +265,15 @@ async def test_legacy_process_document_writes_original_and_provenance(monkeypatc
     assert ok is True
     assert session.committed is True
 
-    first, second = session.added
-    assert first.original_text == O_SENTINEL
-    assert first.meta_data["text_provenance"] == PARSER_ORIGINAL
-    assert second.original_text is None
-    assert second.meta_data["text_provenance"] == LEGACY_UNVERIFIED
+    attested, legacy, unmarked, blank_o, nonstr_o = session.added
+    assert attested.original_text == O_SENTINEL
+    assert attested.meta_data["text_provenance"] == PARSER_ORIGINAL
+    # 「列非空 ⟹ 写入方已证实」不变式：未证实/空白/非字符串 O 一律不写列
+    assert legacy.original_text is None
+    assert legacy.meta_data["text_provenance"] == LEGACY_UNVERIFIED
+    assert unmarked.original_text is None
+    assert unmarked.meta_data["text_provenance"] == LEGACY_UNVERIFIED
+    assert blank_o.original_text is None
+    assert blank_o.meta_data["text_provenance"] == LEGACY_UNVERIFIED
+    assert nonstr_o.original_text is None
+    assert nonstr_o.meta_data["text_provenance"] == LEGACY_UNVERIFIED
