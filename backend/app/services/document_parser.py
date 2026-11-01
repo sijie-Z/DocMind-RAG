@@ -25,6 +25,7 @@ from sqlalchemy.orm import selectinload
 from app.core.config import settings
 from app.core.database import AsyncSessionLocal
 from app.models.document import Document, DocumentChunk, DocumentStatus
+from app.rag.source_provenance import PARSER_ORIGINAL
 
 logger = logging.getLogger(__name__)
 
@@ -705,6 +706,10 @@ class DocumentParser:
                     "chunk_index": i,
                     "chunk_text": enhanced_text,
                     "original_text": chunk_text,
+                    # 解析器即生产者：original_text 由本函数从解析文本直接产出，
+                    # 显式标记 provenance，下游（parse-upload 等）才能按统一口径
+                    # 确认「这是原文」而不是缺标记即 legacy。
+                    "text_provenance": PARSER_ORIGINAL,
                     "chunk_length": len(enhanced_text),
                     # #197：块在原文中的字符区间（document_chunks.start_pos/end_pos）
                     "start_pos": chunk_meta.get("start_pos"),
