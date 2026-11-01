@@ -11,12 +11,14 @@ fail_count 后原因同样无处可见。修复后：
 不依赖数据库：会话工厂/服务方法按用例替换。
 """
 
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from sqlalchemy.exc import OperationalError
 
 import app.services.knowledge_service as ks_mod
-from app.exceptions import AppError, NotFoundError
+from app.exceptions import AppError, ConflictError, NotFoundError
 
 
 def _svc():
@@ -98,7 +100,11 @@ async def test_batch_delete_continues_and_collects_reasons(monkeypatch):
     assert result["success_count"] == 2
     assert result["fail_count"] == 1
     assert result["errors"] == [
-        {"document_id": "bad", "reason": "删除文档失败: IntegrityError: (1451, ...)"}
+        {
+            "document_id": "bad",
+            "reason": "删除文档失败: IntegrityError: (1451, ...)",
+            "error_code": "INTERNAL_ERROR",
+        }
     ]
 
 
@@ -185,3 +191,189 @@ async def test_endpoint_keeps_404_for_missing_document(monkeypatch):
         )
 
     assert exc_info.value.status_code == 404
+
+
+# ── MySQL 事务冲突：1205/1213 映射为可重试 409（Batch 11） ────────────────────
+
+
+class _ConflictSession(_ExplodingSession):
+    """第一条查询即抛指定错误码的 OperationalError（死锁/锁等待超时）。"""
+
+    def __init__(self, code: int):
+        self._code = code
+
+    async def execute(self, *args, **kwargs):
+        # 真实 asyncmy/aiomysql 驱动异常是 (errno, message) 两元组
+        raise OperationalError("SELECT ... FOR UPDATE", {}, Exception(self._code, "driver message"))
+
+
+@pytest.mark.asyncio
+async def test_delete_deadlock_maps_to_retryable_conflict(monkeypatch):
+    """1213 死锁：删除应返回可重试 409，而不是 500 吞进通用文案。"""
+    monkeypatch.setattr(ks_mod, "AsyncSessionLocal", lambda: _ConflictSession(1213))
+
+    with pytest.raises(ConflictError) as exc_info:
+        await _svc().delete_knowledge_thoroughly("doc-1")
+
+    assert exc_info.value.status_code == 409
+    assert exc_info.value.error_code == "DOCUMENT_DELETE_CONFLICT"
+    assert "重试" in exc_info.value.message
+    # 原始驱动异常必须保留在 cause 链里（排障依据），不能被吞掉
+    assert isinstance(exc_info.value.__cause__, OperationalError)
+    assert exc_info.value.__cause__.orig.args[0] == 1213
+
+
+@pytest.mark.asyncio
+async def test_delete_lock_wait_timeout_maps_to_retryable_conflict(monkeypatch):
+    """1205 锁等待超时（innodb_deadlock_detect=OFF 部署）同样可重试。"""
+    monkeypatch.setattr(ks_mod, "AsyncSessionLocal", lambda: _ConflictSession(1205))
+
+    with pytest.raises(ConflictError) as exc_info:
+        await _svc().delete_knowledge_thoroughly("doc-1")
+
+    assert exc_info.value.status_code == 409
+    assert exc_info.value.error_code == "DOCUMENT_DELETE_CONFLICT"
+    assert "重试" in exc_info.value.message
+    assert isinstance(exc_info.value.__cause__, OperationalError)
+    assert exc_info.value.__cause__.orig.args[0] == 1205
+
+
+@pytest.mark.asyncio
+async def test_delete_non_retryable_operational_error_stays_500(monkeypatch):
+    """非 1205/1213 的 OperationalError 保持原 500 语义，不得误报为可重试。"""
+    monkeypatch.setattr(ks_mod, "AsyncSessionLocal", lambda: _ConflictSession(1317))
+
+    with pytest.raises(AppError) as exc_info:
+        await _svc().delete_knowledge_thoroughly("doc-1")
+
+    assert exc_info.value.status_code == 500
+    assert "OperationalError" in exc_info.value.message
+
+
+@pytest.mark.asyncio
+async def test_batch_delete_collects_conflict_and_continues(monkeypatch):
+    """批量删除遇到可重试冲突：按条收集原因、不中断后续文档。"""
+    svc = _svc()
+    calls: list[str] = []
+
+    async def _fake_delete(doc_id, organization_id=None):
+        calls.append(doc_id)
+        if doc_id == "busy":
+            raise ConflictError(
+                "文档删除与并发操作冲突，请重试",
+                error_code="DOCUMENT_DELETE_CONFLICT",
+            )
+        return True
+
+    monkeypatch.setattr(svc, "delete_knowledge_thoroughly", _fake_delete)
+
+    result = await svc.batch_delete_knowledge(["ok-1", "busy", "ok-2"])
+
+    assert calls == ["ok-1", "busy", "ok-2"], "冲突后必须继续处理后续文档"
+    assert result["success_count"] == 2
+    assert result["fail_count"] == 1
+    assert result["errors"] == [
+        {
+            "document_id": "busy",
+            "reason": "文档删除与并发操作冲突，请重试",
+            "error_code": "DOCUMENT_DELETE_CONFLICT",
+        }
+    ]
+
+
+_DOC = SimpleNamespace(id="doc-1", organization_id=1, file_path="1/doc-1.txt")
+
+
+class _DocRowResult:
+    def scalar_one_or_none(self):
+        return _DOC
+
+
+class _NoCaseRefsResult:
+    def scalars(self):
+        return self
+
+    def all(self):
+        return []
+
+
+class _ZeroCountResult:
+    def scalar(self):
+        return 0
+
+
+class _CommitConflictSession:
+    """文档存在、引用检查通过、ES 删除成功，最终 commit 抛 1213。"""
+
+    def __init__(self):
+        self._results = [_DocRowResult(), _NoCaseRefsResult(), _ZeroCountResult()]
+        self.commit_attempted = False
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *args):
+        return False
+
+    async def execute(self, *args, **kwargs):
+        return self._results.pop(0) if self._results else None
+
+    async def commit(self):
+        self.commit_attempted = True
+        raise OperationalError("COMMIT", {}, Exception(1213, "Deadlock found"))
+
+
+@pytest.mark.asyncio
+async def test_delete_commit_deadlock_is_retryable_after_es_deleted(monkeypatch):
+    """ES 已删、DB commit 前的 1213：仍映射 409 可重试（重试幂等收敛）。"""
+    session = _CommitConflictSession()
+    monkeypatch.setattr(ks_mod, "AsyncSessionLocal", lambda: session)
+    svc = _svc()
+    es_calls: list[str] = []
+
+    async def _es_ok(doc_id):
+        es_calls.append(doc_id)
+        return True
+
+    monkeypatch.setattr(svc, "delete_es_by_document_id", _es_ok)
+
+    with pytest.raises(ConflictError) as exc_info:
+        await svc.delete_knowledge_thoroughly("doc-1")
+
+    assert es_calls == ["doc-1"], "commit 前的 ES 删除已经发生"
+    assert session.commit_attempted is True
+    assert exc_info.value.status_code == 409
+    assert exc_info.value.error_code == "DOCUMENT_DELETE_CONFLICT"
+    assert isinstance(exc_info.value.__cause__, OperationalError)
+    assert exc_info.value.__cause__.orig.args[0] == 1213
+
+
+@pytest.mark.asyncio
+async def test_endpoint_propagates_delete_conflict_409(monkeypatch):
+    """端点层不得把可重试冲突吞掉或改写成 500。"""
+    from app.api.v1.endpoints import knowledge as knowledge_api
+
+    doc = MagicMock()
+    doc.organization_id = 1
+    doc.filename = "x.txt"
+    monkeypatch.setattr(knowledge_api, "get_document_for_user", AsyncMock(return_value=doc))
+    monkeypatch.setattr(
+        knowledge_api.knowledge_service,
+        "delete_knowledge",
+        AsyncMock(
+            side_effect=ConflictError(
+                "文档删除与并发操作冲突，请重试", error_code="DOCUMENT_DELETE_CONFLICT"
+            )
+        ),
+    )
+    audit = AsyncMock()
+    monkeypatch.setattr(knowledge_api.audit_service, "log_activity", audit)
+
+    with pytest.raises(ConflictError) as exc_info:
+        await knowledge_api.delete_knowledge_document(
+            "doc-1", current_user=MagicMock(), db=MagicMock()
+        )
+
+    assert exc_info.value.status_code == 409
+    assert exc_info.value.error_code == "DOCUMENT_DELETE_CONFLICT"
+    audit.assert_not_awaited()

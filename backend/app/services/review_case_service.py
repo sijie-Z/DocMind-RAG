@@ -25,6 +25,7 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.db_conflicts import is_retryable_mysql_conflict
 from app.core.security import get_user_org_id
 from app.exceptions import (
     AuthorizationError,
@@ -242,7 +243,7 @@ async def create_case(
     except OperationalError as exc:
         # 防御性映射：即使未来出现新的索引锁序颠倒（1213），也返回可重试的
         # 409 而不是 500。根因修复见迁移 025（去掉冗余 ix_documents_id）。
-        if not _is_mysql_deadlock(exc):
+        if not is_retryable_mysql_conflict(exc):
             raise
         await session.rollback()
         raise ConflictError(
@@ -250,18 +251,6 @@ async def create_case(
         ) from exc
     await session.refresh(case)
     return case
-
-
-# 可安全重试的 MySQL 事务冲突：1213 死锁、1205 锁等待超时
-# （innodb_deadlock_detect=OFF 的部署只会报 1205）。
-_RETRYABLE_MYSQL_ERRS = frozenset({1205, 1213})
-
-
-def _is_mysql_deadlock(exc: OperationalError) -> bool:
-    """MySQL 死锁/锁等待超时：可安全重试的事务冲突。"""
-    orig = getattr(exc, "orig", None)
-    args = getattr(orig, "args", ()) or ()
-    return bool(args) and args[0] in _RETRYABLE_MYSQL_ERRS
 
 
 def _collect_blocking_reasons(metas: dict[str, Any], readiness: dict[str, Any]) -> list[str]:

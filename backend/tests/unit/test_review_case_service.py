@@ -855,15 +855,7 @@ def test_022_migration_roundtrip(tmp_path, monkeypatch):
         assert name not in tables
 
 
-# ── MySQL 1213 死锁映射（Batch 10） ─────────────────────────────────────────
-
-
-def test_is_retryable_mysql_conflict_codes():
-    # 1213 死锁与 1205 锁等待超时（innodb_deadlock_detect=OFF 的部署）都可重试
-    assert svc._is_mysql_deadlock(OperationalError("stmt", {}, Exception(1213))) is True
-    assert svc._is_mysql_deadlock(OperationalError("stmt", {}, Exception(1205))) is True
-    assert svc._is_mysql_deadlock(OperationalError("stmt", {}, Exception(1317))) is False
-    assert svc._is_mysql_deadlock(OperationalError("stmt", {}, Exception())) is False
+# ── MySQL 1213 死锁映射（Batch 10；判定工具已提取到 app.core.db_conflicts） ──
 
 
 @pytest.mark.asyncio
@@ -897,7 +889,10 @@ async def test_create_case_maps_deadlock_to_retryable_conflict(monkeypatch):
 
         async def execute(self, *args, **_kwargs):
             self.statements.append(args[0])
-            raise OperationalError("SELECT documents.id ... FOR UPDATE", {}, Exception(1213))
+            # 真实 asyncmy/aiomysql 驱动异常是 (errno, message) 两元组
+            raise OperationalError(
+                "SELECT documents.id ... FOR UPDATE", {}, Exception(1213, "Deadlock found")
+            )
 
         async def rollback(self):
             self.rolled_back = True
@@ -969,7 +964,9 @@ async def test_create_case_reraises_non_retryable_operational_error(monkeypatch)
 
     class _BrokenSession:
         async def execute(self, *_args, **_kwargs):
-            raise OperationalError("SELECT ...", {}, Exception(1317))
+            raise OperationalError(
+                "SELECT ...", {}, Exception(1317, "Query execution was interrupted")
+            )
 
         async def rollback(self):
             return None
@@ -1006,6 +1003,16 @@ def _documents_indexes(db_path: Path) -> set[str]:
         return {row[1] for row in conn.execute("PRAGMA index_list('documents')")}
 
 
+def _index_definition(db_path: Path, name: str) -> tuple[bool, list[str]]:
+    """索引定义：(是否唯一, 列序)。只断言名字会放过 unique/列集合变异。"""
+    with sqlite3.connect(str(db_path)) as conn:
+        unique = any(
+            row[1] == name and row[2] == 1 for row in conn.execute("PRAGMA index_list('documents')")
+        )
+        columns = [row[2] for row in conn.execute(f"PRAGMA index_info('{name}')")]
+    return unique, columns
+
+
 def test_025_migration_roundtrip_and_idempotent(tmp_path, monkeypatch):
     db_path = tmp_path / "documents-025.db"
     monkeypatch.setattr(settings, "DATABASE_URL", f"sqlite+aiosqlite:///{db_path.as_posix()}")
@@ -1019,6 +1026,7 @@ def test_025_migration_roundtrip_and_idempotent(tmp_path, monkeypatch):
 
     command.downgrade(cfg, "024_review_case_archive")
     assert "ix_documents_id" in _documents_indexes(db_path)
+    assert _index_definition(db_path, "ix_documents_id") == (True, ["id"])
 
     command.upgrade(cfg, "head")
     assert "ix_documents_id" not in _documents_indexes(db_path)
@@ -1035,3 +1043,16 @@ def test_025_upgrade_is_idempotent_when_index_already_dropped(tmp_path, monkeypa
         conn.execute("DROP INDEX ix_documents_id")
     command.upgrade(cfg, "head")
     assert "ix_documents_id" not in _documents_indexes(db_path)
+
+
+def test_025_downgrade_is_idempotent_when_index_already_exists(tmp_path, monkeypatch):
+    """对称方向：索引已被提前重建时，downgrade 不得因重复建索引（1061）失败。"""
+    db_path = tmp_path / "documents-025-down-idem.db"
+    monkeypatch.setattr(settings, "DATABASE_URL", f"sqlite+aiosqlite:///{db_path.as_posix()}")
+    cfg = _cfg()
+
+    command.upgrade(cfg, "head")
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.execute("CREATE UNIQUE INDEX ix_documents_id ON documents (id)")
+    command.downgrade(cfg, "024_review_case_archive")
+    assert _index_definition(db_path, "ix_documents_id") == (True, ["id"])
