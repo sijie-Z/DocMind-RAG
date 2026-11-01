@@ -66,6 +66,19 @@ BUSINESS_INDEXES = (
     ("document_chunks", "ix_document_chunks_document_id"),
 )
 
+# 只在 create_all 路径出现过的 PK 冗余索引：迁移路径从没建过它们，
+# 模型侧移除 index=True 后两条路径都应为零。
+CREATE_ALL_ONLY = (
+    ("chat_messages", "ix_chat_messages_id"),
+    ("chat_sessions", "ix_chat_sessions_id"),
+    ("document_chunks", "ix_document_chunks_id"),
+    ("document_tags", "ix_document_tags_id"),
+    ("organizations", "ix_organizations_id"),
+    ("tags", "ix_tags_id"),
+    ("users", "ix_users_id"),
+)
+ALL_PK_ID_INDEXES = REDUNDANT + CREATE_ALL_ONLY
+
 
 def test_no_primary_key_column_declares_secondary_index():
     offenders = [
@@ -87,7 +100,7 @@ def test_026_upgrade_drops_and_downgrade_restores(tmp_path, monkeypatch):
         assert index in _index_names(db_path, table), (table, index)
 
     command.upgrade(cfg, "head")
-    for table, index in REDUNDANT:
+    for table, index in ALL_PK_ID_INDEXES:
         assert index not in _index_names(db_path, table), (table, index)
     for table, index in BUSINESS_INDEXES:
         assert index in _index_names(db_path, table), (table, index)
@@ -110,3 +123,35 @@ def test_026_upgrade_is_idempotent_when_index_already_dropped(tmp_path, monkeypa
         conn.execute(f"DROP INDEX {index}")
     command.upgrade(cfg, "head")
     assert index not in _index_names(db_path, table)
+
+
+@pytest.mark.parametrize(("table", "index"), [REDUNDANT[0], REDUNDANT[-1]])
+def test_026_downgrade_is_idempotent_when_index_already_exists(tmp_path, monkeypatch, table, index):
+    """对称方向：索引已被提前重建时，downgrade 不得因重复建索引（1061）失败。"""
+    db_path = tmp_path / f"pk-indexes-026-down-idem-{table}.db"
+    monkeypatch.setattr(settings, "DATABASE_URL", f"sqlite+aiosqlite:///{db_path.as_posix()}")
+    cfg = _cfg()
+
+    command.upgrade(cfg, "head")
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.execute(f"CREATE INDEX {index} ON {table} (id)")
+    command.downgrade(cfg, PREV_REV)
+    assert _index_definition(db_path, table, index) == (False, ["id"])
+
+
+def test_create_all_path_has_no_redundant_pk_indexes(tmp_path):
+    """create_all 路径（模型声明）同样不得产生 PK 冗余索引。
+
+    这条直接锁定「模型无声明」这一事实，而不是依赖迁移库里没有残留。
+    """
+    from sqlalchemy import create_engine
+
+    db_path = tmp_path / "create-all.db"
+    engine = create_engine(f"sqlite:///{db_path.as_posix()}")
+    try:
+        Base.metadata.create_all(engine)
+    finally:
+        engine.dispose()
+
+    for table, index in ALL_PK_ID_INDEXES:
+        assert index not in _index_names(db_path, table), (table, index)
