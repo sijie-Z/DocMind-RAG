@@ -428,6 +428,38 @@ async def _close_clients(embed) -> None:
             pass
 
 
+def _seed_source(
+    *,
+    fname: str,
+    chunk: str,
+    vector: list[float],
+    organization_id: str,
+    document_id: str,
+    chunk_index: int,
+) -> dict:
+    """评估索引的 _source 契约：E（content/chunk_text）+ 可信 O（original_text）。
+
+    当前 fixture 的每个 chunk 同时充当 E 与 O（语料是纯原文，无增强前缀）。
+    未来若引入 E≠O 的语料，必须在此拆分两种正文并分别标注 provenance，
+    不能让 E 冒充 O。
+    """
+    return {
+        "content": chunk,
+        "chunk_text": chunk,
+        "original_text": chunk,
+        "text_provenance": "parser_original",
+        "embedding": vector,
+        "organization_id": organization_id,
+        "document_id": document_id,
+        "filename": fname,
+        "file_type": "md",
+        "file_size": len(chunk.encode("utf-8")),
+        "upload_time": "2026-10-09T00:00:00+00:00",
+        "user_id": "eval-seed",
+        "metadata": {"chunk_index": chunk_index, "source": "evals/corpus"},
+    }
+
+
 async def _cmd_seed_async(args: argparse.Namespace, golden: GoldenSet) -> int:
     from app.core.config import settings
     from app.core.elasticsearch import (
@@ -510,19 +542,14 @@ async def _cmd_seed_async(args: argparse.Namespace, golden: GoldenSet) -> int:
                     {
                         "_index": index,
                         "_id": f"{document_id}:c{i:02d}",
-                        "_source": {
-                            "content": chunk,
-                            "chunk_text": chunk,
-                            "embedding": vec,
-                            "organization_id": org,
-                            "document_id": document_id,
-                            "filename": fname,
-                            "file_type": "md",
-                            "file_size": len(chunk.encode("utf-8")),
-                            "upload_time": "2026-10-09T00:00:00+00:00",
-                            "user_id": "eval-seed",
-                            "metadata": {"chunk_index": i, "source": "evals/corpus"},
-                        },
+                        "_source": _seed_source(
+                            fname=fname,
+                            chunk=chunk,
+                            vector=vec,
+                            organization_id=org,
+                            document_id=document_id,
+                            chunk_index=i,
+                        ),
                     }
                 )
             # 幂等：先清同文档旧数据再写入（同 worker 的 delete_by_query 惯例）
@@ -637,6 +664,8 @@ async def _dense_retrieve(embed, query: str, org_id: int, top_k: int) -> Retriev
         "_source": [
             "content",
             "chunk_text",
+            "original_text",
+            "text_provenance",
             "filename",
             "document_id",
             "chunk_index",
@@ -651,6 +680,8 @@ async def _dense_retrieve(embed, query: str, org_id: int, top_k: int) -> Retriev
         results.append(
             {
                 "content": source.get("content") or source.get("chunk_text") or "",
+                "original_text": source.get("original_text"),
+                "text_provenance": source.get("text_provenance"),
                 "filename": source.get("filename") or "",
                 "document_id": source.get("document_id"),
                 "chunk_index": source.get("chunk_index"),
@@ -768,6 +799,7 @@ async def _cmd_run_async(args: argparse.Namespace, golden: GoldenSet) -> int:
         corpus_defs=corpus_defs,
         corpus_digest=_corpus_digest(golden),
         git_commit=_git_commit(),
+        provenance_mode=settings.RAG_SOURCE_PROVENANCE_MODE,
     )
     out_dir = Path(args.out)
     json_path = write_json(report, out_dir / "latest.json")

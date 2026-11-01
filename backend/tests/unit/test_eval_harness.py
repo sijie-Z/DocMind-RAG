@@ -276,6 +276,9 @@ class TestMetrics:
             "positives": 3,
             "negatives": 2,
             "positives_with_near_miss": 3,
+            # 有检索结果的 4 条（p1/p2/p3/n2）均无 provenance → compat；
+            # 空结果与错误不计入（它们没有「判定依据」）。
+            "text_basis": {"compat": 4},
         }
         assert agg["clause_hit@1"] == pytest.approx(1 / 3)
         assert agg["clause_hit@3"] == pytest.approx(2 / 3)
@@ -302,6 +305,7 @@ class TestMetrics:
             "positives": 0,
             "negatives": 0,
             "positives_with_near_miss": 0,
+            "text_basis": {},
         }
         assert agg["error_items"] == ["e1", "e2"]
         for key in (
@@ -390,6 +394,7 @@ class TestHarnessAndReport:
             top_k=5,
             retriever_label="fake",
             generated_at="2026-10-09T00:00:00+00:00",
+            provenance_mode="compat",
         )
         json.dumps(report, ensure_ascii=False)  # 必须可序列化
         assert report["aggregates"]["clause_hit@5"] == 1.0

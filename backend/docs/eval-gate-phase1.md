@@ -46,6 +46,11 @@ python -m evals run     # 跑全套 → evals/reports/latest.{json,md}
 | EmptyAcc | 负例（`expect: empty`）中检索结果为空的比例 |
 | 95% CI | 小样本一律带 Wilson 区间 |
 
+**原文口径（O/E，Batch 15）**：评测 seed 为每个 chunk 写入 `original_text` +
+`text_provenance=parser_original`；ClauseHit/NearMiss/MRR 的条款判定优先取可验证原文 O，
+仅在缺 O 时回退检索文本 E（标记 `compat`）。报告 `meta.provenance_mode` 与
+`meta.text_basis_counts` 记录本次运行的判定依据；当前 fixture 的 E 与 O 是同一段纯原文。
+
 **条号提取规则**（`evals/clauses.py`，纯标准库）：
 
 1. **条号**：`第<数字>条`，数字支持中文数字（一/二/…/十/百/千、零〇、两）与阿拉伯数字。
