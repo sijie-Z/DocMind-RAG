@@ -229,7 +229,14 @@ class KnowledgeService:
             # 主搜索端点仍必须 409，不得把拒答伪装成空结果。
             logger.warning(f"Search suggestions degraded (source original unavailable): {e}")
             return []
-        return [r["text"][:50] + "..." for r in results]
+        # 建议文本优先使用原文派生片段（snippet/original_text），
+        # 只有 legacy 结果才回退增强文本 text，避免把生成背景摘要当文档内容。
+        suggestions: list[str] = []
+        for result in results:
+            text = result.get("snippet") or result.get("original_text") or result.get("text") or ""
+            if text:
+                suggestions.append(text[:50] + "...")
+        return suggestions
 
     async def get_knowledge_stats(self, organization_id: str) -> dict[str, Any]:
         """获取知识库统计信息"""

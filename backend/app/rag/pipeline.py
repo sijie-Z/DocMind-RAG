@@ -475,9 +475,12 @@ class RAGPipeline:
                                 if r.get("rerank_score") is not None
                                 else None
                             ),
-                            "snippet": (r.get("content") or r.get("snippet") or _source_content(r))[
-                                :200
-                            ],
+                            "snippet": (
+                                r.get("snippet")
+                                or r.get("original_text")
+                                or r.get("content")
+                                or _source_content(r)
+                            )[:200],
                         }
                         for r in result[:top_k]
                     ]

@@ -25,7 +25,7 @@ from sqlalchemy.orm import selectinload
 from app.core.config import settings
 from app.core.database import AsyncSessionLocal
 from app.models.document import Document, DocumentChunk, DocumentStatus
-from app.rag.source_provenance import PARSER_ORIGINAL
+from app.rag.source_provenance import LEGACY_UNVERIFIED, PARSER_ORIGINAL
 
 logger = logging.getLogger(__name__)
 
@@ -765,19 +765,31 @@ class DocumentParser:
                     document.chunk_count = len(parse_result["chunks"])  # type: ignore
                     document.parsed_at = datetime.now()  # type: ignore
 
-                    # 保存文档分块
+                    # 保存文档分块（与 worker 写 DB 的口径一致：原文列 + 写入方
+                    # provenance 标记；缺标记/空原文一律 legacy，不冒充原文）。
                     for chunk_data in parse_result["chunks"]:
+                        metadata = chunk_data.get("metadata", {}) or {}
+                        original_text = chunk_data.get("original_text")
+                        marker = chunk_data.get("text_provenance")
+                        provenance = (
+                            marker
+                            if marker == PARSER_ORIGINAL
+                            and isinstance(original_text, str)
+                            and original_text.strip()
+                            else LEGACY_UNVERIFIED
+                        )
                         chunk = DocumentChunk(
                             id=str(uuid.uuid4()),
                             document_id=document_id,
                             chunk_index=chunk_data["chunk_index"],
                             chunk_text=chunk_data["chunk_text"],
+                            original_text=original_text,
                             chunk_length=chunk_data["chunk_length"],
                             start_pos=chunk_data.get("start_pos"),
                             end_pos=chunk_data.get("end_pos"),
-                            page_number=chunk_data["metadata"].get("page_number"),
-                            section_title=chunk_data["metadata"].get("section_title"),
-                            meta_data=chunk_data["metadata"],
+                            page_number=metadata.get("page_number"),
+                            section_title=metadata.get("section_title"),
+                            meta_data={**metadata, "text_provenance": provenance},
                         )
                         session.add(chunk)
 

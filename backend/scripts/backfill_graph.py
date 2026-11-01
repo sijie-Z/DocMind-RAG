@@ -61,14 +61,18 @@ async def fetch_indexed_documents(
 
 
 async def fetch_document_text(session, document_id: str) -> str:
-    """按 chunk_index 顺序拼接文档全文（图谱抽取的输入）。"""
+    """按 chunk_index 顺序拼接文档全文（图谱抽取的输入）。
+
+    优先原文 original_text；legacy 分块（original_text 为 NULL）才回退
+    chunk_text（检索增强文本，含生成背景摘要）。
+    """
     stmt = (
-        select(DocumentChunk.chunk_text)
+        select(DocumentChunk.chunk_text, DocumentChunk.original_text)
         .where(DocumentChunk.document_id == document_id)
         .order_by(DocumentChunk.chunk_index)
     )
-    texts = (await session.execute(stmt)).scalars().all()
-    return "\n".join(t for t in texts if t)
+    rows = (await session.execute(stmt)).all()
+    return "\n".join((original or chunk) for chunk, original in rows if (original or chunk))
 
 
 async def backfill(

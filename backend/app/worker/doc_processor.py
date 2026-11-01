@@ -676,7 +676,10 @@ class DocumentProcessor:
             from app.services.graph_rag_service import graph_rag_service
             from app.services.rag_service import rag_service
 
-            text = "\n".join((c.get("chunk_text") or "") for c in chunks_data)
+            # 图谱实体抽取的输入是原文 O；legacy 分块才回退检索增强文本
+            text = "\n".join(
+                (c.get("original_text") or c.get("chunk_text") or "") for c in chunks_data
+            )
             result = await graph_rag_service.ingest_document(
                 document_id=doc.id,
                 organization_id=doc.organization_id,
