@@ -189,6 +189,8 @@ async def test_parse_upload_ignores_unattested_original_text(monkeypatch):
 
     assert data["content"] == E_SENTINEL
     assert data["text_provenance"] == LEGACY_UNVERIFIED
+    assert data["original_chunk_count"] == 0
+    assert data["legacy_chunk_count"] == 1
 
 
 @pytest.mark.asyncio
@@ -215,6 +217,8 @@ async def test_parse_upload_blank_original_with_marker_is_legacy(monkeypatch):
 
     assert data["content"] == E_SENTINEL
     assert data["text_provenance"] == LEGACY_UNVERIFIED
+    assert data["original_chunk_count"] == 0
+    assert data["legacy_chunk_count"] == 1
 
 
 # ── 2. 工作流知识库节点：上下文只取原文 O ────────────────────────────────────
@@ -412,6 +416,9 @@ async def test_compare_documents_mixed_hits_label_actual_content(monkeypatch):
     assert "E-SENTINEL" not in out
     assert "LEGACY-HIT" not in out
     assert "Provenance: parser_original" in out
+    # doc-2 全原文也会提供 parser_original——必须直接排除 mixed 标签，
+    # 才能钉住 doc-1（混合命中）的标注语义（评审 B 的 M4d-oldlabel 变异）。
+    assert "Provenance: mixed" not in out
     assert "Legacy hits ignored: 1" in out
 
 
