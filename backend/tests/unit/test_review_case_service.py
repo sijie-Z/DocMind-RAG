@@ -889,7 +889,10 @@ async def test_create_case_maps_deadlock_to_retryable_conflict(monkeypatch):
 
         async def execute(self, *args, **_kwargs):
             self.statements.append(args[0])
-            raise OperationalError("SELECT documents.id ... FOR UPDATE", {}, Exception(1213))
+            # 真实 asyncmy/aiomysql 驱动异常是 (errno, message) 两元组
+            raise OperationalError(
+                "SELECT documents.id ... FOR UPDATE", {}, Exception(1213, "Deadlock found")
+            )
 
         async def rollback(self):
             self.rolled_back = True
@@ -961,7 +964,9 @@ async def test_create_case_reraises_non_retryable_operational_error(monkeypatch)
 
     class _BrokenSession:
         async def execute(self, *_args, **_kwargs):
-            raise OperationalError("SELECT ...", {}, Exception(1317))
+            raise OperationalError(
+                "SELECT ...", {}, Exception(1317, "Query execution was interrupted")
+            )
 
         async def rollback(self):
             return None

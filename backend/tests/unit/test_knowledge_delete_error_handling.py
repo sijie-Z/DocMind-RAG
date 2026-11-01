@@ -281,7 +281,7 @@ async def test_batch_delete_collects_conflict_and_continues(monkeypatch):
     ]
 
 
-_DOC = SimpleNamespace(id="doc-1", organization_id=1, file_path=None)
+_DOC = SimpleNamespace(id="doc-1", organization_id=1, file_path="1/doc-1.txt")
 
 
 class _DocRowResult:
