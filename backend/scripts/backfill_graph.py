@@ -30,6 +30,7 @@ from sqlalchemy import select  # noqa: E402
 from app.core.database import AsyncSessionLocal  # noqa: E402
 from app.core.redis import get_redis, init_redis, redis_client  # noqa: E402
 from app.models.document import Document, DocumentChunk, DocumentStatus  # noqa: E402
+from app.rag.source_provenance import PARSER_ORIGINAL, provenance_of  # noqa: E402
 from app.services.graph_rag_service import graph_rag_service  # noqa: E402
 
 EXIT_OK = 0
@@ -61,14 +62,30 @@ async def fetch_indexed_documents(
 
 
 async def fetch_document_text(session, document_id: str) -> str:
-    """按 chunk_index 顺序拼接文档全文（图谱抽取的输入）。"""
+    """按 chunk_index 顺序拼接文档全文（图谱抽取的输入）。
+
+    与 preview/review 的 DB 读口径一致：只有「original_text 非空 + 写入方
+    provenance 标记为 parser_original」才用原文；legacy/无标记分块回退
+    chunk_text（检索增强文本，含生成背景摘要）。
+    """
     stmt = (
-        select(DocumentChunk.chunk_text)
+        select(DocumentChunk.chunk_text, DocumentChunk.original_text, DocumentChunk.meta_data)
         .where(DocumentChunk.document_id == document_id)
         .order_by(DocumentChunk.chunk_index)
     )
-    texts = (await session.execute(stmt)).scalars().all()
-    return "\n".join(t for t in texts if t)
+    rows = (await session.execute(stmt)).all()
+    parts: list[str] = []
+    for chunk_text, original_text, meta_data in rows:
+        is_original = (
+            isinstance(meta_data, dict)
+            and provenance_of(meta_data) == PARSER_ORIGINAL
+            and isinstance(original_text, str)
+            and bool(original_text.strip())
+        )
+        text = original_text if is_original else chunk_text
+        if text:
+            parts.append(text)
+    return "\n".join(parts)
 
 
 async def backfill(

@@ -80,6 +80,13 @@ def _source_filename(hit: dict[str, Any]) -> str:
     return (hit.get("_source") or {}).get("filename", "未知")
 
 
+def _debug_snippet(hit: dict[str, Any]) -> str:
+    """debug 面板正文：O 派生 snippet/original_text 优先，再回退增强文本。"""
+    return (
+        hit.get("snippet") or hit.get("original_text") or hit.get("content") or _source_content(hit)
+    )[:200]
+
+
 def _gate_source_provenance(results: list[dict[str, Any]], *, query: str) -> list[dict[str, Any]]:
     """Normalize evidence from O, then apply the same strict gate everywhere."""
     return filter_original_results(
@@ -475,9 +482,7 @@ class RAGPipeline:
                                 if r.get("rerank_score") is not None
                                 else None
                             ),
-                            "snippet": (r.get("content") or r.get("snippet") or _source_content(r))[
-                                :200
-                            ],
+                            "snippet": _debug_snippet(r),
                         }
                         for r in result[:top_k]
                     ]

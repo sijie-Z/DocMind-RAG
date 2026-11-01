@@ -84,7 +84,12 @@ def _patch_graph(monkeypatch, recorder, *, result=None, error=None):
             raise error
         return result if result is not None else {"status": "extracted", "entities": 2}
 
-    monkeypatch.setattr(graph_mod.graph_rag_service, "ingest_document", fake_ingest, raising=False)
+    # 挂到模块级单例引用上，而不是在单例实例上 setattr：实例级 patch 在
+    # monkeypatch undo 时会把 bound method 写回实例 __dict__，永久遮蔽后续
+    # 对类/模块的 patch（单进程按目录顺序跑时的跨用例污染）。
+    monkeypatch.setattr(
+        graph_mod, "graph_rag_service", SimpleNamespace(ingest_document=fake_ingest)
+    )
 
 
 @pytest.mark.asyncio

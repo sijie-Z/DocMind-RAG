@@ -127,6 +127,8 @@ ALLOWED_SQL_COLUMNS: dict[str, set[str]] = {
         "document_id",
         "chunk_index",
         "chunk_text",
+        # 原文列（legacy 分块为 NULL）；chunk_text 是可能含生成背景摘要的检索增强文本
+        "original_text",
         "chunk_length",
         "start_pos",
         "end_pos",
