@@ -122,6 +122,7 @@ async def test_parse_upload_marks_legacy_and_mixed(monkeypatch):
     data = result["data"]
 
     assert O_SENTINEL in data["content"] and "LEGACY-CHUNK" in data["content"]
+    assert "E-SENTINEL" not in data["content"]
     assert data["text_provenance"] == "mixed"
     assert data["original_chunk_count"] == 1
     assert data["legacy_chunk_count"] == 1
@@ -143,8 +144,77 @@ async def test_parse_upload_all_legacy_is_marked(monkeypatch):
     )
     data = result["data"]
 
+    assert data["content"] == E_SENTINEL
     assert data["text_provenance"] == LEGACY_UNVERIFIED
+    assert data["original_chunk_count"] == 0
     assert data["legacy_chunk_count"] == 1
+
+
+@pytest.mark.asyncio
+async def test_parse_upload_without_chunks_is_legacy(monkeypatch):
+    async def _parse(_self, _path, organization_id):
+        return {"chunks": [], "content": "PLAIN-CONTENT", "file_size": 5}
+
+    _patch_org(monkeypatch)
+    monkeypatch.setattr(DocumentParser, "parse_local_file", _parse)
+
+    result = await chat_api.chat_parse_upload(
+        file=_upload(), current_user=SimpleNamespace(id=1), db=SimpleNamespace()
+    )
+    data = result["data"]
+
+    assert data["content"] == "PLAIN-CONTENT"
+    assert data["text_provenance"] == LEGACY_UNVERIFIED
+    assert data["original_chunk_count"] == 0
+    assert data["legacy_chunk_count"] == 0
+
+
+@pytest.mark.asyncio
+async def test_parse_upload_ignores_unattested_original_text(monkeypatch):
+    """有 original_text 但没有 provenance 标记：必须按 legacy 处理（marker gate）。"""
+
+    async def _parse(_self, _path, organization_id):
+        return {
+            "chunks": [{"chunk_text": E_SENTINEL, "original_text": O_SENTINEL}],
+            "file_size": 5,
+        }
+
+    _patch_org(monkeypatch)
+    monkeypatch.setattr(DocumentParser, "parse_local_file", _parse)
+
+    result = await chat_api.chat_parse_upload(
+        file=_upload(), current_user=SimpleNamespace(id=1), db=SimpleNamespace()
+    )
+    data = result["data"]
+
+    assert data["content"] == E_SENTINEL
+    assert data["text_provenance"] == LEGACY_UNVERIFIED
+
+
+@pytest.mark.asyncio
+async def test_parse_upload_blank_original_with_marker_is_legacy(monkeypatch):
+    async def _parse(_self, _path, organization_id):
+        return {
+            "chunks": [
+                {
+                    "chunk_text": E_SENTINEL,
+                    "original_text": "   ",
+                    "text_provenance": PARSER_ORIGINAL,
+                }
+            ],
+            "file_size": 5,
+        }
+
+    _patch_org(monkeypatch)
+    monkeypatch.setattr(DocumentParser, "parse_local_file", _parse)
+
+    result = await chat_api.chat_parse_upload(
+        file=_upload(), current_user=SimpleNamespace(id=1), db=SimpleNamespace()
+    )
+    data = result["data"]
+
+    assert data["content"] == E_SENTINEL
+    assert data["text_provenance"] == LEGACY_UNVERIFIED
 
 
 # ── 2. 工作流知识库节点：上下文只取原文 O ────────────────────────────────────
@@ -196,6 +266,40 @@ async def test_workflow_knowledge_node_uses_original_text(monkeypatch):
     assert sources[1]["textProvenance"] == LEGACY_UNVERIFIED
 
 
+@pytest.mark.asyncio
+async def test_workflow_strict_mode_skips_unattested_legacy(monkeypatch):
+    """strict 下即使上游漏过滤，节点也不得把未验证文本送进 LLM。"""
+    monkeypatch.setattr(settings, "RAG_SOURCE_PROVENANCE_MODE", "strict")
+
+    async def _search(self, query, organization_id, top_k=5, **kwargs):
+        return [
+            {
+                "title": "合同",
+                "score": 0.9,
+                "content": E_SENTINEL,
+                "original_text": O_SENTINEL,
+                "text_provenance": PARSER_ORIGINAL,
+            },
+            {
+                "title": "旧文档",
+                "score": 0.8,
+                "content": "E-LEGACY",
+                "text_provenance": LEGACY_UNVERIFIED,
+                "prompt_text": "",
+            },
+        ], None
+
+    monkeypatch.setattr(RagServiceFacade, "search_knowledge_base", _search)
+
+    executor = KnowledgeSearchNodeExecutor(_workflow_node())
+    executor.organization_id = 3
+    result = await executor.execute(_workflow_state())
+
+    context = result["context"]["knowledge_context"]
+    assert O_SENTINEL in context
+    assert "E-LEGACY" not in context
+
+
 # ── 3. compare_documents：预览优先原文，legacy 显式标记，strict 拒绝 ─────────
 
 
@@ -204,6 +308,21 @@ def _patch_es(monkeypatch, sources: list[dict]):
 
     async def _search(_query):
         return {"hits": {"hits": [{"_source": source} for source in sources]}}
+
+    monkeypatch.setattr(ElasticsearchTools, "search_documents", _search)
+
+
+def _patch_es_by_doc(monkeypatch, by_doc: dict[str, list[dict]], failing: set[str] | None = None):
+    from app.core.elasticsearch import ElasticsearchTools
+
+    failing = failing or set()
+
+    async def _search(query):
+        doc_id = query["query"]["bool"]["must"][0]["term"]["document_id"]
+        if doc_id in failing:
+            raise RuntimeError("es down")
+        hits = [{"_source": source} for source in by_doc.get(doc_id, [])]
+        return {"hits": {"hits": hits}}
 
     monkeypatch.setattr(ElasticsearchTools, "search_documents", _search)
 
@@ -228,6 +347,8 @@ async def test_compare_documents_prefers_original_text(monkeypatch):
     assert "O-SENTINEL 原文" in out
     assert "E-SENTINEL" not in out
     assert "Provenance: parser_original" in out
+    assert "Sampled hits: 1" in out
+    assert "Legacy hits ignored: 0" in out
 
 
 @pytest.mark.asyncio
@@ -251,4 +372,114 @@ async def test_compare_documents_strict_refuses_legacy(monkeypatch):
 
     assert not isinstance(out, str)
     assert out.success is False
-    assert out.error.code == "source_original_unavailable"
+    # 复用既有 ToolErrorType 契约；机器可读的 provenance 状态放在 raw
+    assert out.error.code == "invalid_configuration"
+    assert out.error.raw["code"] == "source_original_unavailable"
+    assert out.error.raw["status"] == "needs_rebuild"
+    assert out.error.raw["document_ids"] == ["doc-1", "doc-2"]
+
+
+@pytest.mark.asyncio
+async def test_compare_documents_mixed_hits_label_actual_content(monkeypatch):
+    """同文档混合命中：预览只用 O；标签按实际返回内容，丢弃的 legacy 数量单列。"""
+    _patch_es_by_doc(
+        monkeypatch,
+        {
+            "doc-1": [
+                {
+                    "filename": "a.txt",
+                    "chunk_text": E_SENTINEL,
+                    "original_text": O_SENTINEL,
+                    "text_provenance": PARSER_ORIGINAL,
+                },
+                {"filename": "a.txt", "chunk_text": "LEGACY-HIT"},
+            ],
+            "doc-2": [
+                {
+                    "filename": "b.txt",
+                    "chunk_text": E_SENTINEL,
+                    "original_text": O_SENTINEL,
+                    "text_provenance": PARSER_ORIGINAL,
+                }
+            ],
+        },
+    )
+
+    out = await compare_documents(["doc-1", "doc-2"], organization_id=1)
+
+    assert isinstance(out, str)
+    assert "O-SENTINEL 原文" in out
+    assert "E-SENTINEL" not in out
+    assert "LEGACY-HIT" not in out
+    assert "Provenance: parser_original" in out
+    assert "Legacy hits ignored: 1" in out
+
+
+@pytest.mark.asyncio
+async def test_compare_documents_strict_partial_missing_original(monkeypatch):
+    """strict：只要任一文档缺原文就拒绝（不是「全部缺失」才拒绝）。"""
+    monkeypatch.setattr(settings, "RAG_SOURCE_PROVENANCE_MODE", "strict")
+    _patch_es_by_doc(
+        monkeypatch,
+        {
+            "doc-1": [
+                {
+                    "filename": "a.txt",
+                    "chunk_text": E_SENTINEL,
+                    "original_text": O_SENTINEL,
+                    "text_provenance": PARSER_ORIGINAL,
+                }
+            ],
+            "doc-2": [{"filename": "old.txt", "chunk_text": "LEGACY-CONTENT"}],
+        },
+    )
+
+    out = await compare_documents(["doc-1", "doc-2"], organization_id=1)
+
+    assert not isinstance(out, str)
+    assert out.error.code == "invalid_configuration"
+    assert out.error.raw["document_ids"] == ["doc-2"]
+    assert "doc-2" in out.error.message
+
+
+@pytest.mark.asyncio
+async def test_compare_documents_strict_query_failure_is_structured(monkeypatch):
+    """strict：ES 查询异常的文档也必须进入结构化失败，不得静默返回成功字符串。"""
+    monkeypatch.setattr(settings, "RAG_SOURCE_PROVENANCE_MODE", "strict")
+    _patch_es_by_doc(
+        monkeypatch,
+        {
+            "doc-2": [
+                {
+                    "filename": "a.txt",
+                    "chunk_text": E_SENTINEL,
+                    "original_text": O_SENTINEL,
+                    "text_provenance": PARSER_ORIGINAL,
+                }
+            ]
+        },
+        failing={"doc-1"},
+    )
+
+    out = await compare_documents(["doc-1", "doc-2"], organization_id=1)
+
+    assert not isinstance(out, str)
+    assert out.error.code == "invalid_configuration"
+    assert out.error.raw["query_failed_document_ids"] == ["doc-1"]
+
+
+@pytest.mark.asyncio
+async def test_compare_documents_marker_gate_blocks_unattested_original(monkeypatch):
+    """有 original_text 但无 provenance 标记：不得当作原文（marker gate）。"""
+    monkeypatch.setattr(settings, "RAG_SOURCE_PROVENANCE_MODE", "compat")
+    _patch_es(
+        monkeypatch,
+        [{"filename": "a.txt", "chunk_text": E_SENTINEL, "original_text": O_SENTINEL}],
+    )
+
+    out = await compare_documents(["doc-1", "doc-2"], organization_id=1)
+
+    assert isinstance(out, str)
+    assert "[legacy_unverified]" in out
+    assert "Provenance: legacy_unverified" in out
+    assert "Provenance: parser_original" not in out
