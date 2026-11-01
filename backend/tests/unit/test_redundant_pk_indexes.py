@@ -21,6 +21,7 @@ from app.core.database import Base
 
 BACKEND_DIR = Path(__file__).resolve().parents[2]
 PREV_REV = "025_drop_documents_id_index"
+TARGET_REV = "026_drop_redundant_pk_indexes"
 
 # 与 026 迁移的清单保持一致（迁移路径上真实存在的冗余索引）。
 REDUNDANT = (
@@ -93,24 +94,54 @@ CREATE_ALL_ONLY = (
 ALL_PK_ID_INDEXES = REDUNDANT + CREATE_ALL_ONLY
 
 
-def test_primary_key_first_column_has_no_secondary_index():
-    """PK 首列不得再声明二级索引（与 PRIMARY 左前缀冗余）。
+def _pk_index_offenders(metadata) -> list[str]:
+    """PK 前缀上的二级索引：列级 index=True 或显式 Index() 都是冗余。
 
-    复合 PK 的非首列索引可能是业务需要，不在此规则范围；同时覆盖两种声明
-    方式——列级 ``index=True`` 与显式 ``Index()`` 对象（后者是列级扫描的盲点）。
+    命中规则是「索引列序列 == PK 列序列的前缀（长度 ≥1）」：
+    - 单列 PK 上的 Index(id) 命中；
+    - 复合 PK 上的 Index(a)、Index(a, b) 命中（与 PRIMARY 或其左前缀重复）；
+    - 复合 PK 的非首列 Index(b) 放行（可能是业务需要）。
     """
-    offenders = []
-    for table_name, table in sorted(Base.metadata.tables.items()):
+    offenders: list[str] = []
+    for table_name, table in sorted(metadata.tables.items()):
         pk_columns = list(table.primary_key.columns)
         if not pk_columns:
             continue
-        first = pk_columns[0].name
+        pk_names = [column.name for column in pk_columns]
         if pk_columns[0].index:
-            offenders.append(f"{table_name}.{first} (index=True)")
+            offenders.append(f"{table_name}.{pk_names[0]} (index=True)")
         for index in table.indexes:
-            if [column.name for column in index.columns] == [first]:
-                offenders.append(f"{table_name}.{index.name} (Index on PK first column)")
-    assert offenders == [], "PK 首列不得声明二级索引（与 PRIMARY 完全冗余）"
+            columns = [column.name for column in index.columns]
+            if columns and columns == pk_names[: len(columns)]:
+                offenders.append(f"{table_name}.{index.name} (Index on PK prefix)")
+    return offenders
+
+
+def test_primary_key_prefix_has_no_secondary_index():
+    assert _pk_index_offenders(Base.metadata) == [], (
+        "PK 前缀列不得声明二级索引（与 PRIMARY 完全冗余）"
+    )
+
+
+def test_pk_prefix_guard_semantics_on_synthetic_metadata():
+    """用合成元数据正面锁住守卫两个方向的语义（当前模型不触发这些分支）。"""
+    from sqlalchemy import Column, Index, Integer, MetaData, String, Table
+
+    metadata = MetaData()
+    Table("single", metadata, Column("id", Integer, primary_key=True, index=True))
+    composite = Table(
+        "composite",
+        metadata,
+        Column("a", String(10), primary_key=True),
+        Column("b", Integer, primary_key=True),
+    )
+    Index("ix_composite_pair", composite.c.a, composite.c.b)
+    Index("ix_composite_second", composite.c.b)
+
+    offenders = _pk_index_offenders(metadata)
+    assert "single.id (index=True)" in offenders
+    assert "composite.ix_composite_pair (Index on PK prefix)" in offenders
+    assert not any("ix_composite_second" in item for item in offenders)
 
 
 def test_026_upgrade_drops_and_downgrade_restores(tmp_path, monkeypatch):
@@ -123,7 +154,7 @@ def test_026_upgrade_drops_and_downgrade_restores(tmp_path, monkeypatch):
     for table, index in REDUNDANT:
         assert index in snapshot_before.get(table, set()), (table, index)
 
-    command.upgrade(cfg, "head")
+    command.upgrade(cfg, TARGET_REV)
     snapshot_head = _index_snapshot(db_path)
     disappeared = {
         (table, index)
@@ -160,7 +191,7 @@ def test_026_upgrade_is_idempotent_when_index_already_dropped(tmp_path, monkeypa
     command.upgrade(cfg, PREV_REV)
     with sqlite3.connect(str(db_path)) as conn:
         conn.execute(f"DROP INDEX {index}")
-    command.upgrade(cfg, "head")
+    command.upgrade(cfg, TARGET_REV)
     # 断言全部 14 个都已删除：no-op/stale-guard 的「升级什么都不做」也变红
     for table, index in REDUNDANT:
         assert index not in _index_names(db_path, table), (table, index)
@@ -173,7 +204,7 @@ def test_026_downgrade_is_idempotent_when_index_already_exists(tmp_path, monkeyp
     monkeypatch.setattr(settings, "DATABASE_URL", f"sqlite+aiosqlite:///{db_path.as_posix()}")
     cfg = _cfg()
 
-    command.upgrade(cfg, "head")
+    command.upgrade(cfg, TARGET_REV)
     with sqlite3.connect(str(db_path)) as conn:
         conn.execute(f"CREATE INDEX {index} ON {table} (id)")
     command.downgrade(cfg, PREV_REV)
