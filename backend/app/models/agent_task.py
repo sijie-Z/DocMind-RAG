@@ -144,7 +144,6 @@ class AgentTask(Base):
     id: Mapped[str] = mapped_column(
         String(36),
         primary_key=True,
-        index=True,
         default=lambda: uuid.uuid4().hex[:12],
     )
     user_id: Mapped[int] = mapped_column(

@@ -64,7 +64,7 @@ class ChatSession(Base):
         ),
     )
 
-    id: Mapped[str] = mapped_column(String(36), primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
     user_id: Mapped[int] = mapped_column(
         Integer, ForeignKey("users.id"), index=True, comment="用户ID"
     )
@@ -177,7 +177,7 @@ class ChatMessage(Base):
         ),
     )
 
-    id: Mapped[str] = mapped_column(String(36), primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
     session_id: Mapped[str] = mapped_column(
         String(36), ForeignKey("chat_sessions.id"), index=True, comment="会话ID"
     )

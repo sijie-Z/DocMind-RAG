@@ -25,7 +25,7 @@ class Organization(Base):
 
     __tablename__ = "organizations"
 
-    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    id: Mapped[int] = mapped_column(primary_key=True)
     name: Mapped[str] = mapped_column(String(100), unique=True, index=True)
     description: Mapped[str | None] = mapped_column(String(500))
     color: Mapped[str] = mapped_column(String(20), default="#18a058")

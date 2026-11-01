@@ -21,7 +21,7 @@ class PromptTemplate(Base):
         UniqueConstraint("organization_id", "name", name="uq_prompt_templates_org_name"),
     )
 
-    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    id: Mapped[int] = mapped_column(primary_key=True)
     name: Mapped[str] = mapped_column(String(100), index=True, comment="模板名称")
     content: Mapped[str] = mapped_column(Text, comment="提示词内容")
     description: Mapped[str | None] = mapped_column(String(255), comment="模板描述")

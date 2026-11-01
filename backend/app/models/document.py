@@ -108,7 +108,7 @@ class DocumentChunk(Base):
 
     __tablename__ = "document_chunks"
 
-    id: Mapped[str] = mapped_column(String(36), primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
     document_id: Mapped[str] = mapped_column(
         String(36), ForeignKey("documents.id"), index=True, comment="所属文档"
     )
@@ -153,7 +153,7 @@ class DocumentTag(Base):
 
     __tablename__ = "document_tags"
 
-    id: Mapped[str] = mapped_column(String(36), primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
     document_id: Mapped[str] = mapped_column(
         String(36), ForeignKey("documents.id"), index=True, comment="文档ID"
     )
@@ -176,7 +176,7 @@ class Tag(Base):
 
     __tablename__ = "tags"
 
-    id: Mapped[str] = mapped_column(String(36), primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
     name: Mapped[str] = mapped_column(String(100), unique=True, comment="标签名称")
     color: Mapped[str] = mapped_column(String(7), default="#007bff", comment="标签颜色")
     description: Mapped[str | None] = mapped_column(String(500), comment="标签描述")
