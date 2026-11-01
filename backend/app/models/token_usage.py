@@ -16,7 +16,7 @@ class TokenUsageRecord(Base):
 
     __tablename__ = "token_usage_records"
 
-    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    id: Mapped[int] = mapped_column(primary_key=True)
     user_id: Mapped[int] = mapped_column(
         Integer, ForeignKey("users.id"), index=True, comment="用户ID"
     )

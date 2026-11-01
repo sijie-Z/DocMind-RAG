@@ -16,7 +16,7 @@ class SystemManual(Base):
 
     __tablename__ = "system_manuals"
 
-    id: Mapped[int] = mapped_column(primary_key=True, index=True, autoincrement=True)
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     title: Mapped[str] = mapped_column(String(200), comment="手册标题")
     content: Mapped[str] = mapped_column(Text, comment="手册内容(Markdown)")
     category: Mapped[str] = mapped_column(String(50), default="general", comment="分类")
