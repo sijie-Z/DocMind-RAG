@@ -50,6 +50,23 @@ def _index_names(db_path: Path, table: str) -> set[str]:
         return {row[1] for row in conn.execute(f"PRAGMA index_list('{table}')")}
 
 
+def _index_definition(db_path: Path, table: str, name: str) -> tuple[bool, list[str]]:
+    """索引定义：(是否唯一, 列序)。只断言名字会放过列/唯一性变异。"""
+    with sqlite3.connect(str(db_path)) as conn:
+        unique = any(
+            row[1] == name and row[2] == 1 for row in conn.execute(f"PRAGMA index_list('{table}')")
+        )
+        columns = [row[2] for row in conn.execute(f"PRAGMA index_info('{name}')")]
+    return unique, columns
+
+
+# 与 PRIMARY 无关的业务索引：升级时不得误删（防止「按错误清单 drop」的变异）。
+BUSINESS_INDEXES = (
+    ("documents", "ix_documents_organization_id"),
+    ("document_chunks", "ix_document_chunks_document_id"),
+)
+
+
 def test_no_primary_key_column_declares_secondary_index():
     offenders = [
         f"{table_name}.{column.name}"
@@ -72,10 +89,13 @@ def test_026_upgrade_drops_and_downgrade_restores(tmp_path, monkeypatch):
     command.upgrade(cfg, "head")
     for table, index in REDUNDANT:
         assert index not in _index_names(db_path, table), (table, index)
+    for table, index in BUSINESS_INDEXES:
+        assert index in _index_names(db_path, table), (table, index)
 
     command.downgrade(cfg, PREV_REV)
     for table, index in REDUNDANT:
         assert index in _index_names(db_path, table), (table, index)
+        assert _index_definition(db_path, table, index) == (False, ["id"])
 
 
 @pytest.mark.parametrize(("table", "index"), [REDUNDANT[0], REDUNDANT[-1]])
