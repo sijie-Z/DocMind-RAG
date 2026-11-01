@@ -14,10 +14,9 @@ import pytest
 from sqlalchemy.dialects import sqlite
 
 import app.services.document_parser as parser_mod
-from app.agent.tools.code_execution import _is_safe_select_sql
+from app.agent.tools.code_execution import ALLOWED_SQL_COLUMNS, _is_safe_select_sql
 from app.rag.source_provenance import LEGACY_UNVERIFIED, PARSER_ORIGINAL
 from app.services.document_parser import DocumentParser
-from app.services.graph_rag_service import GraphRAGService
 from app.services.knowledge_service import KnowledgeService
 from app.services.rag_service import RagServiceFacade
 from app.worker.doc_processor import DocumentProcessor
@@ -31,29 +30,46 @@ E_SENTINEL = f"【文档背景：E-SENTINEL 背景】\n\n{O_SENTINEL}"
 
 
 @pytest.mark.asyncio
-async def test_graph_extraction_prefers_original_text(monkeypatch):
+async def test_graph_extraction_prefers_attested_original_text(monkeypatch):
     captured: dict = {}
 
-    async def _ingest(self, *, document_id, organization_id=None, text, llm_client=None, **_kw):
-        captured["text"] = text
-        return {"status": "ok", "entities": 1}
+    class _GraphStub:
+        async def ingest_document(
+            self, *, document_id, organization_id=None, text, llm_client=None, **_kw
+        ):
+            captured["text"] = text
+            return {"status": "ok", "entities": 1}
 
-    monkeypatch.setattr(GraphRAGService, "ingest_document", _ingest)
-    monkeypatch.setattr(RagServiceFacade, "openai_client", property(lambda self: None))
+    # 挂模块级单例引用（而不是类/实例上的方法）：单进程按目录顺序跑时，
+    # 其它用例对单例实例的 patch/undo 不会遮蔽这里。
+    import app.services.graph_rag_service as graph_mod
+    import app.services.rag_service as rag_mod
+
+    monkeypatch.setattr(graph_mod, "graph_rag_service", _GraphStub())
+    monkeypatch.setattr(rag_mod, "rag_service", SimpleNamespace(openai_client=None))
 
     processor = DocumentProcessor()
     doc = SimpleNamespace(id="doc-1", organization_id=1)
     await processor._extract_graph_safely(
         doc,
         [
-            {"chunk_text": E_SENTINEL, "original_text": O_SENTINEL},
+            {
+                "chunk_text": E_SENTINEL,
+                "original_text": O_SENTINEL,
+                "text_provenance": PARSER_ORIGINAL,
+            },
             {"chunk_text": "LEGACY-CHUNK"},
+            {"chunk_text": "E-UNMARKED", "original_text": "O-UNMARKED"},
+            {
+                "chunk_text": "E-BLANK-O",
+                "original_text": "   ",
+                "text_provenance": PARSER_ORIGINAL,
+            },
         ],
     )
 
-    assert O_SENTINEL in captured["text"]
-    assert "E-SENTINEL" not in captured["text"]
-    assert "LEGACY-CHUNK" in captured["text"]
+    # 只有被 marker 证实且非空的 O 进入抽取输入；其余回退增强文本
+    assert captured["text"] == "\n".join([O_SENTINEL, "LEGACY-CHUNK", "E-UNMARKED", "E-BLANK-O"])
 
 
 class _Rows:
@@ -97,14 +113,11 @@ async def test_backfill_fetch_text_requires_attested_original():
         < compiled.index("document_chunks.original_text")
         < compiled.index("document_chunks.meta_data")
     )
+    # WHERE/ORDER BY 是图谱输入的正确性前提（跨文档混入/乱序必须被守护）
+    assert "WHERE document_chunks.document_id" in compiled
+    assert "ORDER BY document_chunks.chunk_index" in compiled
 
-    assert O_SENTINEL in text
-    assert "E-SENTINEL" not in text
-    assert "LEGACY-CHUNK" in text
-    # 无 marker 的 original_text 与空白 O 都不得当作原文
-    assert "O-UNMARKED" not in text
-    assert "E-UNMARKED" in text
-    assert "E-BLANK-O" in text
+    assert text == "\n".join([O_SENTINEL, "LEGACY-CHUNK", "E-UNMARKED", "E-BLANK-O"])
 
 
 # ── 2. 搜索联想：走真实格式化层，优先 O 派生 content ───────────────────────
@@ -132,6 +145,14 @@ async def test_search_suggestions_use_formatted_content(monkeypatch):
                 "score": 0.5,
                 "filename": "b.txt",
             },
+            {
+                "document_id": "doc-3",
+                "text": "E-LONG",
+                "snippet": "长" * 60,
+                "text_provenance": PARSER_ORIGINAL,
+                "score": 0.4,
+                "filename": "c.txt",
+            },
         ], None
 
     monkeypatch.setattr(RagServiceFacade, "search_knowledge_base", _search)
@@ -141,6 +162,9 @@ async def test_search_suggestions_use_formatted_content(monkeypatch):
     assert suggestions[0] == O_SENTINEL[:50] + "..."
     assert "E-SENTINEL" not in suggestions[0]
     assert suggestions[1] == "LEGACY-TEXT..."
+    # 截断边界：>50 字符的 O 派生片段截到 50 + 省略号
+    assert suggestions[2] == "长" * 50 + "..."
+    assert len(suggestions[2]) == 53
 
 
 # ── 3. SQL 工具：白名单提供 original_text ───────────────────────────────────
@@ -161,6 +185,36 @@ def test_sql_whitelist_still_rejects_unknown_columns():
     )
     assert not ok
     assert "no_such_col" in message
+
+
+def test_sql_whitelist_document_chunks_is_frozen():
+    """逐表冻结：任何新增列（含敏感列）都必须显式更新本断言。"""
+    assert ALLOWED_SQL_COLUMNS["document_chunks"] == {
+        "id",
+        "document_id",
+        "chunk_index",
+        "chunk_text",
+        "original_text",
+        "chunk_length",
+        "start_pos",
+        "end_pos",
+        "page_number",
+        "section_title",
+        "meta_data",
+    }
+
+
+# ── 3b. 检索 debug 面板：snippet 优先 O 派生字段 ───────────────────────────
+
+
+def test_debug_snippet_prefers_original_derived_fields():
+    from app.rag.pipeline import _debug_snippet
+
+    # 同一命中同时带 content=E 与 snippet/original_text=O 时取 O 派生
+    assert _debug_snippet({"content": E_SENTINEL, "snippet": O_SENTINEL}) == O_SENTINEL
+    assert _debug_snippet({"content": E_SENTINEL, "original_text": "O-RAW"}) == "O-RAW"
+    # 无 O 派生字段时回退增强文本
+    assert _debug_snippet({"content": E_SENTINEL}) == E_SENTINEL
 
 
 # ── 4. 旧解析写入路径：补 original_text 与 provenance ──────────────────────

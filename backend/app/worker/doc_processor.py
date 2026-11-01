@@ -24,6 +24,7 @@ from app.core.elasticsearch import (
 from app.core.log_safety import log_safe
 from app.models.document import Document, DocumentChunk, DocumentStatus
 from app.models.knowledge_job import KnowledgeJobStatus, KnowledgeProcessingJob
+from app.rag.source_provenance import PARSER_ORIGINAL
 from app.services.clause_refs import extract_clause_fields
 from app.services.document_parser import document_service
 from app.services.document_status import (
@@ -87,6 +88,22 @@ def _original_text_and_provenance(chunk_data: dict) -> tuple[str | None, str]:
     if isinstance(original_text, str) and original_text.strip():
         return original_text, "parser_original"
     return None, "legacy_unverified"
+
+
+def _graph_chunk_text(chunk_data: dict) -> str:
+    """GraphRAG 抽取输入：只有被 parser_original 标记证实且非空的 O 才算原文。
+
+    与 preview/review/backfill 的读口径一致；无标记、空白或非字符串
+    original_text 一律回退 chunk_text（检索增强文本）。
+    """
+    original_text = chunk_data.get("original_text")
+    if (
+        chunk_data.get("text_provenance") == PARSER_ORIGINAL
+        and isinstance(original_text, str)
+        and original_text.strip()
+    ):
+        return original_text
+    return str(chunk_data.get("chunk_text") or "")
 
 
 class LockLostError(Exception):
@@ -676,10 +693,10 @@ class DocumentProcessor:
             from app.services.graph_rag_service import graph_rag_service
             from app.services.rag_service import rag_service
 
-            # 图谱实体抽取的输入是原文 O；legacy 分块才回退检索增强文本
-            text = "\n".join(
-                (c.get("original_text") or c.get("chunk_text") or "") for c in chunks_data
-            )
+            # 图谱实体抽取的输入是原文 O——与 DB/preview 同口径：只有
+            # parser_original 标记证实且非空的 original_text 才算原文，
+            # legacy/无标记/空白一律回退检索增强文本。
+            text = "\n".join(_graph_chunk_text(c) for c in chunks_data)
             result = await graph_rag_service.ingest_document(
                 document_id=doc.id,
                 organization_id=doc.organization_id,
