@@ -40,7 +40,10 @@ class Document(Base):
 
     __tablename__ = "documents"
 
-    id: Mapped[str] = mapped_column(String(36), primary_key=True, index=True)
+    # 主键不再附加 index=True：ix_documents_id 与 PRIMARY 完全冗余，且在
+    # 「建案 FOR UPDATE IN(...) vs 并发 DELETE」下会形成主键/二级索引锁序颠倒
+    # （实测 MySQL 1213 死锁）。迁移 025 删除该索引。
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
     filename: Mapped[str] = mapped_column(String(255), comment="原始文件名")
     file_path: Mapped[str] = mapped_column(String(500), comment="文件存储路径")
     file_size: Mapped[int] = mapped_column(Integer, comment="文件大小(字节)")

@@ -49,7 +49,11 @@ CANONICAL_MYSQL_COLLATION = "utf8mb4_unicode_ci"
 
 def _sync_url(url: str) -> str:
     """把异步驱动 URL 换成对应的同步驱动，供 create_engine 使用。"""
-    return url.replace("+aiomysql", "+pymysql").replace("+aiosqlite", "")
+    return (
+        url.replace("+aiomysql", "+pymysql")
+        .replace("+asyncmy", "+pymysql")
+        .replace("+aiosqlite", "")
+    )
 
 
 def _script_directory() -> ScriptDirectory:

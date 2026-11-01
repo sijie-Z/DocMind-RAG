@@ -22,7 +22,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from sqlalchemy import func, select
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.security import get_user_org_id
@@ -178,62 +178,90 @@ async def create_case(
     # Batch 5 并发收口：在插入案件行之前对三份文档做加锁复核（当前读）。
     # 先锁 documents 再写 review_case，与删除侧的锁序一致（documents →
     # review_case），避免与并发删除形成锁环；锁持有到 commit 保证互斥。
-    locked_ids = set(
-        (
-            await session.execute(
-                select(Document.id)
-                .where(Document.id.in_([docs[side].id for side in REVIEW_SIDES]))
-                .with_for_update()
-            )
-        )
-        .scalars()
-        .all()
-    )
-    missing = [side for side in REVIEW_SIDES if docs[side].id not in locked_ids]
-    if missing:
-        await session.rollback()
-        raise ConflictError(
-            "案件引用的文档已被删除，请重新选择文档建案",
-            error_code="REVIEW_DOCUMENT_UNAVAILABLE",
-            detail={"missing_sides": missing},
-        )
-
-    case = ReviewCase(
-        id=str(uuid.uuid4()),
-        organization_id=org_id,
-        title=title.strip(),
-        policy_document_id=docs["policy"].id,
-        base_document_id=docs["base"].id,
-        revised_document_id=docs["revised"].id,
-        checklist_version=checklist_version,
-        status="blocked" if blocking_reasons else "ready",
-        blocking_reasons=blocking_reasons,
-        readiness_snapshot=snapshot,
-        created_by=created_by,
-        assignee_id=assignee_id,
-        lock_version=1,
-    )
-    session.add(case)
-    items = {}
-    for ordinal, item_key in enumerate(REVIEW_ITEM_KEYS, start=1):
-        item = ReviewItem(
-            id=str(uuid.uuid4()),
-            case_id=case.id,
-            item_key=item_key,
-            ordinal=ordinal,
-            status="pending",
-        )
-        session.add(item)
-        items[item_key] = item
-    if case.status == "ready":
-        await _capture_candidates(session, case, items, docs, metas)
     try:
+        # 强制走 PRIMARY：若锁定读由任一二级索引驱动（如 ix_documents_status），
+        # InnoDB 会先锁二级索引条目再锁主键行，而并发 DELETE 持主键行后要删
+        # 二级索引条目——两者锁序相反即 1213（Batch 10 在真实 MySQL 上实测，
+        # 去掉冗余 ix_documents_id 后优化器改用 ix_documents_status 复现同一死锁）。
+        # 只锁主键行后，建案与删除在同一个锁对象上排队，等待方向唯一。
+        locked_ids = set(
+            (
+                await session.execute(
+                    select(Document.id)
+                    .where(Document.id.in_([docs[side].id for side in REVIEW_SIDES]))
+                    .with_hint(Document, "FORCE INDEX (PRIMARY)", dialect_name="mysql")
+                    .with_for_update()
+                )
+            )
+            .scalars()
+            .all()
+        )
+        missing = [side for side in REVIEW_SIDES if docs[side].id not in locked_ids]
+        if missing:
+            await session.rollback()
+            raise ConflictError(
+                "案件引用的文档已被删除，请重新选择文档建案",
+                error_code="REVIEW_DOCUMENT_UNAVAILABLE",
+                detail={"missing_sides": missing},
+            )
+        case = ReviewCase(
+            id=str(uuid.uuid4()),
+            organization_id=org_id,
+            title=title.strip(),
+            policy_document_id=docs["policy"].id,
+            base_document_id=docs["base"].id,
+            revised_document_id=docs["revised"].id,
+            checklist_version=checklist_version,
+            status="blocked" if blocking_reasons else "ready",
+            blocking_reasons=blocking_reasons,
+            readiness_snapshot=snapshot,
+            created_by=created_by,
+            assignee_id=assignee_id,
+            lock_version=1,
+        )
+        session.add(case)
+        items = {}
+        for ordinal, item_key in enumerate(REVIEW_ITEM_KEYS, start=1):
+            item = ReviewItem(
+                id=str(uuid.uuid4()),
+                case_id=case.id,
+                item_key=item_key,
+                ordinal=ordinal,
+                status="pending",
+            )
+            session.add(item)
+            items[item_key] = item
+        if case.status == "ready":
+            await _capture_candidates(session, case, items, docs, metas)
         await session.commit()
+    except ConflictError:
+        raise
     except IntegrityError as exc:
         await session.rollback()
         raise ConflictError("核验案件创建冲突，请重试", error_code="REVIEW_CASE_CONFLICT") from exc
+    except OperationalError as exc:
+        # 防御性映射：即使未来出现新的索引锁序颠倒（1213），也返回可重试的
+        # 409 而不是 500。根因修复见迁移 025（去掉冗余 ix_documents_id）。
+        if not _is_mysql_deadlock(exc):
+            raise
+        await session.rollback()
+        raise ConflictError(
+            "建案与并发操作冲突，请重试", error_code="REVIEW_CASE_CONFLICT"
+        ) from exc
     await session.refresh(case)
     return case
+
+
+# 可安全重试的 MySQL 事务冲突：1213 死锁、1205 锁等待超时
+# （innodb_deadlock_detect=OFF 的部署只会报 1205）。
+_RETRYABLE_MYSQL_ERRS = frozenset({1205, 1213})
+
+
+def _is_mysql_deadlock(exc: OperationalError) -> bool:
+    """MySQL 死锁/锁等待超时：可安全重试的事务冲突。"""
+    orig = getattr(exc, "orig", None)
+    args = getattr(orig, "args", ()) or ()
+    return bool(args) and args[0] in _RETRYABLE_MYSQL_ERRS
 
 
 def _collect_blocking_reasons(metas: dict[str, Any], readiness: dict[str, Any]) -> list[str]:
