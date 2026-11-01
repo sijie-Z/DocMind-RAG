@@ -5,6 +5,14 @@ import logging
 from typing import Any
 
 from app.agent.registry import ToolResult, extended_surface_enabled, register_tool
+from app.core.config import settings
+from app.rag.source_provenance import (
+    LEGACY_UNVERIFIED,
+    PARSER_ORIGINAL,
+    STRICT,
+    normalize_mode,
+    original_text_of,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -162,7 +170,10 @@ async def compare_documents(
         )
 
     from app.core.elasticsearch import ElasticsearchTools
+    from app.services.document_preview import TEXT_PROVENANCE_MIXED
 
+    strict_mode = normalize_mode(settings.RAG_SOURCE_PROVENANCE_MODE) == STRICT
+    missing_original_docs: list[str] = []
     summaries = []
     for doc_id in document_ids:
         es_query = {
@@ -175,19 +186,43 @@ async def compare_documents(
                     ]
                 }
             },
-            "_source": ["chunk_text", "filename"],
+            "_source": ["chunk_text", "original_text", "text_provenance", "filename"],
         }
         try:
             res = await ElasticsearchTools.search_documents(es_query)
             hits = res.get("hits", {}).get("hits", [])
             if hits:
                 filename = hits[0].get("_source", {}).get("filename", doc_id)
-                text = " ".join(h.get("_source", {}).get("chunk_text", "")[:500] for h in hits[:10])
+                original_parts: list[str] = []
+                legacy_parts: list[str] = []
+                for hit in hits[:10]:
+                    source = hit.get("_source", {})
+                    original = original_text_of(source)
+                    if original is not None:
+                        original_parts.append(original[:500])
+                    else:
+                        legacy_parts.append(str(source.get("chunk_text") or "")[:500])
+                if original_parts:
+                    # 有真实原文就只用原文；同文档内混合时如实标 mixed
+                    text = " ".join(original_parts)
+                    doc_provenance = PARSER_ORIGINAL if not legacy_parts else TEXT_PROVENANCE_MIXED
+                elif strict_mode:
+                    # strict：没有任何可验证原文的命中不得以增强文本替代
+                    missing_original_docs.append(doc_id)
+                    text = ""
+                    doc_provenance = LEGACY_UNVERIFIED
+                else:
+                    # compat：允许回退检索增强文本，但逐段显式标记未验证
+                    text = " ".join(
+                        f"[{LEGACY_UNVERIFIED}] {part}" for part in legacy_parts if part
+                    )
+                    doc_provenance = LEGACY_UNVERIFIED
                 summaries.append(
                     {
                         "id": doc_id,
                         "filename": filename,
                         "text": text[:2000],
+                        "text_provenance": doc_provenance,
                         "chunk_count": len(hits),
                     }
                 )
@@ -197,6 +232,7 @@ async def compare_documents(
                         "id": doc_id,
                         "filename": "Not found",
                         "text": "",
+                        "text_provenance": LEGACY_UNVERIFIED,
                         "chunk_count": 0,
                     }
                 )
@@ -206,9 +242,19 @@ async def compare_documents(
                     "id": doc_id,
                     "filename": f"Error: {e}",
                     "text": "",
+                    "text_provenance": LEGACY_UNVERIFIED,
                     "chunk_count": 0,
                 }
             )
+
+    if strict_mode and missing_original_docs:
+        return ToolResult.fail(
+            code="source_original_unavailable",
+            message=(
+                "strict 模式不会把检索增强文本当作文档内容；以下文档缺少可验证原文，"
+                f"请先重建：{', '.join(sorted(missing_original_docs))}"
+            ),
+        )
 
     # Build comparison output
     aspect_prompts = {
@@ -227,6 +273,7 @@ async def compare_documents(
         output_parts.append(
             f"\n### {s['filename']} ({s['id'][:8]}...)\n"
             f"Chunks: {s['chunk_count']}\n"
+            f"Provenance: {s['text_provenance']}\n"
             f"Preview: {s['text'][:300]}..."
         )
 

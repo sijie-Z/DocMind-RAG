@@ -56,8 +56,14 @@ from app.models.chat import (
 )
 from app.models.document import Document
 from app.models.user import User
+from app.rag.source_provenance import (
+    LEGACY_UNVERIFIED,
+    PARSER_ORIGINAL,
+    original_text_of,
+)
 from app.schemas.chat import ChatSessionCreate, ChatStreamRequest, FeedbackRequest
 from app.services.chat_service import RAGEvent, run_rag_pipeline
+from app.services.document_preview import TEXT_PROVENANCE_MIXED
 from app.services.rag_service import rag_service
 from app.services.session_service import (
     SessionAccessScope,
@@ -969,9 +975,31 @@ async def chat_parse_upload(
         )
 
         chunks = result.get("chunks", [])
-        full_text = (
-            "\n".join(c["chunk_text"] for c in chunks) if chunks else result.get("content", "")
-        )
+        original_chunk_count = 0
+        legacy_chunk_count = 0
+        if chunks:
+            # 附件内容 = 逐块原文 O；只有缺 O 的旧块才回退检索增强文本 E，
+            # 并且必须如实标注 legacy_unverified/mixed，不能把 E 冒充文件内容。
+            parts: list[str] = []
+            for chunk in chunks:
+                original = original_text_of(chunk)
+                if original is None:
+                    legacy_chunk_count += 1
+                    parts.append(str(chunk.get("chunk_text") or ""))
+                else:
+                    original_chunk_count += 1
+                    parts.append(original)
+            full_text = "\n".join(parts)
+            if legacy_chunk_count == 0:
+                text_provenance = PARSER_ORIGINAL
+            elif original_chunk_count == 0:
+                text_provenance = LEGACY_UNVERIFIED
+            else:
+                text_provenance = TEXT_PROVENANCE_MIXED
+        else:
+            # 无分块结构时没有可验证的原文声明，按 legacy 处理
+            full_text = result.get("content", "")
+            text_provenance = LEGACY_UNVERIFIED
 
         return {
             "success": True,
@@ -980,6 +1008,9 @@ async def chat_parse_upload(
                 "content": full_text,
                 "chunk_count": len(chunks),
                 "file_size": result.get("file_size", 0),
+                "text_provenance": text_provenance,
+                "original_chunk_count": original_chunk_count,
+                "legacy_chunk_count": legacy_chunk_count,
             },
         }
     except AppError:

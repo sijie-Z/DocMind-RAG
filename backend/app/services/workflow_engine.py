@@ -259,6 +259,8 @@ class KnowledgeSearchNodeExecutor(NodeExecutor):
     organization_id: int | None = None
 
     async def execute(self, state: WorkflowState) -> dict[str, Any]:
+        from app.rag.context_compressor import get_prompt_text
+        from app.rag.source_provenance import provenance_of
         from app.services.rag_service import rag_service
 
         # 获取查询
@@ -293,12 +295,20 @@ class KnowledgeSearchNodeExecutor(NodeExecutor):
         # 过滤低相关性结果
         filtered_docs = [d for d in docs if d.get("score", 0) >= score_threshold]
 
-        # 构建上下文
-        context = "\n\n".join([doc.get("content", "") for doc in filtered_docs[:3]])
+        # 构建上下文：只取原文 O（get_prompt_text 是提示词正文的唯一入口；
+        # 直接读 content 会拿到检索增强文本 E，strict 模式在这里会被绕过）。
+        context = "\n\n".join(
+            text for text in (get_prompt_text(doc) for doc in filtered_docs[:3]) if text
+        )
 
-        # 构建来源信息
+        # 构建来源信息（provenance 缺失一律按 legacy_unverified 处理）
         sources = [
-            {"title": d.get("title", "未知"), "score": d.get("score", 0)} for d in filtered_docs
+            {
+                "title": d.get("title", "未知"),
+                "score": d.get("score", 0),
+                "textProvenance": provenance_of(d),
+            }
+            for d in filtered_docs
         ]
 
         return {
