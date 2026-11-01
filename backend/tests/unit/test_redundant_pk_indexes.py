@@ -80,14 +80,17 @@ CREATE_ALL_ONLY = (
 ALL_PK_ID_INDEXES = REDUNDANT + CREATE_ALL_ONLY
 
 
-def test_no_primary_key_column_declares_secondary_index():
+def test_no_single_column_primary_key_declares_secondary_index():
+    # 只约束单列 PK：其 PK 列与 PRIMARY 完全冗余。复合 PK 的非首列索引
+    # 可能是业务需要（关联表的第二列），不在此规则范围。
     offenders = [
         f"{table_name}.{column.name}"
         for table_name, table in sorted(Base.metadata.tables.items())
+        if len(table.primary_key.columns) == 1
         for column in table.primary_key.columns
         if column.index
     ]
-    assert offenders == [], "主键列不得声明 index=True（与 PRIMARY 完全冗余）"
+    assert offenders == [], "单列主键列不得声明 index=True（与 PRIMARY 完全冗余）"
 
 
 def test_026_upgrade_drops_and_downgrade_restores(tmp_path, monkeypatch):
