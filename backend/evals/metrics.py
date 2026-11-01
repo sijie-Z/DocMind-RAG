@@ -165,7 +165,7 @@ def aggregate(outcomes: list[ItemOutcome], cutoffs: tuple[int, ...] = (1, 3, 5))
 
     basis_counts: dict[str, int] = {}
     for o in outcomes:
-        if o.n_results:
+        if o.status == "ok" and o.n_results:
             basis_counts[o.text_basis] = basis_counts.get(o.text_basis, 0) + 1
 
     agg: dict = {

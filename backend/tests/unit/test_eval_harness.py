@@ -394,6 +394,7 @@ class TestHarnessAndReport:
             top_k=5,
             retriever_label="fake",
             generated_at="2026-10-09T00:00:00+00:00",
+            provenance_mode="compat",
         )
         json.dumps(report, ensure_ascii=False)  # 必须可序列化
         assert report["aggregates"]["clause_hit@5"] == 1.0

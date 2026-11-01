@@ -6,6 +6,7 @@
 """
 
 import json
+from types import SimpleNamespace
 
 import pytest
 
@@ -59,6 +60,14 @@ class TestResultText:
         result = {"content": "content", "prompt_text": "prompt", "text_provenance": "legacy"}
         assert result_text(result) == ("prompt", "compat")
 
+    def test_whitespace_original_falls_back(self):
+        result = {
+            "content": "E 第7条",
+            "original_text": "   ",
+            "text_provenance": "parser_original",
+        }
+        assert result_text(result) == ("E 第7条", "compat")
+
     def test_empty_result(self):
         assert result_text({}) == ("", "compat")
 
@@ -88,6 +97,10 @@ class TestEvaluateUsesOriginal:
         results = [_o_result("f.md", "第7条"), {"filename": "g.md", "content": "无关"}]
         outcome = evaluate_item(_item(), results)
         assert outcome.text_basis == "mixed"
+
+    def test_empty_negative_has_no_basis(self):
+        outcome = evaluate_item(_item("neg", expect="empty", gold=()), [])
+        assert outcome.text_basis == "none"
 
 
 class TestAggregateBasisCounts:
@@ -127,7 +140,10 @@ class TestDenseProvenancePassthrough:
     async def test_dense_results_carry_original_and_provenance(self, monkeypatch):
         from app.core.elasticsearch import ElasticsearchTools
 
+        captured_queries: list[dict] = []
+
         async def _fake_search(_query):
+            captured_queries.append(_query)
             return {
                 "hits": {
                     "hits": [
@@ -170,6 +186,9 @@ class TestDenseProvenancePassthrough:
         assert second["original_text"] is None
         assert second["text_provenance"] is None
         assert result_text(first)[1] == "original"
+        # 查询本身必须向 ES 请求 provenance 字段（删任一映射该断言即红）
+        assert captured_queries, "dense 必须实际发起 ES 查询"
+        assert {"original_text", "text_provenance"} <= set(captured_queries[0]["_source"])
 
 
 class TestReportMeta:
@@ -207,3 +226,138 @@ class TestReportMeta:
         assert report["items"][0]["text_basis"] == "original"
         # 本批不扩张 CI 协议键（协议/基线变更单独立项）
         assert "provenance_mode" not in PROTOCOL_KEYS
+
+
+class TestReportUsesOriginal:
+    def test_report_defs_and_snippet_come_from_original(self, tmp_path):
+        item = _item("a")
+        # 诱饵：E 是摘要/改写文本，不含行首条款定义；O 才是合同原文。
+        result = {
+            "filename": "f.md",
+            "content": "（摘要）付款为 30 天",
+            "original_text": "第7条 付款期限为30天。",
+            "text_provenance": "parser_original",
+            "score": 0.9,
+        }
+        outcome = evaluate_item(item, [result])
+        runs = [ItemRun(item=item, outcome=outcome, results=[result])]
+        golden = GoldenSet(
+            dataset_id="ds",
+            version=1,
+            description="",
+            path=tmp_path / "x.json",
+            corpus_dir=tmp_path,
+            corpus_files=("f.md",),
+            top_k=5,
+            items=(item,),
+        )
+        report = build_report(
+            golden,
+            runs,
+            index="idx",
+            org_id=9901,
+            top_k=5,
+            retriever_label="fake",
+            provenance_mode="compat",
+        )
+        trimmed = report["items"][0]["results"][0]
+        assert "第7条" not in result["content"], "诱饵 E 本身不得含定义位"
+        assert trimmed["defs"] == ["第7条"]
+        assert trimmed["snippet"].startswith("第7条")
+        assert trimmed["defs"] == outcome.top1_defs
+
+
+class TestBuildReportContract:
+    def test_provenance_mode_is_required(self, tmp_path):
+        item = _item("a")
+        runs = [ItemRun(item=item, outcome=evaluate_item(item, []), results=[])]
+        golden = GoldenSet(
+            dataset_id="ds",
+            version=1,
+            description="",
+            path=tmp_path / "x.json",
+            corpus_dir=tmp_path,
+            corpus_files=("f.md",),
+            top_k=5,
+            items=(item,),
+        )
+        with pytest.raises(TypeError):
+            build_report(golden, runs, index="idx", org_id=9901, top_k=5, retriever_label="fake")
+
+
+class TestSeedCommandPayload:
+    @pytest.mark.asyncio
+    async def test_seed_command_writes_original_and_provenance(self, tmp_path, monkeypatch):
+        import app.core.config as config_mod
+        import app.core.elasticsearch as es_mod
+        from evals import runner
+
+        (tmp_path / "f.md").write_text("第1条 正文一\n\n第2条 正文二\n", encoding="utf-8")
+        golden = GoldenSet(
+            dataset_id="ds",
+            version=1,
+            description="",
+            path=tmp_path / "x.json",
+            corpus_dir=tmp_path,
+            corpus_files=("f.md",),
+            top_k=5,
+            items=(),
+        )
+        args = SimpleNamespace(org_id=9901, dry_run=False, recreate=False, embedding="fake")
+
+        class _Indices:
+            async def refresh(self, index=None):
+                return None
+
+        class _Client:
+            def __init__(self, count: int):
+                self._count = count
+                self.indices = _Indices()
+
+            async def count(self, **kwargs):
+                return {"count": self._count}
+
+            async def search(self, **kwargs):
+                return {"aggregations": {"docs": {"value": 1}}}
+
+            async def delete_by_query(self, **kwargs):
+                return {"deleted": 0}
+
+        captured: dict = {}
+
+        async def _fake_bulk(actions):
+            captured["actions"] = actions
+
+        class _Embed:
+            async def get_embeddings(self, texts):
+                return [[0.1, 0.2] for _ in texts]
+
+        async def _init_es():
+            return None
+
+        async def _get_es():
+            return _Client(2)
+
+        async def _close_es():
+            return None
+
+        monkeypatch.setattr(es_mod, "init_elasticsearch", _init_es)
+        monkeypatch.setattr(es_mod, "get_index_error", lambda: None)
+        monkeypatch.setattr(es_mod, "get_elasticsearch", _get_es)
+        monkeypatch.setattr(es_mod, "close_elasticsearch", _close_es)
+        monkeypatch.setattr(es_mod.ElasticsearchTools, "bulk_index_documents", _fake_bulk)
+        monkeypatch.setattr(runner, "_require_embedding_service", lambda mode: _Embed())
+        monkeypatch.setattr(
+            config_mod.settings, "ELASTICSEARCH_INDEX_NAME", "docmind_knowledge_eval_tmp"
+        )
+        monkeypatch.setattr(config_mod.settings, "VECTOR_DIMENSION", 2)
+
+        rc = await runner._cmd_seed_async(args, golden)
+
+        assert rc == 0
+        actions = captured["actions"]
+        assert len(actions) == 2
+        for action in actions:
+            source = action["_source"]
+            assert source["text_provenance"] == "parser_original"
+            assert source["original_text"] == source["content"]

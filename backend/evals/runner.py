@@ -439,8 +439,9 @@ def _seed_source(
 ) -> dict:
     """评估索引的 _source 契约：E（content/chunk_text）+ 可信 O（original_text）。
 
-    fixture 语料是纯原文（E==O），但仍显式写入 O 与 provenance，让评测走
-    与产品一致的证据契约；未来加入带【文档背景】前缀的 fixture 时无需改这里。
+    当前 fixture 的每个 chunk 同时充当 E 与 O（语料是纯原文，无增强前缀）。
+    未来若引入 E≠O 的语料，必须在此拆分两种正文并分别标注 provenance，
+    不能让 E 冒充 O。
     """
     return {
         "content": chunk,

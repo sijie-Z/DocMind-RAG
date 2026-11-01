@@ -63,9 +63,13 @@ def build_report(
     corpus_defs: int | None = None,
     corpus_digest: str | None = None,
     git_commit: str | None = None,
-    provenance_mode: str = "compat",
+    provenance_mode: str,
 ) -> dict:
-    """构建报告 dict（可直接 json.dump 到文件）。"""
+    """构建报告 dict（可直接 json.dump 到文件）。
+
+    ``provenance_mode`` 必填：漏传必须立刻 TypeError，而不是静默写成默认值
+    ——否则报告会把「不知道跑在哪个原文模式」伪装成 compat。
+    """
     outcomes = [run.outcome for run in runs]
     aggregates = aggregate(outcomes, cutoffs=cutoffs)
     return {
@@ -162,6 +166,10 @@ def render_markdown(report: dict) -> str:
     lines.append(f"# RAG 检索评估报告（{meta['dataset_id']} v{meta['dataset_version']}）")
     lines.append("")
     lines.append(f"- 索引：`{meta['index']}`　组织：`{meta['org_id']}`　top_k：{top_k}")
+    lines.append(
+        f"- 原文口径：`{meta.get('provenance_mode', 'n/a')}`　判定依据："
+        f"{meta.get('text_basis_counts') or '—'}"
+    )
     lines.append(
         f"- 条目：{counts['total']}（正例 {counts['positives']} + 负例 {counts['negatives']}"
         f"{'，错误 ' + str(counts['errors']) if counts['errors'] else ''}）"

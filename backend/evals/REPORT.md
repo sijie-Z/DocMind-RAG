@@ -9,6 +9,10 @@
 
 > 口径：ClauseHit@k = top-k 中存在「文件名匹配 + 条号位于 chunk 行首定义位」的块；
 > NearMiss@k = 声明 near-miss 的正例中 top-k 出现相邻条定义位的比例（越低越好）；Wilson 95% CI；不引入 bootstrap。
+>
+> 原文口径（Batch 15）：评测索引的每个 chunk 同时写入 `original_text` 与 `text_provenance=parser_original`；
+> 条款判定优先使用可验证原文 O，缺失时才回退检索文本 E（标记 `compat`）。报告 meta 的
+> `provenance_mode` 与 `text_basis_counts` 如实记录本次运行的判定依据。
 
 ## 总体指标（含 Wilson 95% CI）
 
