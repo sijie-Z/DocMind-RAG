@@ -19,13 +19,14 @@ from pathlib import Path
 from .clauses import clause_definitions, clause_mentions
 from .golden import GoldenSet
 from .harness import ItemRun
-from .metrics import aggregate, aggregate_by_type
+from .metrics import aggregate, aggregate_by_type, result_text
 
 _SNIPPET_LEN = 120
 
 
 def _content_of(result: dict) -> str:
-    return str(result.get("content") or result.get("text") or result.get("snippet") or "")
+    """与 metrics 同一取文口径（O 优先，缺 O 回退 E）——避免双口径漂移。"""
+    return result_text(result)[0]
 
 
 def _trim_results(results: list[dict]) -> list[dict]:
@@ -62,9 +63,11 @@ def build_report(
     corpus_defs: int | None = None,
     corpus_digest: str | None = None,
     git_commit: str | None = None,
+    provenance_mode: str = "compat",
 ) -> dict:
     """构建报告 dict（可直接 json.dump 到文件）。"""
     outcomes = [run.outcome for run in runs]
+    aggregates = aggregate(outcomes, cutoffs=cutoffs)
     return {
         "meta": {
             "phase": 1.5,
@@ -88,11 +91,15 @@ def build_report(
             "retriever": retriever_label,
             "retriever_mode": retriever_mode,
             "embedding_mode": embedding_mode,
+            # 如实记录本次运行的原文口径与判定依据分布（信息性字段，
+            # 不参与 CI 协议比较；协议/基线变更另行显式立项）。
+            "provenance_mode": provenance_mode,
+            "text_basis_counts": aggregates["counts"].get("text_basis", {}),
             "es_version": es_version,
             "llm_assist": False,
             "generated_at": generated_at or datetime.now(UTC).isoformat(timespec="seconds"),
         },
-        "aggregates": aggregate(outcomes, cutoffs=cutoffs),
+        "aggregates": aggregates,
         "aggregates_by_type": aggregate_by_type(outcomes, cutoffs=cutoffs),
         "items": [
             {
@@ -109,6 +116,7 @@ def build_report(
                 "matched_near_miss": run.outcome.matched_near_miss,
                 "declares_near_miss": run.outcome.declares_near_miss,
                 "n_results": run.outcome.n_results,
+                "text_basis": run.outcome.text_basis,
                 "strategy": run.outcome.strategy,
                 "elapsed_ms": round(run.elapsed_ms, 1),
                 "degraded": run.degraded,

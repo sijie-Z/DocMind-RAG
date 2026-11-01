@@ -44,10 +44,37 @@ class ItemOutcome:
     top1_defs: list[str] = field(default_factory=list)
     strategy: str | None = None
     declares_near_miss: bool = False
+    # 条款判定所用文本的依据：original（可验证 O）/ compat（回退 E）/ mixed / none。
+    text_basis: str = "none"
 
 
-def _result_content(result: dict) -> str:
-    return str(result.get("content") or result.get("text") or result.get("snippet") or "")
+# 产品契约：证据正文以 O 为准（text_provenance=parser_original 时才可信）；
+# 没有可验证 O 时才回退到 E，并如实记录依据（与 retriever/pipeline 的
+# PARSER_ORIGINAL 常量保持一致，evals 不 import app 以保持纯标准库）。
+_PARSER_ORIGINAL = "parser_original"
+
+
+def result_text(result: dict) -> tuple[str, str]:
+    """返回（用于条款判定的文本, 依据 original/compat）。
+
+    E（content/prompt_text）含上下文增强前缀，行首定义位可能失真；
+    只有带 provenance 标记的 original_text 才能作为条款判定依据。
+    """
+    original = result.get("original_text")
+    if (
+        str(result.get("text_provenance") or "") == _PARSER_ORIGINAL
+        and isinstance(original, str)
+        and original.strip()
+    ):
+        return original, "original"
+    fallback = (
+        result.get("prompt_text")
+        or result.get("content")
+        or result.get("text")
+        or result.get("snippet")
+        or ""
+    )
+    return str(fallback), "compat"
 
 
 def _match_items(
@@ -58,7 +85,7 @@ def _match_items(
         return None, []
     for rank, result in enumerate(results, 1):
         filename = str(result.get("filename") or "")
-        defs = clause_definitions(_result_content(result))
+        defs = clause_definitions(result_text(result)[0])
         matched = [loc.label() for loc in locators if filename == loc.file and loc.clause in defs]
         if matched:
             return rank, matched
@@ -74,6 +101,13 @@ def evaluate_item(
     strategy: str | None = None,
 ) -> ItemOutcome:
     """对单条 golden 的检索结果做判定（纯函数，便于单元测试判别）。"""
+    bases = {result_text(result)[1] for result in results}
+    if not results:
+        text_basis = "none"
+    elif len(bases) > 1:
+        text_basis = "mixed"
+    else:
+        text_basis = bases.pop()
     outcome = ItemOutcome(
         item_id=item.id,
         item_type=item.type,
@@ -83,10 +117,11 @@ def evaluate_item(
         strategy=strategy,
         n_results=len(results),
         declares_near_miss=bool(item.near_miss),
+        text_basis=text_basis,
     )
     if results:
         outcome.top1_file = str(results[0].get("filename") or "") or None
-        outcome.top1_defs = sorted(clause_definitions(_result_content(results[0])))
+        outcome.top1_defs = sorted(clause_definitions(result_text(results[0])[0]))
     if status == "error":
         return outcome
 
@@ -117,12 +152,21 @@ def _rate(numer: int, denom: int) -> float | None:
 
 
 def aggregate(outcomes: list[ItemOutcome], cutoffs: tuple[int, ...] = (1, 3, 5)) -> dict:
-    """汇总指标。错误项不进分母；分项计数如实报告。"""
+    """汇总指标。错误项不进分母；分项计数如实报告。
+
+    ``counts.text_basis`` 只统计有检索结果的条目（original/compat/mixed），
+    空结果与错误不参与——它回答的是「本次判定依据了哪种正文」。
+    """
     ok = [o for o in outcomes if o.status == "ok"]
     errors = [o for o in outcomes if o.status == "error"]
     positives = [o for o in ok if o.expect == "hit"]
     negatives = [o for o in ok if o.expect == "empty"]
     nm_positives = [o for o in positives if o.declares_near_miss]
+
+    basis_counts: dict[str, int] = {}
+    for o in outcomes:
+        if o.n_results:
+            basis_counts[o.text_basis] = basis_counts.get(o.text_basis, 0) + 1
 
     agg: dict = {
         "counts": {
@@ -132,6 +176,7 @@ def aggregate(outcomes: list[ItemOutcome], cutoffs: tuple[int, ...] = (1, 3, 5))
             "positives": len(positives),
             "negatives": len(negatives),
             "positives_with_near_miss": len(nm_positives),
+            "text_basis": basis_counts,
         },
         "error_items": [o.item_id for o in errors],
     }
