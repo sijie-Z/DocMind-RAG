@@ -724,7 +724,7 @@ describe('远程搜索 R2 收口', () => {
   })
 
   it('候选加载期间 loading 翻转（deferred 请求）', async () => {
-    const { vm } = await openModal()
+    const { wrapper, vm } = await openModal()
     const deferred: Array<(value: unknown) => void> = []
     api.candidates.mockImplementation(
       () =>
@@ -732,14 +732,18 @@ describe('远程搜索 R2 收口', () => {
           deferred.push(resolve as (value: unknown) => void)
         }) as never
     )
-    const loadingRef = (vm as unknown as { candidatesLoading: boolean }).candidatesLoading
     void vm.loadCandidates('x')
     await flushPromises()
     expect((vm as unknown as { candidatesLoading: boolean }).candidatesLoading).toBe(true)
+    // :loading 绑定真实透传到 NSelect（请求挂起期间组件 props 为 true）
+    expect(
+      (wrapper.findComponent(CreateCaseModal).findAllComponents(NSelect)[0].props() as {
+        loading?: boolean
+      }).loading
+    ).toBe(true)
     deferred[0](candidatesResponse([POLICY]))
     await flushPromises()
     expect((vm as unknown as { candidatesLoading: boolean }).candidatesLoading).toBe(false)
-    expect(loadingRef).toBe(false)
   })
 })
 
@@ -759,5 +763,60 @@ describe('远程搜索失败重试', () => {
     await flushPromises()
 
     expect(api.candidates).toHaveBeenLastCalledWith({ q: '网断了', page: 1, page_size: 200 })
+  })
+})
+
+
+describe('Batch 10 测试守护补齐', () => {
+  it('关闭下拉后搜索态/无匹配提示消失（dropdownOpen 关闭侧）', async () => {
+    const { wrapper, modal, vm } = await openModal()
+    const vmAny = vm as unknown as { dropdownOpen: boolean }
+    vmAny.dropdownOpen = true
+    api.candidates.mockResolvedValue(candidatesResponse([], 0))
+    await vm.loadCandidates('不存在')
+    await flushPromises()
+    expect(wrapper.find('[data-testid="candidate-no-match"]').exists()).toBe(true)
+
+    modal.findAllComponents(NSelect)[0].vm.$emit('update:show', false)
+    await flushPromises()
+    expect(wrapper.find('[data-testid="candidate-no-match"]').exists()).toBe(false)
+  })
+
+  it('重开弹窗会清空上一次会话的候选（首屏返回前不可选旧列表）', async () => {
+    const { wrapper, vm } = await openModal()
+    expect(vm.optionsFor('policy').length).toBeGreaterThan(0)
+
+    // 关闭 → 重开，首屏请求挂起
+    const deferred: Array<(value: unknown) => void> = []
+    api.candidates.mockImplementation(
+      () => new Promise((resolve) => deferred.push(resolve as (value: unknown) => void)) as never
+    )
+    const indexVm = wrapper.findComponent(ReviewsIndex).vm as unknown as {
+      createVisible: boolean
+    }
+    indexVm.createVisible = false
+    await flushPromises()
+    indexVm.createVisible = true
+    await flushPromises()
+
+    expect(vm.optionsFor('policy')).toEqual([])
+    deferred.forEach((resolve) => resolve(candidatesResponse([POLICY, BASE])))
+    await flushPromises()
+    expect(vm.optionsFor('policy').length).toBeGreaterThan(0)
+  })
+
+  it('组件卸载会取消待发的防抖搜索', async () => {
+    vi.useFakeTimers()
+    try {
+      const { wrapper, modal } = await openModal()
+      const callsBefore = api.candidates.mock.calls.length
+      modal.findAllComponents(NSelect)[0].vm.$emit('search', '卸载前输入')
+      wrapper.unmount()
+      await vi.advanceTimersByTimeAsync(400)
+      await flushPromises()
+      expect(api.candidates.mock.calls.length).toBe(callsBefore)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })

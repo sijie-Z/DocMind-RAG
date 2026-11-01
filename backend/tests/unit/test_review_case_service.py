@@ -5,11 +5,13 @@ import sqlite3
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from alembic.config import Config
 from alembic.script import ScriptDirectory
 from sqlalchemy import func, select, update
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 import app.models  # noqa: F401
@@ -850,3 +852,82 @@ def test_022_migration_roundtrip(tmp_path, monkeypatch):
         }
     for name in ("review_case", "review_item", "review_evidence"):
         assert name not in tables
+
+
+# ── MySQL 1213 死锁映射（Batch 10） ─────────────────────────────────────────
+
+
+def test_is_mysql_deadlock_only_matches_1213():
+    assert svc._is_mysql_deadlock(OperationalError("stmt", {}, Exception(1213))) is True
+    assert svc._is_mysql_deadlock(OperationalError("stmt", {}, Exception(1205))) is False
+    assert svc._is_mysql_deadlock(OperationalError("stmt", {}, Exception())) is False
+
+
+@pytest.mark.asyncio
+async def test_create_case_maps_deadlock_to_retryable_conflict(monkeypatch):
+    """锁读/提交阶段遇到 1213 必须返回可重试 409，而不是 500。"""
+
+    async def _no_meta(_session, _doc_id):
+        return None
+
+    async def _ready(_session, _doc):
+        return SimpleNamespace(
+            status="reviewable",
+            blocking_reasons=[],
+            warnings=[],
+            meta=None,
+            document_id=_doc.id,
+            total_chunks=1,
+            original_text_chunks=1,
+            page_number_chunks=1,
+            clause_candidate_chunks=1,
+            legacy_chunk_count=0,
+        )
+
+    monkeypatch.setattr(svc, "get_review_meta", _no_meta)
+    monkeypatch.setattr(svc, "compute_readiness", _ready)
+
+    class _DeadlockSession:
+        def __init__(self):
+            self.rolled_back = False
+
+        async def execute(self, *_args, **_kwargs):
+            raise OperationalError("SELECT documents.id ... FOR UPDATE", {}, Exception(1213))
+
+        async def rollback(self):
+            self.rolled_back = True
+
+        def add(self, _obj):
+            return None
+
+    session = _DeadlockSession()
+    docs = {
+        side: SimpleNamespace(
+            id=f"dl-{side}",
+            organization_id=1,
+            filename=f"{side}.txt",
+            parsed_at=None,
+            indexed_at=None,
+        )
+        for side in ("policy", "base", "revised")
+    }
+
+    with pytest.raises(ConflictError) as excinfo:
+        await svc.create_case(
+            session, docs=docs, title="deadlock", checklist_version="v1", created_by=USER_ID
+        )
+
+    assert excinfo.value.error_code == "REVIEW_CASE_CONFLICT"
+    assert "重试" in excinfo.value.message
+    assert session.rolled_back is True
+
+
+def test_all_alembic_revision_ids_fit_mysql_version_num():
+    """MySQL alembic_version.version_num 是 VARCHAR(32)：超长 revision id
+    会让迁移执行后版本戳写入失败（DataError 1406，Batch 10 实测踩过）。"""
+    cfg = _cfg()
+    script = ScriptDirectory.from_config(cfg)
+    too_long = {
+        rev.revision: len(rev.revision) for rev in script.walk_revisions() if len(rev.revision) > 32
+    }
+    assert too_long == {}
