@@ -6,8 +6,8 @@
 
 两者都意味着「这次事务因并发操作被 abort」，调用方应返回可重试的业务冲突
 （409）而不是未处理异常（500）。判断依据是底层驱动异常的参数首位错误码
-（aiomysql/pymysql 的 ``orig.args[0]``）；其它错误码或非 MySQL 驱动一律
-返回 False，保持原有异常路径不变。
+（aiomysql/asyncmy/pymysql 都会把驱动错误的 ``args[0]`` 保留为 errno）；
+其它错误码或非 MySQL 驱动一律返回 False，保持原有异常路径不变。
 """
 
 from __future__ import annotations

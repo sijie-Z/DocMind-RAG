@@ -496,7 +496,11 @@ class KnowledgeService:
                 if getattr(outcome, "file_cleanup_pending", False):
                     cleanup_pending_ids.append(doc_id)
             except AppError as e:
-                errors.append({"document_id": doc_id, "reason": e.message})
+                # error_code 让客户端能程序化区分「可重试冲突」（如
+                # DOCUMENT_DELETE_CONFLICT）与其它业务拒绝，而不必解析文案。
+                errors.append(
+                    {"document_id": doc_id, "reason": e.message, "error_code": e.error_code}
+                )
         fail_count = len(errors)
         message = f"成功删除 {success_count} 个文档，失败 {fail_count} 个"
         if cleanup_pending_ids:

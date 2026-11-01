@@ -998,6 +998,16 @@ def _documents_indexes(db_path: Path) -> set[str]:
         return {row[1] for row in conn.execute("PRAGMA index_list('documents')")}
 
 
+def _index_definition(db_path: Path, name: str) -> tuple[bool, list[str]]:
+    """索引定义：(是否唯一, 列序)。只断言名字会放过 unique/列集合变异。"""
+    with sqlite3.connect(str(db_path)) as conn:
+        unique = any(
+            row[1] == name and row[2] == 1 for row in conn.execute("PRAGMA index_list('documents')")
+        )
+        columns = [row[2] for row in conn.execute(f"PRAGMA index_info('{name}')")]
+    return unique, columns
+
+
 def test_025_migration_roundtrip_and_idempotent(tmp_path, monkeypatch):
     db_path = tmp_path / "documents-025.db"
     monkeypatch.setattr(settings, "DATABASE_URL", f"sqlite+aiosqlite:///{db_path.as_posix()}")
@@ -1011,6 +1021,7 @@ def test_025_migration_roundtrip_and_idempotent(tmp_path, monkeypatch):
 
     command.downgrade(cfg, "024_review_case_archive")
     assert "ix_documents_id" in _documents_indexes(db_path)
+    assert _index_definition(db_path, "ix_documents_id") == (True, ["id"])
 
     command.upgrade(cfg, "head")
     assert "ix_documents_id" not in _documents_indexes(db_path)
@@ -1039,4 +1050,4 @@ def test_025_downgrade_is_idempotent_when_index_already_exists(tmp_path, monkeyp
     with sqlite3.connect(str(db_path)) as conn:
         conn.execute("CREATE UNIQUE INDEX ix_documents_id ON documents (id)")
     command.downgrade(cfg, "024_review_case_archive")
-    assert "ix_documents_id" in _documents_indexes(db_path)
+    assert _index_definition(db_path, "ix_documents_id") == (True, ["id"])
