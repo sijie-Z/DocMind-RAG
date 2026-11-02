@@ -180,7 +180,13 @@ _NO_COLON_EXCEPTION_RE = re.compile(
 # 独立例外条款。
 _EXCEPTION_AS_PAYMENT_HEADING_RE = re.compile(
     rf"^第[一二三四五六七八九十百零〇0-9]+条\s*(?:{_EXCEPTION_TERM_PATTERN})"
-    r"\s*(?:情形|情况)?\s*下?的?\s*(?:[应预首分]?期?付款|应?支付|账期|价款|货款|结算)"
+    r"\s*(?:情形|情况)?\s*下?的?\s*[及与和、]?\s*"
+    r"(?:[应预首分]?期?付款|应?支付|账期|价款|货款|结算)"
+)
+# 例外词后是标点、紧跟合同主语（「补充协议，甲方应…」）属正文，不是标题。
+_EXCEPTION_BODY_SUBJECT_RE = re.compile(
+    rf"^第[一二三四五六七八九十百零〇0-9]+条\s*(?:{_EXCEPTION_TERM_PATTERN})"
+    r"\s*[，,。；;、]\s*(?:甲方|乙方|双方|本合同|本协议)"
 )
 # 阈值语境：定义「逾期/超过 N 天」的违约条件时，期限不是账期。
 THRESHOLD_CONTEXT = ("逾期", "超过", "延迟", "超期", "违约", "滞纳", "罚息")
@@ -320,20 +326,24 @@ def _is_exception_article(clause: Clause) -> bool:
     - 无冒号但标题形态明确：「第九条 例外 …」；
     - 「第三条 付款期限 除不可抗力外…」不命中（例外词不在条号之后）。
     """
+    raw = clause.raw_text or clause.text
+    # 先认明确的标题形态：「第X条 例外<分隔>…」。即便正文后面还有冒号（如
+    # 「例外 因不可抗力导致付款延迟的：顺延30天」）也仍是独立例外条款；
+    # 例外词作付款定语（含 及/与/和 连接）或分隔符后紧跟合同主语的属正文。
+    if (
+        _NO_COLON_EXCEPTION_RE.match(raw)
+        and not _EXCEPTION_AS_PAYMENT_HEADING_RE.match(raw)
+        and not _EXCEPTION_BODY_SUBJECT_RE.match(raw)
+    ):
+        return True
     parts = _HEADING_SPLIT_RE.split(clause.text, maxsplit=1)
     if len(parts) >= 2:
         heading = parts[0].split("\n", 1)[0][:40]
-        if any(keyword in heading for keyword in PAYMENT_KEYWORDS):
-            # 冒号标题明确是付款主题：直接判为付款条款，不再落入无冒号分支。
-            return False
-        if any(term in heading for term in EXCEPTION_TERMS):
+        if not any(keyword in heading for keyword in PAYMENT_KEYWORDS) and any(
+            term in heading for term in EXCEPTION_TERMS
+        ):
             return True
-    # 无冒号形态用原文判定：例外词后必须有分隔（空格/冒号/行尾），避免把
-    # 「补充协议未作约定的…」「暂缓履行需另行约定…」这类正文开头当成标题。
-    raw = clause.raw_text or clause.text
-    return bool(
-        _NO_COLON_EXCEPTION_RE.match(raw) and not _EXCEPTION_AS_PAYMENT_HEADING_RE.match(raw)
-    )
+    return False
 
 
 def _mask_item_noise(text: str, item_key: str) -> str:

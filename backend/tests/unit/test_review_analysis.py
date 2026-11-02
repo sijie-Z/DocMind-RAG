@@ -1612,3 +1612,43 @@ def test_exception_heading_payment_nouns_with_separator_pins_both_layers():
     facts = analysis.extract_payment_term([no_colon])
     assert facts["status"] == "identified"
     assert (facts["value"], facts["unit"]) == (30, "day")
+
+
+def test_no_colon_exception_with_colon_in_body_is_exception():
+    """例外词后有分隔、正文后面才出现冒号时仍是独立例外条款（B 的 A 项）。"""
+    clause = _clause("第九条 例外 因不可抗力导致付款延迟的：付款期限相应顺延30天。", clause_no=[9])
+    assert analysis._is_exception_article(clause) is True
+
+    base = _contract_clauses("甲方应在验收合格后30天支付货款。", _ACC_TEXT)
+    revised = base + [clause]
+    assert (
+        analysis.align_item(
+            "payment_term",
+            analysis.extract_payment_term(base),
+            analysis.extract_payment_term(revised),
+        )
+        == "unchanged"
+    )
+
+
+def test_exception_word_with_subject_after_separator_is_body_not_heading():
+    """「补充协议，甲方应…」「另行约定，甲方应…」是正文，不是例外条款（B 残留）。"""
+    texts = (
+        "第八条 补充协议，甲方应在验收合格后30天内支付货款。",
+        "第八条 另行约定，甲方应在验收合格后30天内支付货款。",
+    )
+    for text in texts:
+        clause = _clause(text, clause_no=[8])
+        assert analysis._is_exception_article(clause) is False, text
+        facts = analysis.extract_payment_term([clause])
+        assert facts["status"] == "identified", text
+        assert (facts["value"], facts["unit"]) == (30, "day"), text
+
+
+def test_exception_payment_heading_with_connector_is_not_exception():
+    """「例外 及结算：…」这类付款主题标题仍是付款条款（A 变异 g）。"""
+    clause = _clause("第三条 例外 及结算：甲方应在验收合格后30天支付货款。", clause_no=[3])
+    assert analysis._is_exception_article(clause) is False
+    facts = analysis.extract_payment_term([clause])
+    assert facts["status"] == "identified"
+    assert (facts["value"], facts["unit"]) == (30, "day")
