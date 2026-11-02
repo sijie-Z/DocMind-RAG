@@ -1038,3 +1038,90 @@ def test_payment_subject_and_negation_still_modified():
             )
             == "modified"
         )
+
+
+# ── D6 R1 评审回归（更精确的片段级屏蔽）────────────────────────────────────
+
+
+def test_exception_duration_change_is_modified():
+    """例外条款自己的顺延期限 30→15 必须报 exception modified；付款不变。"""
+    base = _contract_clauses(
+        "甲方应在验收合格后30天支付货款。",
+        _ACC_TEXT,
+        extra="因不可抗力导致验收延迟的，付款期限相应顺延30天。",
+    )
+    revised = _contract_clauses(
+        "甲方应在验收合格后30天支付货款。",
+        _ACC_TEXT,
+        extra="因不可抗力导致验收延迟的，付款期限相应顺延15天。",
+    )
+    assert (
+        analysis.align_item(
+            "exception", analysis.extract_exception(base), analysis.extract_exception(revised)
+        )
+        == "modified"
+    )
+    assert (
+        analysis.align_item(
+            "payment_term",
+            analysis.extract_payment_term(base),
+            analysis.extract_payment_term(revised),
+        )
+        == "unchanged"
+    )
+
+
+def test_payment_clause_with_exception_word_keeps_subject_and_negation():
+    """付款条款正文含「除外」不得让整条失去主体/否定保护。"""
+    base = _contract_clauses("甲方应在验收合格后30天支付货款，双方另有约定的除外。", _ACC_TEXT)
+    subject = _contract_clauses("乙方应在验收合格后30天支付货款，双方另有约定的除外。", _ACC_TEXT)
+    negated = _contract_clauses("甲方应在验收不合格后30天支付货款，双方另有约定的除外。", _ACC_TEXT)
+    for revised in (subject, negated):
+        assert (
+            analysis.align_item(
+                "payment_term",
+                analysis.extract_payment_term(base),
+                analysis.extract_payment_term(revised),
+            )
+            == "modified"
+        )
+
+
+def test_shared_sentence_keeps_acceptance_duration():
+    """付款与验收同句（逗号分隔）时，验收自己的 10→15 个工作日仍须 modified。"""
+    base = [
+        _clause(
+            "第三条 付款与验收：乙方应在10个工作日内完成验收，甲方应在验收合格后30天内付款。",
+            clause_no=[3],
+        )
+    ]
+    revised = [
+        _clause(
+            "第三条 付款与验收：乙方应在15个工作日内完成验收，甲方应在验收合格后30天内付款。",
+            clause_no=[3],
+        )
+    ]
+    assert (
+        analysis.align_item(
+            "acceptance_invoice",
+            analysis.extract_acceptance_invoice(base),
+            analysis.extract_acceptance_invoice(revised),
+        )
+        == "modified"
+    )
+
+
+def test_mixed_unit_candidates_do_not_crash():
+    """候选值相同但 unit 混合 None/str（30天和30日）不得抛 TypeError。"""
+    clauses = _contract_clauses("甲方应在验收合格后30天和30日内支付货款。", _ACC_TEXT)
+    facts = analysis.extract_payment_term(clauses)
+    assert facts["status"] == "ambiguous"
+    assert analysis.align_item("payment_term", facts, facts) == "unchanged"
+
+
+def test_truncated_scan_with_equal_ambiguous_candidates_is_unidentified():
+    """截断扫描时不得宣称 ambiguous 候选相同即 unchanged。"""
+    clauses = _contract_clauses("甲方应在验收合格后30日内支付货款。", _ACC_TEXT)
+    facts = analysis.extract_payment_term(clauses)
+    assert facts["status"] == "ambiguous"
+    assert analysis.align_item("payment_term", facts, facts, scan_truncated=True) == "unidentified"

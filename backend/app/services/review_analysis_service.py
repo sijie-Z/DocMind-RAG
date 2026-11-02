@@ -185,15 +185,30 @@ def _collapse_mask(text: str) -> str:
     return "".join(out)
 
 
+_FRAGMENT_BOUNDARY_RE = re.compile(r"(?<=[，,、；;。！!？?\n])")
+_HEADING_SPLIT_RE = re.compile(r"[:：]")
+
+
 def _mask_payment_durations(text: str) -> str:
-    """只屏蔽“付款语境句子”里的期限数字；验收条款自己的期限必须保留。"""
+    """只屏蔽“付款片段”（逗号/分号/句号等切分后含付款关键词的片段）里的期限数字。
+
+    同一句里的验收期限（如「乙方应在10个工作日内完成验收，甲方应在验收合格后
+    30天内付款」）保留 10 个工作日，避免把验收项自己的期限一起屏蔽。
+    """
     parts: list[str] = []
-    for sentence in _iter_sentences(text):
-        if any(keyword in sentence for keyword in PAYMENT_KEYWORDS):
-            sentence = DURATION_RE.sub(_MASK, sentence)
-            sentence = MONTH_RE.sub(_MASK, sentence)
-        parts.append(sentence)
+    for fragment in _FRAGMENT_BOUNDARY_RE.split(text):
+        body = _HEADING_SPLIT_RE.split(fragment, maxsplit=1)[-1]
+        if any(keyword in body for keyword in PAYMENT_KEYWORDS):
+            fragment = DURATION_RE.sub(_MASK, fragment)
+            fragment = MONTH_RE.sub(_MASK, fragment)
+        parts.append(fragment)
     return "".join(parts)
+
+
+def _is_exception_article(clause: Clause) -> bool:
+    """按条款标题（冒号前/首行）识别独立的例外条款，如「第九条 例外：…」。"""
+    heading = _HEADING_SPLIT_RE.split(clause.text, maxsplit=1)[0].split("\n", 1)[0][:40]
+    return any(term in heading for term in EXCEPTION_TERMS)
 
 
 def _mask_item_noise(text: str, item_key: str) -> str:
@@ -202,7 +217,10 @@ def _mask_item_noise(text: str, item_key: str) -> str:
         for term in sorted(START_EVENTS + ACCEPTANCE_TERMS, key=len, reverse=True):
             text = text.replace(term, _MASK)
         return _collapse_mask(text)
-    return _mask_payment_durations(text)
+    if item_key in ("start_condition", "acceptance_invoice"):
+        return _mask_payment_durations(text)
+    # exception：不屏蔽任何期限——“顺延30天→15天”本身就是例外项的变化。
+    return text
 
 
 def _content_sha_for(clause: Clause, item_key: str) -> str:
@@ -213,13 +231,6 @@ def _content_sha_for(clause: Clause, item_key: str) -> str:
 
 def _matched_text_sha_for(clauses: list[Clause], item_key: str) -> str:
     unique = {clause.chunk_id: clause for clause in clauses}
-    if item_key == "payment_term":
-        # 例外条款里的“顺延 N 天”属于 exception 项；不参与付款基线的文本哈希。
-        unique = {
-            chunk_id: clause
-            for chunk_id, clause in unique.items()
-            if not any(term in clause.text for term in EXCEPTION_TERMS)
-        }
     return hashlib.sha256(
         "|".join(sorted(_content_sha_for(c, item_key) for c in unique.values())).encode()
     ).hexdigest()
@@ -388,7 +399,12 @@ def _is_date_fragment(text: str, start: int, unit_raw: str) -> bool:
 
 
 def extract_payment_term(clauses: list[Clause]) -> dict[str, Any]:
-    payment_clauses = [c for c in clauses if any(k in c.text for k in PAYMENT_KEYWORDS)]
+    # 标题为「例外」的独立条款归 exception 项：其顺延期限不参与付款基线判定。
+    payment_clauses = [
+        c
+        for c in clauses
+        if any(k in c.text for k in PAYMENT_KEYWORDS) and not _is_exception_article(c)
+    ]
     hits: list[dict[str, Any]] = []
     for clause in payment_clauses:
         for sentence in _iter_sentences(clause.text):
@@ -445,12 +461,10 @@ def extract_payment_term(clauses: list[Clause]) -> dict[str, Any]:
         ):
             distinct.append(hit)
     matched_clauses = [hit["_clause"] for hit in hits]
-    # 例外条款里的顺延期限归 exception 项：不参与付款基线的哈希/条款号集合。
-    payment_scoped = [
-        c for c in matched_clauses if not any(term in c.text for term in EXCEPTION_TERMS)
-    ]
-    text_sha = _matched_text_sha_for(payment_scoped, "payment_term")
-    clause_no_union = _clause_no_union(payment_scoped)
+    # 例外条款里的顺延期限归 exception 项：不参与付款基线（标题含例外词才排除，
+    # 付款条款正文里出现「除外/另行约定」不会让整条付款文本失去主体/否定保护）。
+    text_sha = _matched_text_sha_for(matched_clauses, "payment_term")
+    clause_no_union = _clause_no_union(matched_clauses)
     if len(distinct) == 1 and not ambiguous_units:
         hit = distinct[0]
         return {
@@ -504,7 +518,9 @@ def extract_start_condition(clauses: list[Clause]) -> dict[str, Any]:
     }
 
 
-def _collect_terms(clauses: list[Clause], terms: tuple[str, ...]) -> dict[str, Any]:
+def _collect_terms(
+    clauses: list[Clause], terms: tuple[str, ...], item_key: str = "acceptance_invoice"
+) -> dict[str, Any]:
     hits: list[dict[str, Any]] = []
     for clause in clauses:
         for term in _dedupe_terms(clause.text, terms):
@@ -521,7 +537,7 @@ def _collect_terms(clauses: list[Clause], terms: tuple[str, ...]) -> dict[str, A
     return {
         "status": "identified",
         "terms": [hit["term"] for hit in hits],
-        "text_sha256": _matched_text_sha_for(matched_clauses, "acceptance_invoice"),
+        "text_sha256": _matched_text_sha_for(matched_clauses, item_key),
         **locator,
         "clause_no_union": _clause_no_union(matched_clauses),
     }
@@ -541,7 +557,7 @@ def extract_acceptance_invoice(clauses: list[Clause]) -> dict[str, Any]:
 
 
 def extract_exception(clauses: list[Clause]) -> dict[str, Any]:
-    facts = _collect_terms(clauses, EXCEPTION_TERMS)
+    facts = _collect_terms(clauses, EXCEPTION_TERMS, item_key="exception")
     refs = extract_cross_refs(clauses)
     facts["cross_refs"] = refs
     if facts["status"] == "identified" and refs:
@@ -598,10 +614,8 @@ def align_item(
     elif base["status"] == "ambiguous" and revised["status"] == "ambiguous":
         # 单位不明但数值可确定：候选集合相同 → 视为 payload 相同继续比较文本；
         # 候选集合不同 → modified；空候选 → unidentified（不猜）。
-        def _candidates(facts: dict) -> list[tuple]:
-            return sorted(
-                {(c["value"], c["unit"], c["unit_raw"]) for c in (facts.get("candidates") or [])}
-            )
+        def _candidates(facts: dict) -> set[tuple]:
+            return {(c["value"], c["unit"], c["unit_raw"]) for c in (facts.get("candidates") or [])}
 
         base_candidates = _candidates(base)
         revised_candidates = _candidates(revised)
@@ -609,15 +623,17 @@ def align_item(
             base_sha = base.get("text_sha256")
             revised_sha = revised.get("text_sha256")
             if base_sha and revised_sha and base_sha != revised_sha:
-                return "modified"
-            if (base.get("clause_no_union") or base.get("clause_no") or []) != (
+                result = "modified"
+            elif (base.get("clause_no_union") or base.get("clause_no") or []) != (
                 revised.get("clause_no_union") or revised.get("clause_no") or []
             ):
-                return "renumbered"
-            return "unchanged"
-        if base_candidates and revised_candidates:
-            return "modified"
-        result = "unidentified"
+                result = "renumbered"
+            else:
+                result = "unchanged"
+        elif base_candidates and revised_candidates:
+            result = "modified"
+        else:
+            result = "unidentified"
     elif base["status"] == "ambiguous" or revised["status"] == "ambiguous":
         # 一侧未识别时不能把另一侧断言成「新增/删除」。
         result = "unidentified"
