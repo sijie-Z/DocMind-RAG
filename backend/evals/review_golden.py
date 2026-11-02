@@ -114,6 +114,15 @@ async def evaluate(cases=None) -> dict:
             base_facts = analysis.EXTRACTORS[item](base)
             revised_facts = analysis.EXTRACTORS[item](revised)
             change_type = analysis.align_item(item, base_facts, revised_facts)
+            # 与 analyze_case 相同的差异感知主证据修正（生产路径保真）。
+            analysis.refine_primary_locator(
+                item,
+                base_facts,
+                revised_facts,
+                change_type,
+                base_clauses=base,
+                revised_clauses=revised,
+            )
             side_facts = {"base": base_facts, "revised": revised_facts}
 
             stats = per_item[item]
@@ -192,7 +201,7 @@ def _ratio(ok: int, n: int) -> float | None:
 
 def _table(metrics: dict) -> str:
     lines = [
-        "核验 golden set（12 组合成中文采购合同，确定性规则链路）",
+        f"核验 golden set（{metrics['cases']} 组合成中文采购合同，确定性规则链路）",
         "",
         "| 核验项 | 识别准确率 | change_type 准确率 |",
         "|---|---|---|",

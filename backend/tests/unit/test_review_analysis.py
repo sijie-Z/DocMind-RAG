@@ -1267,3 +1267,63 @@ def test_acceptance_primary_points_to_invoice_reconciliation_clause():
     ]
     recon_facts = analysis.extract_acceptance_invoice(recon_clauses)
     assert recon_facts["clause_no"] == [3]
+
+
+def test_change_aware_primary_fixes_acceptance_first_render():
+    """验收条款在前、付款条款含发票时，验收期限变化的主证据必须指回验收条款。"""
+    base = [
+        _clause("第三条 验收：乙方交付后10个工作日内完成验收。", clause_no=[3]),
+        _clause("第四条 付款期限：甲方应在收到发票后30天支付货款。", clause_no=[4]),
+    ]
+    revised = [
+        _clause("第三条 验收：乙方交付后15个工作日内完成验收。", clause_no=[3]),
+        _clause("第四条 付款期限：甲方应在收到发票后30天支付货款。", clause_no=[4]),
+    ]
+    base_facts = analysis.extract_acceptance_invoice(base)
+    revised_facts = analysis.extract_acceptance_invoice(revised)
+    assert analysis.align_item("acceptance_invoice", base_facts, revised_facts) == "modified"
+    analysis.refine_primary_locator(
+        "acceptance_invoice",
+        base_facts,
+        revised_facts,
+        "modified",
+        base_clauses=base,
+        revised_clauses=revised,
+    )
+    assert revised_facts["clause_no"] == [3]
+
+
+def test_heading_concepts_built_from_text_are_order_independent():
+    """混合标题「验收与付款」条款必须被选为主证据，且不依赖条款顺序/全局去重。"""
+    mixed_text = "验收与付款：验收合格后凭发票付款，并对账无误后结算。"
+    variants = [
+        [
+            _clause("第三条 付款期限：甲方应在验收合格后30天支付货款。", clause_no=[3]),
+            _clause(f"第五条 {mixed_text}", clause_no=[5]),
+        ],
+        [
+            _clause(f"第三条 {mixed_text}", clause_no=[3]),
+            _clause("第五条 付款期限：甲方应在验收合格后30天支付货款。", clause_no=[5]),
+        ],
+    ]
+    for clauses in variants:
+        facts = analysis.extract_acceptance_invoice(clauses)
+        mixed_no = [c.clause_no for c in clauses if "验收与付款" in c.text][0]
+        assert facts["clause_no"] == mixed_no
+        assert {3, 5} <= set(facts["clause_no_union"])
+
+
+def test_shared_term_union_keeps_acceptance_clause():
+    """付款条款写「验收后」时，独立验收条款仍须出现在证据 union 中。"""
+    clauses = [
+        _clause("第三条 付款期限：甲方应在验收后30天支付货款。", clause_no=[3]),
+        _clause("第四条 验收：乙方交付后10个工作日内完成验收。", clause_no=[4]),
+    ]
+    facts = analysis.extract_acceptance_invoice(clauses)
+    assert facts["clause_no"] == [4]
+    assert {3, 4} <= set(facts["clause_no_union"])
+
+
+def test_acceptance_concept_map_covers_all_terms():
+    """ACCEPTANCE_TERMS 新增词必须同时配置概念映射，否则会被当成“新概念”误重定向。"""
+    assert set(analysis.ACCEPTANCE_TERMS) <= set(analysis.ACCEPTANCE_TERM_CONCEPTS)

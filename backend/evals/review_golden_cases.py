@@ -446,4 +446,36 @@ CASES = [
             "exception": _item("unidentified", _ABSENT),
         },
     },
+    {
+        "id": "acceptance_first_payment_invoice",
+        "note": "验收条款在前、付款条款含发票；验收期限 10→15 变化（评审 A 回归场景）",
+        "base": _doc(
+            _A1,
+            _A2,
+            _acc("三", "乙方交付后10个工作日内完成验收，验收标准以本合同附件二为准。"),
+            _pay("四", "甲方应在收到发票后30天支付货款。"),
+            _A5,
+            _A6,
+            _A7,
+            _A8,
+        ),
+        "revised": _doc(
+            _A1,
+            _A2,
+            _acc("三", "乙方交付后15个工作日内完成验收，验收标准以本合同附件二为准。"),
+            _pay("四", "甲方应在收到发票后30天支付货款。"),
+            _A5,
+            _A6,
+            _A7,
+            _A8,
+        ),
+        "items": {
+            "payment_term": _item("unchanged", _PAY_30, ("revised", 4)),
+            "start_condition": _item(
+                "unchanged", {"status": "identified", "events": ["收到发票"]}, ("revised", 4)
+            ),
+            "acceptance_invoice": _item("modified", _ACCEPT_OK, ("revised", 3)),
+            "exception": _item("unidentified", _ABSENT),
+        },
+    },
 ]
