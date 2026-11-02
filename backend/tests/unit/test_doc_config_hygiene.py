@@ -274,8 +274,14 @@ def test_env_templates_cover_required_keys():
         "DEMO_PASSWORD 在 ensure_demo_user.py 中不再被消费"
     )
 
-    # 两份模板的 ES 索引名必须一致（同一部署口径）。
-    assert _active_value(env, "ELASTICSEARCH_INDEX_NAME") == _active_value(
+    # 两份模板的 ES 索引名口径必须一致：要么同为显式名，要么同为空。
+    # 空值是新部署契约：运行期按 DATABASE_URL 库名派生（见 test_es_index_derivation）。
+    def _declared_value(text: str, key: str) -> str:
+        match = re.search(rf"^{re.escape(key)}=(.*)$", text, re.MULTILINE)
+        assert match, f"模板缺少未注释的 {key}= 行"
+        return match.group(1).strip()
+
+    assert _declared_value(env, "ELASTICSEARCH_INDEX_NAME") == _declared_value(
         docker_env, "ELASTICSEARCH_INDEX_NAME"
     ), "backend/.env.example 与 .env.docker.example 的 ELASTICSEARCH_INDEX_NAME 不一致"
 
