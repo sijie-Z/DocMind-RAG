@@ -13,7 +13,7 @@
 | 6 | 限流 | nginx 两档：普通 API 300r/m（IP 维度，突发 60）、聊天 30r/m（突发 5）；后端 `RATE_LIMIT_REQUESTS_PER_MINUTE=300` 兜底 | 压测出现 429；上线后实测 | ✅ 仓库内 |
 | 7 | 演示数据合成 | `seed_demo.py` 只用合成采购文本，标题标注“演示” | 人工检查文档与案件 | ✅ 仓库内 |
 | 8 | LLM 成本 | Access 门 + 限流；DeepSeek 账户侧设配额/余额告警 | 平台账单页 + 日志 `LLM_CALL_LOG_*` | 部分（配额在平台侧） |
-| 9 | 日志 | 容器 json-file `10m×3`；后端 `backend/logs/` | `docker compose logs --since=1h` | ✅ 仓库内 |
+| 9 | 日志 | 容器 json-file `10m×3`（backend/worker；其余服务用默认）；后端 `backend/logs/` | `docker compose logs --since=1h` | ✅ 仓库内 |
 | 10 | 备份 | `backup.sh`：MySQL 逻辑备份 + MinIO 原始文件卷 | 备份文件可解压；恢复演练 | ✅ 脚本；演练待做 |
 | 11 | 公开功能面 | 本批未动；按产品决策后续把产品 profile 冻结到 文档入库 / 证据问答 / 核验工作台 | 导航与 API 能力清单 | 计划 |
 | 12 | 注册开放性 | 当前开放注册（在 Access 门内）；未加邀请码 | —— | 已知边界 |
@@ -21,7 +21,7 @@
 
 ## 已知残余风险（明确接受再上线）
 
-- Kafka / Elasticsearch 无认证，但只监听容器网络与 127.0.0.1，宿主机不对外暴露。
+- Kafka / Elasticsearch / Redis 无认证，但只监听容器网络与 127.0.0.1，宿主机不对外暴露。
 - Cloudflare Free 在中国大陆的访问质量波动；对内演示可接受。
 - 无邮箱验证与找回密码；演示账号密码只发给被邀请的人。
 - 上传文件按合成数据对待；不要用真实合同做公开演示。

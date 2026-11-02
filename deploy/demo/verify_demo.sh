@@ -5,7 +5,7 @@ set -uo pipefail
 
 BASE="${1:-http://127.0.0.1:8080}"
 BACKEND="${BACKEND_URL:-http://127.0.0.1:8000}"
-EXPECT_INDEX="${DEMO_EXPECT_INDEX:-docmind_demo_knowledge}"
+EXPECT_INDEX="${DEMO_EXPECT_INDEX:-docmind_knowledge_demo}"
 PASS=0
 FAIL=0
 

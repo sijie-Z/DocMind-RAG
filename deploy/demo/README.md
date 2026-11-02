@@ -43,8 +43,8 @@ Cloudflare 边缘（TLS / Access 邮箱门 / DDoS）
 
 ### 1. 准备主机
 
-1. 购买阿里云轻量应用服务器/ECS（Ubuntu 22.04，≥4C8G），安全组**不开任何入站端口**
-   （Tunnel 是出站连接；SSH 只对你的 IP 开放）。
+1. 购买阿里云轻量应用服务器/ECS（Ubuntu 22.04，≥4C8G），安全组**除 SSH（只对你的 IP 开放）外不开任何入站端口**
+   （Tunnel 是出站连接）。
 2. 安装 Docker Engine + Compose 插件（官方脚本或阿里云镜像源）。
 
 ### 2. 部署 Demo 栈
