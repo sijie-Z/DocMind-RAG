@@ -185,29 +185,74 @@ def _collapse_mask(text: str) -> str:
     return "".join(out)
 
 
-_FRAGMENT_BOUNDARY_RE = re.compile(r"(?<=[，,、；;。！!？?\n])")
 _HEADING_SPLIT_RE = re.compile(r"[:：]")
 
 
 def _mask_payment_durations(text: str) -> str:
-    """只屏蔽“付款片段”（逗号/分号/句号等切分后含付款关键词的片段）里的期限数字。
+    """只屏蔽“最近的语义锚点是付款词”的期限数字。
 
-    同一句里的验收期限（如「乙方应在10个工作日内完成验收，甲方应在验收合格后
-    30天内付款」）保留 10 个工作日，避免把验收项自己的期限一起屏蔽。
+    依据锚点距离而非整句/整片段：`10个工作日内完成对账并在30天内支付货款` 中
+    10 最近的是验收/对账词（保留），30 最近的是“支付”（屏蔽）；跨条款拼接、
+    无逗号长句也不会把验收自己的期限一起吞掉。
     """
+    matches = list(DURATION_RE.finditer(text)) + list(MONTH_RE.finditer(text))
+    mask_spans = sorted(
+        {
+            (match.start(), match.end())
+            for match in matches
+            if _nearest_anchor_is_payment(text, match.start(), match.end())
+        }
+    )
+    if not mask_spans:
+        return text
+
     parts: list[str] = []
-    for fragment in _FRAGMENT_BOUNDARY_RE.split(text):
-        body = _HEADING_SPLIT_RE.split(fragment, maxsplit=1)[-1]
-        if any(keyword in body for keyword in PAYMENT_KEYWORDS):
-            fragment = DURATION_RE.sub(_MASK, fragment)
-            fragment = MONTH_RE.sub(_MASK, fragment)
-        parts.append(fragment)
+    cursor = 0
+    for start, end in mask_spans:
+        if start < cursor:  # 与上一个屏蔽区间重叠（DURATION 已覆盖的情况）
+            continue
+        parts.append(text[cursor:start])
+        parts.append(_MASK)
+        cursor = end
+    parts.append(text[cursor:])
     return "".join(parts)
 
 
+def _nearest_anchor_is_payment(text: str, start: int, end: int) -> bool:
+    """期限命中处最近的语义锚点是否为付款词（等距时按付款处理）。"""
+    best: tuple[int, int] | None = None
+    for kind, terms in (
+        (0, PAYMENT_KEYWORDS),
+        (1, START_EVENTS + ACCEPTANCE_TERMS),
+    ):
+        for term in terms:
+            index = text.find(term)
+            while index != -1:
+                term_end = index + len(term)
+                distance = (
+                    0
+                    if index <= end and term_end >= start
+                    else min(abs(start - term_end), abs(index - end))
+                )
+                candidate = (distance, kind)
+                if best is None or candidate < best:
+                    best = candidate
+                index = text.find(term, term_end)
+    return best is not None and best[1] == 0
+
+
 def _is_exception_article(clause: Clause) -> bool:
-    """按条款标题（冒号前/首行）识别独立的例外条款，如「第九条 例外：…」。"""
-    heading = _HEADING_SPLIT_RE.split(clause.text, maxsplit=1)[0].split("\n", 1)[0][:40]
+    """识别独立的例外条款：必须有标题分隔符，且标题是例外主题（不含付款词）。
+
+    约束“标题不含付款词”避免把「第三条 不可抗力情形下的付款：…」误判为例外；
+    无冒号的条款一律不判定（宁可保守降级为 unidentified，也不整条剔除）。
+    """
+    parts = _HEADING_SPLIT_RE.split(clause.text, maxsplit=1)
+    if len(parts) < 2:
+        return False
+    heading = parts[0].split("\n", 1)[0][:40]
+    if any(keyword in heading for keyword in PAYMENT_KEYWORDS):
+        return False
     return any(term in heading for term in EXCEPTION_TERMS)
 
 

@@ -1125,3 +1125,66 @@ def test_truncated_scan_with_equal_ambiguous_candidates_is_unidentified():
     facts = analysis.extract_payment_term(clauses)
     assert facts["status"] == "ambiguous"
     assert analysis.align_item("payment_term", facts, facts, scan_truncated=True) == "unidentified"
+
+
+def test_payment_clause_without_title_colon_not_misclassified():
+    """无标题冒号的付款条款（正文含「除外」）不得被整条误判为例外条款。"""
+    base = [_clause("甲方应在验收合格后30天支付货款，双方另有约定的除外。", clause_no=[3])]
+    subject = [_clause("乙方应在验收合格后30天支付货款，双方另有约定的除外。", clause_no=[3])]
+    base_facts = analysis.extract_payment_term(base)
+    assert base_facts["status"] == "identified"
+    assert (
+        analysis.align_item("payment_term", base_facts, analysis.extract_payment_term(subject))
+        == "modified"
+    )
+
+
+def test_payment_clause_without_colon_and_exception_prefix():
+    """无标题冒号、正文以「除不可抗力外」开头的付款条款不得被整条剔除。"""
+    base = [_clause("除不可抗力外，甲方应在验收合格后30天支付货款。", clause_no=[3])]
+    subject = [_clause("除不可抗力外，乙方应在验收合格后30天支付货款。", clause_no=[3])]
+    base_facts = analysis.extract_payment_term(base)
+    assert base_facts["status"] == "identified"
+    assert (
+        analysis.align_item("payment_term", base_facts, analysis.extract_payment_term(subject))
+        == "modified"
+    )
+
+
+def test_payment_heading_with_exception_word_not_misclassified():
+    """标题含「不可抗力」但主题是付款（含付款词）时不得判为例外条款。"""
+    base = [_clause("第三条 不可抗力情形下的付款：甲方应在验收合格后30天支付货款。", clause_no=[3])]
+    subject = [
+        _clause("第三条 不可抗力情形下的付款：乙方应在验收合格后30天支付货款。", clause_no=[3])
+    ]
+    base_facts = analysis.extract_payment_term(base)
+    assert base_facts["status"] == "identified"
+    assert (
+        analysis.align_item("payment_term", base_facts, analysis.extract_payment_term(subject))
+        == "modified"
+    )
+
+
+def test_shared_fragment_without_comma_keeps_acceptance_duration():
+    """同一片段（无逗号）里「10个工作日内完成对账并在30天内支付」：
+    验收的 10→15 必须 modified（锚点归属：10 最近验收/对账，30 最近支付）。"""
+    base = [
+        _clause(
+            "第三条 付款：甲方应在验收合格后10个工作日内完成对账并在30天内支付货款。",
+            clause_no=[3],
+        )
+    ]
+    revised = [
+        _clause(
+            "第三条 付款：甲方应在验收合格后15个工作日内完成对账并在30天内支付货款。",
+            clause_no=[3],
+        )
+    ]
+    assert (
+        analysis.align_item(
+            "acceptance_invoice",
+            analysis.extract_acceptance_invoice(base),
+            analysis.extract_acceptance_invoice(revised),
+        )
+        == "modified"
+    )
