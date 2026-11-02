@@ -289,8 +289,9 @@ async def main_async(args) -> int:
 
 
 def main() -> int:
-    if hasattr(sys.stdout, "reconfigure"):
-        sys.stdout.reconfigure(encoding="utf-8")
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8")
     parser = argparse.ArgumentParser(description="核验 golden set 评测（离线性）")
     parser.add_argument("--update-baseline", action="store_true", help="显式更新基线")
     return asyncio.run(main_async(parser.parse_args()))

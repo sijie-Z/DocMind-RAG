@@ -91,17 +91,22 @@ def test_embedding_trigger_is_hard_failure(monkeypatch):
 
 
 def test_evaluator_detects_broken_gold(monkeypatch):
-    """敏感性 canary：故意写错 gold 必须降指标（防“比较器恒真”使基线失效）。"""
+    """敏感性 canary：每个核验项各写错一条 gold 都必须降指标（防比较器恒真）。"""
     _with_stub(monkeypatch)
-    broken = copy.deepcopy(CASES)
-    broken[0]["items"]["payment_term"]["facts"] = {
-        "status": "identified",
-        "value": 999,
-        "unit": "day",
+    mutations = {
+        "payment_term": {"status": "identified", "value": 999, "unit": "day"},
+        "start_condition": {"status": "identified", "events": ["__missing__"]},
+        "acceptance_invoice": {"status": "not_found"},
+        "exception": {"status": "not_found"},
     }
-    result = asyncio.run(golden.evaluate(broken))
-    assert result["metrics"]["per_item"]["payment_term"]["extraction"] < 1.0
-    assert any(d["case"] == broken[0]["id"] for d in result["details"])
+    # 选 facts 为 identified 的用例；exception 用 exception_added（gold/实际均 identified）
+    case_index = {"payment_term": 0, "start_condition": 0, "acceptance_invoice": 0, "exception": 4}
+    for item, bad_facts in mutations.items():
+        broken = copy.deepcopy(CASES)
+        broken[case_index[item]]["items"][item]["facts"] = bad_facts
+        result = asyncio.run(golden.evaluate(broken))
+        assert result["metrics"]["per_item"][item]["extraction"] < 1.0, item
+        assert any(d["item"] == item for d in result["details"]), item
 
     broken_change = copy.deepcopy(CASES)
     broken_change[0]["items"]["payment_term"]["change_type"] = "unidentified"
