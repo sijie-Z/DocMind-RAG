@@ -42,8 +42,15 @@ def step(name: str, ok: bool, extra: str = "") -> None:
         FAILURES.append(name)
 
 
-def preflight() -> bool:
-    """启动自检：数据库/派生索引/backend 健康；worker 运行与否由后续上传超时报错兜底。"""
+def preflight(expect_index: str | None) -> bool:
+    """启动自检：库/索引身份 + 目标 backend 健康。
+
+    必须能证明「目标栈用的是哪个索引」：本地可导入配置时用当前生效索引名
+    （显式优先，否则按库派生）；导入失败时必须显式传 --expect-index。目标
+    ``/health`` 暴露的 ``knowledge_base.index_name`` 与期望值不一致或无法
+    比对 → 直接拒绝，避免把验收数据写进错栈（脚本会创建账号/文档/案件）。
+    """
+    expected = expect_index
     try:
         from sqlalchemy.engine import make_url
 
@@ -52,14 +59,17 @@ def preflight() -> bool:
 
         db = make_url(settings.DATABASE_URL).database
         derived = _derive_es_index_name(settings.DATABASE_URL)
-        print(
-            f"[preflight] DATABASE_URL db={db} index={settings.ELASTICSEARCH_INDEX_NAME} "
-            f"(derived={derived})"
-        )
-        if derived != settings.ELASTICSEARCH_INDEX_NAME:
-            print("[preflight] 注意：当前使用显式索引名（显式配置优先于按库派生）")
-    except Exception as exc:  # 没有可导入的本地配置时，只能做 HTTP 自检
-        print(f"[preflight] 跳过本地配置检查：{type(exc).__name__}: {exc}")
+        local_index = settings.ELASTICSEARCH_INDEX_NAME
+        print(f"[preflight] 本地配置 db={db} index={local_index} derived={derived}")
+        if expected is None:
+            expected = local_index
+    except Exception as exc:
+        print(f"[preflight] 本地配置不可用（{type(exc).__name__}: {exc}）")
+        if not expected:
+            print(
+                "[preflight] 无法确认真实索引身份：请在目标栈 backend 目录运行，或传 --expect-index"
+            )
+            return False
 
     try:
         r = requests.get(f"{BASE}/health", timeout=15)
@@ -67,11 +77,25 @@ def preflight() -> bool:
         print(f"[preflight] backend 不可达 {BASE}: {type(exc).__name__}: {exc}")
         return False
     data = r.json() if r.status_code == 200 else {}
-    print(f"[preflight] /health {r.status_code} status={data.get('status')}")
+    kb = (data.get("knowledge_base") or {}) if isinstance(data, dict) else {}
+    target_index = kb.get("index_name")
+    print(
+        f"[preflight] /health {r.status_code} status={data.get('status')} "
+        f"target_index={target_index} expect_index={expected}"
+    )
     if r.status_code != 200 or data.get("status") != "healthy":
         print(
             f"[preflight] 依赖不健康，先修复环境再跑验收：{json.dumps(data, ensure_ascii=False)[:500]}"
         )
+        return False
+    if not expected or not target_index:
+        print(
+            "[preflight] 无法比对目标索引名"
+            "（缺少 expected 或 /health.knowledge_base.index_name），拒绝运行"
+        )
+        return False
+    if target_index != expected:
+        print(f"[preflight] 目标栈索引不匹配：期望 {expected}，实际 {target_index}；拒绝写入")
         return False
     print(
         "[preflight] worker 必须与 backend 使用同一 DATABASE_URL/索引/主题并在运行（上传后处理依赖它）"
@@ -390,10 +414,15 @@ def _cli() -> int:
     parser.add_argument(
         "--base-url", default=DEFAULT_BASE, help="backend 地址（默认 $RC_BASE_URL 或 :8020）"
     )
+    parser.add_argument(
+        "--expect-index",
+        default=None,
+        help="目标栈必须使用的 ES 索引名（本地配置不可用/多栈并存时必传）",
+    )
     args = parser.parse_args()
     global BASE
     BASE = args.base_url.rstrip("/")
-    if not preflight():
+    if not preflight(args.expect_index):
         return 2
     return main()
 
