@@ -110,6 +110,13 @@ START_EVENTS = (
     "开票",
 )
 ACCEPTANCE_TERMS = ("验收合格", "对账单", "验收", "发票", "对账")
+ACCEPTANCE_TERM_CONCEPTS = {
+    "验收合格": "acceptance",
+    "验收": "acceptance",
+    "对账单": "reconciliation",
+    "对账": "reconciliation",
+    "发票": "invoice",
+}
 EXCEPTION_TERMS = (
     "不可抗力",
     "补充协议",
@@ -289,6 +296,16 @@ def _matched_text_sha_for(clauses: list[Clause], item_key: str) -> str:
 
 def _clause_no_union(clauses: list[Clause]) -> list[int]:
     return sorted({number for clause in clauses for number in clause.clause_no})
+
+
+def _locator_nos(facts: dict[str, Any]) -> list[int]:
+    """对齐用的条款号集合：只取参与 payload 的条款（证据展示用的 union 另存）。"""
+    return (
+        facts.get("payload_clause_no")
+        or facts.get("clause_no_union")
+        or facts.get("clause_no")
+        or []
+    )
 
 
 def _dedupe_terms(text: str, terms: tuple[str, ...]) -> list[str]:
@@ -569,8 +586,100 @@ def extract_start_condition(clauses: list[Clause]) -> dict[str, Any]:
     }
 
 
+def _heading_contains(clause: Clause, terms: tuple[str, ...]) -> bool:
+    """条款标题（必须有冒号分隔）是否命中给定术语；无冒号不判定为标题。"""
+    parts = _HEADING_SPLIT_RE.split(clause.text, maxsplit=1)
+    if len(parts) < 2:
+        return False
+    heading = parts[0].split("\n", 1)[0][:40]
+    return any(term in heading for term in terms)
+
+
+def _clause_concepts(
+    clause: Clause, terms: tuple[str, ...], concept_map: dict[str, str] | None
+) -> set[str]:
+    """条款文本中出现的术语所对应的概念集合（不依赖全局去重后的 hits）。"""
+    return {concept_map.get(term, term) for term in terms if term in clause.text}
+
+
+def _primary_term_hit(
+    hits: list[dict[str, Any]],
+    term_clauses: list[Clause],
+    terms: tuple[str, ...],
+    concept_map: dict[str, str] | None,
+) -> Clause:
+    """静态主证据（无变化时的回退）：标题命中优先；若其它条款含有标题条款没有
+    的概念（发票/对账），选该条款。概念集按条款文本构建，避免全局术语去重
+    带来的顺序依赖。"""
+    heading_clauses = [clause for clause in term_clauses if _heading_contains(clause, terms)]
+    if not heading_clauses:
+        return hits[0]["_clause"]
+    heading_clause = heading_clauses[0]
+    if concept_map:
+        heading_concepts = _clause_concepts(heading_clause, terms, concept_map)
+        for clause in term_clauses:
+            if _clause_concepts(clause, terms, concept_map) - heading_concepts:
+                return clause
+    return heading_clause
+
+
+def refine_primary_locator(
+    item_key: str,
+    base_facts: dict[str, Any],
+    revised_facts: dict[str, Any],
+    change_type: str,
+    *,
+    base_clauses: list[Clause],
+    revised_clauses: list[Clause],
+) -> None:
+    """差异感知的主证据修正：该项确有变化时，把主定位指向“它的视角下文本
+    实际变化”的那一条；无变化/无法判定时保留静态回退（标题/概念）结果。
+
+    对验收/起算项，付款期限等噪音已被按项屏蔽，因此“付款天数变化”不会把
+    主证据吸到付款条款；而“发票/对账新增”“验收期限变化”会把主证据移到真正
+    变化的那一条。对付款项，起算/验收词元已屏蔽，主体/否定变化仍可检测。
+    """
+    if change_type not in ("modified", "added", "removed"):
+        return
+    side = "base" if change_type == "removed" else "revised"
+    facts = base_facts if side == "base" else revised_facts
+    side_clauses = base_clauses if side == "base" else revised_clauses
+    other_clauses = revised_clauses if side == "base" else base_clauses
+
+    other_counts: dict[str, int] = {}
+    for clause in other_clauses:
+        digest = _content_sha_for(clause, item_key)
+        other_counts[digest] = other_counts.get(digest, 0) + 1
+    candidates: list[Clause] = []
+    for clause in side_clauses:
+        digest = _content_sha_for(clause, item_key)
+        if other_counts.get(digest, 0) <= 0:
+            candidates.append(clause)
+    if not candidates:
+        return
+
+    allowed = set(facts.get("clause_no_union") or facts.get("clause_no") or [])
+    if not allowed:
+        # section-numbered / 无编号文档没有 clause_no 可收敛；保留静态回退，
+        # 绝不在整篇里按“第一个变化条款”乱移主证据。
+        return
+    scoped = [clause for clause in candidates if set(clause.clause_no) & allowed]
+    static_chunk = facts.get("chunk_id")
+    if static_chunk and any(clause.chunk_id == static_chunk for clause in scoped):
+        # 静态主证据本身就在变化候选里：它已经是“变化的那一条”，不要被更早的
+        # 其它变化条款（如新增的前部例外条款）劫持。
+        return
+    chosen = (scoped or candidates)[0]
+    locator = _primary_locator(chosen)
+    for key in ("chunk_id", "chunk_index", "clause_no", "section_no", "page_number"):
+        facts[key] = locator[key]
+
+
 def _collect_terms(
-    clauses: list[Clause], terms: tuple[str, ...], item_key: str = "acceptance_invoice"
+    clauses: list[Clause],
+    terms: tuple[str, ...],
+    item_key: str = "acceptance_invoice",
+    concept_map: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     hits: list[dict[str, Any]] = []
     for clause in clauses:
@@ -579,18 +688,16 @@ def _collect_terms(
                 hits.append({"term": term, "_clause": clause, **_primary_locator(clause)})
     if not hits:
         return {"status": "not_found", "reason": "no_terms"}
-    first = hits[0]
-    locator = {
-        key: first[key]
-        for key in ("chunk_id", "chunk_index", "clause_no", "section_no", "page_number")
-    }
-    matched_clauses = [hit["_clause"] for hit in hits]
+    contributing_clauses = [hit["_clause"] for hit in hits]
+    all_term_clauses = [clause for clause in clauses if any(term in clause.text for term in terms)]
+    primary_clause = _primary_term_hit(hits, all_term_clauses, terms, concept_map)
     return {
         "status": "identified",
         "terms": [hit["term"] for hit in hits],
-        "text_sha256": _matched_text_sha_for(matched_clauses, item_key),
-        **locator,
-        "clause_no_union": _clause_no_union(matched_clauses),
+        "text_sha256": _matched_text_sha_for(contributing_clauses, item_key),
+        **_primary_locator(primary_clause),
+        "payload_clause_no": _clause_no_union(contributing_clauses),
+        "clause_no_union": _clause_no_union(all_term_clauses),
     }
 
 
@@ -604,7 +711,7 @@ def extract_cross_refs(clauses: list[Clause]) -> list[str]:
 
 
 def extract_acceptance_invoice(clauses: list[Clause]) -> dict[str, Any]:
-    return _collect_terms(clauses, ACCEPTANCE_TERMS)
+    return _collect_terms(clauses, ACCEPTANCE_TERMS, concept_map=ACCEPTANCE_TERM_CONCEPTS)
 
 
 def extract_exception(clauses: list[Clause]) -> dict[str, Any]:
@@ -621,7 +728,15 @@ def extract_exception(clauses: list[Clause]) -> dict[str, Any]:
         if matched:
             clauses_matched = list(matched.values())
             facts["text_sha256"] = _matched_text_sha(clauses_matched)
-            facts["clause_no_union"] = _clause_no_union(clauses_matched)
+            # 交叉引用条款的“只改编号”也要能被 renumber 判定看到：payload 与
+            # 展示 union 都纳入术语条款与交叉引用条款。
+            ref_numbers = _clause_no_union(clauses_matched)
+            facts["payload_clause_no"] = sorted(
+                set(facts.get("payload_clause_no") or []) | set(ref_numbers)
+            )
+            facts["clause_no_union"] = sorted(
+                set(facts.get("clause_no_union") or []) | set(ref_numbers)
+            )
     return facts
 
 
@@ -675,9 +790,7 @@ def align_item(
             revised_sha = revised.get("text_sha256")
             if base_sha and revised_sha and base_sha != revised_sha:
                 result = "modified"
-            elif (base.get("clause_no_union") or base.get("clause_no") or []) != (
-                revised.get("clause_no_union") or revised.get("clause_no") or []
-            ):
+            elif _locator_nos(base) != _locator_nos(revised):
                 result = "renumbered"
             else:
                 result = "unchanged"
@@ -698,9 +811,7 @@ def align_item(
         if base_sha and revised_sha and base_sha != revised_sha:
             # 事实词元相同但文本变了（否定/主体/限定语）：必须报差异。
             result = "modified"
-        elif (base.get("clause_no_union") or base.get("clause_no") or []) != (
-            revised.get("clause_no_union") or revised.get("clause_no") or []
-        ):
+        elif _locator_nos(base) != _locator_nos(revised):
             result = "renumbered"
         else:
             result = "unchanged"
@@ -849,17 +960,28 @@ async def analyze_case(session: AsyncSession, case: ReviewCase) -> dict[str, Any
                 continue
             facts_by_side = {side: extractor(clauses[side]) for side in side_docs}
             scan_truncated = scans["base"]["truncated"] or scans["revised"]["truncated"]
-            item.facts = {
-                "extractor_version": EXTRACTOR_VERSION,
-                "scan": {side: dict(scan) for side, scan in scans.items()},
-                **facts_by_side,
-            }
-            item.change_type = align_item(
+            change_type = align_item(
                 item.item_key,
                 facts_by_side["base"],
                 facts_by_side["revised"],
                 scan_truncated=scan_truncated,
             )
+            # 差异感知主证据：有变化时指向该项视角下实际变化的条款；
+            # 无变化/无法判定时保留 extractor 的静态回退（标题/概念）。
+            refine_primary_locator(
+                item.item_key,
+                facts_by_side["base"],
+                facts_by_side["revised"],
+                change_type,
+                base_clauses=clauses["base"],
+                revised_clauses=clauses["revised"],
+            )
+            item.facts = {
+                "extractor_version": EXTRACTOR_VERSION,
+                "scan": {side: dict(scan) for side, scan in scans.items()},
+                **facts_by_side,
+            }
+            item.change_type = change_type
             for side in side_docs:
                 facts = facts_by_side[side]
                 if facts["status"] == "not_found":

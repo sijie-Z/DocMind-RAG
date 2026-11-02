@@ -1,6 +1,6 @@
 {
   "metrics": {
-    "cases": 12,
+    "cases": 14,
     "per_item": {
       "payment_term": {
         "extraction": 1.0,
@@ -20,18 +20,8 @@
       }
     },
     "evidence_hit_rate": 1.0,
-    "primary_evidence_hit_rate": 0.7568,
+    "primary_evidence_hit_rate": 1.0,
     "overall_change_type": 1.0
   },
-  "failures": [
-    "acceptance_days_modified/acceptance_invoice: evidence primary miss revised:4",
-    "exception_added/acceptance_invoice: evidence primary miss revised:4",
-    "exception_removed/acceptance_invoice: evidence primary miss revised:4",
-    "exception_with_duration/acceptance_invoice: evidence primary miss revised:4",
-    "payment_bare_ri_value_changed/acceptance_invoice: evidence primary miss revised:4",
-    "payment_bare_ri_value_same/acceptance_invoice: evidence primary miss revised:4",
-    "payment_days_modified/acceptance_invoice: evidence primary miss revised:4",
-    "renumbered_only/acceptance_invoice: evidence primary miss revised:5",
-    "unchanged_all/acceptance_invoice: evidence primary miss revised:4"
-  ]
+  "failures": []
 }

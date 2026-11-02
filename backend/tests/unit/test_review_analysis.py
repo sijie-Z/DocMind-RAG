@@ -1225,3 +1225,150 @@ def test_payment_verb_after_filler_words_still_shields_duration():
             )
             == "unchanged"
         ), payment_text
+
+
+# ── D7：主证据定位器按核验项选择条款 ─────────────────────────────────────
+
+
+def test_acceptance_primary_locator_prefers_acceptance_heading():
+    """验收证据主定位器应选「第四条 验收：…」，而不是先命中术语的付款条款。"""
+    clauses = [
+        _clause("第三条 付款期限：甲方应在验收合格后30天支付货款。", clause_no=[3]),
+        _clause("第四条 验收：乙方交付后10个工作日内完成验收。", clause_no=[4]),
+    ]
+    facts = analysis.extract_acceptance_invoice(clauses)
+    assert facts["clause_no"] == [4]
+    assert facts["clause_no_union"] == [3, 4]
+
+
+def test_exception_primary_locator_prefers_exception_heading():
+    """例外主证据应选「第九条 例外：…」，而不是前文顺便提到不可抗力的条款。"""
+    clauses = [
+        _clause("第二条 定义：不可抗力指不能预见、不能避免的客观情况。", clause_no=[2]),
+        _clause("第九条 例外：双方可另行约定顺延情形。", clause_no=[9]),
+    ]
+    facts = analysis.extract_exception(clauses)
+    assert facts["clause_no"] == [9]
+    assert 2 in (facts["clause_no_union"] or [])
+
+
+def test_acceptance_primary_points_to_invoice_reconciliation_clause():
+    """发票/对账概念只在付款条款出现时，主证据应指向该条款（真正的变化处）。"""
+    invoice_clauses = [
+        _clause("第三条 付款期限：甲方应在收到发票后30天支付货款。", clause_no=[3]),
+        _clause("第四条 验收：乙方交付后10个工作日内完成验收。", clause_no=[4]),
+    ]
+    invoice_facts = analysis.extract_acceptance_invoice(invoice_clauses)
+    assert invoice_facts["clause_no"] == [3]
+
+    recon_clauses = [
+        _clause("第三条 付款期限：甲方应在验收合格并对账无误后30天支付货款。", clause_no=[3]),
+        _clause("第四条 验收：乙方交付后10个工作日内完成验收。", clause_no=[4]),
+    ]
+    recon_facts = analysis.extract_acceptance_invoice(recon_clauses)
+    assert recon_facts["clause_no"] == [3]
+
+
+def test_change_aware_primary_fixes_acceptance_first_render():
+    """验收条款在前、付款条款含发票时，验收期限变化的主证据必须指回验收条款。"""
+    base = [
+        _clause("第三条 验收：乙方交付后10个工作日内完成验收。", clause_no=[3]),
+        _clause("第四条 付款期限：甲方应在收到发票后30天支付货款。", clause_no=[4]),
+    ]
+    revised = [
+        _clause("第三条 验收：乙方交付后15个工作日内完成验收。", clause_no=[3]),
+        _clause("第四条 付款期限：甲方应在收到发票后30天支付货款。", clause_no=[4]),
+    ]
+    base_facts = analysis.extract_acceptance_invoice(base)
+    revised_facts = analysis.extract_acceptance_invoice(revised)
+    assert analysis.align_item("acceptance_invoice", base_facts, revised_facts) == "modified"
+    analysis.refine_primary_locator(
+        "acceptance_invoice",
+        base_facts,
+        revised_facts,
+        "modified",
+        base_clauses=base,
+        revised_clauses=revised,
+    )
+    assert revised_facts["clause_no"] == [3]
+
+
+def test_heading_concepts_built_from_text_are_order_independent():
+    """混合标题「验收与付款」条款必须被选为主证据，且不依赖条款顺序/全局去重。"""
+    mixed_text = "验收与付款：验收合格后凭发票付款，并对账无误后结算。"
+    variants = [
+        [
+            _clause("第三条 付款期限：甲方应在验收合格后30天支付货款。", clause_no=[3]),
+            _clause(f"第五条 {mixed_text}", clause_no=[5]),
+        ],
+        [
+            _clause(f"第三条 {mixed_text}", clause_no=[3]),
+            _clause("第五条 付款期限：甲方应在验收合格后30天支付货款。", clause_no=[5]),
+        ],
+    ]
+    for clauses in variants:
+        facts = analysis.extract_acceptance_invoice(clauses)
+        mixed_no = [c.clause_no for c in clauses if "验收与付款" in c.text][0]
+        assert facts["clause_no"] == mixed_no
+        assert {3, 5} <= set(facts["clause_no_union"])
+
+
+def test_shared_term_union_keeps_acceptance_clause():
+    """付款条款写「验收后」时，独立验收条款仍须出现在证据 union 中。"""
+    clauses = [
+        _clause("第三条 付款期限：甲方应在验收后30天支付货款。", clause_no=[3]),
+        _clause("第四条 验收：乙方交付后10个工作日内完成验收。", clause_no=[4]),
+    ]
+    facts = analysis.extract_acceptance_invoice(clauses)
+    assert facts["clause_no"] == [4]
+    assert {3, 4} <= set(facts["clause_no_union"])
+
+
+def test_acceptance_concept_map_covers_all_terms():
+    """ACCEPTANCE_TERMS 新增词必须同时配置概念映射，否则会被当成“新概念”误重定向。"""
+    assert set(analysis.ACCEPTANCE_TERMS) <= set(analysis.ACCEPTANCE_TERM_CONCEPTS)
+
+
+def test_refine_primary_locator_keeps_static_when_no_clause_numbers():
+    """section 编号/无第N条文档：refine 必须保留静态主证据，不能乱移。"""
+    base = [
+        _clause("2.1 总则：双方应保持书面沟通。"),
+        _clause("2.3 验收：乙方交付后10个工作日内完成验收。"),
+    ]
+    revised = [
+        _clause("2.1 总则：双方应每日书面沟通。"),
+        _clause("2.3 验收：乙方交付后15个工作日内完成验收。"),
+    ]
+    base_facts = analysis.extract_acceptance_invoice(base)
+    revised_facts = analysis.extract_acceptance_invoice(revised)
+    static_chunk = revised_facts["chunk_id"]
+    assert analysis.align_item("acceptance_invoice", base_facts, revised_facts) == "modified"
+    analysis.refine_primary_locator(
+        "acceptance_invoice",
+        base_facts,
+        revised_facts,
+        "modified",
+        base_clauses=base,
+        revised_clauses=revised,
+    )
+    assert revised_facts["chunk_id"] == static_chunk
+
+
+def test_cross_ref_only_renumber_is_detected():
+    """例外项的交叉引用条款只改编号（10→11）必须报 renumbered，而不是 unchanged。"""
+    base = [
+        _clause("第九条 不可抗力暂缓履行。", clause_no=[9]),
+        _clause("第十条 未尽事宜详见第12条。", clause_no=[10]),
+    ]
+    revised = [
+        _clause("第九条 不可抗力暂缓履行。", clause_no=[9]),
+        _clause("第十一条 未尽事宜详见第12条。", clause_no=[11]),
+    ]
+    assert (
+        analysis.align_item(
+            "exception",
+            analysis.extract_exception(base),
+            analysis.extract_exception(revised),
+        )
+        == "renumbered"
+    )
