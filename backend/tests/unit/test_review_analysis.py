@@ -1352,3 +1352,23 @@ def test_refine_primary_locator_keeps_static_when_no_clause_numbers():
         revised_clauses=revised,
     )
     assert revised_facts["chunk_id"] == static_chunk
+
+
+def test_cross_ref_only_renumber_is_detected():
+    """例外项的交叉引用条款只改编号（10→11）必须报 renumbered，而不是 unchanged。"""
+    base = [
+        _clause("第九条 不可抗力暂缓履行。", clause_no=[9]),
+        _clause("第十条 未尽事宜详见第12条。", clause_no=[10]),
+    ]
+    revised = [
+        _clause("第九条 不可抗力暂缓履行。", clause_no=[9]),
+        _clause("第十一条 未尽事宜详见第12条。", clause_no=[11]),
+    ]
+    assert (
+        analysis.align_item(
+            "exception",
+            analysis.extract_exception(base),
+            analysis.extract_exception(revised),
+        )
+        == "renumbered"
+    )
