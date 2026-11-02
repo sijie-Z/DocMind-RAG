@@ -59,3 +59,34 @@ def test_preflight_rejects_missing_target_identity_even_with_expectation(monkeyp
     )
     # 不导入本地 app 配置：直接以 --expect-index 路径断言缺失字段被拒
     assert rc.preflight("docmind_knowledge_rc") is False
+
+
+def test_preflight_requires_expect_index_when_local_import_fails(monkeypatch):
+    """本地 app 配置不可导入时，没有 --expect-index 必须拒绝。"""
+    import builtins
+
+    real_import = builtins.__import__
+
+    def _fake_import(name, *args, **kwargs):
+        if name == "app.core.config" or name.startswith("app.core.config."):
+            raise ImportError("no config in this cwd")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", _fake_import)
+    _fake_health(
+        monkeypatch,
+        {"status": "healthy", "knowledge_base": {"index_name": "docmind_knowledge_iso"}},
+    )
+    assert rc.preflight(None) is False
+    assert rc.preflight("docmind_knowledge_iso") is True
+
+
+def test_preflight_rejects_non_object_health(monkeypatch):
+    class _Resp:
+        status_code = 200
+
+        def json(self):
+            return ["not", "a", "dict"]
+
+    monkeypatch.setattr(rc.requests, "get", lambda *a, **k: _Resp())
+    assert rc.preflight("docmind_knowledge_iso") is False

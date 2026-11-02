@@ -626,3 +626,72 @@ async def test_empty_chunk_documents_do_not_poison_health():
     assert status == "healthy"
     assert details["empty_indexed_documents"] == 5
     assert "chunk_count=0" in details["empty_notice"]
+
+
+@pytest.mark.asyncio
+async def test_scope_and_empty_queries_exclude_active_jobs():
+    """ids 查询与空文档统计同样必须排除有未终局处理任务的文档。"""
+    from app.main import _knowledge_base_health
+
+    sess = MagicMock()
+    result = MagicMock()
+    result.one = MagicMock(return_value=(1, 1))
+    result.scalars = MagicMock(return_value=result)
+    result.all = MagicMock(return_value=["doc-1"])
+    result.scalar = MagicMock(return_value=0)
+    sess.execute = AsyncMock(return_value=result)
+    ctx = MagicMock()
+    ctx.__aenter__ = AsyncMock(return_value=sess)
+    ctx.__aexit__ = AsyncMock(return_value=False)
+
+    async def _search(**kwargs):
+        return {
+            "hits": {"total": {"value": 1, "relation": "eq"}},
+            "aggregations": {"documents": {"value": 1}},
+        }
+
+    fake = MagicMock()
+    fake.search = AsyncMock(side_effect=_search)
+    with (
+        patch("app.core.elasticsearch.get_index_error", return_value=None),
+        patch("app.core.elasticsearch.get_elasticsearch", new=AsyncMock(return_value=fake)),
+        patch("app.core.database.AsyncSessionLocal", return_value=ctx),
+    ):
+        status, _ = await _knowledge_base_health()
+
+    assert status == "healthy"
+    sqls = [
+        " ".join(c.args[0].compile(compile_kwargs={"literal_binds": True}).string.split())
+        if hasattr(c.args[0], "compile")
+        else ""
+        for c in sess.execute.await_args_list
+    ]
+    sqls = [s for s in sqls if s]
+    assert len(sqls) >= 2
+    assert all("NOT (EXISTS" in s for s in sqls), sqls
+
+
+@pytest.mark.asyncio
+async def test_scope_note_for_no_claimed_documents_is_accurate():
+    """claimed=0 且索引有外部文档时，提示应说「本库没有声称 INDEXED 的文档」。"""
+    from app.main import _knowledge_base_health
+
+    async def _search(**kwargs):
+        return {
+            "hits": {"total": {"value": 3, "relation": "eq"}},
+            "aggregations": {"documents": {"value": 3}},
+        }
+
+    fake = MagicMock()
+    fake.search = AsyncMock(side_effect=_search)
+    with (
+        patch("app.core.elasticsearch.get_index_error", return_value=None),
+        patch("app.core.elasticsearch.get_elasticsearch", new=AsyncMock(return_value=fake)),
+        _patch_db_count(0, 0),
+    ):
+        status, details = await _knowledge_base_health()
+
+    assert status == "healthy"
+    assert details["scope_note"].startswith("索引")
+    assert "本库没有声称 INDEXED 的文档" in details["scope_note"]
+    assert "超过作用域上限" not in details["scope_note"]

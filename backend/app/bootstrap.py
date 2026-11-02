@@ -909,7 +909,12 @@ async def _knowledge_base_health() -> tuple[str, dict]:
     # 共享索引里多出的「非本库」文档：作用域模式下已被排除；全索引模式下仅提示。
     extra_docs = int(details.get("extra_documents") or 0)
     if extra_docs:
-        if details.get("scope") == "document_ids":
+        if claimed == 0:
+            details["scope_note"] = (
+                f"索引 {settings.ELASTICSEARCH_INDEX_NAME} 中另有 {extra_docs} 篇文档，"
+                "但本库没有声称 INDEXED 的文档（不计入缺失判定）"
+            )
+        elif details.get("scope") == "document_ids":
             details["scope_note"] = (
                 f"索引 {settings.ELASTICSEARCH_INDEX_NAME} 中另有 {extra_docs} 篇不属于本库"
                 "状态基线的文档（共享索引/陈旧数据），已按本库 document_id 作用域排除"

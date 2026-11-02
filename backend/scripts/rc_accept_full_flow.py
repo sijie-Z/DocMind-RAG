@@ -76,8 +76,14 @@ def preflight(expect_index: str | None) -> bool:
     except Exception as exc:
         print(f"[preflight] backend 不可达 {BASE}: {type(exc).__name__}: {exc}")
         return False
-    data = r.json() if r.status_code == 200 else {}
-    kb = (data.get("knowledge_base") or {}) if isinstance(data, dict) else {}
+    try:
+        data = r.json() if r.status_code == 200 else {}
+    except Exception:
+        data = {}
+    if not isinstance(data, dict):
+        print(f"[preflight] /health 返回非对象 JSON（{type(data).__name__}），拒绝运行")
+        return False
+    kb = data.get("knowledge_base") or {}
     target_index = kb.get("index_name")
     print(
         f"[preflight] /health {r.status_code} status={data.get('status')} "
@@ -416,7 +422,7 @@ def _cli() -> int:
     )
     parser.add_argument(
         "--expect-index",
-        default=None,
+        default=os.environ.get("RC_EXPECT_INDEX"),
         help="目标栈必须使用的 ES 索引名（本地配置不可用/多栈并存时必传）",
     )
     args = parser.parse_args()
