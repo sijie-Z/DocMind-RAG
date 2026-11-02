@@ -190,6 +190,56 @@ def _apply_hardware_tier(settings_obj: Settings) -> None:
         logger.info("hardware_tier_applied=%s", sorted(applied))
 
 
+def _derive_es_index_name(database_url: str) -> str:
+    """按数据库名派生 ES 索引名：docmind → docmind_knowledge，docmind_rc → docmind_knowledge_rc。
+
+    同一个 ES 上挂多个库（主库 / RC / 测试库）时必须各用各的索引：共享索引会让
+    检索跨库串数据（不同库的 organization_id 会重号），也会让「本库文档 vs 全索引
+    内容」的健康对账必然误报。显式配置 ``ELASTICSEARCH_INDEX_NAME`` 时优先使用显式值；
+    未配置或留空才走派生。
+
+    库名经过大小写/非法字符归一后若已与原库名不同，追加原库名短哈希——否则
+    ``docmind-rc`` 与 ``docmind_rc``、``DocMind_RC`` 与 ``docmind_rc`` 会映射到同一
+    索引，正好制造 T1 要消除的静默串库。sqlite/非法 URL 没有有意义的库名，退回
+    通用名（此类部署本来也不共享 MySQL 索引语义）。
+    """
+    try:
+        from sqlalchemy.engine import make_url
+
+        url = make_url(database_url)
+        backend = url.get_backend_name()
+        db = url.database or ""
+    except Exception:  # 非法 URL 不阻断启动；退化为通用名
+        return "docmind_knowledge"
+    if backend == "sqlite" or not db:
+        return "docmind_knowledge"
+    safe = re.sub(r"[^0-9a-zA-Z_]+", "_", db).strip("_").lower()
+    if not safe:
+        digest = hashlib.sha256(db.encode("utf-8")).hexdigest()[:8]
+        return f"db_{digest}_knowledge"
+    if safe != db:
+        safe = f"{safe}_{hashlib.sha256(db.encode('utf-8')).hexdigest()[:8]}"
+    # 沿用既有命名：主库 docmind → docmind_knowledge；同前缀的副本库
+    # （docmind_rc/docmind_it/...）→ docmind_knowledge_<后缀>；其它库名 → <db>_knowledge。
+    if safe == "docmind":
+        return "docmind_knowledge"
+    if safe.startswith("docmind_"):
+        return f"docmind_knowledge_{safe.removeprefix('docmind_')}"
+    return f"{safe}_knowledge"
+
+
+def _apply_es_index_name(settings_obj: Settings) -> None:
+    """未显式配置（或显式留空）时，按当前数据库名派生本库专属 ES 索引名。"""
+    explicit = "ELASTICSEARCH_INDEX_NAME" in settings_obj.model_fields_set
+    value = (settings_obj.ELASTICSEARCH_INDEX_NAME or "").strip()
+    if explicit and value:
+        logger.info("ELASTICSEARCH_INDEX_NAME=%s（显式配置）", value)
+        return
+    derived = _derive_es_index_name(settings_obj.DATABASE_URL)
+    object.__setattr__(settings_obj, "ELASTICSEARCH_INDEX_NAME", derived)
+    logger.info("ELASTICSEARCH_INDEX_NAME=%s（按库名派生）", derived)
+
+
 def validate_webhook_runtime(settings_obj: Settings) -> None:
     """Webhook fail-closed 启动校验（issue #478）。
 
@@ -292,6 +342,7 @@ def load_settings(profile: str | None = None, patches: list[str] | None = None) 
     merged = deep_merge(merged, _environment_layer())
     settings_obj = _build_settings(merged)
     _apply_hardware_tier(settings_obj)
+    _apply_es_index_name(settings_obj)
     validate_webhook_runtime(settings_obj)
 
     _settings = settings_obj

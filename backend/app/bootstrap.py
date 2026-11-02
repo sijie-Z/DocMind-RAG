@@ -729,6 +729,10 @@ _KB_COVERAGE_THRESHOLD: float = 0.95
 # 一次 bad draw 持续摘流直到索引数据变化，而不是靠 failureThreshold 自愈。
 _KB_DOC_CARDINALITY_EXACT_LIMIT: int = 40000
 _KB_DOC_COUNT_TOLERANCE: float = 0.98
+# 作用域对账上限：按本库 document_id 做 terms 查询，文档数过大时退回全索引口径
+# （查询数与内存随文档数线性增长；>2 万的部署应使用独立索引而非共享索引）。
+_KB_SCOPE_MAX_DOCS: int = 20000
+_KB_SCOPE_BATCH: int = 2000
 
 
 async def _knowledge_base_health() -> tuple[str, dict]:
@@ -770,30 +774,43 @@ async def _knowledge_base_health() -> tuple[str, dict]:
         details["index_error"] = cfg_err
         return "unhealthy", details
 
-    # 一次 ES 查询同时取 chunk 总数与去重 document_id 数。只看 count 不够 ——
+    # ES 查询同时取 chunk 总数与去重 document_id 数。只看 count 不够 ——
     # 1 条 chunk 也能让「10 篇声称 INDEXED」看起来有数据（#223）。
+    # 带 query 时用于「本库 document_id 集合」的作用域查询（共享索引安全）。
     client = await get_elasticsearch()
-    res = await asyncio.wait_for(
-        client.search(
-            index=settings.ELASTICSEARCH_INDEX_NAME,
-            size=0,
-            track_total_hits=True,
-            aggs={
-                "documents": {
-                    # 精度阈值设高：对账要的是「文档数是否变少」，近似误差会误报。
-                    "cardinality": {
-                        "field": "document_id",
-                        "precision_threshold": _KB_DOC_CARDINALITY_EXACT_LIMIT,
+
+    async def _search_stats(query: dict | None = None) -> tuple[int, int]:
+        kwargs: dict = {
+            "index": settings.ELASTICSEARCH_INDEX_NAME,
+            "size": 0,
+            "track_total_hits": True,
+        }
+        if query is not None:
+            kwargs["query"] = query
+        res = await asyncio.wait_for(
+            client.search(
+                **kwargs,
+                aggs={
+                    "documents": {
+                        # 精度阈值设高：对账要的是「文档数是否变少」，近似误差会误报。
+                        "cardinality": {
+                            "field": "document_id",
+                            "precision_threshold": _KB_DOC_CARDINALITY_EXACT_LIMIT,
+                        }
                     }
-                }
-            },
-        ),
-        timeout=3,
-    )
-    hits_total = (res.get("hits") or {}).get("total") or {}
-    documents_agg = (res.get("aggregations") or {}).get("documents") or {}
-    indexed_chunks = int(hits_total.get("value") or 0)
-    indexed_docs = int(documents_agg.get("value") or 0)
+                },
+            ),
+            timeout=3,
+        )
+        hits_total = (res.get("hits") or {}).get("total") or {}
+        documents_agg = (res.get("aggregations") or {}).get("documents") or {}
+        return int(hits_total.get("value") or 0), int(documents_agg.get("value") or 0)
+
+    total_chunks, total_docs = await _search_stats()
+    details["index_name"] = settings.ELASTICSEARCH_INDEX_NAME
+    details["index_total_chunks"] = total_chunks
+    details["index_total_documents"] = total_docs
+    indexed_chunks, indexed_docs = total_chunks, total_docs
     details["indexed_chunks"] = indexed_chunks
     details["indexed_documents"] = indexed_docs
 
@@ -837,8 +854,19 @@ async def _knowledge_base_health() -> tuple[str, dict]:
             .select_from(Document)
             .where(Document.status == DocumentStatus.INDEXED)
             .where(~active_job)
+            .where(Document.chunk_count > 0)
         )
         claimed, expected_chunks = q.one()
+        empty_claimed = (
+            await sess.execute(
+                select(func.count())
+                .select_from(Document)
+                .where(Document.status == DocumentStatus.INDEXED)
+                .where(~active_job)
+                .where(Document.chunk_count == 0)
+            )
+        ).scalar() or 0
+        details["empty_indexed_documents"] = int(empty_claimed)
     claimed = int(claimed or 0)
     expected_chunks = int(expected_chunks or 0)
     details["documents_marked_indexed"] = claimed
@@ -849,13 +877,69 @@ async def _knowledge_base_health() -> tuple[str, dict]:
     if expected_chunks > 0:
         details["extra_chunks"] = max(0, indexed_chunks - expected_chunks)
 
+    # 作用域对账：按「本库文档 id 集合」过滤 ES。共享索引里其它库的文档既不能
+    # 补平本库的缺失（假绿），也不该让本库的完整索引被误判（假红）。
+    if 0 < claimed <= _KB_SCOPE_MAX_DOCS:
+        async with AsyncSessionLocal() as sess:
+            ids_result = await sess.execute(
+                select(Document.id)
+                .select_from(Document)
+                .where(Document.status == DocumentStatus.INDEXED)
+                .where(~active_job)
+                .where(Document.chunk_count > 0)
+            )
+            doc_ids = [str(doc_id) for doc_id in ids_result.scalars().all()]
+        if doc_ids:
+            scoped_chunks = 0
+            scoped_docs = 0
+            for start in range(0, len(doc_ids), _KB_SCOPE_BATCH):
+                batch = doc_ids[start : start + _KB_SCOPE_BATCH]
+                chunks, docs = await _search_stats({"terms": {"document_id": batch}})
+                scoped_chunks += chunks
+                scoped_docs += docs
+            indexed_chunks, indexed_docs = scoped_chunks, scoped_docs
+            details["scope"] = "document_ids"
+            details["indexed_chunks"] = indexed_chunks
+            details["indexed_documents"] = indexed_docs
+            details["extra_documents"] = max(0, total_docs - indexed_docs)
+            details["extra_chunks"] = max(0, total_chunks - indexed_chunks)
+    else:
+        details["scope"] = "index_global"
+
+    # 共享索引里多出的「非本库」文档：作用域模式下已被排除；全索引模式下仅提示。
+    extra_docs = int(details.get("extra_documents") or 0)
+    if extra_docs:
+        if claimed == 0:
+            details["scope_note"] = (
+                f"索引 {settings.ELASTICSEARCH_INDEX_NAME} 中另有 {extra_docs} 篇文档，"
+                "但本库没有声称 INDEXED 的文档（不计入缺失判定）"
+            )
+        elif details.get("scope") == "document_ids":
+            details["scope_note"] = (
+                f"索引 {settings.ELASTICSEARCH_INDEX_NAME} 中另有 {extra_docs} 篇不属于本库"
+                "状态基线的文档（共享索引/陈旧数据），已按本库 document_id 作用域排除"
+            )
+        else:
+            details["scope_note"] = (
+                f"索引 {settings.ELASTICSEARCH_INDEX_NAME} 中另有 {extra_docs} 篇不属于本库"
+                "状态基线的文档；当前按全索引口径对账（本库文档数超过作用域上限）"
+            )
+    if details.get("empty_indexed_documents"):
+        details["empty_notice"] = (
+            f"另有 {details['empty_indexed_documents']} 篇文档状态为 INDEXED 但 chunk_count=0"
+            "（无内容可索引），未计入本库缺失判定"
+        )
+
     if claimed == 0:
         # 全新部署（或索引里只有未被声称的陈旧数据）：没有「状态 vs 现实」矛盾。
         return "healthy", details
 
     if indexed_chunks == 0:
         # 状态在撒谎 —— 这正是「检索恒返回 0 条却没人在意」的根源（#183）
-        details["mismatch"] = f"{claimed} 篇文档状态为 INDEXED，但索引里一篇都没有"
+        details["mismatch"] = (
+            f"{claimed} 篇文档状态为 INDEXED，但索引 {settings.ELASTICSEARCH_INDEX_NAME} "
+            f"中找不到这些文档的任何 chunk"
+        )
         return "unhealthy", details
 
     # 按 document_id 去重数对账：部分文档整篇丢失时，chunk 总数可能仍然"够"（#223）。
@@ -871,8 +955,9 @@ async def _knowledge_base_health() -> tuple[str, dict]:
 
     if doc_shortfall:
         details["mismatch"] = (
-            f"{claimed} 篇文档状态为 INDEXED，索引中只找到 {indexed_docs} 篇的 chunk —— "
-            f"{claimed - indexed_docs} 篇文档完全检索不到"
+            f"{claimed} 篇文档状态为 INDEXED，索引 {settings.ELASTICSEARCH_INDEX_NAME} 中"
+            f"只找到 {indexed_docs} 篇的 chunk —— {claimed - indexed_docs} 篇文档完全检索不到"
+            + (f"（索引另有 {extra_docs} 篇非本库文档，已排除）" if extra_docs else "")
         )
         return "unhealthy", details
 
@@ -886,14 +971,15 @@ async def _knowledge_base_health() -> tuple[str, dict]:
 
     if coverage_ratio < _KB_COVERAGE_THRESHOLD:
         details["mismatch"] = (
-            f"索引 chunk 覆盖率 {coverage_ratio:.1%} 低于阈值 {_KB_COVERAGE_THRESHOLD:.0%}"
+            f"索引 {settings.ELASTICSEARCH_INDEX_NAME} chunk 覆盖率 "
+            f"{coverage_ratio:.1%} 低于阈值 {_KB_COVERAGE_THRESHOLD:.0%}"
             f"（文档表声称 {expected_chunks} 个 chunk，索引中 {indexed_chunks} 个）"
         )
         return "unhealthy", details
 
     if coverage_ratio < 1.0:
         details["mismatch"] = (
-            f"索引 chunk 覆盖率 {coverage_ratio:.1%}"
+            f"索引 {settings.ELASTICSEARCH_INDEX_NAME} chunk 覆盖率 {coverage_ratio:.1%}"
             f"（文档表声称 {expected_chunks} 个 chunk，索引中 {indexed_chunks} 个）—— "
             f"部分 chunk 未入索引"
         )
