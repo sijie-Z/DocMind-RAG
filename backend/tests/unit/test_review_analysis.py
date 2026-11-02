@@ -1225,3 +1225,45 @@ def test_payment_verb_after_filler_words_still_shields_duration():
             )
             == "unchanged"
         ), payment_text
+
+
+# ── D7：主证据定位器按核验项选择条款 ─────────────────────────────────────
+
+
+def test_acceptance_primary_locator_prefers_acceptance_heading():
+    """验收证据主定位器应选「第四条 验收：…」，而不是先命中术语的付款条款。"""
+    clauses = [
+        _clause("第三条 付款期限：甲方应在验收合格后30天支付货款。", clause_no=[3]),
+        _clause("第四条 验收：乙方交付后10个工作日内完成验收。", clause_no=[4]),
+    ]
+    facts = analysis.extract_acceptance_invoice(clauses)
+    assert facts["clause_no"] == [4]
+    assert facts["clause_no_union"] == [3, 4]
+
+
+def test_exception_primary_locator_prefers_exception_heading():
+    """例外主证据应选「第九条 例外：…」，而不是前文顺便提到不可抗力的条款。"""
+    clauses = [
+        _clause("第二条 定义：不可抗力指不能预见、不能避免的客观情况。", clause_no=[2]),
+        _clause("第九条 例外：因不可抗力导致验收延迟的，付款期限相应顺延。", clause_no=[9]),
+    ]
+    facts = analysis.extract_exception(clauses)
+    assert facts["clause_no"] == [9]
+    assert 2 in (facts["clause_no_union"] or [])
+
+
+def test_acceptance_primary_points_to_invoice_reconciliation_clause():
+    """发票/对账概念只在付款条款出现时，主证据应指向该条款（真正的变化处）。"""
+    invoice_clauses = [
+        _clause("第三条 付款期限：甲方应在收到发票后30天支付货款。", clause_no=[3]),
+        _clause("第四条 验收：乙方交付后10个工作日内完成验收。", clause_no=[4]),
+    ]
+    invoice_facts = analysis.extract_acceptance_invoice(invoice_clauses)
+    assert invoice_facts["clause_no"] == [3]
+
+    recon_clauses = [
+        _clause("第三条 付款期限：甲方应在验收合格并对账无误后30天支付货款。", clause_no=[3]),
+        _clause("第四条 验收：乙方交付后10个工作日内完成验收。", clause_no=[4]),
+    ]
+    recon_facts = analysis.extract_acceptance_invoice(recon_clauses)
+    assert recon_facts["clause_no"] == [3]

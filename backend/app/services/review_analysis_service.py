@@ -110,6 +110,13 @@ START_EVENTS = (
     "开票",
 )
 ACCEPTANCE_TERMS = ("验收合格", "对账单", "验收", "发票", "对账")
+ACCEPTANCE_TERM_CONCEPTS = {
+    "验收合格": "acceptance",
+    "验收": "acceptance",
+    "对账单": "reconciliation",
+    "对账": "reconciliation",
+    "发票": "invoice",
+}
 EXCEPTION_TERMS = (
     "不可抗力",
     "补充协议",
@@ -569,8 +576,35 @@ def extract_start_condition(clauses: list[Clause]) -> dict[str, Any]:
     }
 
 
+def _heading_contains(clause: Clause, terms: tuple[str, ...]) -> bool:
+    """条款标题（冒号前/首行）是否命中给定术语。"""
+    heading = _HEADING_SPLIT_RE.split(clause.text, maxsplit=1)[0].split("\n", 1)[0][:40]
+    return any(term in heading for term in terms)
+
+
+def _primary_term_hit(
+    hits: list[dict[str, Any]],
+    terms: tuple[str, ...],
+    concept_map: dict[str, str] | None,
+) -> dict[str, Any]:
+    """主证据选择：标题命中优先；若其它条款贡献了标题条款没有的概念（如发票/
+    对账），则选贡献该概念的条款——工作台要指向真正发生变化的那一条。"""
+    heading_hits = [hit for hit in hits if _heading_contains(hit["_clause"], terms)]
+    if not heading_hits:
+        return hits[0]
+    if concept_map:
+        heading_concepts = {concept_map.get(hit["term"], hit["term"]) for hit in heading_hits}
+        for hit in hits:
+            if concept_map.get(hit["term"], hit["term"]) not in heading_concepts:
+                return hit
+    return heading_hits[0]
+
+
 def _collect_terms(
-    clauses: list[Clause], terms: tuple[str, ...], item_key: str = "acceptance_invoice"
+    clauses: list[Clause],
+    terms: tuple[str, ...],
+    item_key: str = "acceptance_invoice",
+    concept_map: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     hits: list[dict[str, Any]] = []
     for clause in clauses:
@@ -579,7 +613,7 @@ def _collect_terms(
                 hits.append({"term": term, "_clause": clause, **_primary_locator(clause)})
     if not hits:
         return {"status": "not_found", "reason": "no_terms"}
-    first = hits[0]
+    first = _primary_term_hit(hits, terms, concept_map)
     locator = {
         key: first[key]
         for key in ("chunk_id", "chunk_index", "clause_no", "section_no", "page_number")
@@ -604,7 +638,7 @@ def extract_cross_refs(clauses: list[Clause]) -> list[str]:
 
 
 def extract_acceptance_invoice(clauses: list[Clause]) -> dict[str, Any]:
-    return _collect_terms(clauses, ACCEPTANCE_TERMS)
+    return _collect_terms(clauses, ACCEPTANCE_TERMS, concept_map=ACCEPTANCE_TERM_CONCEPTS)
 
 
 def extract_exception(clauses: list[Clause]) -> dict[str, Any]:
