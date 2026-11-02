@@ -1372,3 +1372,120 @@ def test_cross_ref_only_renumber_is_detected():
         )
         == "renumbered"
     )
+
+
+# ── D8：中文数字期限 / 共享术语第二条款 / 无冒号例外条款 ──────────────────
+
+
+def test_cn_numeral_durations_extracted():
+    workday = analysis.extract_payment_term(
+        [_clause("第三条 付款期限：甲方应在验收合格后三十个工作日内支付货款。", clause_no=[3])]
+    )
+    assert workday["status"] == "identified"
+    assert (workday["value"], workday["unit"]) == (30, "workday")
+
+    bare = analysis.extract_payment_term(
+        [_clause("第三条 付款期限：甲方应在验收合格后六十日内支付货款。", clause_no=[3])]
+    )
+    assert bare["status"] == "ambiguous"
+    assert bare["candidates"][0]["value"] == 60
+
+    hundred = analysis.extract_payment_term(
+        [_clause("第三条 付款期限：甲方应在验收合格后一百零五天内支付货款。", clause_no=[3])]
+    )
+    assert hundred["status"] == "identified"
+    assert (hundred["value"], hundred["unit"]) == (105, "day")
+
+
+def test_cn_numeral_date_and_ordinal_are_not_durations():
+    date_like = analysis.extract_payment_term(
+        [_clause("第三条 付款期限：付款日为三月十五日，甲方应支付货款。", clause_no=[3])]
+    )
+    assert date_like["status"] == "not_found"
+    ordinal = analysis.extract_payment_term(
+        [_clause("第三条 付款期限：甲方应在第三个工作日支付货款。", clause_no=[3])]
+    )
+    assert ordinal["status"] == "not_found"
+
+
+def test_cn_numeral_duration_change_does_not_flip_other_items():
+    base = _contract_clauses("甲方应在验收合格后三十个工作日内支付货款。", _ACC_TEXT)
+    revised = _contract_clauses("甲方应在验收合格后六十个工作日内支付货款。", _ACC_TEXT)
+    assert (
+        analysis.align_item(
+            "payment_term",
+            analysis.extract_payment_term(base),
+            analysis.extract_payment_term(revised),
+        )
+        == "modified"
+    )
+    assert (
+        analysis.align_item(
+            "start_condition",
+            analysis.extract_start_condition(base),
+            analysis.extract_start_condition(revised),
+        )
+        == "unchanged"
+    )
+    assert (
+        analysis.align_item(
+            "acceptance_invoice",
+            analysis.extract_acceptance_invoice(base),
+            analysis.extract_acceptance_invoice(revised),
+        )
+        == "unchanged"
+    )
+
+
+def test_shared_term_second_clause_change_is_detected():
+    """付款条款写「验收后」时，独立验收条款自身的期限变化必须 modified（S1）。"""
+    base = _contract_clauses("甲方应在验收后30天支付货款。", _ACC_TEXT)
+    revised = _contract_clauses(
+        "甲方应在验收后30天支付货款。",
+        "乙方交付后15个工作日内完成验收。",
+    )
+    assert (
+        analysis.align_item(
+            "acceptance_invoice",
+            analysis.extract_acceptance_invoice(base),
+            analysis.extract_acceptance_invoice(revised),
+        )
+        == "modified"
+    )
+
+
+def test_acceptance_second_clause_added_is_modified():
+    base = _contract_clauses("甲方应在验收合格后30天支付货款。", _ACC_TEXT)
+    revised = base + [_clause("第九条 验收：甲方书面确认后方视为验收完成。", clause_no=[9])]
+    assert (
+        analysis.align_item(
+            "acceptance_invoice",
+            analysis.extract_acceptance_invoice(base),
+            analysis.extract_acceptance_invoice(revised),
+        )
+        == "modified"
+    )
+
+
+def test_no_colon_exception_article_detected_but_payment_heading_not():
+    exception_like = _clause(
+        "第九条 例外 因不可抗力导致验收延迟的，付款期限相应顺延30天。", clause_no=[9]
+    )
+    assert analysis._is_exception_article(exception_like) is True
+    payment_heading = _clause(
+        "第三条 不可抗力情形下的付款：甲方应在验收合格后30天支付货款。", clause_no=[3]
+    )
+    assert analysis._is_exception_article(payment_heading) is False
+
+    base = _contract_clauses("甲方应在验收合格后30天支付货款。", _ACC_TEXT)
+    revised = base + [
+        _clause("第九条 例外 因不可抗力导致验收延迟的，付款期限相应顺延30天。", clause_no=[9])
+    ]
+    assert (
+        analysis.align_item(
+            "payment_term",
+            analysis.extract_payment_term(base),
+            analysis.extract_payment_term(revised),
+        )
+        == "unchanged"
+    )

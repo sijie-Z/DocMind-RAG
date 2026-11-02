@@ -94,6 +94,48 @@ NON_PAYMENT_CONTEXT = (
 # 「天」按自然日；单独「日」无法判定自然日/工作日 → ambiguous。
 DURATION_RE = re.compile(r"(\d+)\s*(个)?\s*(工作日|自然日|日历日|天|日)")
 MONTH_RE = re.compile(r"(\d+)\s*个\s*月")
+# 中文数字期限（三十日 / 六十个工作日 / 一百零五天）
+CN_DURATION_RE = re.compile(
+    r"([一二两三四五六七八九十百零〇]+)\s*(个)?\s*(工作日|自然日|日历日|天|日)"
+)
+_CN_DIGITS = {
+    "零": 0,
+    "〇": 0,
+    "一": 1,
+    "二": 2,
+    "两": 2,
+    "三": 3,
+    "四": 4,
+    "五": 5,
+    "六": 6,
+    "七": 7,
+    "八": 8,
+    "九": 9,
+}
+
+
+def _cn_to_int(text: str) -> int | None:
+    """中文数字转整数（覆盖 1–999 的常见合同写法）。"""
+    text = text.replace("零", "").replace("〇", "")
+    if not text:
+        return None
+    if "百" in text:
+        head, _, tail = text.partition("百")
+        hundreds = _CN_DIGITS.get(head, 1) if head else 1
+        rest = _cn_to_int(tail) if tail else 0
+        if hundreds is None or rest is None:
+            return None
+        return hundreds * 100 + rest
+    if "十" in text:
+        head, _, tail = text.partition("十")
+        tens = _CN_DIGITS.get(head, 1) if head else 1
+        units = _CN_DIGITS.get(tail, 0) if tail else 0
+        if tens is None or units is None:
+            return None
+        return tens * 10 + units
+    return _CN_DIGITS.get(text)
+
+
 SENTENCE_SPLIT_RE = re.compile(r"[。；;！!？?\n]+")
 FRAGMENT_SPLIT_RE = re.compile(r"[，,、]")
 UNIT_MAP = {"工作日": "workday", "自然日": "day", "日历日": "day", "天": "day"}
@@ -126,6 +168,12 @@ EXCEPTION_TERMS = (
     "暂缓",
     "除外",
     "例外",
+)
+_EXCEPTION_TERM_PATTERN = "|".join(re.escape(term) for term in EXCEPTION_TERMS)
+# 无冒号但标题形态明确：「第九条 例外 …」。付款条款「第三条 付款期限 除不可抗力外…」
+# 不会命中（例外词不在条号之后）。
+_NO_COLON_EXCEPTION_RE = re.compile(
+    rf"^第[一二三四五六七八九十百零〇0-9]+条\s*(?:{_EXCEPTION_TERM_PATTERN})"
 )
 # 阈值语境：定义「逾期/超过 N 天」的违约条件时，期限不是账期。
 THRESHOLD_CONTEXT = ("逾期", "超过", "延迟", "超期", "违约", "滞纳", "罚息")
@@ -202,7 +250,11 @@ def _mask_payment_durations(text: str) -> str:
     10 最近的是验收/对账词（保留），30 最近的是“支付”（屏蔽）；跨条款拼接、
     无逗号长句也不会把验收自己的期限一起吞掉。
     """
-    matches = list(DURATION_RE.finditer(text)) + list(MONTH_RE.finditer(text))
+    matches = (
+        list(DURATION_RE.finditer(text))
+        + list(MONTH_RE.finditer(text))
+        + list(CN_DURATION_RE.finditer(text))
+    )
     mask_spans = sorted(
         {
             (match.start(), match.end())
@@ -255,18 +307,24 @@ def _nearest_anchor_is_payment(text: str, start: int, end: int) -> bool:
 
 
 def _is_exception_article(clause: Clause) -> bool:
-    """识别独立的例外条款：必须有标题分隔符，且标题是例外主题（不含付款词）。
+    """识别独立的例外条款：标题必须是例外主题（不含付款词），允许无冒号形态。
 
-    约束“标题不含付款词”避免把「第三条 不可抗力情形下的付款：…」误判为例外；
-    无冒号的条款一律不判定（宁可保守降级为 unidentified，也不整条剔除）。
+    - 有标题分隔符：「第九条 例外：…」标题含例外词且不含付款词；
+    - 无冒号但标题形态明确：「第九条 例外 …」；
+    - 「第三条 付款期限 除不可抗力外…」不命中（例外词不在条号之后）。
     """
     parts = _HEADING_SPLIT_RE.split(clause.text, maxsplit=1)
-    if len(parts) < 2:
-        return False
-    heading = parts[0].split("\n", 1)[0][:40]
-    if any(keyword in heading for keyword in PAYMENT_KEYWORDS):
-        return False
-    return any(term in heading for term in EXCEPTION_TERMS)
+    if len(parts) >= 2:
+        heading = parts[0].split("\n", 1)[0][:40]
+        if not any(keyword in heading for keyword in PAYMENT_KEYWORDS) and any(
+            term in heading for term in EXCEPTION_TERMS
+        ):
+            return True
+    if _NO_COLON_EXCEPTION_RE.match(clause.text):
+        head = re.split(r"[，,。；;：:]", clause.text, maxsplit=1)[0].split("\n", 1)[0][:40]
+        if not any(k in head for k in PAYMENT_KEYWORDS):
+            return True
+    return False
 
 
 def _mask_item_noise(text: str, item_key: str) -> str:
@@ -505,6 +563,26 @@ def extract_payment_term(clauses: list[Clause]) -> dict[str, Any]:
                         "_clause": clause,
                     }
                 )
+            for match in CN_DURATION_RE.finditer(sentence):
+                value = _cn_to_int(match.group(1))
+                unit_raw = match.group(3)
+                if value is None:
+                    continue
+                if not _duration_context_ok(sentence, match.start(), match.end()):
+                    continue
+                if _is_date_fragment(sentence, match.start(), unit_raw):
+                    continue
+                if match.start() > 0 and sentence[match.start() - 1] in "第月年":
+                    continue
+                hits.append(
+                    {
+                        "value": value,
+                        "unit": UNIT_MAP.get(unit_raw),
+                        "unit_raw": unit_raw,
+                        "raw": match.group(0),
+                        "_clause": clause,
+                    }
+                )
     if not hits:
         reason = "no_duration" if payment_clauses else "no_payment_clause"
         return {"status": "not_found", "reason": reason}
@@ -691,10 +769,15 @@ def _collect_terms(
     contributing_clauses = [hit["_clause"] for hit in hits]
     all_term_clauses = [clause for clause in clauses if any(term in clause.text for term in terms)]
     primary_clause = _primary_term_hit(hits, all_term_clauses, terms, concept_map)
+    # 验收项：同术语的第二条款也要参与变更检测（S1）；独立例外条款归例外项，
+    # 不参与验收文本哈希（否则新增例外条款会误报验收 modified）。
+    hash_clauses = contributing_clauses
+    if item_key == "acceptance_invoice":
+        hash_clauses = [c for c in all_term_clauses if not _is_exception_article(c)]
     return {
         "status": "identified",
         "terms": [hit["term"] for hit in hits],
-        "text_sha256": _matched_text_sha_for(contributing_clauses, item_key),
+        "text_sha256": _matched_text_sha_for(hash_clauses, item_key),
         **_primary_locator(primary_clause),
         "payload_clause_no": _clause_no_union(contributing_clauses),
         "clause_no_union": _clause_no_union(all_term_clauses),
