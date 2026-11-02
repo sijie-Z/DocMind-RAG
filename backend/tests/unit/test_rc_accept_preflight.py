@@ -133,19 +133,27 @@ def test_script_makes_app_importable_when_run_directly(tmp_path):
     拒绝）。pytest 进程的 rootdir 已在 sys.path 里，故用干净 cwd 的子进程验证。
 
     子进程显式剔除 ``PYTHONPATH`` 并断言 ``app`` 来自 backend 根：否则外部
-    PYTHONPATH 可让变异版本照样通过（评审 B 实测的假绿路径）。
+    PYTHONPATH 可让变异版本照样通过（评审 B 实测的假绿路径）。同时模拟
+    “backend 根已存在但不在最前 + 排它路径上有诱饵 app 包”（评审 A 观察项），
+    钉住脚本必须把 backend 根移到最前，而不是只检查存在。
     """
     backend_root = Path(rc.__file__).resolve().parents[1]
     script = backend_root / "scripts" / "rc_accept_full_flow.py"
+    decoy_app = tmp_path / "decoy" / "app"
+    decoy_app.mkdir(parents=True)
+    (decoy_app / "__init__.py").write_text("", encoding="utf-8")
     code = (
         "import importlib.util\n"
+        "import sys\n"
+        "from pathlib import Path\n"
+        f"backend = Path({str(backend_root)!r})\n"
+        f"sys.path.insert(0, str(Path({str(tmp_path)!r}) / 'decoy'))\n"
+        "sys.path.append(str(backend))\n"
         f"spec = importlib.util.spec_from_file_location('rcmod', {str(script)!r})\n"
         "mod = importlib.util.module_from_spec(spec)\n"
         "spec.loader.exec_module(mod)\n"
         "import app\n"
-        "from pathlib import Path\n"
-        f"assert Path(app.__file__).resolve().is_relative_to(Path({str(backend_root)!r})), "
-        "app.__file__\n"
+        "assert Path(app.__file__).resolve().is_relative_to(backend), app.__file__\n"
         "print('OK')\n"
     )
     # Windows 环境变量大小写不敏感：按大写键名统一剔除，避免被测进程借道外部路径。

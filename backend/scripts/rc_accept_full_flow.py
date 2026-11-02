@@ -35,9 +35,11 @@ import requests
 # 按文档直跑 ``python scripts/rc_accept_full_flow.py`` 时，Python 只把
 # ``scripts/`` 放进 sys.path；backend 根需显式加入，否则 ``app`` 导入必失败，
 # preflight 会退化为只能依赖 --expect-index（连正确的本地栈也会被拒绝）。
-_BACKEND_ROOT = Path(__file__).resolve().parents[1]
-if str(_BACKEND_ROOT) not in sys.path:
-    sys.path.insert(0, str(_BACKEND_ROOT))
+# 无条件移到最前：“存在即可”的守卫在极端 PYTHONPATH 顺序下仍可能让外来
+# ``app`` 包抢先（评审 A 观察项），这里保证脚本所属 backend 的 app 总能解析。
+_BACKEND_ROOT = str(Path(__file__).resolve().parents[1])
+sys.path[:] = [entry for entry in sys.path if entry != _BACKEND_ROOT]
+sys.path.insert(0, _BACKEND_ROOT)
 
 DEFAULT_BASE = os.environ.get("RC_BASE_URL", "http://127.0.0.1:8020")
 BASE = DEFAULT_BASE
