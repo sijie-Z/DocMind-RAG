@@ -140,23 +140,28 @@ class PermissionService:
         )
         role = result.scalar_one_or_none()
         if role is None:
+            # 新角色：一次性带权限构造，之后 return。绝不对未加载的
+            # ``role.permissions`` 做 append——flush 后的新对象集合仍未加载，
+            # async 会话里 append 会触发惰性 SELECT（MissingGreenlet）。
+            # 「权限已种、OrgAdmin 角色缺失」的部署可稳定复现该路径。
+            perms_result = await db.execute(
+                select(Permission).where(Permission.name.in_(ORG_ADMIN_PERMISSION_NAMES))
+            )
             role = Role(
                 name=ORG_ADMIN_ROLE_NAME,
                 description="组织管理员（组织级，仅限本组织）",
                 is_system_role=False,
+                permissions=list(perms_result.scalars().all()),
             )
             db.add(role)
             await db.flush()
-            # 新建对象没有已加载的 permissions 集合：直接读 role.permissions 会
-            # 在 async 上下文触发惰性 IO（MissingGreenlet）。新角色从空集合起步。
-            current: set[str] = set()
-        else:
-            current = {perm.name for perm in role.permissions}
+            return role
+
+        current = {perm.name for perm in role.permissions}
         missing = [name for name in ORG_ADMIN_PERMISSION_NAMES if name not in current]
         if missing:
             perms_result = await db.execute(select(Permission).where(Permission.name.in_(missing)))
-            for perm in perms_result.scalars().all():
-                role.permissions.append(perm)
+            role.permissions.extend(perms_result.scalars().all())
         await db.flush()
         return role
 
