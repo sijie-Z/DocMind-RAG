@@ -7,7 +7,8 @@
 
 路径与生产一致：semantic_chunker.split_text → Clause（normalize + clause 字段）
 → extract_* → align_item。用例保持“每条 <5 句”，分块器不会调用 embedding；
-评测器仍显式注入拒绝桩，一旦用例写法漂移触发 embedding 会立即报错。
+评测器对 embedding 调用计数，一旦触发（分块器会吞异常回退单 chunk）立即硬失败，
+避免悄悄偏离生产路径。
 """
 
 from __future__ import annotations
@@ -15,26 +16,49 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import os
+import sys
 from pathlib import Path
 
-from app.services import review_analysis_service as analysis
-from app.services import semantic_chunker as semantic_chunker_module
-from app.services.semantic_chunker import semantic_chunker
-from evals.review_golden_cases import CASES
+# 评测只需要 app 的纯函数；在干净 clone 里 import 链会碰配置加载，先给离线默认值
+# （setdefault：绝不覆盖真实环境）。仅本 eval CLI/测试导入本模块时生效。
+os.environ.setdefault("SECRET_KEY", "review-golden-not-a-secret")
+os.environ.setdefault("JWT_SECRET_KEY", "review-golden-not-a-secret")
+os.environ.setdefault("DATABASE_URL", "sqlite+aiosqlite:///:memory:")
+# embedding_service 在 import 期构造客户端；评测不会真正调用（由拒绝桩替换）。
+os.environ.setdefault("EMBEDDING_API_KEY", "review-golden-not-a-secret")
+
+from app.services import review_analysis_service as analysis  # noqa: E402
+from app.services import semantic_chunker as semantic_chunker_module  # noqa: E402
+from app.services.semantic_chunker import semantic_chunker  # noqa: E402
+from evals.review_golden_cases import CASES  # noqa: E402
 
 ITEMS = ("payment_term", "start_condition", "acceptance_invoice", "exception")
 BASELINE_PATH = Path(__file__).with_name("review_golden_baseline.json")
 
 
 class _NoEmbedding:
-    async def get_embeddings(self, texts):  # noqa: ANN001 - 仅用于拒绝
-        raise RuntimeError(
-            "review_golden 用例触发了 embedding：请保持每条 < 5 句，评测必须离线且确定性"
-        )
+    """返回占位向量但计数；由 `_clauses` 在 split 后检查并硬失败。
+
+    分块器内部对 embedding 异常是 `except Exception` 回退整段单 chunk——若这里直接
+    抛异常会被吞掉并静默改变切分路径，因此必须“先返回、事后计数校验”。
+    """
+
+    calls = 0
+
+    async def get_embeddings(self, texts):  # noqa: ANN001 - 仅占位
+        type(self).calls += 1
+        return [[0.0] for _ in texts]
 
 
 async def _clauses(text: str) -> list[analysis.Clause]:
+    before = _NoEmbedding.calls
     chunks = await semantic_chunker.split_text(text)
+    if _NoEmbedding.calls != before:
+        raise RuntimeError(
+            "review_golden 用例触发了 embedding：分块器会静默回退单 chunk，"
+            "评测将偏离生产路径。请保持每条 < 5 句。"
+        )
     clauses: list[analysis.Clause] = []
     for i, ch in enumerate(chunks):
         raw = ch["text"]
@@ -63,9 +87,12 @@ def _norm_facts(item: str, facts: dict) -> dict:
     return {"status": "identified"}
 
 
-def _evidence_hit(side_facts: dict, clause_no: int) -> bool:
-    nums = side_facts.get("clause_no_union") or side_facts.get("clause_no") or []
-    return clause_no in nums
+def _evidence_nums(side_facts: dict, *, primary: bool) -> list[int]:
+    key = "clause_no" if primary else "clause_no_union"
+    nums = side_facts.get(key)
+    if nums is None:
+        nums = side_facts.get("clause_no") or []
+    return list(nums)
 
 
 async def evaluate(cases=None) -> dict:
@@ -74,45 +101,60 @@ async def evaluate(cases=None) -> dict:
         item: {"extraction_ok": 0, "extraction_n": 0, "change_ok": 0, "change_n": 0}
         for item in ITEMS
     }
-    evidence_ok = evidence_n = 0
+    evidence_union_ok = evidence_primary_ok = evidence_n = 0
+    failures: list[str] = []
     details: list[dict] = []
 
+    _NoEmbedding.calls = 0
     for case in cases:
         base = await _clauses(case["base"])
         revised = await _clauses(case["revised"])
-        case_facts: dict[str, dict] = {}
         for item in ITEMS:
             gold = case["items"][item]
             base_facts = analysis.EXTRACTORS[item](base)
             revised_facts = analysis.EXTRACTORS[item](revised)
             change_type = analysis.align_item(item, base_facts, revised_facts)
-            case_facts[item] = {
-                "base": base_facts,
-                "revised": revised_facts,
-                "change_type": change_type,
-            }
+            side_facts = {"base": base_facts, "revised": revised_facts}
 
             stats = per_item[item]
             stats["change_n"] += 1
             change_ok = change_type == gold["change_type"]
             stats["change_ok"] += int(change_ok)
+            if not change_ok:
+                failures.append(f"{case['id']}/{item}: change {gold['change_type']}->{change_type}")
 
             extraction_ok = None
             if gold.get("facts") is not None:
                 side = (gold.get("evidence") or ("revised", 0))[0]
-                actual = _norm_facts(item, case_facts[item][side])
-                extraction_ok = actual == _norm_facts(item, gold["facts"])
+                actual = _norm_facts(item, side_facts[side])
+                expected = _norm_facts(item, gold["facts"])
+                extraction_ok = actual == expected
                 stats["extraction_n"] += 1
                 stats["extraction_ok"] += int(extraction_ok)
+                if not extraction_ok:
+                    failures.append(f"{case['id']}/{item}: extraction {expected}->{actual}")
 
-            evidence_hit = None
+            union_hit = primary_hit = None
             if gold.get("evidence") is not None:
                 side, clause_no = gold["evidence"]
-                evidence_hit = _evidence_hit(case_facts[item][side], clause_no)
+                union_hit = clause_no in _evidence_nums(side_facts[side], primary=False)
+                primary_hit = clause_no in _evidence_nums(side_facts[side], primary=True)
                 evidence_n += 1
-                evidence_ok += int(evidence_hit)
+                evidence_union_ok += int(union_hit)
+                evidence_primary_ok += int(primary_hit)
+                if not union_hit:
+                    failures.append(f"{case['id']}/{item}: evidence union miss {side}:{clause_no}")
+                if not primary_hit:
+                    failures.append(
+                        f"{case['id']}/{item}: evidence primary miss {side}:{clause_no}"
+                    )
 
-            if not change_ok or extraction_ok is False or evidence_hit is False:
+            if (
+                not change_ok
+                or extraction_ok is False
+                or union_hit is False
+                or primary_hit is False
+            ):
                 details.append(
                     {
                         "case": case["id"],
@@ -120,7 +162,8 @@ async def evaluate(cases=None) -> dict:
                         "expected_change": gold["change_type"],
                         "actual_change": change_type,
                         "extraction_ok": extraction_ok,
-                        "evidence_hit": evidence_hit,
+                        "evidence_union_hit": union_hit,
+                        "evidence_primary_hit": primary_hit,
                     }
                 )
 
@@ -133,13 +176,14 @@ async def evaluate(cases=None) -> dict:
             }
             for item, stats in per_item.items()
         },
-        "evidence_hit_rate": _ratio(evidence_ok, evidence_n),
+        "evidence_hit_rate": _ratio(evidence_union_ok, evidence_n),
+        "primary_evidence_hit_rate": _ratio(evidence_primary_ok, evidence_n),
         "overall_change_type": _ratio(
             sum(s["change_ok"] for s in per_item.values()),
             sum(s["change_n"] for s in per_item.values()),
         ),
     }
-    return {"metrics": metrics, "details": details}
+    return {"metrics": metrics, "failures": sorted(failures), "details": details}
 
 
 def _ratio(ok: int, n: int) -> float | None:
@@ -148,9 +192,9 @@ def _ratio(ok: int, n: int) -> float | None:
 
 def _table(metrics: dict) -> str:
     lines = [
-        "核验 golden set（10 组合成中文采购合同，确定性规则链路）",
+        "核验 golden set（12 组合成中文采购合同，确定性规则链路）",
         "",
-        "| 核验项 | 抽取准确率 | change_type 准确率 |",
+        "| 核验项 | 识别准确率 | change_type 准确率 |",
         "|---|---|---|",
     ]
     for item in ITEMS:
@@ -158,7 +202,8 @@ def _table(metrics: dict) -> str:
         lines.append(f"| {item} | {_fmt(row['extraction'])} | {_fmt(row['change_type'])} |")
     lines += [
         "",
-        f"证据命中率: {_fmt(metrics['evidence_hit_rate'])}",
+        f"证据命中率（主定位器）: {_fmt(metrics['primary_evidence_hit_rate'])}",
+        f"证据命中率（union 口径）: {_fmt(metrics['evidence_hit_rate'])}",
         f"change_type 总体准确率: {_fmt(metrics['overall_change_type'])}",
     ]
     return "\n".join(lines)
@@ -174,26 +219,25 @@ def _load_baseline() -> dict | None:
     return json.loads(BASELINE_PATH.read_text(encoding="utf-8"))
 
 
-def compare_to_baseline(metrics: dict, baseline: dict) -> list[str]:
-    """基线棘轮：任一项低于基线即失败；高于基线要求显式更新基线。"""
+def compare_to_baseline(result: dict, baseline: dict) -> list[str]:
+    """基线棘轮：指标或失败集合任何变化都必须显式更新基线（提升亦然）。"""
     problems: list[str] = []
+    metrics, before = result["metrics"], baseline["metrics"]
+
+    if metrics["cases"] != before["cases"]:
+        problems.append(f"cases: {metrics['cases']} != 基线 {before['cases']}")
     for item in ITEMS:
         for metric in ("extraction", "change_type"):
-            before = baseline["per_item"][item][metric]
             now = metrics["per_item"][item][metric]
-            if now is not None and before is not None and now < before:
-                problems.append(f"{item}.{metric}: {now} < 基线 {before}")
-            if now is not None and before is not None and now > before:
-                problems.append(
-                    f"{item}.{metric}: {now} > 基线 {before}（提升需显式 --update-baseline）"
-                )
-    for metric in ("evidence_hit_rate", "overall_change_type"):
-        before = baseline[metric]
-        now = metrics[metric]
-        if now is not None and before is not None and now < before:
-            problems.append(f"{metric}: {now} < 基线 {before}")
-        if now is not None and before is not None and now > before:
-            problems.append(f"{metric}: {now} > 基线 {before}（提升需显式 --update-baseline）")
+            old = before["per_item"][item][metric]
+            if now != old:
+                problems.append(f"{item}.{metric}: {now} != 基线 {old}")
+    for metric in ("evidence_hit_rate", "primary_evidence_hit_rate", "overall_change_type"):
+        if metrics[metric] != before[metric]:
+            problems.append(f"{metric}: {metrics[metric]} != 基线 {before[metric]}")
+
+    if result["failures"] != baseline["failures"]:
+        problems.append("失败集合与基线不一致（'修好一例、弄坏一例'也会被捕获）")
     return problems
 
 
@@ -208,21 +252,24 @@ async def main_async(args) -> int:
     print(_table(result["metrics"]))
     if result["details"]:
         print("\n失败明细:")
-        for d in result["details"]:
+        for detail in result["details"]:
             print(
-                f"  - {d['case']}/{d['item']}: change 期望 {d['expected_change']}"
-                f" 实际 {d['actual_change']}"
-                + (
-                    f"; extraction_ok={d['extraction_ok']}"
-                    if d["extraction_ok"] is not None
-                    else ""
-                )
-                + (f"; evidence_hit={d['evidence_hit']}" if d["evidence_hit"] is not None else "")
+                f"  - {detail['case']}/{detail['item']}: change 期望"
+                f" {detail['expected_change']} 实际 {detail['actual_change']}"
+                f"; extraction_ok={detail['extraction_ok']}"
+                f"; evidence primary/union={detail['evidence_primary_hit']}"
+                f"/{detail['evidence_union_hit']}"
             )
 
     if args.update_baseline:
         BASELINE_PATH.write_text(
-            json.dumps(result["metrics"], ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+            json.dumps(
+                {"metrics": result["metrics"], "failures": result["failures"]},
+                ensure_ascii=False,
+                indent=2,
+            )
+            + "\n",
+            encoding="utf-8",
         )
         print(f"\n基线已更新: {BASELINE_PATH}")
         return 0
@@ -231,17 +278,19 @@ async def main_async(args) -> int:
     if baseline is None:
         print("\n未找到基线；先运行一次 --update-baseline 并随 PR 提交。")
         return 2
-    problems = compare_to_baseline(result["metrics"], baseline)
+    problems = compare_to_baseline(result, baseline)
     if problems:
         print("\n与基线不一致:")
-        for p in problems:
-            print("  -", p)
+        for problem in problems:
+            print("  -", problem)
         return 1
-    print("\n与基线一致（无回归、无未登记提升）")
+    print("\n与基线一致（无回归、无未登记变化）")
     return 0
 
 
 def main() -> int:
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8")
     parser = argparse.ArgumentParser(description="核验 golden set 评测（离线性）")
     parser.add_argument("--update-baseline", action="store_true", help="显式更新基线")
     return asyncio.run(main_async(parser.parse_args()))

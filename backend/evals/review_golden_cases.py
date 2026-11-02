@@ -27,7 +27,7 @@ _A1 = (
 )
 _A2 = (
     "第二条 合同价款：本合同总价为人民币壹拾万元整，已包含运输、安装、调试、培训及"
-    "税费等全部费用，乙方不得以任何理由另行收取其他费用，价款支付方式以第三条约定为准。"
+    "税费等全部费用，乙方不得以任何理由另行收取其他费用。"
 )
 _A5 = (
     "第五条 交付：乙方应于合同生效后三十日内将全部设备交付至甲方指定地点，并提前"
@@ -107,8 +107,8 @@ CASES = [
         },
     },
     {
-        "id": "payment_bare_ri_ambiguous",
-        "note": "裸『日』= 自然日/工作日不明，引擎按设计不猜 → unidentified",
+        "id": "payment_bare_ri_value_changed",
+        "note": "裸『日』：单位不明，但 30→60 的数值变化可确定 → modified（评审 A R1）",
         "base": _doc(
             _A1,
             _A2,
@@ -130,7 +130,37 @@ CASES = [
             _A8,
         ),
         "items": {
-            "payment_term": _item("unidentified", _PAY_AMBIG, ("revised", 3)),
+            "payment_term": _item("modified", _PAY_AMBIG, ("revised", 3)),
+            "start_condition": _item("unchanged", _START_ACCEPTED, ("revised", 3)),
+            "acceptance_invoice": _item("unchanged", _ACCEPT_OK, ("revised", 4)),
+            "exception": _item("unidentified", _ABSENT),
+        },
+    },
+    {
+        "id": "payment_bare_ri_value_same",
+        "note": "裸『日』且数值相同：单位不明但两版一致 → unchanged（评审 A R1）",
+        "base": _doc(
+            _A1,
+            _A2,
+            _pay("三", "甲方应在验收合格后30日内支付货款。"),
+            _acc("四", "乙方交付后10个工作日内完成验收，验收标准以本合同附件二为准。"),
+            _A5,
+            _A6,
+            _A7,
+            _A8,
+        ),
+        "revised": _doc(
+            _A1,
+            _A2,
+            _pay("三", "甲方应在验收合格后30日内支付货款。"),
+            _acc("四", "乙方交付后10个工作日内完成验收，验收标准以本合同附件二为准。"),
+            _A5,
+            _A6,
+            _A7,
+            _A8,
+        ),
+        "items": {
+            "payment_term": _item("unchanged", _PAY_AMBIG, ("revised", 3)),
             "start_condition": _item("unchanged", _START_ACCEPTED, ("revised", 3)),
             "acceptance_invoice": _item("unchanged", _ACCEPT_OK, ("revised", 4)),
             "exception": _item("unidentified", _ABSENT),
@@ -229,6 +259,37 @@ CASES = [
         },
     },
     {
+        "id": "exception_with_duration",
+        "note": "新增例外条款含「顺延30天」：payment/acceptance 不应被污染（评审 A R3）",
+        "base": _doc(
+            _A1,
+            _A2,
+            _pay("三", "甲方应在验收合格后30天支付货款。"),
+            _acc("四", "乙方交付后10个工作日内完成验收，验收标准以本合同附件二为准。"),
+            _A5,
+            _A6,
+            _A7,
+            _A8,
+        ),
+        "revised": _doc(
+            _A1,
+            _A2,
+            _pay("三", "甲方应在验收合格后30天支付货款。"),
+            _acc("四", "乙方交付后10个工作日内完成验收，验收标准以本合同附件二为准。"),
+            _A5,
+            _A6,
+            _A7,
+            _A8,
+            "第九条 例外：因不可抗力导致验收延迟的，付款期限相应顺延30天。",
+        ),
+        "items": {
+            "payment_term": _item("unchanged", _PAY_30, ("revised", 3)),
+            "start_condition": _item("unchanged", _START_ACCEPTED, ("revised", 3)),
+            "acceptance_invoice": _item("unchanged", _ACCEPT_OK, ("revised", 4)),
+            "exception": _item("added", {"status": "identified"}, ("revised", 9)),
+        },
+    },
+    {
         "id": "start_condition_modified",
         "note": "起算事件 验收合格→收到发票（付款天数不变）",
         "base": _doc(
@@ -296,7 +357,7 @@ CASES = [
     },
     {
         "id": "renumbered_only",
-        "note": "仅插入新条款并顺延编号，内容不变 → renumbered",
+        "note": "插入定义条款并顺延编号；四个核验项内容不变 → renumbered",
         "base": _doc(
             _A1,
             _A2,
