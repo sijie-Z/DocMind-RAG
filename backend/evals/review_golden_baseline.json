@@ -1,0 +1,23 @@
+{
+  "cases": 10,
+  "per_item": {
+    "payment_term": {
+      "extraction": 1.0,
+      "change_type": 0.8
+    },
+    "start_condition": {
+      "extraction": 1.0,
+      "change_type": 0.8
+    },
+    "acceptance_invoice": {
+      "extraction": 1.0,
+      "change_type": 0.8
+    },
+    "exception": {
+      "extraction": 1.0,
+      "change_type": 1.0
+    }
+  },
+  "evidence_hit_rate": 1.0,
+  "overall_change_type": 0.85
+}
