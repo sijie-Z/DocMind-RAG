@@ -147,8 +147,11 @@ class PermissionService:
             )
             db.add(role)
             await db.flush()
-
-        current = {perm.name for perm in role.permissions}
+            # 新建对象没有已加载的 permissions 集合：直接读 role.permissions 会
+            # 在 async 上下文触发惰性 IO（MissingGreenlet）。新角色从空集合起步。
+            current: set[str] = set()
+        else:
+            current = {perm.name for perm in role.permissions}
         missing = [name for name in ORG_ADMIN_PERMISSION_NAMES if name not in current]
         if missing:
             perms_result = await db.execute(select(Permission).where(Permission.name.in_(missing)))

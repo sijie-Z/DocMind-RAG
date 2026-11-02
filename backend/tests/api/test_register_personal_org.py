@@ -357,3 +357,78 @@ async def test_register_real_db_second_collision_uses_random_suffix():
     finally:
         app.dependency_overrides.pop(get_db, None)
         await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_register_grants_org_admin_to_personal_org_owner():
+    """注册个人空间的所有者必须持有 OrgAdmin（否则 document:update 等全部 403）。
+
+    真实验收暴露：注册只建组织+成员，不授予任何组织角色；User 系统角色仅含
+    read/upload/delete，导致新用户无法登记核验身份/建案/改文档。修复：组织
+    创建时给 owner 授予 per-org OrgAdmin（只在本人组织内生效）。
+
+    变异验证：删 organization_service.create_organization 里的 set_org_admin →
+    is_org_admin=False 且权限缺 document:update，本用例红。
+    """
+    from app.core.database import get_db
+    from app.core.security import is_org_admin
+    from app.main import app
+    from app.models import Organization, User
+    from app.models.rbac import PermissionType, user_organization_role_association
+    from app.services.organization_service import organization_service
+    from app.services.permission_service import permission_service
+
+    engine, factory = await _make_real_db()
+    async with factory() as s:
+        await permission_service.initialize_default_permissions_and_roles(s)
+
+    app.dependency_overrides[get_db] = _real_db_override(factory)
+    try:
+        r = await _post_register(
+            {
+                "username": "orgadminnewbie",
+                "email": "orgadminnewbie@example.com",
+                "password": "ValidPass123!",
+            }
+        )
+        assert r.status_code == 200, f"register failed: {r.text[:300]}"
+        org_id = r.json()["data"]["user_info"]["organization_id"]
+
+        async with factory() as s:
+            user = (
+                await s.execute(select(User).where(User.username == "orgadminnewbie"))
+            ).scalar_one()
+            assert await is_org_admin(s, user, org_id) is True, "个人空间 owner 必须是 OrgAdmin"
+            perms = await permission_service.get_user_permissions(s, user, org_id)
+            assert PermissionType.DOCUMENT_UPDATE.value in perms
+            assert PermissionType.DOCUMENT_UPLOAD.value in perms
+            role_rows = (
+                await s.execute(
+                    select(user_organization_role_association).where(
+                        user_organization_role_association.c.user_id == user.id,
+                        user_organization_role_association.c.organization_id == org_id,
+                    )
+                )
+            ).all()
+            assert len(role_rows) == 1, "owner 应有且仅有一个组织角色关联（OrgAdmin）"
+
+            # 普通成员不会被自动授予 OrgAdmin（隔离/最小权限）
+            org = (
+                await s.execute(select(Organization).where(Organization.id == org_id))
+            ).scalar_one()
+            other = User(
+                username="orgmember",
+                email="orgmember@example.com",
+                hashed_password="x",
+                is_active=True,
+            )
+            s.add(other)
+            await s.flush()
+            await organization_service.add_user_to_organization(s, other, org)
+            await s.commit()
+            assert await is_org_admin(s, other, org_id) is False
+            other_perms = await permission_service.get_user_permissions(s, other, org_id)
+            assert PermissionType.DOCUMENT_UPDATE.value not in other_perms
+    finally:
+        app.dependency_overrides.pop(get_db, None)
+        await engine.dispose()
