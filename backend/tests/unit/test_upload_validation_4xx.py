@@ -23,12 +23,13 @@ upload-chunk）逐层放行 (HTTPException, AppError)；未识别的其余异常
   test_avatar_endpoint_* 精确红。
 """
 
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from fastapi import HTTPException
 
-from app.exceptions import AppError, ValidationError
+from app.exceptions import AppError, PayloadTooLargeError, ValidationError
 from app.services.file_service import FileUploadService
 
 # 真实 1x1 PNG（与 test_avatar_upload_image_mime.py 同款魔术字节）
@@ -213,3 +214,39 @@ class TestEndpointLayer:
                 db=db,
             )
         assert exc.value.status_code == 400
+
+
+class TestDocumentUploadOversize:
+    """documents.py 上传端点的体积超限：413 + 上限 detail（评审 #601 发现）。"""
+
+    @pytest.mark.asyncio
+    async def test_document_upload_oversize_returns_413(self, monkeypatch):
+        from app.api.v1.endpoints import documents as docs_ep
+
+        # 模块级 settings 是惰性代理，直接 patch 成本函数内的名字即可。
+        monkeypatch.setattr(
+            docs_ep, "settings", SimpleNamespace(MAX_FILE_SIZE=10, EXPOSE_EXCEPTION_DETAIL=False)
+        )
+        monkeypatch.setattr(docs_ep, "require_organization", AsyncMock(return_value=1))
+
+        upload = MagicMock()
+        upload.filename = "big.txt"
+        upload.file = MagicMock()
+        upload.file.tell = MagicMock(return_value=11)
+        upload.seek = AsyncMock()
+        db = _fake_db()
+        db.merge = AsyncMock(return_value=MagicMock())
+
+        with pytest.raises(PayloadTooLargeError) as exc:
+            await docs_ep.upload_document(
+                file=upload,
+                title=None,
+                description=None,
+                tags=None,
+                db=db,
+                current_user=MagicMock(),
+            )
+
+        assert exc.value.status_code == 413
+        assert exc.value.detail == {"max_body_bytes": 10, "received_bytes": 11}
+        assert "文件过大" in exc.value.message

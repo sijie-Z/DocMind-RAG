@@ -209,3 +209,9 @@ GRAFANA_PASSWORD='<强口令>' ALERT_WEBHOOK_TOKEN='<URL 安全随机串>' \
 - [ ] Configure resource limits (CPU/memory)
 - [ ] Enable monitoring (Prometheus + Grafana)
 - [ ] Set up log aggregation (ELK/Loki)
+
+## Demo（公网演示）
+
+面向个人域名 + Cloudflare（Tunnel / Access）的公网演示部署见
+[`deploy/demo/README.md`](demo/README.md)，含安全闸清单（`demo/SECURITY.md`）、
+演示数据种子（`demo/seed_demo.py`）、上线自检（`demo/verify_demo.sh`）与备份脚本。

@@ -1,0 +1,14 @@
+# 仅用于“以仓库根为构建上下文”的镜像（deploy/demo/Dockerfile.frontend）。
+# backend 镜像的上下文是 backend/，由 backend/.dockerignore（若有）或默认规则决定。
+.git
+**/node_modules
+**/dist
+_scratch
+**/__pycache__
+*.log
+backend/.env
+backend/.env.*
+!backend/.env.example
+!backend/.env.docker.example
+backend/venv
+backend/.venv*

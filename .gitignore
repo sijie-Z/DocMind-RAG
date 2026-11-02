@@ -11,6 +11,9 @@ venv/
 .env.*
 !.env.example
 !.env.docker.example
+!.env.demo.example
+deploy/demo/backups/
+deploy/demo/.htpasswd
 .backend-port
 backend.log
 node_modules/

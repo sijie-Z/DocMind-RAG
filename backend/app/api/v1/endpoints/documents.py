@@ -27,6 +27,7 @@ from app.exceptions import (
     AuthorizationError,
     ConflictError,
     NotFoundError,
+    PayloadTooLargeError,
 )
 from app.models.document import Document, DocumentStatus, DocumentType
 from app.models.knowledge_job import KnowledgeJobStatus, KnowledgeProcessingJob
@@ -179,7 +180,15 @@ async def upload_document(
         declared_size = file.file.tell()
         await file.seek(0)
         if declared_size > settings.MAX_FILE_SIZE:
-            raise AppError(f"文件过大，最大支持 {settings.MAX_FILE_SIZE // (1024 * 1024)}MB")
+            # 413（不是基类 AppError 的 500）：超限是客户端可修正的错误，
+            # 且 detail 必须让调用方知道实际上限（与 webhook 超限同口径）。
+            raise PayloadTooLargeError(
+                f"文件过大，最大支持 {settings.MAX_FILE_SIZE // (1024 * 1024)}MB",
+                detail={
+                    "max_body_bytes": settings.MAX_FILE_SIZE,
+                    "received_bytes": declared_size,
+                },
+            )
 
         # 4. 计算 MD5 和 文件大小
         md5 = await calculate_md5(file)
