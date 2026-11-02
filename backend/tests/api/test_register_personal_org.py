@@ -279,10 +279,13 @@ async def test_register_real_db_crash_before_commit_leaves_no_partial_rows():
     engine, factory = await _make_real_db()
     app.dependency_overrides[get_db] = _real_db_override(factory)
     try:
-        with patch(
-            "app.api.v1.endpoints.auth.Notification",
-            side_effect=RuntimeError("注入崩溃：回填后、commit 前"),
-        ):
+        injected = {"calls": 0}
+
+        def _boom(*_args, **_kwargs):
+            injected["calls"] += 1
+            raise RuntimeError("注入崩溃：回填后、commit 前")
+
+        with patch("app.api.v1.endpoints.auth.Notification", side_effect=_boom):
             r = await _post_register(
                 {
                     "username": "crashbaby",
@@ -291,6 +294,9 @@ async def test_register_real_db_crash_before_commit_leaves_no_partial_rows():
                 }
             )
         assert r.status_code == 500, f"注入崩溃应表现为 500，实得 {r.status_code}"
+        # 断言 500 来自注入点（避免被 MissingGreenlet 等其它 500 假绿）
+        assert injected["calls"] == 1
+        assert "注册失败" in (r.json().get("message") or "")
 
         async with factory() as s:
             leftover = (
@@ -402,6 +408,9 @@ async def test_register_grants_org_admin_to_personal_org_owner():
             perms = await permission_service.get_user_permissions(s, user, org_id)
             assert PermissionType.DOCUMENT_UPDATE.value in perms
             assert PermissionType.DOCUMENT_UPLOAD.value in perms
+            # OrgAdmin 独有（User 系统角色不含）：防止「授权失效但恰由
+            # User 角色兜住」的假绿（评审 B 变异 M5c2 证据）。
+            assert PermissionType.UPDATE_ORGANIZATION.value in perms
             role_rows = (
                 await s.execute(
                     select(user_organization_role_association).where(
