@@ -1,5 +1,8 @@
 """RC 验收脚本 preflight：必须按目标 /health 的索引身份拦截错栈（评审 A R2）。"""
 
+import subprocess
+import sys
+from pathlib import Path
 from types import SimpleNamespace
 
 from scripts import rc_accept_full_flow as rc
@@ -119,3 +122,31 @@ def test_preflight_defaults_to_local_effective_index_when_import_succeeds(monkey
         },
     )
     assert rc.preflight(None) is True
+
+
+def test_script_makes_app_importable_when_run_directly(tmp_path):
+    """按文档直跑 ``python scripts/...`` 时，脚本自身须把 backend 根加入 sys.path。
+
+    否则 Python 只把 ``scripts/`` 放进 sys.path，``from app.core.config import
+    settings`` 必失败，preflight 退化为只能依赖 --expect-index（正确栈也会被
+    拒绝）。pytest 进程的 rootdir 已在 sys.path 里，故用干净 cwd 的子进程验证。
+    """
+    backend_root = Path(rc.__file__).resolve().parents[1]
+    script = backend_root / "scripts" / "rc_accept_full_flow.py"
+    code = (
+        "import importlib.util\n"
+        f"spec = importlib.util.spec_from_file_location('rcmod', r'{script}')\n"
+        "mod = importlib.util.module_from_spec(spec)\n"
+        "spec.loader.exec_module(mod)\n"
+        "from app.core.config import settings\n"
+        "print('OK')\n"
+    )
+    out = subprocess.run(
+        [sys.executable, "-c", code],
+        capture_output=True,
+        text=True,
+        cwd=str(tmp_path),
+        timeout=120,
+    )
+    assert out.returncode == 0, out.stderr
+    assert "OK" in out.stdout
