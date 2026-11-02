@@ -315,6 +315,16 @@ class OrganizationService:
         user = user_result.scalar_one_or_none()
         if user:
             await self.add_user_to_organization(db, user, organization)
+            # 所有者必须持有本组织的 OrgAdmin：注册时自动创建的个人空间若没有
+            # 任何组织角色，新用户对 document:update 等管理操作一律 403——真实验收
+            # 实测：注册用户无法登记核验身份/建案/改文档，「注册即可用」是断的。
+            # OrgAdmin 是 per-org 角色（W0-1）：只在本人组织内生效，不授予平台级
+            # 权限，也不影响其它组织；与 organization.owner_id 的语义一致。
+            # 信任模型（显式）：公开注册者即其个人空间的管理员（owner==OrgAdmin）；
+            # 成员/账号管理能力仍受组织边界约束，账号接管防护另立批次。
+            from app.services.permission_service import permission_service
+
+            await permission_service.set_org_admin(db, owner_id, organization.id, True)
 
         return organization
 
