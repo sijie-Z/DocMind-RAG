@@ -1188,3 +1188,40 @@ def test_shared_fragment_without_comma_keeps_acceptance_duration():
         )
         == "modified"
     )
+
+
+def test_payment_verb_after_filler_words_still_shields_duration():
+    """付款动词隔几个字（内向乙方/内完成/内安排）时，期限仍归属付款片段。"""
+    cases = [
+        "甲方应在验收合格后30个自然日内向乙方支付货款。",
+        "甲方应在验收合格后30个工作日内完成付款。",
+        "甲方应在验收合格后30天内安排付款。",
+    ]
+    acceptance = "乙方交付后10个工作日内完成验收。"
+    for payment_text in cases:
+        base = _contract_clauses(payment_text, acceptance)
+        revised = _contract_clauses(payment_text.replace("30", "60", 1), acceptance)
+        assert (
+            analysis.align_item(
+                "payment_term",
+                analysis.extract_payment_term(base),
+                analysis.extract_payment_term(revised),
+            )
+            == "modified"
+        ), payment_text
+        assert (
+            analysis.align_item(
+                "start_condition",
+                analysis.extract_start_condition(base),
+                analysis.extract_start_condition(revised),
+            )
+            == "unchanged"
+        ), payment_text
+        assert (
+            analysis.align_item(
+                "acceptance_invoice",
+                analysis.extract_acceptance_invoice(base),
+                analysis.extract_acceptance_invoice(revised),
+            )
+            == "unchanged"
+        ), payment_text

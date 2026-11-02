@@ -56,9 +56,9 @@ make review-eval-baseline  # 显式更新基线（评审可见的 PR 行为）
   主体/否定保护。
 - ambiguous 双侧比较候选值集合（集合比较，不做排序）：相同 →
   unchanged/renumbered，不同 → modified；截断扫描统一降级 unidentified。
-- 专项回归测试：`tests/unit/test_review_analysis.py` 新增 15 条（共享句污染、
+- 专项回归测试：`tests/unit/test_review_analysis.py` 新增 17 条（共享句污染、
   例外期限改值与新增、付款条款含例外词的主体/否定、验收与付款同句的期限、
-  mixed-unit 候选不崩溃、截断+ambiguous、无逗号同片段锚点归属、无冒号/含例外词标题不误判、主体/否定保持等），全绿。
+  mixed-unit 候选不崩溃、截断+ambiguous、无逗号同片段锚点归属、付款动词隔字（内向乙方/内完成/内安排）、无冒号/含例外词标题不误判、主体/否定保持等），全绿。
 - 效果：change_type 81.2% → **100%**（识别 100%、union 证据 100% 不变；
   主证据仍 75.7%，见上）。
 

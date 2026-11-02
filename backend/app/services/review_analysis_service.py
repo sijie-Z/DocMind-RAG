@@ -219,8 +219,14 @@ def _mask_payment_durations(text: str) -> str:
 
 
 def _nearest_anchor_is_payment(text: str, start: int, end: int) -> bool:
-    """期限命中处最近的语义锚点是否为付款词（等距时按付款处理）。"""
-    best: tuple[int, int] | None = None
+    """判断期限之后的最近语义锚点是否为付款词（方向感知）。
+
+    付款动词常隔“内向乙方/内完成/内安排”几个字（如「30个自然日内向乙方支付」），
+    此时期限前紧邻的「验收合格」并不是它的归属；只有期限之后存在锚点时才由其
+    决定归属，之后没有锚点才回看之前（覆盖「10天内起算」这类后置定义）。
+    """
+    after: list[tuple[int, int]] = []
+    before: list[tuple[int, int]] = []
     for kind, terms in (
         (0, PAYMENT_KEYWORDS),
         (1, START_EVENTS + ACCEPTANCE_TERMS),
@@ -229,16 +235,16 @@ def _nearest_anchor_is_payment(text: str, start: int, end: int) -> bool:
             index = text.find(term)
             while index != -1:
                 term_end = index + len(term)
-                distance = (
-                    0
-                    if index <= end and term_end >= start
-                    else min(abs(start - term_end), abs(index - end))
-                )
-                candidate = (distance, kind)
-                if best is None or candidate < best:
-                    best = candidate
+                if index >= end:
+                    after.append((index - end, kind))
+                elif term_end <= start:
+                    before.append((start - term_end, kind))
                 index = text.find(term, term_end)
-    return best is not None and best[1] == 0
+    pool = after if after else before
+    if not pool:
+        return False
+    best = min(pool)  # 距离相同按付款优先（kind=0）
+    return best[1] == 0
 
 
 def _is_exception_article(clause: Clause) -> bool:
