@@ -418,7 +418,6 @@ def test_compound_overdue_phrases_are_not_payment_terms():
     assert unpaid == {"status": "not_found", "reason": "no_duration"}
 
 
-@pytest.mark.xfail(reason="v1 边界：付款后 N 天内交货的复合语序未区分方向", strict=True)
 def test_delivery_after_payment_is_boundary():
     facts = analysis.extract_payment_term([_clause("第八条 甲方付款后30天内，乙方交货。")])
     assert facts == {"status": "not_found", "reason": "no_duration"}
@@ -1741,3 +1740,72 @@ def test_delivery_duration_is_not_payment_term():
     payment = analysis.extract_payment_term(base)
     assert payment["status"] == "identified"
     assert (payment["value"], payment["unit"]) == (30, "day")
+
+
+def test_acceptance_duration_with_payment_in_next_sentence_not_masked():
+    """后一句的「付款」不得把前一句的验收期限判成付款并吞掉变化（D9 阻断回归）。"""
+    base = [_clause("第四条 验收：乙方应在10个工作日内完成验收。甲方应付款。", clause_no=[4])]
+    revised = [_clause("第四条 验收：乙方应在15个工作日内完成验收。甲方应付款。", clause_no=[4])]
+    assert (
+        analysis.align_item(
+            "acceptance_invoice",
+            analysis.extract_acceptance_invoice(base),
+            analysis.extract_acceptance_invoice(revised),
+        )
+        == "modified"
+    )
+
+
+def test_arabic_month_leading_char_guard_matches_cn():
+    """「自第3个月起」与「自第三个月起」口径一致，均不抽为月份期限。"""
+    arabic = analysis.extract_payment_term(
+        [_clause("第三条 付款期限：甲方应自第3个月起支付货款。", clause_no=[3])]
+    )
+    chinese = analysis.extract_payment_term(
+        [_clause("第三条 付款期限：甲方应自第三个月起支付货款。", clause_no=[3])]
+    )
+    assert arabic["status"] == "not_found"
+    assert chinese["status"] == "not_found"
+
+
+def test_payment_after_delivery_event_is_still_payment():
+    """交货/交付作为触发事件时，期限后的付款动词仍应识别为付款期限（A-1）。"""
+    cases = {
+        "第三条 付款期限：交货后30日内，甲方支付货款。": ("ambiguous", 30),
+        "第三条 付款期限：交付后5个工作日内，甲方支付货款。": ("identified", 5),
+        "第三条 付款期限：甲方应在30天内交付货款。": ("identified", 30),
+        "第三条 付款期限：乙方发货后30天内甲方付款。": ("identified", 30),
+    }
+    for text, (status, value) in cases.items():
+        facts = analysis.extract_payment_term([_clause(text, clause_no=[3])])
+        assert facts["status"] == status, text
+        if status == "identified":
+            assert facts["value"] == value, text
+        else:
+            assert facts["candidates"][0]["value"] == value, text
+
+
+def test_payment_first_delivery_after_is_not_payment():
+    """「付款后30天内交货」的 30 是交付期限，不是付款期限。"""
+    facts = analysis.extract_payment_term([_clause("第八条 甲方付款后30天内，乙方交货。")])
+    assert facts == {"status": "not_found", "reason": "no_duration"}
+
+
+def test_refine_excludes_exception_candidates_without_moving_static():
+    """refine 候选排除独立例外条款：只剩例外候选时保留静态主证据（A-7）。"""
+    base_clause = _clause("第四条 验收：乙方交付后10个工作日内完成验收。", clause_no=[4])
+    exception_clause = _clause("第九条 例外 因不可抗力导致验收延迟的，顺延30天。", clause_no=[9])
+    base_facts = analysis.extract_acceptance_invoice([base_clause])
+    revised_facts = analysis.extract_acceptance_invoice([base_clause, exception_clause])
+    # 人工构造 modified 场景，直接验证 refine 的例外候选过滤。
+    static_chunk = base_facts["chunk_id"]
+    base_facts["change_type"] = "modified"
+    analysis.refine_primary_locator(
+        "acceptance_invoice",
+        base_facts,
+        revised_facts,
+        "modified",
+        base_clauses=[base_clause],
+        revised_clauses=[base_clause, exception_clause],
+    )
+    assert base_facts["chunk_id"] == static_chunk

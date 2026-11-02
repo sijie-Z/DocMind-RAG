@@ -90,11 +90,6 @@ NON_PAYMENT_CONTEXT = (
     "合作期",
     "试用期",
     "租赁期",
-    "交付",
-    "交货",
-    "供货",
-    "安装",
-    "发货",
 )
 # 「天」按自然日；单独「日」无法判定自然日/工作日 → ambiguous。
 DURATION_RE = re.compile(r"(\d+)\s*(个)?\s*(工作日|自然日|日历日|天|日)")
@@ -260,6 +255,26 @@ def _collapse_mask(text: str) -> str:
 _HEADING_SPLIT_RE = re.compile(r"[:：]")
 
 
+def _duration_owned_by_delivery(sentence: str, start: int, end: int) -> bool:
+    """期限归属交付类事件时，不作为付款期限。
+
+    「30天内交付货款」中的「交付货款」是付款动词短语，仍属付款；
+    「10个工作日内交付，甲方随后付款」的 10 归交付（不作为付款 hit）。
+    """
+    after = sentence[end:]
+    if re.match(r"\s*[内之]{0,2}\s*交付(?:全部)?(?:货款|价款|款项)", after):
+        return False
+    delivery_index = min(
+        (after.find(term) for term in DELIVERY_TERMS if term in after), default=None
+    )
+    payment_index = min(
+        (after.find(keyword) for keyword in PAYMENT_KEYWORDS if keyword in after), default=None
+    )
+    if delivery_index is None:
+        return False
+    return payment_index is None or delivery_index < payment_index
+
+
 def _mask_payment_durations(text: str) -> str:
     """只屏蔽“最近的语义锚点是付款词”的期限数字。
 
@@ -309,7 +324,12 @@ def _nearest_anchor_is_payment(text: str, start: int, end: int) -> bool:
         for match in pattern.finditer(text):
             if match.start() >= end:
                 next_starts.append(match.start())
-    span_end = min(next_starts) if next_starts else len(text)
+    # 付款动词必须与期限同句：后一句的「付款」不得把前一句的验收期限判成付款。
+    sentence_end = len(text)
+    boundary = SENTENCE_SPLIT_RE.search(text, end)
+    if boundary:
+        sentence_end = boundary.start()
+    span_end = min(next_starts + [sentence_end])
     span = text[end:span_end]
     if any(keyword in span for keyword in PAYMENT_KEYWORDS) and not any(
         delivery in span for delivery in DELIVERY_TERMS
@@ -584,6 +604,9 @@ def extract_payment_term(clauses: list[Clause]) -> dict[str, Any]:
                         "unit": UNIT_MAP.get(unit_raw),
                         "unit_raw": unit_raw,
                         "raw": match.group(0),
+                        "_sentence": sentence,
+                        "_start": match.start(),
+                        "_end": match.end(),
                         "_clause": clause,
                     }
                 )
@@ -591,6 +614,8 @@ def extract_payment_term(clauses: list[Clause]) -> dict[str, Any]:
                 if not _duration_context_ok(sentence, match.start(), match.end()):
                     continue
                 if _is_date_fragment(sentence, match.start(), "月"):
+                    continue
+                if match.start() > 0 and sentence[match.start() - 1] in "第年月日同唯统数几千万":
                     continue
                 if re.match(r"\s*\d+\s*[日号]", sentence[match.end() :]):
                     continue
@@ -600,6 +625,9 @@ def extract_payment_term(clauses: list[Clause]) -> dict[str, Any]:
                         "unit": "month",
                         "unit_raw": "月",
                         "raw": match.group(0),
+                        "_sentence": sentence,
+                        "_start": match.start(),
+                        "_end": match.end(),
                         "_clause": clause,
                     }
                 )
@@ -622,6 +650,9 @@ def extract_payment_term(clauses: list[Clause]) -> dict[str, Any]:
                         "unit": "month",
                         "unit_raw": "月",
                         "raw": match.group(0),
+                        "_sentence": sentence,
+                        "_start": match.start(),
+                        "_end": match.end(),
                         "_clause": clause,
                     }
                 )
@@ -644,9 +675,17 @@ def extract_payment_term(clauses: list[Clause]) -> dict[str, Any]:
                         "unit": UNIT_MAP.get(unit_raw),
                         "unit_raw": unit_raw,
                         "raw": match.group(0),
+                        "_sentence": sentence,
+                        "_start": match.start(),
+                        "_end": match.end(),
                         "_clause": clause,
                     }
                 )
+    hits = [
+        hit
+        for hit in hits
+        if not _duration_owned_by_delivery(hit["_sentence"], hit["_start"], hit["_end"])
+    ]
     if not hits:
         reason = "no_duration" if payment_clauses else "no_payment_clause"
         return {"status": "not_found", "reason": reason}

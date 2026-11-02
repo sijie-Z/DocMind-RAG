@@ -759,4 +759,36 @@ CASES = [
             "exception": _item("unidentified", _ABSENT),
         },
     },
+    {
+        "id": "payment_after_delivery_event",
+        "note": "交付触发付款：交付后 5→10 个工作日内支付，付款项必须 modified（A-1）",
+        "base": _doc(
+            _A1,
+            _A2,
+            _pay("三", "甲方应在交付后5个工作日内支付货款。"),
+            _acc("四", "乙方交付后10个工作日内完成验收，验收标准以本合同附件二为准。"),
+            _A5,
+            _A6,
+            _A7,
+            _A8,
+        ),
+        "revised": _doc(
+            _A1,
+            _A2,
+            _pay("三", "甲方应在交付后10个工作日内支付货款。"),
+            _acc("四", "乙方交付后10个工作日内完成验收，验收标准以本合同附件二为准。"),
+            _A5,
+            _A6,
+            _A7,
+            _A8,
+        ),
+        "items": {
+            "payment_term": _item(
+                "modified", {"status": "identified", "value": 10, "unit": "workday"}, ("revised", 3)
+            ),
+            "start_condition": _item("unidentified", _ABSENT),
+            "acceptance_invoice": _item("unchanged", _ACCEPT_OK, ("revised", 4)),
+            "exception": _item("unidentified", _ABSENT),
+        },
+    },
 ]
