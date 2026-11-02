@@ -29,7 +29,9 @@ services:
     # issue #479/#495：统一入口；迁移由上面的 migrate 服务先完成，启动期 schema guard 兜底校验
     command: python -m app --profile web
     ports:
-      - "8000:8000"
+      # 默认只绑本机；确需局域网访问（手机联调）时在 shell/.env.docker 设
+      # DOCMIND_BIND_HOST=0.0.0.0，务必只在可信网络下使用。
+      - "${DOCMIND_BIND_HOST:-127.0.0.1}:8000:8000"
     env_file:
       - .env.docker
     environment:
@@ -244,7 +246,8 @@ services:
       ZOOKEEPER_CLIENT_PORT: 2181
       ZOOKEEPER_TICK_TIME: 2000
     ports:
-      - "2181:2181"
+      # 仅本机调试需要；Kafka 走容器网络 docmind-zookeeper:2181。
+      - "${DOCMIND_BIND_HOST:-127.0.0.1}:2181:2181"
     networks:
       - docmind-network
     restart: unless-stopped
@@ -255,8 +258,10 @@ services:
     depends_on:
       - zookeeper
     ports:
-      - "127.0.0.1:9092:9092"       # 宿主机 → Kafka（API 在宿主机上跑，用 localhost:9092）
-      - "29092:29092"     # Docker 内网 → Kafka（Worker 用 docmind-kafka:29092）
+      # 宿主机 → Kafka（API 在宿主机上跑，用 localhost:9092）。29092 是容器网络
+      # 内部监听器（Worker 用 docmind-kafka:29092），不需要发布到宿主机——此前
+      # 发布在 0.0.0.0 上，公网主机等于直接暴露 Broker。
+      - "${DOCMIND_BIND_HOST:-127.0.0.1}:9092:9092"
     environment:
       KAFKA_BROKER_ID: 1
       KAFKA_ZOOKEEPER_CONNECT: docmind-zookeeper:2181

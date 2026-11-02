@@ -1,0 +1,89 @@
+# DocMind Demo 部署 overlay（叠加在 backend/docker-compose.yml 之上）
+#
+# 用法（仓库根目录）：
+#   cp deploy/demo/.env.demo.example backend/.env.docker   # 逐项填真实值
+#   ./deploy/demo/build.sh                                # 构建前端镜像
+#   docker compose --env-file backend/.env.docker \
+#     -f backend/docker-compose.yml -f deploy/demo/docker-compose.demo.yml up -d
+#   # 用 Cloudflare Tunnel 时追加：--profile tunnel
+#
+# 基线 compose 已把中间件与 backend 端口绑到 127.0.0.1；本 overlay 只新增前端和
+# 可选隧道，并调低 Java 堆 / 加容器内存上限，避免 4–8GB 小机器被默认堆吃满。
+
+services:
+  backend:
+    environment:
+      - MAX_FILE_SIZE=${MAX_FILE_SIZE:-10485760}
+      - RATE_LIMIT_REQUESTS_PER_MINUTE=${RATE_LIMIT_REQUESTS_PER_MINUTE:-300}
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  worker:
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  elasticsearch:
+    environment:
+      - "ES_JAVA_OPTS=-Xms768m -Xmx768m"
+    mem_limit: 1536m
+
+  kafka:
+    environment:
+      - KAFKA_HEAP_OPTS=-Xmx384m -Xms256m
+    mem_limit: 768m
+
+  zookeeper:
+    environment:
+      - KAFKA_HEAP_OPTS=-Xmx192m -Xms128m
+    mem_limit: 384m
+
+  mysql:
+    mem_limit: 1g
+
+  minio:
+    mem_limit: 384m
+
+  redis:
+    mem_limit: 192m
+
+  prometheus:
+    mem_limit: 384m
+
+  grafana:
+    mem_limit: 256m
+
+  # 前端（静态 SPA + 反代 /api）。镜像由 deploy/demo/build.sh 构建，
+  # nginx 配置为 deploy/demo/nginx.demo.conf（含限流与上传体大小限制）。
+  frontend:
+    image: docmind-demo-frontend:latest
+    container_name: docmind-demo-frontend
+    ports:
+      - "127.0.0.1:8080:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks:
+      - docmind-network
+    restart: unless-stopped
+
+  # Cloudflare Tunnel（可选，profile=tunnel）：对外只暴露 Cloudflare 边缘，
+  # 源站不需要开放任何入站端口。public hostname 指向 http://frontend:80。
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: docmind-demo-tunnel
+    profiles: ["tunnel"]
+    command: tunnel --no-autoupdate run
+    environment:
+      - TUNNEL_TOKEN=${TUNNEL_TOKEN:-}
+    depends_on:
+      frontend:
+        condition: service_started
+    networks:
+      - docmind-network
+    restart: unless-stopped

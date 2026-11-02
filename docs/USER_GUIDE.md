@@ -35,7 +35,7 @@
 | Node.js | **22.12+**（CI 使用 Node 22） | `frontend/package-lock.json` 中 Vite 8 要求 `^20.19.0 \|\| >=22.12.0`、Vitest 5 要求 `^22.12.0 \|\| ^24.0.0 \|\| >=26.0.0`；`.github/workflows/ci-fast.yml` 使用 Node 22。根 `README.md` 的「Node.js 18+」是旧口径，以 lockfile 的 engines 为准 |
 | Docker Desktop | 含 Compose v2（Windows 建议启用 WSL2 backend） | `backend/docker-compose.yml`；`SETUP.md` |
 | Ollama | 默认 Embedding 走本机 `nomic-embed-text`（768 维） | `backend/app/core/config/ai.py` 的 `EMBEDDING_API_URL` / `EMBEDDING_MODEL` 默认值 |
-| 端口 | 8000、5173；基础设施 3308、6390、9200/9300、9000/9001、9092/29092、2181、9090、3001 | `backend/docker-compose.yml` |
+| 端口 | 8000、5173；基础设施 3308、6390、9200/9300、9000/9001、9092、2181、9090、3001 | `backend/docker-compose.yml` |
 
 准备 Ollama（默认 Embedding 路径需要它；改用云端 Embedding 可跳过）：
 

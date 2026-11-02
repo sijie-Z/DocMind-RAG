@@ -35,7 +35,7 @@
 | Node.js | **22.12+** (CI uses Node 22) | `frontend/package-lock.json`: Vite 8 requires `^20.19.0 \|\| >=22.12.0`, Vitest 5 requires `^22.12.0 \|\| ^24.0.0 \|\| >=26.0.0`; `.github/workflows/ci-fast.yml` uses Node 22. The root README's "Node.js 18+" is stale — trust the lockfile engines |
 | Docker Desktop | with Compose v2 (WSL2 backend recommended on Windows) | `backend/docker-compose.yml`; `SETUP.md` |
 | Ollama | default embeddings use local `nomic-embed-text` (768 dims) | defaults in `backend/app/core/config/ai.py` |
-| Ports | 8000, 5173; infrastructure 3308, 6390, 9200/9300, 9000/9001, 9092/29092, 2181, 9090, 3001 | `backend/docker-compose.yml` |
+| Ports | 8000, 5173; infrastructure 3308, 6390, 9200/9300, 9000/9001, 9092, 2181, 9090, 3001 | `backend/docker-compose.yml` |
 
 Prepare Ollama (needed for the default embedding path; skip if you switch to a cloud embedding provider):
 
