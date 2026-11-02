@@ -478,4 +478,37 @@ CASES = [
             "exception": _item("unidentified", _ABSENT),
         },
     },
+    {
+        "id": "early_exception_clause_hijack",
+        "note": "前部新增含「验收」的例外条款 + 付款起算改发票；主证据不得被例外条款劫持",
+        "base": _doc(
+            _A1,
+            _A2,
+            _pay("三", "甲方应在验收合格后30天支付货款。"),
+            _acc("四", "乙方交付后10个工作日内完成验收，验收标准以本合同附件二为准。"),
+            _A5,
+            _A6,
+            _A7,
+            _A8,
+        ),
+        "revised": _doc(
+            _A1,
+            _A2,
+            "第三条 例外：因不可抗力导致验收延迟的，付款期限相应顺延。",
+            _pay("四", "甲方应在收到发票后30天支付货款。"),
+            _acc("五", "乙方交付后10个工作日内完成验收，验收标准以本合同附件二为准。"),
+            "第六条 " + _A5.split(" ", 1)[1],
+            "第七条 " + _A6.split(" ", 1)[1],
+            "第八条 " + _A7.split(" ", 1)[1],
+            "第九条 " + _A8.split(" ", 1)[1],
+        ),
+        "items": {
+            "payment_term": _item("renumbered", _PAY_30, ("revised", 4)),
+            "start_condition": _item(
+                "modified", {"status": "identified", "events": ["收到发票"]}, ("revised", 4)
+            ),
+            "acceptance_invoice": _item("modified", _ACCEPT_OK, ("revised", 4)),
+            "exception": _item("added", {"status": "identified"}, ("revised", 3)),
+        },
+    },
 ]

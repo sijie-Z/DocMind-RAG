@@ -659,7 +659,16 @@ def refine_primary_locator(
         return
 
     allowed = set(facts.get("clause_no_union") or facts.get("clause_no") or [])
+    if not allowed:
+        # section-numbered / 无编号文档没有 clause_no 可收敛；保留静态回退，
+        # 绝不在整篇里按“第一个变化条款”乱移主证据。
+        return
     scoped = [clause for clause in candidates if set(clause.clause_no) & allowed]
+    static_chunk = facts.get("chunk_id")
+    if static_chunk and any(clause.chunk_id == static_chunk for clause in scoped):
+        # 静态主证据本身就在变化候选里：它已经是“变化的那一条”，不要被更早的
+        # 其它变化条款（如新增的前部例外条款）劫持。
+        return
     chosen = (scoped or candidates)[0]
     locator = _primary_locator(chosen)
     for key in ("chunk_id", "chunk_index", "clause_no", "section_no", "page_number"):
@@ -719,7 +728,15 @@ def extract_exception(clauses: list[Clause]) -> dict[str, Any]:
         if matched:
             clauses_matched = list(matched.values())
             facts["text_sha256"] = _matched_text_sha(clauses_matched)
-            facts["clause_no_union"] = _clause_no_union(clauses_matched)
+            # 交叉引用条款的“只改编号”也要能被 renumber 判定看到：payload 与
+            # 展示 union 都纳入术语条款与交叉引用条款。
+            ref_numbers = _clause_no_union(clauses_matched)
+            facts["payload_clause_no"] = sorted(
+                set(facts.get("payload_clause_no") or []) | set(ref_numbers)
+            )
+            facts["clause_no_union"] = sorted(
+                set(facts.get("clause_no_union") or []) | set(ref_numbers)
+            )
     return facts
 
 

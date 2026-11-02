@@ -1245,7 +1245,7 @@ def test_exception_primary_locator_prefers_exception_heading():
     """例外主证据应选「第九条 例外：…」，而不是前文顺便提到不可抗力的条款。"""
     clauses = [
         _clause("第二条 定义：不可抗力指不能预见、不能避免的客观情况。", clause_no=[2]),
-        _clause("第九条 例外：因不可抗力导致验收延迟的，付款期限相应顺延。", clause_no=[9]),
+        _clause("第九条 例外：双方可另行约定顺延情形。", clause_no=[9]),
     ]
     facts = analysis.extract_exception(clauses)
     assert facts["clause_no"] == [9]
@@ -1327,3 +1327,28 @@ def test_shared_term_union_keeps_acceptance_clause():
 def test_acceptance_concept_map_covers_all_terms():
     """ACCEPTANCE_TERMS 新增词必须同时配置概念映射，否则会被当成“新概念”误重定向。"""
     assert set(analysis.ACCEPTANCE_TERMS) <= set(analysis.ACCEPTANCE_TERM_CONCEPTS)
+
+
+def test_refine_primary_locator_keeps_static_when_no_clause_numbers():
+    """section 编号/无第N条文档：refine 必须保留静态主证据，不能乱移。"""
+    base = [
+        _clause("2.1 总则：双方应保持书面沟通。"),
+        _clause("2.3 验收：乙方交付后10个工作日内完成验收。"),
+    ]
+    revised = [
+        _clause("2.1 总则：双方应每日书面沟通。"),
+        _clause("2.3 验收：乙方交付后15个工作日内完成验收。"),
+    ]
+    base_facts = analysis.extract_acceptance_invoice(base)
+    revised_facts = analysis.extract_acceptance_invoice(revised)
+    static_chunk = revised_facts["chunk_id"]
+    assert analysis.align_item("acceptance_invoice", base_facts, revised_facts) == "modified"
+    analysis.refine_primary_locator(
+        "acceptance_invoice",
+        base_facts,
+        revised_facts,
+        "modified",
+        base_clauses=base,
+        revised_clauses=revised,
+    )
+    assert revised_facts["chunk_id"] == static_chunk
