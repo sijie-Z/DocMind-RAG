@@ -174,12 +174,13 @@ _EXCEPTION_TERM_PATTERN = "|".join(re.escape(term) for term in EXCEPTION_TERMS)
 # 不会命中（例外词不在条号之后）。
 _NO_COLON_EXCEPTION_RE = re.compile(
     rf"^第[一二三四五六七八九十百零〇0-9]+条\s*(?:{_EXCEPTION_TERM_PATTERN})"
+    r"(?:[\s:：]|$)"
 )
 # 「例外情形下的付款 / 不可抗力情况下的付款」：例外词作定语，属付款条款而非
 # 独立例外条款。
 _EXCEPTION_AS_PAYMENT_HEADING_RE = re.compile(
     rf"^第[一二三四五六七八九十百零〇0-9]+条\s*(?:{_EXCEPTION_TERM_PATTERN})"
-    r"\s*(?:情形|情况)?\s*下?的?\s*(?:付款|支付|价款|货款)"
+    r"\s*(?:情形|情况)?\s*下?的?\s*(?:[应预首分]?期?付款|应?支付|账期|价款|货款|结算)"
 )
 # 阈值语境：定义「逾期/超过 N 天」的违约条件时，期限不是账期。
 THRESHOLD_CONTEXT = ("逾期", "超过", "延迟", "超期", "违约", "滞纳", "罚息")
@@ -322,13 +323,16 @@ def _is_exception_article(clause: Clause) -> bool:
     parts = _HEADING_SPLIT_RE.split(clause.text, maxsplit=1)
     if len(parts) >= 2:
         heading = parts[0].split("\n", 1)[0][:40]
-        if not any(keyword in heading for keyword in PAYMENT_KEYWORDS) and any(
-            term in heading for term in EXCEPTION_TERMS
-        ):
+        if any(keyword in heading for keyword in PAYMENT_KEYWORDS):
+            # 冒号标题明确是付款主题：直接判为付款条款，不再落入无冒号分支。
+            return False
+        if any(term in heading for term in EXCEPTION_TERMS):
             return True
+    # 无冒号形态用原文判定：例外词后必须有分隔（空格/冒号/行尾），避免把
+    # 「补充协议未作约定的…」「暂缓履行需另行约定…」这类正文开头当成标题。
+    raw = clause.raw_text or clause.text
     return bool(
-        _NO_COLON_EXCEPTION_RE.match(clause.text)
-        and not _EXCEPTION_AS_PAYMENT_HEADING_RE.match(clause.text)
+        _NO_COLON_EXCEPTION_RE.match(raw) and not _EXCEPTION_AS_PAYMENT_HEADING_RE.match(raw)
     )
 
 
@@ -577,8 +581,9 @@ def extract_payment_term(clauses: list[Clause]) -> dict[str, Any]:
                     continue
                 if _is_date_fragment(sentence, match.start(), unit_raw):
                     continue
-                # 同一日 / 唯一日期 / 统一日 等复合词里的「一日」不是期限。
-                if match.start() > 0 and sentence[match.start() - 1] in "第月年同唯统":
+                # 同一日 / 唯一日期 / 统一日 / 数十日 / 一千二百 等复合词或
+                # 约数里的数字不是期限，也不允许静默截半。
+                if match.start() > 0 and sentence[match.start() - 1] in "第月年同唯统数几千万":
                     continue
                 hits.append(
                     {

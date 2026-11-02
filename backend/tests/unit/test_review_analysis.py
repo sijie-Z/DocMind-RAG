@@ -1534,3 +1534,45 @@ def test_no_colon_exception_payment_heading_not_exception():
     """「例外/不可抗力情形下的付款」是付款条款，不是独立例外条款。"""
     clause = _clause("第三条 不可抗力情形下的付款 甲方应在验收合格后30天支付货款。", clause_no=[3])
     assert analysis._is_exception_article(clause) is False
+
+
+def test_exception_heading_with_broader_payment_nouns_not_exception():
+    """「例外情形下的结算/账期/应付款项/首付款」仍是付款条款（B3）。"""
+    texts = (
+        "第三条 例外情形下的结算：甲方应在验收合格后30天支付货款。",
+        "第三条 不可抗力情形下的账期：甲方应在验收合格后30天支付货款。",
+        "第三条 例外情形下的应付款项 甲方应在验收合格后30天支付货款。",
+        "第三条 例外情形下的首付款 甲方应在验收合格后30天支付货款。",
+    )
+    for text in texts:
+        clause = _clause(text, clause_no=[3])
+        assert analysis._is_exception_article(clause) is False, text
+        facts = analysis.extract_payment_term([clause])
+        assert facts["status"] == "identified", text
+        assert (facts["value"], facts["unit"]) == (30, "day"), text
+
+
+def test_no_colon_exception_body_prefix_words_not_misclassified():
+    """「补充协议未作约定…」「暂缓履行…」开头的付款条款不得被当例外条款（F1）。"""
+    texts = (
+        "第八条 补充协议未作约定的，甲方应在验收合格后30天内支付货款。",
+        "第八条 暂缓履行需另行约定的，甲方应在验收合格后30天内支付货款。",
+        "第八条 另行约定其他事项的，甲方应在验收合格后30天内支付货款。",
+    )
+    for text in texts:
+        clause = _clause(text, clause_no=[8])
+        assert analysis._is_exception_article(clause) is False, text
+        facts = analysis.extract_payment_term([clause])
+        assert facts["status"] == "identified", text
+        assert (facts["value"], facts["unit"]) == (30, "day"), text
+
+
+def test_cn_approximation_and_thousand_not_durations():
+    """「一千二百个工作日」「数十日」不得静默截取值（F2）。"""
+    texts = (
+        "第三条 付款期限：甲方应在验收合格后一千二百个工作日支付货款。",
+        "第三条 付款期限：甲方应在验收合格后数十日内支付货款。",
+    )
+    for text in texts:
+        facts = analysis.extract_payment_term([_clause(text, clause_no=[3])])
+        assert facts["status"] == "not_found", text
