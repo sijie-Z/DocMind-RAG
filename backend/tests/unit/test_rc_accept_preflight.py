@@ -1,5 +1,6 @@
 """RC 验收脚本 preflight：必须按目标 /health 的索引身份拦截错栈（评审 A R2）。"""
 
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -130,22 +131,31 @@ def test_script_makes_app_importable_when_run_directly(tmp_path):
     否则 Python 只把 ``scripts/`` 放进 sys.path，``from app.core.config import
     settings`` 必失败，preflight 退化为只能依赖 --expect-index（正确栈也会被
     拒绝）。pytest 进程的 rootdir 已在 sys.path 里，故用干净 cwd 的子进程验证。
+
+    子进程显式剔除 ``PYTHONPATH`` 并断言 ``app`` 来自 backend 根：否则外部
+    PYTHONPATH 可让变异版本照样通过（评审 B 实测的假绿路径）。
     """
     backend_root = Path(rc.__file__).resolve().parents[1]
     script = backend_root / "scripts" / "rc_accept_full_flow.py"
     code = (
         "import importlib.util\n"
-        f"spec = importlib.util.spec_from_file_location('rcmod', r'{script}')\n"
+        f"spec = importlib.util.spec_from_file_location('rcmod', {str(script)!r})\n"
         "mod = importlib.util.module_from_spec(spec)\n"
         "spec.loader.exec_module(mod)\n"
-        "from app.core.config import settings\n"
+        "import app\n"
+        "from pathlib import Path\n"
+        f"assert Path(app.__file__).resolve().is_relative_to(Path({str(backend_root)!r})), "
+        "app.__file__\n"
         "print('OK')\n"
     )
+    # Windows 环境变量大小写不敏感：按大写键名统一剔除，避免被测进程借道外部路径。
+    env = {k: v for k, v in os.environ.items() if k.upper() != "PYTHONPATH"}
     out = subprocess.run(
         [sys.executable, "-c", code],
         capture_output=True,
         text=True,
         cwd=str(tmp_path),
+        env=env,
         timeout=120,
     )
     assert out.returncode == 0, out.stderr
