@@ -167,6 +167,64 @@ def _matched_text_sha(clauses: list[Clause]) -> str:
     ).hexdigest()
 
 
+_MASK = "\u0001"
+_CONNECTOR_CHARS = set("并且及与、，,。；; \t\n") | {_MASK}
+
+
+def _collapse_mask(text: str) -> str:
+    out: list[str] = []
+    prev_mask = False
+    for ch in text:
+        if ch in _CONNECTOR_CHARS:
+            if not prev_mask:
+                out.append(_MASK)
+            prev_mask = True
+        else:
+            out.append(ch)
+            prev_mask = False
+    return "".join(out)
+
+
+def _mask_payment_durations(text: str) -> str:
+    """只屏蔽“付款语境句子”里的期限数字；验收条款自己的期限必须保留。"""
+    parts: list[str] = []
+    for sentence in _iter_sentences(text):
+        if any(keyword in sentence for keyword in PAYMENT_KEYWORDS):
+            sentence = DURATION_RE.sub(_MASK, sentence)
+            sentence = MONTH_RE.sub(_MASK, sentence)
+        parts.append(sentence)
+    return "".join(parts)
+
+
+def _mask_item_noise(text: str, item_key: str) -> str:
+    """屏蔽“属于其它核验项”的词元，避免共享条款的文本哈希互相污染。"""
+    if item_key == "payment_term":
+        for term in sorted(START_EVENTS + ACCEPTANCE_TERMS, key=len, reverse=True):
+            text = text.replace(term, _MASK)
+        return _collapse_mask(text)
+    return _mask_payment_durations(text)
+
+
+def _content_sha_for(clause: Clause, item_key: str) -> str:
+    content = _CLAUSE_NUMBER_PREFIX_RE.sub("", clause.text, count=1)
+    content = _mask_item_noise(content, item_key)
+    return hashlib.sha256(content.encode("utf-8")).hexdigest()
+
+
+def _matched_text_sha_for(clauses: list[Clause], item_key: str) -> str:
+    unique = {clause.chunk_id: clause for clause in clauses}
+    if item_key == "payment_term":
+        # 例外条款里的“顺延 N 天”属于 exception 项；不参与付款基线的文本哈希。
+        unique = {
+            chunk_id: clause
+            for chunk_id, clause in unique.items()
+            if not any(term in clause.text for term in EXCEPTION_TERMS)
+        }
+    return hashlib.sha256(
+        "|".join(sorted(_content_sha_for(c, item_key) for c in unique.values())).encode()
+    ).hexdigest()
+
+
 def _clause_no_union(clauses: list[Clause]) -> list[int]:
     return sorted({number for clause in clauses for number in clause.clause_no})
 
@@ -387,8 +445,12 @@ def extract_payment_term(clauses: list[Clause]) -> dict[str, Any]:
         ):
             distinct.append(hit)
     matched_clauses = [hit["_clause"] for hit in hits]
-    text_sha = _matched_text_sha(matched_clauses)
-    clause_no_union = _clause_no_union(matched_clauses)
+    # 例外条款里的顺延期限归 exception 项：不参与付款基线的哈希/条款号集合。
+    payment_scoped = [
+        c for c in matched_clauses if not any(term in c.text for term in EXCEPTION_TERMS)
+    ]
+    text_sha = _matched_text_sha_for(payment_scoped, "payment_term")
+    clause_no_union = _clause_no_union(payment_scoped)
     if len(distinct) == 1 and not ambiguous_units:
         hit = distinct[0]
         return {
@@ -436,7 +498,7 @@ def extract_start_condition(clauses: list[Clause]) -> dict[str, Any]:
     return {
         "status": "identified",
         "events": [event["event"] for event in events],
-        "text_sha256": _matched_text_sha(matched_clauses),
+        "text_sha256": _matched_text_sha_for(matched_clauses, "start_condition"),
         **locator,
         "clause_no_union": _clause_no_union(matched_clauses),
     }
@@ -459,7 +521,7 @@ def _collect_terms(clauses: list[Clause], terms: tuple[str, ...]) -> dict[str, A
     return {
         "status": "identified",
         "terms": [hit["term"] for hit in hits],
-        "text_sha256": _matched_text_sha(matched_clauses),
+        "text_sha256": _matched_text_sha_for(matched_clauses, "acceptance_invoice"),
         **locator,
         "clause_no_union": _clause_no_union(matched_clauses),
     }
@@ -532,6 +594,29 @@ def align_item(
     revised_found = revised["status"] != "not_found"
     result: str
     if not base_found and not revised_found:
+        result = "unidentified"
+    elif base["status"] == "ambiguous" and revised["status"] == "ambiguous":
+        # 单位不明但数值可确定：候选集合相同 → 视为 payload 相同继续比较文本；
+        # 候选集合不同 → modified；空候选 → unidentified（不猜）。
+        def _candidates(facts: dict) -> list[tuple]:
+            return sorted(
+                {(c["value"], c["unit"], c["unit_raw"]) for c in (facts.get("candidates") or [])}
+            )
+
+        base_candidates = _candidates(base)
+        revised_candidates = _candidates(revised)
+        if base_candidates and base_candidates == revised_candidates:
+            base_sha = base.get("text_sha256")
+            revised_sha = revised.get("text_sha256")
+            if base_sha and revised_sha and base_sha != revised_sha:
+                return "modified"
+            if (base.get("clause_no_union") or base.get("clause_no") or []) != (
+                revised.get("clause_no_union") or revised.get("clause_no") or []
+            ):
+                return "renumbered"
+            return "unchanged"
+        if base_candidates and revised_candidates:
+            return "modified"
         result = "unidentified"
     elif base["status"] == "ambiguous" or revised["status"] == "ambiguous":
         # 一侧未识别时不能把另一侧断言成「新增/删除」。
