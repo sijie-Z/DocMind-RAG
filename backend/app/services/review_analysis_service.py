@@ -175,6 +175,12 @@ _EXCEPTION_TERM_PATTERN = "|".join(re.escape(term) for term in EXCEPTION_TERMS)
 _NO_COLON_EXCEPTION_RE = re.compile(
     rf"^第[一二三四五六七八九十百零〇0-9]+条\s*(?:{_EXCEPTION_TERM_PATTERN})"
 )
+# 「例外情形下的付款 / 不可抗力情况下的付款」：例外词作定语，属付款条款而非
+# 独立例外条款。
+_EXCEPTION_AS_PAYMENT_HEADING_RE = re.compile(
+    rf"^第[一二三四五六七八九十百零〇0-9]+条\s*(?:{_EXCEPTION_TERM_PATTERN})"
+    r"\s*(?:情形|情况)?\s*下?的?\s*(?:付款|支付|价款|货款)"
+)
 # 阈值语境：定义「逾期/超过 N 天」的违约条件时，期限不是账期。
 THRESHOLD_CONTEXT = ("逾期", "超过", "延迟", "超期", "违约", "滞纳", "罚息")
 CROSS_REF_RE = re.compile(
@@ -320,11 +326,10 @@ def _is_exception_article(clause: Clause) -> bool:
             term in heading for term in EXCEPTION_TERMS
         ):
             return True
-    if _NO_COLON_EXCEPTION_RE.match(clause.text):
-        head = re.split(r"[，,。；;：:]", clause.text, maxsplit=1)[0].split("\n", 1)[0][:40]
-        if not any(k in head for k in PAYMENT_KEYWORDS):
-            return True
-    return False
+    return bool(
+        _NO_COLON_EXCEPTION_RE.match(clause.text)
+        and not _EXCEPTION_AS_PAYMENT_HEADING_RE.match(clause.text)
+    )
 
 
 def _mask_item_noise(text: str, item_key: str) -> str:
@@ -572,7 +577,8 @@ def extract_payment_term(clauses: list[Clause]) -> dict[str, Any]:
                     continue
                 if _is_date_fragment(sentence, match.start(), unit_raw):
                     continue
-                if match.start() > 0 and sentence[match.start() - 1] in "第月年":
+                # 同一日 / 唯一日期 / 统一日 等复合词里的「一日」不是期限。
+                if match.start() > 0 and sentence[match.start() - 1] in "第月年同唯统":
                     continue
                 hits.append(
                     {

@@ -1489,3 +1489,48 @@ def test_no_colon_exception_article_detected_but_payment_heading_not():
         )
         == "unchanged"
     )
+
+
+def test_cn_numeral_compounds_are_not_durations():
+    """同一日/唯一日期/统一日 等复合词里的「一日」不得抽成期限。"""
+    texts = (
+        "第三条 付款期限：甲方应自验收合格同一日起30天内支付货款。",
+        "第三条 付款期限：付款以发票开具的唯一日期为准，甲方应在验收合格后30天内支付货款。",
+        "第三条 付款期限：双方于合同生效统一日确认，甲方应在验收合格后30天内支付货款。",
+    )
+    for text in texts:
+        facts = analysis.extract_payment_term([_clause(text, clause_no=[3])])
+        assert facts["status"] == "identified", text
+        assert (facts["value"], facts["unit"]) == (30, "day"), text
+
+
+def test_cn_to_int_edge_cases():
+    assert analysis._cn_to_int("十") == 10
+    assert analysis._cn_to_int("十五") == 15
+    assert analysis._cn_to_int("二十三") == 23
+    assert analysis._cn_to_int("一百零五") == 105
+
+
+def test_no_colon_exception_with_payment_in_first_segment():
+    """无冒号例外条款即便首段含「付款」，也应按例外条款处理（B2）。"""
+    exception_clause = _clause(
+        "第九条 例外 因不可抗力导致付款延迟的，付款期限相应顺延30天。", clause_no=[9]
+    )
+    assert analysis._is_exception_article(exception_clause) is True
+
+    base = _contract_clauses("甲方应在验收合格后30天支付货款。", _ACC_TEXT)
+    revised = base + [exception_clause]
+    assert (
+        analysis.align_item(
+            "payment_term",
+            analysis.extract_payment_term(base),
+            analysis.extract_payment_term(revised),
+        )
+        == "unchanged"
+    )
+
+
+def test_no_colon_exception_payment_heading_not_exception():
+    """「例外/不可抗力情形下的付款」是付款条款，不是独立例外条款。"""
+    clause = _clause("第三条 不可抗力情形下的付款 甲方应在验收合格后30天支付货款。", clause_no=[3])
+    assert analysis._is_exception_article(clause) is False
