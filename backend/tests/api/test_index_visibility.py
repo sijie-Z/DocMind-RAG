@@ -629,6 +629,56 @@ async def test_empty_chunk_documents_do_not_poison_health():
 
 
 @pytest.mark.asyncio
+async def test_aggregate_baseline_excludes_zero_chunk_documents_in_sql():
+    """基线聚合必须只统计 chunk_count>0 的 INDEXED 文档（空 chunk 另行计数）。
+
+    mock 会话对所有 SQL 返回同一结果，只断言字段无法钉住 WHERE 过滤——变异
+    测试实测删掉聚合的 ``chunk_count > 0`` 后原用例仍全绿。这里按编译后的
+    SQL 定位带 ``sum(`` 的聚合查询做结构断言（ids 查询也含该过滤，不能合并断言）。
+    """
+    from app.main import _knowledge_base_health
+
+    sess = MagicMock()
+    result = MagicMock()
+    result.one = MagicMock(return_value=(1, 1))
+    result.scalars = MagicMock(return_value=result)
+    result.all = MagicMock(return_value=["doc-1"])
+    result.scalar = MagicMock(return_value=0)
+    sess.execute = AsyncMock(return_value=result)
+    ctx = MagicMock()
+    ctx.__aenter__ = AsyncMock(return_value=sess)
+    ctx.__aexit__ = AsyncMock(return_value=False)
+
+    async def _search(**kwargs):
+        return {
+            "hits": {"total": {"value": 1, "relation": "eq"}},
+            "aggregations": {"documents": {"value": 1}},
+        }
+
+    fake = MagicMock()
+    fake.search = AsyncMock(side_effect=_search)
+    with (
+        patch("app.core.elasticsearch.get_index_error", return_value=None),
+        patch("app.core.elasticsearch.get_elasticsearch", new=AsyncMock(return_value=fake)),
+        patch("app.core.database.AsyncSessionLocal", return_value=ctx),
+    ):
+        status, _ = await _knowledge_base_health()
+
+    assert status == "healthy"
+    sqls = [
+        " ".join(c.args[0].compile(compile_kwargs={"literal_binds": True}).string.split())
+        if hasattr(c.args[0], "compile")
+        else ""
+        for c in sess.execute.await_args_list
+    ]
+    sqls = [s for s in sqls if s]
+    aggregate = [s for s in sqls if "sum(" in s.lower()]
+    assert len(aggregate) == 1, sqls
+    assert "documents.chunk_count > 0" in aggregate[0], aggregate[0]
+    assert any("documents.chunk_count = 0" in s for s in sqls), sqls
+
+
+@pytest.mark.asyncio
 async def test_scope_and_empty_queries_exclude_active_jobs():
     """ids 查询与空文档统计同样必须排除有未终局处理任务的文档。"""
     from app.main import _knowledge_base_health

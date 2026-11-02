@@ -1,5 +1,7 @@
 """RC 验收脚本 preflight：必须按目标 /health 的索引身份拦截错栈（评审 A R2）。"""
 
+from types import SimpleNamespace
+
 from scripts import rc_accept_full_flow as rc
 
 
@@ -90,3 +92,30 @@ def test_preflight_rejects_non_object_health(monkeypatch):
 
     monkeypatch.setattr(rc.requests, "get", lambda *a, **k: _Resp())
     assert rc.preflight("docmind_knowledge_iso") is False
+
+
+def test_preflight_defaults_to_local_effective_index_when_import_succeeds(monkeypatch):
+    """本地配置可导入且未传 --expect-index 时，以本地生效索引名（显式优先）比对。
+
+    显式索引与派生值故意不同：若 preflight 误用派生值而非显式配置，会拒绝
+    正确的目标栈，此用例即变红。
+    """
+    monkeypatch.setattr(
+        "app.core.config.settings",
+        SimpleNamespace(
+            DATABASE_URL="mysql+asyncmy://u:p@127.0.0.1:3308/docmind_rc",
+            ELASTICSEARCH_INDEX_NAME="docmind_knowledge_custom",
+        ),
+    )
+    monkeypatch.setattr(
+        "app.core.config.loader._derive_es_index_name",
+        lambda database_url: "docmind_knowledge_rc",
+    )
+    _fake_health(
+        monkeypatch,
+        {
+            "status": "healthy",
+            "knowledge_base": {"index_name": "docmind_knowledge_custom"},
+        },
+    )
+    assert rc.preflight(None) is True
