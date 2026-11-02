@@ -12,6 +12,9 @@
 - Kafka worker 与 backend 使用同一 DATABASE_URL/索引/主题并在运行（上传后的处理由 worker 完成）；
 - Ollama/ES/MinIO/Redis/DeepSeek 可用。
 
+注意：每次运行都会新建账号/文档/核验案件（固定验收口令），不做自动清理；
+RC/测试库专用，禁止指向业务库。preflight 会拒绝索引身份不明的目标栈。
+
 用法::
 
     RC_BASE_URL=http://127.0.0.1:8020 DATABASE_URL=... python scripts/rc_accept_full_flow.py
@@ -123,7 +126,8 @@ def wait_indexed(token: str, doc_id: str, filename: str, timeout: int = 240) -> 
         last = (r.json().get("data") or {}) if r.status_code == 200 else {}
         status = last.get("status")
         if status == "indexed":
-            step(f"{filename} 解析/索引完成（chunks={last.get('chunk_count')}）", True)
+            chunks = int(last.get("chunk_count") or 0)
+            step(f"{filename} 解析/索引完成（chunks={chunks}）", chunks > 0)
             return last
         if status == "failed":
             step(f"{filename} 处理失败: {last.get('parse_error')}", False)
@@ -341,13 +345,16 @@ def main() -> int:
         timeout=30,
     )
     step("证据选择接受真实 parser 分块", ev.status_code == 200, ev.text[:200])
+    decisions_ok = True
     for item in items:
-        requests.put(
+        resp = requests.put(
             f"{BASE}/api/v1/reviews/{case_id}/items/{item['id']}/decision",
             headers=headers(token),
             json={"status": "verified", "note": "RC 全流程验收"},
             timeout=30,
         )
+        decisions_ok = decisions_ok and resp.status_code == 200
+    step("全部决策写入成功", decisions_ok)
     exported = requests.post(
         f"{BASE}/api/v1/reviews/{case_id}/export", headers=headers(token), timeout=60
     )

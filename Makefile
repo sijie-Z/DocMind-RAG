@@ -3,6 +3,7 @@
 .PHONY: help dev dev-backend dev-frontend install-backend install-frontend
 .PHONY: test test-backend test-frontend lint build build-frontend
 .PHONY: eval eval-check eval-ci eval-ci-baseline eval-public eval-v15-baselines eval-rerank-live
+.PHONY: rc-accept
 .PHONY: docker-up docker-down docker-logs docker-build docker-migrate db-migrate
 .PHONY: clean clean-logs check
 

@@ -732,7 +732,7 @@ _KB_DOC_COUNT_TOLERANCE: float = 0.98
 # 作用域对账上限：按本库 document_id 做 terms 查询，文档数过大时退回全索引口径
 # （查询数与内存随文档数线性增长；>2 万的部署应使用独立索引而非共享索引）。
 _KB_SCOPE_MAX_DOCS: int = 20000
-_KB_SCOPE_BATCH: int = 1000
+_KB_SCOPE_BATCH: int = 2000
 
 
 async def _knowledge_base_health() -> tuple[str, dict]:
@@ -854,8 +854,19 @@ async def _knowledge_base_health() -> tuple[str, dict]:
             .select_from(Document)
             .where(Document.status == DocumentStatus.INDEXED)
             .where(~active_job)
+            .where(Document.chunk_count > 0)
         )
         claimed, expected_chunks = q.one()
+        empty_claimed = (
+            await sess.execute(
+                select(func.count())
+                .select_from(Document)
+                .where(Document.status == DocumentStatus.INDEXED)
+                .where(~active_job)
+                .where(Document.chunk_count == 0)
+            )
+        ).scalar() or 0
+        details["empty_indexed_documents"] = int(empty_claimed)
     claimed = int(claimed or 0)
     expected_chunks = int(expected_chunks or 0)
     details["documents_marked_indexed"] = claimed
@@ -875,6 +886,7 @@ async def _knowledge_base_health() -> tuple[str, dict]:
                 .select_from(Document)
                 .where(Document.status == DocumentStatus.INDEXED)
                 .where(~active_job)
+                .where(Document.chunk_count > 0)
             )
             doc_ids = [str(doc_id) for doc_id in ids_result.scalars().all()]
         if doc_ids:
@@ -893,6 +905,25 @@ async def _knowledge_base_health() -> tuple[str, dict]:
             details["extra_chunks"] = max(0, total_chunks - indexed_chunks)
     else:
         details["scope"] = "index_global"
+
+    # 共享索引里多出的「非本库」文档：作用域模式下已被排除；全索引模式下仅提示。
+    extra_docs = int(details.get("extra_documents") or 0)
+    if extra_docs:
+        if details.get("scope") == "document_ids":
+            details["scope_note"] = (
+                f"索引 {settings.ELASTICSEARCH_INDEX_NAME} 中另有 {extra_docs} 篇不属于本库"
+                "状态基线的文档（共享索引/陈旧数据），已按本库 document_id 作用域排除"
+            )
+        else:
+            details["scope_note"] = (
+                f"索引 {settings.ELASTICSEARCH_INDEX_NAME} 中另有 {extra_docs} 篇不属于本库"
+                "状态基线的文档；当前按全索引口径对账（本库文档数超过作用域上限）"
+            )
+    if details.get("empty_indexed_documents"):
+        details["empty_notice"] = (
+            f"另有 {details['empty_indexed_documents']} 篇文档状态为 INDEXED 但 chunk_count=0"
+            "（无内容可索引），未计入本库缺失判定"
+        )
 
     if claimed == 0:
         # 全新部署（或索引里只有未被声称的陈旧数据）：没有「状态 vs 现实」矛盾。
@@ -921,24 +952,11 @@ async def _knowledge_base_health() -> tuple[str, dict]:
         details["mismatch"] = (
             f"{claimed} 篇文档状态为 INDEXED，索引 {settings.ELASTICSEARCH_INDEX_NAME} 中"
             f"只找到 {indexed_docs} 篇的 chunk —— {claimed - indexed_docs} 篇文档完全检索不到"
+            + (f"（索引另有 {extra_docs} 篇非本库文档，已排除）" if extra_docs else "")
         )
         return "unhealthy", details
 
     # chunk 覆盖率：ES chunk 总数 / 文档表 chunk_count 之和。
-    # 共享索引里多出的「非本库」文档：作用域模式下已被排除；全索引模式下仅提示。
-    extra_docs = int(details.get("extra_documents") or 0)
-    if extra_docs:
-        if details.get("scope") == "document_ids":
-            details["scope_note"] = (
-                f"索引 {settings.ELASTICSEARCH_INDEX_NAME} 中另有 {extra_docs} 篇不属于本库"
-                "状态基线的文档（共享索引/陈旧数据），已按本库 document_id 作用域排除"
-            )
-        else:
-            details["scope_note"] = (
-                f"索引 {settings.ELASTICSEARCH_INDEX_NAME} 中另有 {extra_docs} 篇不属于本库"
-                "状态基线的文档；当前按全索引口径对账（本库文档数超过作用域上限）"
-            )
-
     # 历史数据未回填 chunk_count（expected_chunks == 0）时退回文档覆盖率。
     if expected_chunks > 0:
         coverage_ratio = indexed_chunks / expected_chunks

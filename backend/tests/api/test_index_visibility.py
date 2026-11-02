@@ -76,7 +76,10 @@ def _patch_es(*, count: int = 0, docs: int = 0, index_error: str | None = None):
 
 
 def _patch_db_count(
-    claimed: int, expected_chunks: int | None = None, doc_ids: list[str] | None = None
+    claimed: int,
+    expected_chunks: int | None = None,
+    doc_ids: list[str] | None = None,
+    empty_claimed: int = 0,
 ):
     """patch `AsyncSessionLocal`：对账聚合查询 + 作用域 document_id 列表查询。
 
@@ -91,6 +94,7 @@ def _patch_db_count(
     )
     result.scalars = MagicMock(return_value=result)
     result.all = MagicMock(return_value=ids)
+    result.scalar = MagicMock(return_value=empty_claimed)
     sess.execute = AsyncMock(return_value=result)
 
     ctx = MagicMock()
@@ -522,3 +526,103 @@ def settings_index_name() -> str:
     from app.core.config import settings
 
     return settings.ELASTICSEARCH_INDEX_NAME
+
+
+@pytest.mark.asyncio
+async def test_scope_query_uses_document_id_terms_and_spans_batches():
+    """作用域查询必须按 document_id terms 分批求和（字段名/批次语义被钉住）。"""
+    from app.main import _knowledge_base_health
+
+    seen: list[dict] = []
+
+    async def _search(**kwargs):
+        query = kwargs.get("query")
+        if query:
+            seen.append(query)
+            ids = query["terms"]["document_id"]
+            return {
+                "hits": {"total": {"value": len(ids), "relation": "eq"}},
+                "aggregations": {"documents": {"value": len(ids)}},
+            }
+        return {
+            "hits": {"total": {"value": 2500, "relation": "eq"}},
+            "aggregations": {"documents": {"value": 2500}},
+        }
+
+    fake = MagicMock()
+    fake.search = AsyncMock(side_effect=_search)
+    with (
+        patch("app.core.elasticsearch.get_index_error", return_value=None),
+        patch("app.core.elasticsearch.get_elasticsearch", new=AsyncMock(return_value=fake)),
+        _patch_db_count(2500, 2500),
+    ):
+        status, details = await _knowledge_base_health()
+
+    assert status == "healthy"
+    assert details["scope"] == "document_ids"
+    assert len(seen) == 2, f"2500 篇应分 2 批（2000+500），实际 {len(seen)}"
+    assert [len(q["terms"]["document_id"]) for q in seen] == [2000, 500]
+    assert all(set(q["terms"]) == {"document_id"} for q in seen)
+    assert details["indexed_documents"] == 2500
+
+
+@pytest.mark.asyncio
+async def test_large_library_falls_back_to_global_scope():
+    """超过 2 万文档回退全索引口径，不发 terms 查询。"""
+    from app.main import _knowledge_base_health
+
+    queries: list[dict] = []
+
+    async def _search(**kwargs):
+        if "query" in kwargs:
+            queries.append(kwargs["query"])
+        return {
+            "hits": {"total": {"value": 20001, "relation": "eq"}},
+            "aggregations": {"documents": {"value": 20001}},
+        }
+
+    fake = MagicMock()
+    fake.search = AsyncMock(side_effect=_search)
+    with (
+        patch("app.core.elasticsearch.get_index_error", return_value=None),
+        patch("app.core.elasticsearch.get_elasticsearch", new=AsyncMock(return_value=fake)),
+        _patch_db_count(20001, 20001),
+    ):
+        status, details = await _knowledge_base_health()
+
+    assert status == "healthy"
+    assert details["scope"] == "index_global"
+    assert queries == []
+
+
+@pytest.mark.asyncio
+async def test_empty_chunk_documents_do_not_poison_health():
+    """chunk_count=0 的 INDEXED 文档（无可索引内容）不计入缺失判定，但如实暴露。"""
+    from app.main import _knowledge_base_health
+
+    calls: list[dict] = []
+
+    async def _search(**kwargs):
+        calls.append(kwargs)
+        if "query" in kwargs:
+            return {
+                "hits": {"total": {"value": 1, "relation": "eq"}},
+                "aggregations": {"documents": {"value": 1}},
+            }
+        return {
+            "hits": {"total": {"value": 1, "relation": "eq"}},
+            "aggregations": {"documents": {"value": 1}},
+        }
+
+    fake = MagicMock()
+    fake.search = AsyncMock(side_effect=_search)
+    with (
+        patch("app.core.elasticsearch.get_index_error", return_value=None),
+        patch("app.core.elasticsearch.get_elasticsearch", new=AsyncMock(return_value=fake)),
+        _patch_db_count(1, 1, empty_claimed=5),
+    ):
+        status, details = await _knowledge_base_health()
+
+    assert status == "healthy"
+    assert details["empty_indexed_documents"] == 5
+    assert "chunk_count=0" in details["empty_notice"]
