@@ -216,7 +216,7 @@ def _derive_es_index_name(database_url: str) -> str:
     if safe == "docmind":
         return "docmind_knowledge"
     if safe.startswith("docmind_"):
-        return f"docmind_knowledge_{safe[len('docmind_'):]}"
+        return f"docmind_knowledge_{safe.removeprefix('docmind_')}"
     return f"{safe}_knowledge"
 
 
