@@ -174,7 +174,7 @@ _EXCEPTION_TERM_PATTERN = "|".join(re.escape(term) for term in EXCEPTION_TERMS)
 # 不会命中（例外词不在条号之后）。
 _NO_COLON_EXCEPTION_RE = re.compile(
     rf"^第[一二三四五六七八九十百零〇0-9]+条\s*(?:{_EXCEPTION_TERM_PATTERN})"
-    r"(?:[\s:：]|$)"
+    r"(?:[\s:：，,。；;、]|$)"
 )
 # 「例外情形下的付款 / 不可抗力情况下的付款」：例外词作定语，属付款条款而非
 # 独立例外条款。

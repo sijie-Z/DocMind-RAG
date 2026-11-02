@@ -1576,3 +1576,39 @@ def test_cn_approximation_and_thousand_not_durations():
     for text in texts:
         facts = analysis.extract_payment_term([_clause(text, clause_no=[3])])
         assert facts["status"] == "not_found", text
+
+
+def test_no_colon_exception_with_chinese_punctuation_separator():
+    """「第九条 例外，/。/；因…」同样是合法标题分隔（B4）。"""
+    for sep in ("，", "。", "；", "、"):
+        clause = _clause(
+            f"第九条 例外{sep}因不可抗力导致付款延迟的，付款期限相应顺延30天。",
+            clause_no=[9],
+        )
+        assert analysis._is_exception_article(clause) is True, sep
+
+    base = _contract_clauses("甲方应在验收合格后30天支付货款。", _ACC_TEXT)
+    revised = base + [
+        _clause("第九条 例外，因不可抗力导致付款延迟的，付款期限相应顺延30天。", clause_no=[9])
+    ]
+    assert (
+        analysis.align_item(
+            "payment_term",
+            analysis.extract_payment_term(base),
+            analysis.extract_payment_term(revised),
+        )
+        == "unchanged"
+    )
+
+
+def test_exception_heading_payment_nouns_with_separator_pins_both_layers():
+    """带分隔的付款主题标题：钉住冒号短路与定语正则两层机制（A 变异 g/j）。"""
+    colon = _clause("第三条 例外 情形下的结算：甲方应在验收合格后30天支付货款。", clause_no=[3])
+    assert analysis._is_exception_article(colon) is False
+    assert analysis.extract_payment_term([colon])["status"] == "identified"
+
+    no_colon = _clause("第三条 例外 应付款项 甲方应在验收合格后30天支付货款。", clause_no=[3])
+    assert analysis._is_exception_article(no_colon) is False
+    facts = analysis.extract_payment_term([no_colon])
+    assert facts["status"] == "identified"
+    assert (facts["value"], facts["unit"]) == (30, "day")
