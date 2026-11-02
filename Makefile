@@ -133,6 +133,13 @@ db-migrate: ## Run Alembic migrations
 db-migrate-new: ## Create a new Alembic migration
 	cd $(BACKEND_DIR) && source venv/bin/activate && alembic revision --autogenerate -m "$(name)"
 
+# === RC 验收 ===
+
+# 真实全流程验收：需 DATABASE_URL 指向被测库、独立 ES 索引（未显式配置时按库名派生）、
+# backend 与 Kafka worker 同库同索引运行。断言为独立命名的 PASS/FAIL，非零退出=失败。
+rc-accept: ## RC 全流程验收（真实上传/解析/嵌入/索引/检索/Chat/核验/导出/归档）
+	cd $(BACKEND_DIR) && python scripts/rc_accept_full_flow.py --base-url $${RC_BASE_URL:-http://127.0.0.1:8020}
+
 # === Utility ===
 
 clean: clean-logs ## Clean all generated files

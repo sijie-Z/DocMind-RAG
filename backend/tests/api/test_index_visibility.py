@@ -75,13 +75,22 @@ def _patch_es(*, count: int = 0, docs: int = 0, index_error: str | None = None):
     )
 
 
-def _patch_db_count(claimed: int, expected_chunks: int | None = None):
-    """patch `AsyncSessionLocal`，让对账查询返回 (声称 INDEXED 文档数, chunk_count 总和)。"""
+def _patch_db_count(
+    claimed: int, expected_chunks: int | None = None, doc_ids: list[str] | None = None
+):
+    """patch `AsyncSessionLocal`：对账聚合查询 + 作用域 document_id 列表查询。
+
+    同一个结果对象要同时支持 ``.one()``（count/sum）与 ``.scalars().all()``
+    （本库 document_id 作用域），见 ``_knowledge_base_health``。
+    """
+    ids = doc_ids if doc_ids is not None else [f"doc-{i}" for i in range(claimed)]
     sess = MagicMock()
     result = MagicMock()
     result.one = MagicMock(
         return_value=(claimed, claimed if expected_chunks is None else expected_chunks)
     )
+    result.scalars = MagicMock(return_value=result)
+    result.all = MagicMock(return_value=ids)
     sess.execute = AsyncMock(return_value=result)
 
     ctx = MagicMock()
@@ -436,3 +445,80 @@ def test_search_time_is_populated(client: TestClient):
 
     assert r.json()["search_time"] is not None, "search_time 必须真的有值"
     assert r.json()["search_time"] >= 0
+
+
+@pytest.mark.asyncio
+async def test_scoped_reconciliation_ignores_foreign_documents_in_shared_index():
+    """共享索引里其它库的文档不得把本库的缺失「补平」，也不得造成假红灯。
+
+    本库 10 篇 / 39 chunk 全部在索引；索引总数 12 篇 / 45 chunk（另 2 篇来自
+    其它库）。作用域查询只统计本库 document_id → healthy，并给出 scope_note。
+    """
+    from app.main import _knowledge_base_health
+
+    calls: list[dict] = []
+
+    async def _search(**kwargs):
+        calls.append(kwargs)
+        if "query" in kwargs:
+            return {
+                "hits": {"total": {"value": 39, "relation": "eq"}},
+                "aggregations": {"documents": {"value": 10}},
+            }
+        return {
+            "hits": {"total": {"value": 45, "relation": "eq"}},
+            "aggregations": {"documents": {"value": 12}},
+        }
+
+    fake = MagicMock()
+    fake.search = AsyncMock(side_effect=_search)
+    with (
+        patch("app.core.elasticsearch.get_index_error", return_value=None),
+        patch("app.core.elasticsearch.get_elasticsearch", new=AsyncMock(return_value=fake)),
+        _patch_db_count(10, 39),
+    ):
+        status, details = await _knowledge_base_health()
+
+    assert status == "healthy"
+    assert details["scope"] == "document_ids"
+    assert details["indexed_chunks"] == 39
+    assert details["extra_documents"] == 2
+    assert "已按本库 document_id 作用域排除" in details["scope_note"]
+    assert any("query" in c for c in calls), "必须发起作用域查询"
+
+
+@pytest.mark.asyncio
+async def test_scoped_reconciliation_detects_missing_documents_among_foreign_extras():
+    """共享索引里其它库文档很多，但本库缺 3 篇 —— 仍必须 unhealthy。"""
+    from app.main import _knowledge_base_health
+
+    async def _search(**kwargs):
+        if "query" in kwargs:
+            return {
+                "hits": {"total": {"value": 20, "relation": "eq"}},
+                "aggregations": {"documents": {"value": 7}},
+            }
+        return {
+            "hits": {"total": {"value": 100, "relation": "eq"}},
+            "aggregations": {"documents": {"value": 30}},
+        }
+
+    fake = MagicMock()
+    fake.search = AsyncMock(side_effect=_search)
+    with (
+        patch("app.core.elasticsearch.get_index_error", return_value=None),
+        patch("app.core.elasticsearch.get_elasticsearch", new=AsyncMock(return_value=fake)),
+        _patch_db_count(10, 39),
+    ):
+        status, details = await _knowledge_base_health()
+
+    assert status == "unhealthy"
+    assert details["indexed_documents"] == 7
+    assert "3 篇文档完全检索不到" in details["mismatch"]
+    assert settings_index_name() in details["mismatch"]
+
+
+def settings_index_name() -> str:
+    from app.core.config import settings
+
+    return settings.ELASTICSEARCH_INDEX_NAME
