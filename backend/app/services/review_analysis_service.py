@@ -329,7 +329,12 @@ def _nearest_anchor_is_payment(text: str, start: int, end: int) -> bool:
     boundary = SENTENCE_SPLIT_RE.search(text, end)
     if boundary:
         sentence_end = boundary.start()
-    span_end = min(next_starts + [sentence_end])
+    # 连谓付款动词必须与期限同片段：逗号/顿号后的「随后付款」不得回吸前一片段。
+    fragment_end = len(text)
+    fragment_boundary = FRAGMENT_SPLIT_RE.search(text, end)
+    if fragment_boundary:
+        fragment_end = fragment_boundary.start()
+    span_end = min(next_starts + [sentence_end, fragment_end])
     span = text[end:span_end]
     if any(keyword in span for keyword in PAYMENT_KEYWORDS) and not any(
         delivery in span for delivery in DELIVERY_TERMS

@@ -1809,3 +1809,17 @@ def test_refine_excludes_exception_candidates_without_moving_static():
         revised_clauses=[base_clause, exception_clause],
     )
     assert base_facts["chunk_id"] == static_chunk
+
+
+def test_acceptance_duration_with_payment_in_next_comma_clause_not_masked():
+    """逗号分句后的「随后付款」不得回吸前一片段的验收期限（B 残余 blocker）。"""
+    base = [_clause("第四条 验收：乙方应在10个工作日内完成验收，甲方随后付款。", clause_no=[4])]
+    revised = [_clause("第四条 验收：乙方应在15个工作日内完成验收，甲方随后付款。", clause_no=[4])]
+    assert (
+        analysis.align_item(
+            "acceptance_invoice",
+            analysis.extract_acceptance_invoice(base),
+            analysis.extract_acceptance_invoice(revised),
+        )
+        == "modified"
+    )
