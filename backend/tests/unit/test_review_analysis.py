@@ -1652,3 +1652,14 @@ def test_exception_payment_heading_with_connector_is_not_exception():
     facts = analysis.extract_payment_term([clause])
     assert facts["status"] == "identified"
     assert (facts["value"], facts["unit"]) == (30, "day")
+
+
+def test_exception_body_subject_list_covers_common_roles():
+    """卖方/买方/供应商/承包人 等主语出现在分隔后时同样判正文（A 残留）。"""
+    for role in ("卖方", "买方", "供应商", "承包人", "任何一方", "丙方"):
+        text = f"第八条 补充协议，{role}应在验收合格后30天内支付货款。"
+        clause = _clause(text, clause_no=[8])
+        assert analysis._is_exception_article(clause) is False, text
+        facts = analysis.extract_payment_term([clause])
+        assert facts["status"] == "identified", text
+        assert (facts["value"], facts["unit"]) == (30, "day"), text
