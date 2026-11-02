@@ -167,6 +167,126 @@ def _matched_text_sha(clauses: list[Clause]) -> str:
     ).hexdigest()
 
 
+_MASK = "\u0001"
+_CONNECTOR_CHARS = set("并且及与、，,。；; \t\n") | {_MASK}
+
+
+def _collapse_mask(text: str) -> str:
+    out: list[str] = []
+    prev_mask = False
+    for ch in text:
+        if ch in _CONNECTOR_CHARS:
+            if not prev_mask:
+                out.append(_MASK)
+            prev_mask = True
+        else:
+            out.append(ch)
+            prev_mask = False
+    return "".join(out)
+
+
+_HEADING_SPLIT_RE = re.compile(r"[:：]")
+
+
+def _mask_payment_durations(text: str) -> str:
+    """只屏蔽“最近的语义锚点是付款词”的期限数字。
+
+    依据锚点距离而非整句/整片段：`10个工作日内完成对账并在30天内支付货款` 中
+    10 最近的是验收/对账词（保留），30 最近的是“支付”（屏蔽）；跨条款拼接、
+    无逗号长句也不会把验收自己的期限一起吞掉。
+    """
+    matches = list(DURATION_RE.finditer(text)) + list(MONTH_RE.finditer(text))
+    mask_spans = sorted(
+        {
+            (match.start(), match.end())
+            for match in matches
+            if _nearest_anchor_is_payment(text, match.start(), match.end())
+        }
+    )
+    if not mask_spans:
+        return text
+
+    parts: list[str] = []
+    cursor = 0
+    for start, end in mask_spans:
+        if start < cursor:  # 与上一个屏蔽区间重叠（DURATION 已覆盖的情况）
+            continue
+        parts.append(text[cursor:start])
+        parts.append(_MASK)
+        cursor = end
+    parts.append(text[cursor:])
+    return "".join(parts)
+
+
+def _nearest_anchor_is_payment(text: str, start: int, end: int) -> bool:
+    """判断期限之后的最近语义锚点是否为付款词（方向感知）。
+
+    付款动词常隔“内向乙方/内完成/内安排”几个字（如「30个自然日内向乙方支付」），
+    此时期限前紧邻的「验收合格」并不是它的归属；只有期限之后存在锚点时才由其
+    决定归属，之后没有锚点才回看之前（覆盖「10天内起算」这类后置定义）。
+    """
+    after: list[tuple[int, int]] = []
+    before: list[tuple[int, int]] = []
+    for kind, terms in (
+        (0, PAYMENT_KEYWORDS),
+        (1, START_EVENTS + ACCEPTANCE_TERMS),
+    ):
+        for term in terms:
+            index = text.find(term)
+            while index != -1:
+                term_end = index + len(term)
+                if index >= end:
+                    after.append((index - end, kind))
+                elif term_end <= start:
+                    before.append((start - term_end, kind))
+                index = text.find(term, term_end)
+    pool = after if after else before
+    if not pool:
+        return False
+    best = min(pool)  # 距离相同按付款优先（kind=0）
+    return best[1] == 0
+
+
+def _is_exception_article(clause: Clause) -> bool:
+    """识别独立的例外条款：必须有标题分隔符，且标题是例外主题（不含付款词）。
+
+    约束“标题不含付款词”避免把「第三条 不可抗力情形下的付款：…」误判为例外；
+    无冒号的条款一律不判定（宁可保守降级为 unidentified，也不整条剔除）。
+    """
+    parts = _HEADING_SPLIT_RE.split(clause.text, maxsplit=1)
+    if len(parts) < 2:
+        return False
+    heading = parts[0].split("\n", 1)[0][:40]
+    if any(keyword in heading for keyword in PAYMENT_KEYWORDS):
+        return False
+    return any(term in heading for term in EXCEPTION_TERMS)
+
+
+def _mask_item_noise(text: str, item_key: str) -> str:
+    """屏蔽“属于其它核验项”的词元，避免共享条款的文本哈希互相污染。"""
+    if item_key == "payment_term":
+        for term in sorted(START_EVENTS + ACCEPTANCE_TERMS, key=len, reverse=True):
+            text = text.replace(term, _MASK)
+        return _collapse_mask(text)
+    if item_key in ("start_condition", "acceptance_invoice"):
+        return _mask_payment_durations(text)
+    # exception：不屏蔽任何期限——“顺延30天→15天”本身就是例外项的变化。
+    return text
+
+
+def _content_sha_for(clause: Clause, item_key: str) -> str:
+    content = _CLAUSE_NUMBER_PREFIX_RE.sub("", clause.text, count=1)
+    content = _mask_item_noise(content, item_key)
+    return hashlib.sha256(content.encode("utf-8")).hexdigest()
+
+
+def _matched_text_sha_for(clauses: list[Clause], item_key: str) -> str:
+    unique = {clause.chunk_id: clause for clause in clauses}
+    return hashlib.sha256(
+        "|".join(sorted(_content_sha_for(c, item_key) for c in unique.values())).encode()
+    ).hexdigest()
+
+
 def _clause_no_union(clauses: list[Clause]) -> list[int]:
     return sorted({number for clause in clauses for number in clause.clause_no})
 
@@ -330,7 +450,12 @@ def _is_date_fragment(text: str, start: int, unit_raw: str) -> bool:
 
 
 def extract_payment_term(clauses: list[Clause]) -> dict[str, Any]:
-    payment_clauses = [c for c in clauses if any(k in c.text for k in PAYMENT_KEYWORDS)]
+    # 标题为「例外」的独立条款归 exception 项：其顺延期限不参与付款基线判定。
+    payment_clauses = [
+        c
+        for c in clauses
+        if any(k in c.text for k in PAYMENT_KEYWORDS) and not _is_exception_article(c)
+    ]
     hits: list[dict[str, Any]] = []
     for clause in payment_clauses:
         for sentence in _iter_sentences(clause.text):
@@ -387,7 +512,9 @@ def extract_payment_term(clauses: list[Clause]) -> dict[str, Any]:
         ):
             distinct.append(hit)
     matched_clauses = [hit["_clause"] for hit in hits]
-    text_sha = _matched_text_sha(matched_clauses)
+    # 例外条款里的顺延期限归 exception 项：不参与付款基线（标题含例外词才排除，
+    # 付款条款正文里出现「除外/另行约定」不会让整条付款文本失去主体/否定保护）。
+    text_sha = _matched_text_sha_for(matched_clauses, "payment_term")
     clause_no_union = _clause_no_union(matched_clauses)
     if len(distinct) == 1 and not ambiguous_units:
         hit = distinct[0]
@@ -436,13 +563,15 @@ def extract_start_condition(clauses: list[Clause]) -> dict[str, Any]:
     return {
         "status": "identified",
         "events": [event["event"] for event in events],
-        "text_sha256": _matched_text_sha(matched_clauses),
+        "text_sha256": _matched_text_sha_for(matched_clauses, "start_condition"),
         **locator,
         "clause_no_union": _clause_no_union(matched_clauses),
     }
 
 
-def _collect_terms(clauses: list[Clause], terms: tuple[str, ...]) -> dict[str, Any]:
+def _collect_terms(
+    clauses: list[Clause], terms: tuple[str, ...], item_key: str = "acceptance_invoice"
+) -> dict[str, Any]:
     hits: list[dict[str, Any]] = []
     for clause in clauses:
         for term in _dedupe_terms(clause.text, terms):
@@ -459,7 +588,7 @@ def _collect_terms(clauses: list[Clause], terms: tuple[str, ...]) -> dict[str, A
     return {
         "status": "identified",
         "terms": [hit["term"] for hit in hits],
-        "text_sha256": _matched_text_sha(matched_clauses),
+        "text_sha256": _matched_text_sha_for(matched_clauses, item_key),
         **locator,
         "clause_no_union": _clause_no_union(matched_clauses),
     }
@@ -479,7 +608,7 @@ def extract_acceptance_invoice(clauses: list[Clause]) -> dict[str, Any]:
 
 
 def extract_exception(clauses: list[Clause]) -> dict[str, Any]:
-    facts = _collect_terms(clauses, EXCEPTION_TERMS)
+    facts = _collect_terms(clauses, EXCEPTION_TERMS, item_key="exception")
     refs = extract_cross_refs(clauses)
     facts["cross_refs"] = refs
     if facts["status"] == "identified" and refs:
@@ -533,6 +662,29 @@ def align_item(
     result: str
     if not base_found and not revised_found:
         result = "unidentified"
+    elif base["status"] == "ambiguous" and revised["status"] == "ambiguous":
+        # 单位不明但数值可确定：候选集合相同 → 视为 payload 相同继续比较文本；
+        # 候选集合不同 → modified；空候选 → unidentified（不猜）。
+        def _candidates(facts: dict) -> set[tuple]:
+            return {(c["value"], c["unit"], c["unit_raw"]) for c in (facts.get("candidates") or [])}
+
+        base_candidates = _candidates(base)
+        revised_candidates = _candidates(revised)
+        if base_candidates and base_candidates == revised_candidates:
+            base_sha = base.get("text_sha256")
+            revised_sha = revised.get("text_sha256")
+            if base_sha and revised_sha and base_sha != revised_sha:
+                result = "modified"
+            elif (base.get("clause_no_union") or base.get("clause_no") or []) != (
+                revised.get("clause_no_union") or revised.get("clause_no") or []
+            ):
+                result = "renumbered"
+            else:
+                result = "unchanged"
+        elif base_candidates and revised_candidates:
+            result = "modified"
+        else:
+            result = "unidentified"
     elif base["status"] == "ambiguous" or revised["status"] == "ambiguous":
         # 一侧未识别时不能把另一侧断言成「新增/删除」。
         result = "unidentified"

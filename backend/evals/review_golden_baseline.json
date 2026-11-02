@@ -4,15 +4,15 @@
     "per_item": {
       "payment_term": {
         "extraction": 1.0,
-        "change_type": 0.5833
+        "change_type": 1.0
       },
       "start_condition": {
         "extraction": 1.0,
-        "change_type": 0.8333
+        "change_type": 1.0
       },
       "acceptance_invoice": {
         "extraction": 1.0,
-        "change_type": 0.8333
+        "change_type": 1.0
       },
       "exception": {
         "extraction": 1.0,
@@ -21,26 +21,17 @@
     },
     "evidence_hit_rate": 1.0,
     "primary_evidence_hit_rate": 0.7568,
-    "overall_change_type": 0.8125
+    "overall_change_type": 1.0
   },
   "failures": [
     "acceptance_days_modified/acceptance_invoice: evidence primary miss revised:4",
-    "acceptance_terms_modified/payment_term: change unchanged->modified",
     "exception_added/acceptance_invoice: evidence primary miss revised:4",
     "exception_removed/acceptance_invoice: evidence primary miss revised:4",
     "exception_with_duration/acceptance_invoice: evidence primary miss revised:4",
-    "exception_with_duration/payment_term: change unchanged->modified",
-    "payment_bare_ri_value_changed/acceptance_invoice: change unchanged->modified",
     "payment_bare_ri_value_changed/acceptance_invoice: evidence primary miss revised:4",
-    "payment_bare_ri_value_changed/payment_term: change modified->unidentified",
-    "payment_bare_ri_value_changed/start_condition: change unchanged->modified",
     "payment_bare_ri_value_same/acceptance_invoice: evidence primary miss revised:4",
-    "payment_bare_ri_value_same/payment_term: change unchanged->unidentified",
-    "payment_days_modified/acceptance_invoice: change unchanged->modified",
     "payment_days_modified/acceptance_invoice: evidence primary miss revised:4",
-    "payment_days_modified/start_condition: change unchanged->modified",
     "renumbered_only/acceptance_invoice: evidence primary miss revised:5",
-    "start_condition_modified/payment_term: change unchanged->modified",
     "unchanged_all/acceptance_invoice: evidence primary miss revised:4"
   ]
 }

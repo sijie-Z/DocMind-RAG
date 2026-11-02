@@ -865,3 +865,363 @@ async def test_analyze_autoflush_conflict_maps_409(factory, monkeypatch):
         with pytest.raises(ConflictError) as excinfo:
             await analysis.analyze_case(db, case)
     assert excinfo.value.error_code == "REVIEW_CASE_ANALYSIS_CONFLICT"
+
+
+# ── D6：按项屏蔽文本哈希 + ambiguous 候选值比较 ─────────────────────────────
+
+
+def _contract_clauses(payment: str, acceptance: str, extra: str | None = None):
+    clauses = [
+        _clause(f"第三条 付款期限：{payment}", clause_no=[3]),
+        _clause(f"第四条 验收：{acceptance}", clause_no=[4]),
+    ]
+    if extra:
+        clauses.append(_clause(f"第九条 例外：{extra}", clause_no=[9]))
+    return clauses
+
+
+_ACC_TEXT = "乙方交付后10个工作日内完成验收。"
+
+
+def test_duration_change_does_not_flip_start_or_acceptance():
+    """付款天数 30→60 只属于 payment_term；起算/验收不得被整句哈希污染。"""
+    base = _contract_clauses("甲方应在验收合格后30天支付货款。", _ACC_TEXT)
+    revised = _contract_clauses("甲方应在验收合格后60天支付货款。", _ACC_TEXT)
+    assert (
+        analysis.align_item(
+            "payment_term",
+            analysis.extract_payment_term(base),
+            analysis.extract_payment_term(revised),
+        )
+        == "modified"
+    )
+    assert (
+        analysis.align_item(
+            "start_condition",
+            analysis.extract_start_condition(base),
+            analysis.extract_start_condition(revised),
+        )
+        == "unchanged"
+    )
+    assert (
+        analysis.align_item(
+            "acceptance_invoice",
+            analysis.extract_acceptance_invoice(base),
+            analysis.extract_acceptance_invoice(revised),
+        )
+        == "unchanged"
+    )
+
+
+def test_start_trigger_change_does_not_flip_payment():
+    base = _contract_clauses("甲方应在验收合格后30天支付货款。", _ACC_TEXT)
+    revised = _contract_clauses("甲方应在收到发票后30天支付货款。", _ACC_TEXT)
+    assert (
+        analysis.align_item(
+            "payment_term",
+            analysis.extract_payment_term(base),
+            analysis.extract_payment_term(revised),
+        )
+        == "unchanged"
+    )
+    assert (
+        analysis.align_item(
+            "start_condition",
+            analysis.extract_start_condition(base),
+            analysis.extract_start_condition(revised),
+        )
+        == "modified"
+    )
+
+
+def test_acceptance_term_change_does_not_flip_payment():
+    base = _contract_clauses("甲方应在验收合格后30天支付货款。", _ACC_TEXT)
+    revised = _contract_clauses("甲方应在验收合格并对账无误后30天支付货款。", _ACC_TEXT)
+    assert (
+        analysis.align_item(
+            "payment_term",
+            analysis.extract_payment_term(base),
+            analysis.extract_payment_term(revised),
+        )
+        == "unchanged"
+    )
+    assert (
+        analysis.align_item(
+            "acceptance_invoice",
+            analysis.extract_acceptance_invoice(base),
+            analysis.extract_acceptance_invoice(revised),
+        )
+        == "modified"
+    )
+
+
+def test_exception_duration_does_not_flip_payment():
+    """例外条款里的“顺延30天”属于 exception，不是付款基线变化。"""
+    base = _contract_clauses("甲方应在验收合格后30天支付货款。", _ACC_TEXT)
+    revised = _contract_clauses(
+        "甲方应在验收合格后30天支付货款。",
+        _ACC_TEXT,
+        extra="因不可抗力导致验收延迟的，付款期限相应顺延30天。",
+    )
+    assert (
+        analysis.align_item(
+            "payment_term",
+            analysis.extract_payment_term(base),
+            analysis.extract_payment_term(revised),
+        )
+        == "unchanged"
+    )
+    assert (
+        analysis.align_item(
+            "exception",
+            analysis.extract_exception(base),
+            analysis.extract_exception(revised),
+        )
+        == "added"
+    )
+
+
+def test_acceptance_own_duration_change_is_still_modified():
+    """验收条款自己的期限（10→15 个工作日）必须仍然算 modified。"""
+    base = _contract_clauses("甲方应在验收合格后30天支付货款。", _ACC_TEXT)
+    revised = _contract_clauses(
+        "甲方应在验收合格后30天支付货款。",
+        "乙方交付后15个工作日内完成验收。",
+    )
+    assert (
+        analysis.align_item(
+            "acceptance_invoice",
+            analysis.extract_acceptance_invoice(base),
+            analysis.extract_acceptance_invoice(revised),
+        )
+        == "modified"
+    )
+    assert (
+        analysis.align_item(
+            "payment_term",
+            analysis.extract_payment_term(base),
+            analysis.extract_payment_term(revised),
+        )
+        == "unchanged"
+    )
+
+
+def test_ambiguous_candidates_compare_values():
+    """单位不明但数值可确定：30日→60日 modified；30日→30日 unchanged。"""
+    changed_base = _contract_clauses("甲方应在验收合格后30日内支付货款。", _ACC_TEXT)
+    changed_rev = _contract_clauses("甲方应在验收合格后60日内支付货款。", _ACC_TEXT)
+    same_rev = _contract_clauses("甲方应在验收合格后30日内支付货款。", _ACC_TEXT)
+
+    base_facts = analysis.extract_payment_term(changed_base)
+    assert base_facts["status"] == "ambiguous"
+    assert (
+        analysis.align_item("payment_term", base_facts, analysis.extract_payment_term(changed_rev))
+        == "modified"
+    )
+    assert (
+        analysis.align_item("payment_term", base_facts, analysis.extract_payment_term(same_rev))
+        == "unchanged"
+    )
+
+
+def test_payment_subject_and_negation_still_modified():
+    """屏蔽噪音不得吞掉主体/否定这类真实文本变化。"""
+    base = _contract_clauses("甲方应在验收合格后30天支付货款。", _ACC_TEXT)
+    subject = _contract_clauses("乙方应在验收合格后30天支付货款。", _ACC_TEXT)
+    negated = _contract_clauses("甲方应在验收不合格后30天支付货款。", _ACC_TEXT)
+    for revised in (subject, negated):
+        assert (
+            analysis.align_item(
+                "payment_term",
+                analysis.extract_payment_term(base),
+                analysis.extract_payment_term(revised),
+            )
+            == "modified"
+        )
+
+
+# ── D6 R1 评审回归（更精确的片段级屏蔽）────────────────────────────────────
+
+
+def test_exception_duration_change_is_modified():
+    """例外条款自己的顺延期限 30→15 必须报 exception modified；付款不变。"""
+    base = _contract_clauses(
+        "甲方应在验收合格后30天支付货款。",
+        _ACC_TEXT,
+        extra="因不可抗力导致验收延迟的，付款期限相应顺延30天。",
+    )
+    revised = _contract_clauses(
+        "甲方应在验收合格后30天支付货款。",
+        _ACC_TEXT,
+        extra="因不可抗力导致验收延迟的，付款期限相应顺延15天。",
+    )
+    assert (
+        analysis.align_item(
+            "exception", analysis.extract_exception(base), analysis.extract_exception(revised)
+        )
+        == "modified"
+    )
+    assert (
+        analysis.align_item(
+            "payment_term",
+            analysis.extract_payment_term(base),
+            analysis.extract_payment_term(revised),
+        )
+        == "unchanged"
+    )
+
+
+def test_payment_clause_with_exception_word_keeps_subject_and_negation():
+    """付款条款正文含「除外」不得让整条失去主体/否定保护。"""
+    base = _contract_clauses("甲方应在验收合格后30天支付货款，双方另有约定的除外。", _ACC_TEXT)
+    subject = _contract_clauses("乙方应在验收合格后30天支付货款，双方另有约定的除外。", _ACC_TEXT)
+    negated = _contract_clauses("甲方应在验收不合格后30天支付货款，双方另有约定的除外。", _ACC_TEXT)
+    for revised in (subject, negated):
+        assert (
+            analysis.align_item(
+                "payment_term",
+                analysis.extract_payment_term(base),
+                analysis.extract_payment_term(revised),
+            )
+            == "modified"
+        )
+
+
+def test_shared_sentence_keeps_acceptance_duration():
+    """付款与验收同句（逗号分隔）时，验收自己的 10→15 个工作日仍须 modified。"""
+    base = [
+        _clause(
+            "第三条 付款与验收：乙方应在10个工作日内完成验收，甲方应在验收合格后30天内付款。",
+            clause_no=[3],
+        )
+    ]
+    revised = [
+        _clause(
+            "第三条 付款与验收：乙方应在15个工作日内完成验收，甲方应在验收合格后30天内付款。",
+            clause_no=[3],
+        )
+    ]
+    assert (
+        analysis.align_item(
+            "acceptance_invoice",
+            analysis.extract_acceptance_invoice(base),
+            analysis.extract_acceptance_invoice(revised),
+        )
+        == "modified"
+    )
+
+
+def test_mixed_unit_candidates_do_not_crash():
+    """候选值相同但 unit 混合 None/str（30天和30日）不得抛 TypeError。"""
+    clauses = _contract_clauses("甲方应在验收合格后30天和30日内支付货款。", _ACC_TEXT)
+    facts = analysis.extract_payment_term(clauses)
+    assert facts["status"] == "ambiguous"
+    assert analysis.align_item("payment_term", facts, facts) == "unchanged"
+
+
+def test_truncated_scan_with_equal_ambiguous_candidates_is_unidentified():
+    """截断扫描时不得宣称 ambiguous 候选相同即 unchanged。"""
+    clauses = _contract_clauses("甲方应在验收合格后30日内支付货款。", _ACC_TEXT)
+    facts = analysis.extract_payment_term(clauses)
+    assert facts["status"] == "ambiguous"
+    assert analysis.align_item("payment_term", facts, facts, scan_truncated=True) == "unidentified"
+
+
+def test_payment_clause_without_title_colon_not_misclassified():
+    """无标题冒号的付款条款（正文含「除外」）不得被整条误判为例外条款。"""
+    base = [_clause("甲方应在验收合格后30天支付货款，双方另有约定的除外。", clause_no=[3])]
+    subject = [_clause("乙方应在验收合格后30天支付货款，双方另有约定的除外。", clause_no=[3])]
+    base_facts = analysis.extract_payment_term(base)
+    assert base_facts["status"] == "identified"
+    assert (
+        analysis.align_item("payment_term", base_facts, analysis.extract_payment_term(subject))
+        == "modified"
+    )
+
+
+def test_payment_clause_without_colon_and_exception_prefix():
+    """无标题冒号、正文以「除不可抗力外」开头的付款条款不得被整条剔除。"""
+    base = [_clause("除不可抗力外，甲方应在验收合格后30天支付货款。", clause_no=[3])]
+    subject = [_clause("除不可抗力外，乙方应在验收合格后30天支付货款。", clause_no=[3])]
+    base_facts = analysis.extract_payment_term(base)
+    assert base_facts["status"] == "identified"
+    assert (
+        analysis.align_item("payment_term", base_facts, analysis.extract_payment_term(subject))
+        == "modified"
+    )
+
+
+def test_payment_heading_with_exception_word_not_misclassified():
+    """标题含「不可抗力」但主题是付款（含付款词）时不得判为例外条款。"""
+    base = [_clause("第三条 不可抗力情形下的付款：甲方应在验收合格后30天支付货款。", clause_no=[3])]
+    subject = [
+        _clause("第三条 不可抗力情形下的付款：乙方应在验收合格后30天支付货款。", clause_no=[3])
+    ]
+    base_facts = analysis.extract_payment_term(base)
+    assert base_facts["status"] == "identified"
+    assert (
+        analysis.align_item("payment_term", base_facts, analysis.extract_payment_term(subject))
+        == "modified"
+    )
+
+
+def test_shared_fragment_without_comma_keeps_acceptance_duration():
+    """同一片段（无逗号）里「10个工作日内完成对账并在30天内支付」：
+    验收的 10→15 必须 modified（锚点归属：10 最近验收/对账，30 最近支付）。"""
+    base = [
+        _clause(
+            "第三条 付款：甲方应在验收合格后10个工作日内完成对账并在30天内支付货款。",
+            clause_no=[3],
+        )
+    ]
+    revised = [
+        _clause(
+            "第三条 付款：甲方应在验收合格后15个工作日内完成对账并在30天内支付货款。",
+            clause_no=[3],
+        )
+    ]
+    assert (
+        analysis.align_item(
+            "acceptance_invoice",
+            analysis.extract_acceptance_invoice(base),
+            analysis.extract_acceptance_invoice(revised),
+        )
+        == "modified"
+    )
+
+
+def test_payment_verb_after_filler_words_still_shields_duration():
+    """付款动词隔几个字（内向乙方/内完成/内安排）时，期限仍归属付款片段。"""
+    cases = [
+        "甲方应在验收合格后30个自然日内向乙方支付货款。",
+        "甲方应在验收合格后30个工作日内完成付款。",
+        "甲方应在验收合格后30天内安排付款。",
+    ]
+    acceptance = "乙方交付后10个工作日内完成验收。"
+    for payment_text in cases:
+        base = _contract_clauses(payment_text, acceptance)
+        revised = _contract_clauses(payment_text.replace("30", "60", 1), acceptance)
+        assert (
+            analysis.align_item(
+                "payment_term",
+                analysis.extract_payment_term(base),
+                analysis.extract_payment_term(revised),
+            )
+            == "modified"
+        ), payment_text
+        assert (
+            analysis.align_item(
+                "start_condition",
+                analysis.extract_start_condition(base),
+                analysis.extract_start_condition(revised),
+            )
+            == "unchanged"
+        ), payment_text
+        assert (
+            analysis.align_item(
+                "acceptance_invoice",
+                analysis.extract_acceptance_invoice(base),
+                analysis.extract_acceptance_invoice(revised),
+            )
+            == "unchanged"
+        ), payment_text
