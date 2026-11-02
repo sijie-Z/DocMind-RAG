@@ -56,7 +56,8 @@ make review-eval-baseline  # 显式更新基线（评审可见的 PR 行为）
    验收条款里的 CN 月份可能因跨片段付款救援被误归付款（A-6）；
    `3个月15日` 被日期守卫保守拒绝（A-5）；`10个工作日内完成验收，甲方随后付款`
    在 payment_term 抽取仍报 identified 10（片段救援），10→15 会同时报 payment
-   与 acceptance modified。属残余边界。
+   与 acceptance modified；期限后同片段无验收词时，后句/后分句的付款仍可能
+   屏蔽前段验收期限（fallback 锚点跨句，base 既有）。属残余边界。
 
 ## D9 修复记录
 
@@ -72,7 +73,7 @@ make review-eval-baseline  # 显式更新基线（评审可见的 PR 行为）
 - 主证据静态路径简化为“标题命中优先”（概念重定向移除，变化项由
   refine_primary_locator 指向实际变化条款）；refine 候选排除独立例外条款，
   防止前部例外条款劫持验收证据。
-- 新增 10 条专项单测；golden 23 组识别/change_type/主证据/union 全 100%。
+- 新增 11 条专项单测；golden 23 组识别/change_type/主证据/union 全 100%。
 
 ## D8 修复记录
 

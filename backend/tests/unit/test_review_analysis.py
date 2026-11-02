@@ -1798,8 +1798,7 @@ def test_refine_excludes_exception_candidates_without_moving_static():
     base_facts = analysis.extract_acceptance_invoice([base_clause])
     revised_facts = analysis.extract_acceptance_invoice([base_clause, exception_clause])
     # 人工构造 modified 场景，直接验证 refine 的例外候选过滤。
-    static_chunk = base_facts["chunk_id"]
-    base_facts["change_type"] = "modified"
+    static_chunk = revised_facts["chunk_id"]
     analysis.refine_primary_locator(
         "acceptance_invoice",
         base_facts,
@@ -1808,7 +1807,7 @@ def test_refine_excludes_exception_candidates_without_moving_static():
         base_clauses=[base_clause],
         revised_clauses=[base_clause, exception_clause],
     )
-    assert base_facts["chunk_id"] == static_chunk
+    assert revised_facts["chunk_id"] == static_chunk
 
 
 def test_acceptance_duration_with_payment_in_next_comma_clause_not_masked():
@@ -1858,3 +1857,16 @@ def test_comma_conjunctive_payment_continuation_is_masked():
             )
             == "unchanged"
         ), text
+
+
+def test_delivery_payment_compound_variants_are_payment():
+    """交付首期/剩余/合同约定 货款等词形仍按付款短语处理（A-2 残余）。"""
+    texts = (
+        "第三条 付款期限：甲方应在30天内向乙方交付首期货款。",
+        "第三条 付款期限：甲方应在30天内交付剩余价款。",
+        "第三条 付款期限：甲方应在30天内交付合同约定款项。",
+    )
+    for text in texts:
+        facts = analysis.extract_payment_term([_clause(text, clause_no=[3])])
+        assert facts["status"] == "identified", text
+        assert (facts["value"], facts["unit"]) == (30, "day"), text

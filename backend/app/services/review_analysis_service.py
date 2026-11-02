@@ -262,7 +262,7 @@ def _duration_owned_by_delivery(sentence: str, start: int, end: int) -> bool:
     「10个工作日内交付，甲方随后付款」的 10 归交付（不作为付款 hit）。
     """
     after = sentence[end:]
-    if re.match(r"\s*[内之]{0,2}\s*交付(?:全部)?(?:货款|价款|款项)", after):
+    if re.search(r"交付(?:全部|首期|剩余|合同约定)?(?:货款|价款|款项)", after[:12]):
         return False
     delivery_index = min(
         (after.find(term) for term in DELIVERY_TERMS if term in after), default=None
