@@ -1823,3 +1823,38 @@ def test_acceptance_duration_with_payment_in_next_comma_clause_not_masked():
         )
         == "modified"
     )
+
+
+def test_comma_conjunctive_payment_continuation_is_masked():
+    """逗号后「并/且支付」式谓语延续（无新主语）时，付款期限仍归付款。"""
+    variants = (
+        "甲方应在验收合格后30天内完成对账，并支付货款。",
+        "甲方应在验收合格后30天内，完成对账并支付货款。",
+    )
+    for text in variants:
+        base = _contract_clauses(text, _ACC_TEXT)
+        revised = _contract_clauses(text.replace("30", "60", 1), _ACC_TEXT)
+        assert (
+            analysis.align_item(
+                "payment_term",
+                analysis.extract_payment_term(base),
+                analysis.extract_payment_term(revised),
+            )
+            == "modified"
+        ), text
+        assert (
+            analysis.align_item(
+                "start_condition",
+                analysis.extract_start_condition(base),
+                analysis.extract_start_condition(revised),
+            )
+            == "unchanged"
+        ), text
+        assert (
+            analysis.align_item(
+                "acceptance_invoice",
+                analysis.extract_acceptance_invoice(base),
+                analysis.extract_acceptance_invoice(revised),
+            )
+            == "unchanged"
+        ), text

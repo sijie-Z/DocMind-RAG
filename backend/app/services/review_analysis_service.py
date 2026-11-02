@@ -310,6 +310,40 @@ def _mask_payment_durations(text: str) -> str:
     return "".join(parts)
 
 
+_CONTINUATION_SUBJECTS = (
+    "甲方",
+    "乙方",
+    "丙方",
+    "丁方",
+    "戊方",
+    "双方",
+    "各方",
+    "任何一方",
+    "卖方",
+    "买方",
+    "供方",
+    "需方",
+    "承包人",
+    "发包人",
+    "供应商",
+    "采购人",
+)
+
+
+def _payment_continues_after_fragment(text: str, boundary_end: int, sentence_end: int) -> bool:
+    """逗号后是否为“并/且支付”式谓语延续（没有新主语）。
+
+    「完成对账，并支付货款」的付款期限可以跨逗号归付款；
+    「完成验收，甲方随后付款」出现新主语，不得回吸前一片段的期限。
+    """
+    tail = text[boundary_end:sentence_end]
+    payment_positions = [tail.find(keyword) for keyword in PAYMENT_KEYWORDS if keyword in tail]
+    if not payment_positions:
+        return False
+    pay_pos = min(payment_positions)
+    return not any(subject in tail[:pay_pos] for subject in _CONTINUATION_SUBJECTS)
+
+
 def _nearest_anchor_is_payment(text: str, start: int, end: int) -> bool:
     """判断期限之后的最近语义锚点是否为付款词（方向感知）。
 
@@ -334,6 +368,8 @@ def _nearest_anchor_is_payment(text: str, start: int, end: int) -> bool:
     fragment_boundary = FRAGMENT_SPLIT_RE.search(text, end)
     if fragment_boundary:
         fragment_end = fragment_boundary.start()
+        if _payment_continues_after_fragment(text, fragment_boundary.end(), sentence_end):
+            fragment_end = sentence_end
     span_end = min(next_starts + [sentence_end, fragment_end])
     span = text[end:span_end]
     if any(keyword in span for keyword in PAYMENT_KEYWORDS) and not any(
