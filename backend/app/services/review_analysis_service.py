@@ -195,12 +195,18 @@ CROSS_REF_RE = re.compile(
 )
 # 付款语境内的显式条款引用：「具体账期按第四条执行」「付款期限详见第五条」。
 # 要求付款锚点与引用词同片段（不跨标点），避免把「违约责任详见第九条」这类
-# 邻近引用误当成付款定义。
+# 邻近引用误当成付款定义；同一引用短语里的并列/范围目标（第四条、第五条，
+# 第四条至第六条）整体跟随，不得只取第一个。
 _PAYMENT_REF_RE = re.compile(
     r"(?:付款|支付|账期|结算|货款|价款)(?:期限|时间|方式|比例|节点)?"
     r"[^。；;，,]{0,12}?"
     r"(?:详见|参见|见|按照|按|依据|依照|根据|参照|以)"
-    r"(?:本合同|本协议)?第([一二三四五六七八九十百零〇0-9]+)条"
+    r"(?:本合同|本协议)?第[一二三四五六七八九十百零〇0-9]+条"
+    r"(?:\s*(?:[、,，和及与]|以及|至)\s*第[一二三四五六七八九十百零〇0-9]+条)*"
+)
+_CLAUSE_NO_RE = re.compile(r"第([一二三四五六七八九十百零〇0-9]+)条")
+_REF_RANGE_RE = re.compile(
+    r"第([一二三四五六七八九十百零〇0-9]+)条\s*至\s*第([一二三四五六七八九十百零〇0-9]+)条"
 )
 
 
@@ -660,13 +666,38 @@ def _is_date_fragment(text: str, start: int, unit_raw: str) -> bool:
     return False
 
 
+def _clause_number(raw: str) -> int | None:
+    raw = raw.strip()
+    if raw.isdigit():
+        return int(raw)
+    return _cn_to_int(raw)
+
+
+def _reference_numbers(text: str) -> list[int]:
+    """引用短语里的全部条款号（含 第X条至第Y条 的区间展开）。"""
+    numbers: list[int] = []
+    for match in _CLAUSE_NO_RE.finditer(text):
+        number = _clause_number(match.group(1))
+        if number is not None:
+            numbers.append(number)
+    for match in _REF_RANGE_RE.finditer(text):
+        start = _clause_number(match.group(1))
+        end = _clause_number(match.group(2))
+        if start is None or end is None or not 0 < end - start <= 20:
+            continue
+        numbers.extend(range(start, end + 1))
+    return list(dict.fromkeys(numbers))
+
+
 def _payment_reference_clauses(
     clauses: list[Clause], payment_clauses: list[Clause]
-) -> list[Clause]:
+) -> tuple[list[Clause], bool]:
     """付款条款显式引用其它条款时，把被引用条款纳入付款期限抽取（只跟一层）。
 
     仅跟随付款语境同片段的引用；目标必须是本文件内的非例外条款，且未被
-    付款关键词直接命中（后者本来就在抽取范围内）。
+    付款关键词直接命中（后者本来就在抽取范围内）。同一短语的并列/范围目标
+    全部跟随；引用了不存在的条款号时返回 unresolved=True，付款期限无法完整
+    判定，调用方须降级 ambiguous（不得只报第一个目标的值）。
     """
     by_no: dict[int, Clause] = {}
     for clause in clauses:
@@ -674,18 +705,19 @@ def _payment_reference_clauses(
             by_no.setdefault(int(number), clause)
     known = {clause.chunk_id for clause in payment_clauses}
     referenced: list[Clause] = []
+    unresolved = False
     for clause in payment_clauses:
         for match in _PAYMENT_REF_RE.finditer(clause.text):
-            raw = match.group(1)
-            target_no = int(raw) if raw.isdigit() else _cn_to_int(raw)
-            if target_no is None:
-                continue
-            target = by_no.get(target_no)
-            if target is None or target.chunk_id in known or _is_exception_article(target):
-                continue
-            known.add(target.chunk_id)
-            referenced.append(target)
-    return referenced
+            for target_no in _reference_numbers(match.group(0)):
+                target = by_no.get(target_no)
+                if target is None:
+                    unresolved = True
+                    continue
+                if target.chunk_id in known or _is_exception_article(target):
+                    continue
+                known.add(target.chunk_id)
+                referenced.append(target)
+    return referenced, unresolved
 
 
 def _referenced_duration_ok(sentence: str, start: int, end: int) -> bool:
@@ -707,7 +739,7 @@ def extract_payment_term(clauses: list[Clause]) -> dict[str, Any]:
         for c in clauses
         if any(k in c.text for k in PAYMENT_KEYWORDS) and not _is_exception_article(c)
     ]
-    referenced_clauses = _payment_reference_clauses(clauses, payment_clauses)
+    referenced_clauses, unresolved_reference = _payment_reference_clauses(clauses, payment_clauses)
     referenced_ids = {clause.chunk_id for clause in referenced_clauses}
 
     def _context_ok(clause: Clause, sentence: str, start: int, end: int) -> bool:
@@ -813,6 +845,9 @@ def extract_payment_term(clauses: list[Clause]) -> dict[str, Any]:
         if not _duration_owned_by_delivery(hit["_sentence"], hit["_start"], hit["_end"])
     ]
     if not hits:
+        if unresolved_reference:
+            # 引用了本文件不存在的条款：无法完整判定，不假装未识别。
+            return {"status": "ambiguous", "reason": "reference_unresolved", "candidates": []}
         reason = "no_duration" if payment_clauses else "no_payment_clause"
         return {"status": "not_found", "reason": reason}
     ambiguous_units = [hit for hit in hits if hit["unit"] is None]
@@ -840,7 +875,7 @@ def extract_payment_term(clauses: list[Clause]) -> dict[str, Any]:
     # 付款条款正文里出现「除外/另行约定」不会让整条付款文本失去主体/否定保护）。
     text_sha = _matched_text_sha_for(matched_clauses, "payment_term")
     clause_no_union = _clause_no_union(matched_clauses)
-    if len(distinct) == 1 and not ambiguous_units:
+    if len(distinct) == 1 and not ambiguous_units and not unresolved_reference:
         hit = distinct[0]
         return {
             "status": "identified",
@@ -856,6 +891,8 @@ def extract_payment_term(clauses: list[Clause]) -> dict[str, Any]:
         reasons.append("unit_unclear")
     if len(distinct) > 1:
         reasons.append("multiple_durations")
+    if unresolved_reference:
+        reasons.append("reference_unresolved")
     return {
         "status": "ambiguous",
         "reason": "+".join(reasons),
@@ -993,7 +1030,12 @@ def _collect_terms(
     if not hits:
         return {"status": "not_found", "reason": "no_terms"}
     contributing_clauses = [hit["_clause"] for hit in hits]
-    all_term_clauses = [clause for clause in clauses if any(term in clause.text for term in terms)]
+    all_term_clauses = [
+        clause
+        for clause in clauses
+        if any(term in clause.text for term in terms)
+        and (item_key == "exception" or not _is_exception_article(clause))
+    ]
     primary_clause = _primary_term_hit(hits, all_term_clauses, terms)
     # 验收项：同术语的第二条款也要参与变更检测（S1）；独立例外条款归例外项，
     # 不参与验收文本哈希（否则新增例外条款会误报验收 modified）。

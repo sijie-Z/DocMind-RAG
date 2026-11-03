@@ -824,6 +824,40 @@ CASES = [
         },
     },
     {
+        "id": "payment_parallel_reference_targets",
+        "note": "并列引用第四条、第五条：首期/尾款两个期限都可见；尾款 60→90 必须 modified",
+        "base": _doc(
+            _A1,
+            _A2,
+            _pay("三", "付款期限分别按第四条、第五条执行。"),
+            "第四条 期限：首期款于验收合格后30天内结清，具体以财务确认时间为准，"
+            "双方应配合完成对账。",
+            "第五条 期限：尾款于交货后60天内结清，相关单据应齐全并经双方书面确认。",
+            _A5,
+            _A6,
+            _A7,
+            _A8,
+        ),
+        "revised": _doc(
+            _A1,
+            _A2,
+            _pay("三", "付款期限分别按第四条、第五条执行。"),
+            "第四条 期限：首期款于验收合格后30天内结清，具体以财务确认时间为准，"
+            "双方应配合完成对账。",
+            "第五条 期限：尾款于交货后90天内结清，相关单据应齐全并经双方书面确认。",
+            _A5,
+            _A6,
+            _A7,
+            _A8,
+        ),
+        "items": {
+            "payment_term": _item("modified", {"status": "ambiguous"}, ("revised", 5)),
+            "start_condition": _item("unidentified", _ABSENT),
+            "acceptance_invoice": _item("unchanged", _ACCEPT_OK, ("revised", 4)),
+            "exception": _item("unidentified", _ABSENT),
+        },
+    },
+    {
         "id": "start_exception_new_event",
         "note": "新增例外条款提到验收合格+付款顺延：起算条件不得因此 modified（已知问题 #3）",
         "base": _doc(
