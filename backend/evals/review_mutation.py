@@ -92,7 +92,7 @@ def _mutation_specs() -> list[tuple[str, str, Any]]:
         (
             "liability_sentence_masking_disabled",
             "关闭责任句屏蔽（违约金句污染起算/哈希）",
-            lambda: _patched(analysis, "_mask_liability_sentences", lambda text: text),
+            lambda: _patched(analysis, "_mask_liability_sentences", lambda text, **kwargs: text),
         ),
     ]
 

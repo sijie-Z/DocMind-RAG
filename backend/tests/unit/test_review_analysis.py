@@ -2383,3 +2383,77 @@ def test_single_colon_liability_heading_is_excluded():
         ]
     )
     assert facts["status"] == "not_found"
+
+
+def test_comma_connected_penalty_keeps_payment_obligation():
+    """逗号连接「付款货款，逾期按日支付违约金」：付款义务不得被整句屏蔽。"""
+    base = [
+        _clause(
+            "第三条 付款期限：甲方应在验收合格后30天内向乙方支付货款，"
+            "逾期付款的按应付款项每日万分之五支付违约金。",
+            clause_no=[3],
+        )
+    ]
+    assert analysis.extract_start_condition(base)["events"] == ["验收合格"]
+
+    start_changed = [
+        _clause(
+            "第三条 付款期限：甲方应在合同生效后30天内向乙方支付货款，"
+            "逾期付款的按应付款项每日万分之五支付违约金。",
+            clause_no=[3],
+        )
+    ]
+    assert (
+        analysis.align_item(
+            "start_condition",
+            analysis.extract_start_condition(base),
+            analysis.extract_start_condition(start_changed),
+        )
+        == "modified"
+    )
+
+    subject_changed = [
+        _clause(
+            "第三条 付款期限：甲方应在验收合格后30天内向丙方支付服务费，"
+            "逾期付款的按应付款项每日万分之五支付违约金。",
+            clause_no=[3],
+        )
+    ]
+    assert (
+        analysis.align_item(
+            "payment_term",
+            analysis.extract_payment_term(base),
+            analysis.extract_payment_term(subject_changed),
+        )
+        == "modified"
+    )
+
+    negated = [
+        _clause(
+            "第三条 付款期限：甲方应在验收合格后30天内不支付货款，"
+            "逾期付款的按应付款项每日万分之五支付违约金。",
+            clause_no=[3],
+        )
+    ]
+    assert (
+        analysis.align_item(
+            "payment_term",
+            analysis.extract_payment_term(base),
+            analysis.extract_payment_term(negated),
+        )
+        == "modified"
+    )
+
+
+def test_heading_with_clause_number_and_term_colon_keeps_start():
+    """「第六条：逾期付款违约金：…支付货款」标题冒号不得让正文被误屏蔽。"""
+    facts = analysis.extract_start_condition(
+        [
+            _clause(
+                "第六条：逾期付款违约金：甲方应在验收合格后30天内支付货款。",
+                clause_no=[6],
+            )
+        ]
+    )
+    assert facts["status"] == "identified"
+    assert facts["events"] == ["验收合格"]
