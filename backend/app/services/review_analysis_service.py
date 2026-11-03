@@ -495,6 +495,13 @@ def _mask_item_noise(text: str, item_key: str) -> str:
 
 def _content_sha_for(clause: Clause, item_key: str) -> str:
     content = _CLAUSE_NUMBER_PREFIX_RE.sub("", clause.text, count=1)
+    if item_key == "payment_term" and not any(
+        keyword in clause.text for keyword in PAYMENT_KEYWORDS
+    ):
+        # 仅经引用纳入付款项的条款：不做跨项词元屏蔽。否则起算词变化
+        # （合同生效→合同签订生效）会被付款屏蔽与起算不扫引用条款同时吞掉，
+        # 四项全报 unchanged（评审 A B1）。
+        return hashlib.sha256(content.encode("utf-8")).hexdigest()
     content = _mask_item_noise(content, item_key)
     return hashlib.sha256(content.encode("utf-8")).hexdigest()
 
@@ -957,6 +964,25 @@ def extract_payment_term(clauses: list[Clause]) -> dict[str, Any]:
     }
 
 
+def _non_overlapping_events(text: str, events: tuple[str, ...]) -> set[str]:
+    """同一处文字命中多个事件时只保留一个（「合同生效之日起」不应同时是
+    合同生效 + 生效之日）；按起点优先、同起点取较长者。"""
+    spans: list[tuple[int, int, str]] = []
+    for event in events:
+        start = text.find(event)
+        while start != -1:
+            spans.append((start, start + len(event), event))
+            start = text.find(event, start + 1)
+    spans.sort(key=lambda item: (item[0], -(item[1] - item[0])))
+    kept: list[tuple[int, int, str]] = []
+    for span in spans:
+        start, end, _ = span
+        if any(start < kept_end and kept_start < end for kept_start, kept_end, _ in kept):
+            continue
+        kept.append(span)
+    return {name for _, _, name in kept}
+
+
 def extract_start_condition(clauses: list[Clause]) -> dict[str, Any]:
     # 独立例外条款里的起算事件是顺延条件，不是付款起算条件本身。
     payment_clauses = [
@@ -966,8 +992,9 @@ def extract_start_condition(clauses: list[Clause]) -> dict[str, Any]:
     ]
     events: list[dict[str, Any]] = []
     for clause in payment_clauses:
+        clause_events = _non_overlapping_events(clause.text, START_EVENTS)
         for event in START_EVENTS:
-            if event in clause.text and all(e["event"] != event for e in events):
+            if event in clause_events and all(e["event"] != event for e in events):
                 events.append({"event": event, "_clause": clause, **_primary_locator(clause)})
     if not events:
         reason = "no_start_event" if payment_clauses else "no_payment_clause"

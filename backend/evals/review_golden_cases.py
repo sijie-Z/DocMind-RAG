@@ -933,6 +933,40 @@ CASES = [
         },
     },
     {
+        "id": "payment_reference_start_event_word_change",
+        "note": "被引用条款内 合同生效→合同签订生效：付款项必须 modified（评审 A B1）",
+        "base": _doc(
+            _A1,
+            _A2,
+            "第三条 付款方式：验收合格后，具体账期按第四条执行。",
+            "第四条 履行期限：合同生效后10个工作日内付清，逾期未付的按合同约定承担违约责任。",
+            _A5,
+            _A6,
+            _A7,
+            _A8,
+        ),
+        "revised": _doc(
+            _A1,
+            _A2,
+            "第三条 付款方式：验收合格后，具体账期按第四条执行。",
+            "第四条 履行期限：合同签订生效后10个工作日内付清，逾期未付的按合同约定承担违约责任。",
+            _A5,
+            _A6,
+            _A7,
+            _A8,
+        ),
+        "items": {
+            "payment_term": _item(
+                "modified", {"status": "identified", "value": 10, "unit": "workday"}, ("revised", 4)
+            ),
+            "start_condition": _item(
+                "unchanged", {"status": "identified", "events": ["验收合格"]}, ("revised", 3)
+            ),
+            "acceptance_invoice": _item("unchanged", _ACCEPT_OK, ("revised", 3)),
+            "exception": _item("unidentified", _ABSENT),
+        },
+    },
+    {
         "id": "start_exception_new_event",
         "note": "新增例外条款提到验收合格+付款顺延：起算条件不得因此 modified（已知问题 #3）",
         "base": _doc(

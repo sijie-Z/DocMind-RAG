@@ -2208,3 +2208,41 @@ def test_start_condition_recognizes_contract_effective():
     )
     assert facts["status"] == "identified"
     assert facts["events"] == ["合同生效"]
+
+
+def test_start_event_word_change_in_referenced_clause_is_modified():
+    """被引用条款里 合同生效→合同签订生效 必须报 payment modified（评审 A B1）。"""
+    base = [
+        _clause("第三条 付款方式：验收合格后，具体账期按第四条执行。", clause_no=[3]),
+        _clause("第四条 履行期限：合同生效后10个工作日内付清。", clause_no=[4]),
+    ]
+    revised = [
+        _clause("第三条 付款方式：验收合格后，具体账期按第四条执行。", clause_no=[3]),
+        _clause("第四条 履行期限：合同签订生效后10个工作日内付清。", clause_no=[4]),
+    ]
+    base_facts = analysis.extract_payment_term(base)
+    revised_facts = analysis.extract_payment_term(revised)
+    assert (base_facts["value"], base_facts["unit"]) == (10, "workday")
+    assert analysis.align_item("payment_term", base_facts, revised_facts) == "modified"
+    assert (
+        analysis.align_item(
+            "start_condition",
+            analysis.extract_start_condition(base),
+            analysis.extract_start_condition(revised),
+        )
+        == "unchanged"
+    )
+
+
+def test_overlapping_start_events_do_not_double_count():
+    """「合同生效之日起」只算一个起算事件，不得同时计 合同生效 + 生效之日。"""
+    facts = analysis.extract_start_condition(
+        [
+            _clause(
+                "第三条 付款期限：甲方应在合同生效之日起10个工作日内支付货款。",
+                clause_no=[3],
+            )
+        ]
+    )
+    assert facts["status"] == "identified"
+    assert facts["events"] == ["合同生效"]
