@@ -94,6 +94,10 @@ NON_PAYMENT_CONTEXT = (
 # 「天」按自然日；单独「日」无法判定自然日/工作日 → ambiguous。
 DURATION_RE = re.compile(r"(\d+)\s*(个)?\s*(工作日|自然日|日历日|天|日)")
 MONTH_RE = re.compile(r"(\d+)\s*个\s*月")
+# 中文数字月份（三个月 / 六个月）
+CN_MONTH_RE = re.compile(r"([一二两三四五六七八九十百零〇]+)\s*个\s*月")
+# 交付类事件：期限归属与屏蔽时视作“非付款”锚点。
+DELIVERY_TERMS = ("交付", "交货", "供货", "安装", "发货")
 # 中文数字期限（三十日 / 六十个工作日 / 一百零五天）
 CN_DURATION_RE = re.compile(
     r"([一二两三四五六七八九十百零〇]+)\s*(个)?\s*(工作日|自然日|日历日|天|日)"
@@ -152,13 +156,6 @@ START_EVENTS = (
     "开票",
 )
 ACCEPTANCE_TERMS = ("验收合格", "对账单", "验收", "发票", "对账")
-ACCEPTANCE_TERM_CONCEPTS = {
-    "验收合格": "acceptance",
-    "验收": "acceptance",
-    "对账单": "reconciliation",
-    "对账": "reconciliation",
-    "发票": "invoice",
-}
 EXCEPTION_TERMS = (
     "不可抗力",
     "补充协议",
@@ -258,6 +255,26 @@ def _collapse_mask(text: str) -> str:
 _HEADING_SPLIT_RE = re.compile(r"[:：]")
 
 
+def _duration_owned_by_delivery(sentence: str, start: int, end: int) -> bool:
+    """期限归属交付类事件时，不作为付款期限。
+
+    「30天内交付货款」中的「交付货款」是付款动词短语，仍属付款；
+    「10个工作日内交付，甲方随后付款」的 10 归交付（不作为付款 hit）。
+    """
+    after = sentence[end:]
+    if re.search(r"交付(?:全部|首期|剩余|合同约定)?(?:货款|价款|款项)", after[:12]):
+        return False
+    delivery_index = min(
+        (after.find(term) for term in DELIVERY_TERMS if term in after), default=None
+    )
+    payment_index = min(
+        (after.find(keyword) for keyword in PAYMENT_KEYWORDS if keyword in after), default=None
+    )
+    if delivery_index is None:
+        return False
+    return payment_index is None or delivery_index < payment_index
+
+
 def _mask_payment_durations(text: str) -> str:
     """只屏蔽“最近的语义锚点是付款词”的期限数字。
 
@@ -269,6 +286,7 @@ def _mask_payment_durations(text: str) -> str:
         list(DURATION_RE.finditer(text))
         + list(MONTH_RE.finditer(text))
         + list(CN_DURATION_RE.finditer(text))
+        + list(CN_MONTH_RE.finditer(text))
     )
     mask_spans = sorted(
         {
@@ -292,6 +310,68 @@ def _mask_payment_durations(text: str) -> str:
     return "".join(parts)
 
 
+_CONTINUATION_SUBJECTS = (
+    "甲方",
+    "乙方",
+    "丙方",
+    "丁方",
+    "戊方",
+    "双方",
+    "各方",
+    "任何一方",
+    "卖方",
+    "买方",
+    "供方",
+    "需方",
+    "承包人",
+    "发包人",
+    "供应商",
+    "采购人",
+)
+
+# 连词后接通知/约定类动词时，付款只是被提及而非延续前一片段的谓语。
+_CONTINUATION_INTERVENING_VERBS = (
+    "通知",
+    "告知",
+    "提醒",
+    "要求",
+    "约定",
+    "确认",
+    "申请",
+    "催告",
+    "提交",
+)
+
+
+def _payment_continues_after_fragment(text: str, boundary_end: int, sentence_end: int) -> bool:
+    """逗号后是否为“并/且/同时支付”式谓语延续。
+
+    「完成对账，并支付货款」的付款期限可以跨逗号归付款；
+    「完成验收，随后付款/付款/之后付款/再付款」是新谓语，不得回吸前一片段的期限；
+    「完成验收，并由甲方支付货款 / 并提醒付款」连接新主语或通知类动词，
+    期限只约束前一片段，同样不得跨逗号归付款。
+    """
+    tail = text[boundary_end:sentence_end].lstrip()
+    if not tail:
+        return False
+    payment_positions = [tail.find(keyword) for keyword in PAYMENT_KEYWORDS if keyword in tail]
+    if not payment_positions:
+        return False
+    pay_pos = min(payment_positions)
+    if any(subject in tail[:pay_pos] for subject in _CONTINUATION_SUBJECTS):
+        return False
+    if tail[0] in "并且":
+        lead = tail[1:pay_pos]
+    elif tail.startswith("同时"):
+        lead = tail[2:pay_pos]
+    else:
+        # 连词紧贴付款词（「核对无误并支付」）仍算延续。
+        if pay_pos >= 1 and tail[pay_pos - 1] in "并且":
+            return True
+        return pay_pos >= 2 and tail[pay_pos - 2 : pay_pos] == "同时"
+    return not any(verb in lead for verb in _CONTINUATION_INTERVENING_VERBS)
+
+
 def _nearest_anchor_is_payment(text: str, start: int, end: int) -> bool:
     """判断期限之后的最近语义锚点是否为付款词（方向感知）。
 
@@ -299,11 +379,37 @@ def _nearest_anchor_is_payment(text: str, start: int, end: int) -> bool:
     此时期限前紧邻的「验收合格」并不是它的归属；只有期限之后存在锚点时才由其
     决定归属，之后没有锚点才回看之前（覆盖「10天内起算」这类后置定义）。
     """
+    # 连谓结构：期限之后、下一个期限之前若出现付款动词（且没有交付类词），
+    # 该期限归付款（「30天内完成对账并支付」的 30 是付款期限）。
+    next_starts: list[int] = []
+    for pattern in (DURATION_RE, MONTH_RE, CN_DURATION_RE, CN_MONTH_RE):
+        for match in pattern.finditer(text):
+            if match.start() >= end:
+                next_starts.append(match.start())
+    # 付款动词必须与期限同句：后一句的「付款」不得把前一句的验收期限判成付款。
+    sentence_end = len(text)
+    boundary = SENTENCE_SPLIT_RE.search(text, end)
+    if boundary:
+        sentence_end = boundary.start()
+    # 连谓付款动词必须与期限同片段：逗号/顿号后的「随后付款」不得回吸前一片段。
+    fragment_end = len(text)
+    fragment_boundary = FRAGMENT_SPLIT_RE.search(text, end)
+    if fragment_boundary:
+        fragment_end = fragment_boundary.start()
+        if _payment_continues_after_fragment(text, fragment_boundary.end(), sentence_end):
+            fragment_end = sentence_end
+    span_end = min(next_starts + [sentence_end, fragment_end])
+    span = text[end:span_end]
+    if any(keyword in span for keyword in PAYMENT_KEYWORDS) and not any(
+        delivery in span for delivery in DELIVERY_TERMS
+    ):
+        return True
+
     after: list[tuple[int, int]] = []
     before: list[tuple[int, int]] = []
     for kind, terms in (
         (0, PAYMENT_KEYWORDS),
-        (1, START_EVENTS + ACCEPTANCE_TERMS),
+        (1, START_EVENTS + ACCEPTANCE_TERMS + DELIVERY_TERMS),
     ):
         for term in terms:
             index = text.find(term)
@@ -567,6 +673,9 @@ def extract_payment_term(clauses: list[Clause]) -> dict[str, Any]:
                         "unit": UNIT_MAP.get(unit_raw),
                         "unit_raw": unit_raw,
                         "raw": match.group(0),
+                        "_sentence": sentence,
+                        "_start": match.start(),
+                        "_end": match.end(),
                         "_clause": clause,
                     }
                 )
@@ -575,12 +684,44 @@ def extract_payment_term(clauses: list[Clause]) -> dict[str, Any]:
                     continue
                 if _is_date_fragment(sentence, match.start(), "月"):
                     continue
+                if match.start() > 0 and sentence[match.start() - 1] in "第年月日同唯统数几千万":
+                    continue
+                if re.match(r"\s*\d+\s*[日号]", sentence[match.end() :]):
+                    continue
                 hits.append(
                     {
                         "value": int(match.group(1)),
                         "unit": "month",
                         "unit_raw": "月",
                         "raw": match.group(0),
+                        "_sentence": sentence,
+                        "_start": match.start(),
+                        "_end": match.end(),
+                        "_clause": clause,
+                    }
+                )
+            for match in CN_MONTH_RE.finditer(sentence):
+                value = _cn_to_int(match.group(1))
+                if value is None:
+                    continue
+                if not _duration_context_ok(sentence, match.start(), match.end()):
+                    continue
+                if match.start() > 0 and sentence[match.start() - 1] in "第年月日同唯统数几千万":
+                    continue
+                # 「三月十五日」是日期，不是三个月期限。
+                if re.match(
+                    r"\s*(?:\d+|[一二三四五六七八九十]+)\s*[日号]", sentence[match.end() :]
+                ):
+                    continue
+                hits.append(
+                    {
+                        "value": value,
+                        "unit": "month",
+                        "unit_raw": "月",
+                        "raw": match.group(0),
+                        "_sentence": sentence,
+                        "_start": match.start(),
+                        "_end": match.end(),
                         "_clause": clause,
                     }
                 )
@@ -603,9 +744,17 @@ def extract_payment_term(clauses: list[Clause]) -> dict[str, Any]:
                         "unit": UNIT_MAP.get(unit_raw),
                         "unit_raw": unit_raw,
                         "raw": match.group(0),
+                        "_sentence": sentence,
+                        "_start": match.start(),
+                        "_end": match.end(),
                         "_clause": clause,
                     }
                 )
+    hits = [
+        hit
+        for hit in hits
+        if not _duration_owned_by_delivery(hit["_sentence"], hit["_start"], hit["_end"])
+    ]
     if not hits:
         reason = "no_duration" if payment_clauses else "no_payment_clause"
         return {"status": "not_found", "reason": reason}
@@ -696,32 +845,18 @@ def _heading_contains(clause: Clause, terms: tuple[str, ...]) -> bool:
     return any(term in heading for term in terms)
 
 
-def _clause_concepts(
-    clause: Clause, terms: tuple[str, ...], concept_map: dict[str, str] | None
-) -> set[str]:
-    """条款文本中出现的术语所对应的概念集合（不依赖全局去重后的 hits）。"""
-    return {concept_map.get(term, term) for term in terms if term in clause.text}
-
-
 def _primary_term_hit(
     hits: list[dict[str, Any]],
     term_clauses: list[Clause],
     terms: tuple[str, ...],
-    concept_map: dict[str, str] | None,
 ) -> Clause:
-    """静态主证据（无变化时的回退）：标题命中优先；若其它条款含有标题条款没有
-    的概念（发票/对账），选该条款。概念集按条款文本构建，避免全局术语去重
-    带来的顺序依赖。"""
+    """静态主证据（无变化/无法判定时的回退）：标题命中优先，否则首个命中。
+
+    变化项由 `refine_primary_locator` 在拿到两侧事实后指向实际变化条款；
+    静态路径不再做概念重定向（未变化项指向标题条款才是用户期望的证据）。
+    """
     heading_clauses = [clause for clause in term_clauses if _heading_contains(clause, terms)]
-    if not heading_clauses:
-        return hits[0]["_clause"]
-    heading_clause = heading_clauses[0]
-    if concept_map:
-        heading_concepts = _clause_concepts(heading_clause, terms, concept_map)
-        for clause in term_clauses:
-            if _clause_concepts(clause, terms, concept_map) - heading_concepts:
-                return clause
-    return heading_clause
+    return heading_clauses[0] if heading_clauses else hits[0]["_clause"]
 
 
 def refine_primary_locator(
@@ -756,6 +891,9 @@ def refine_primary_locator(
         digest = _content_sha_for(clause, item_key)
         if other_counts.get(digest, 0) <= 0:
             candidates.append(clause)
+    if item_key != "exception":
+        # 独立例外条款归 exception 项：不能劫持验收/付款/起算的证据。
+        candidates = [c for c in candidates if not _is_exception_article(c)]
     if not candidates:
         return
 
@@ -780,7 +918,6 @@ def _collect_terms(
     clauses: list[Clause],
     terms: tuple[str, ...],
     item_key: str = "acceptance_invoice",
-    concept_map: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     hits: list[dict[str, Any]] = []
     for clause in clauses:
@@ -791,7 +928,7 @@ def _collect_terms(
         return {"status": "not_found", "reason": "no_terms"}
     contributing_clauses = [hit["_clause"] for hit in hits]
     all_term_clauses = [clause for clause in clauses if any(term in clause.text for term in terms)]
-    primary_clause = _primary_term_hit(hits, all_term_clauses, terms, concept_map)
+    primary_clause = _primary_term_hit(hits, all_term_clauses, terms)
     # 验收项：同术语的第二条款也要参与变更检测（S1）；独立例外条款归例外项，
     # 不参与验收文本哈希（否则新增例外条款会误报验收 modified）。
     hash_clauses = contributing_clauses
@@ -817,7 +954,7 @@ def extract_cross_refs(clauses: list[Clause]) -> list[str]:
 
 
 def extract_acceptance_invoice(clauses: list[Clause]) -> dict[str, Any]:
-    return _collect_terms(clauses, ACCEPTANCE_TERMS, concept_map=ACCEPTANCE_TERM_CONCEPTS)
+    return _collect_terms(clauses, ACCEPTANCE_TERMS)
 
 
 def extract_exception(clauses: list[Clause]) -> dict[str, Any]:

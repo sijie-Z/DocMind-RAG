@@ -156,7 +156,8 @@ def test_dates_and_warranty_periods_are_not_payment_terms():
     chinese = analysis.extract_payment_term(
         [_clause("第一条 付款期限为六个月，合同于2025年3月签订。")]
     )
-    assert chinese == {"status": "not_found", "reason": "no_duration"}
+    assert chinese["status"] == "identified"
+    assert (chinese["value"], chinese["unit"]) == (6, "month")
 
     mixed = analysis.extract_payment_term(
         [_clause("第一条 付款期限为30天，合同签署日期2025年3月15日。")]
@@ -417,13 +418,11 @@ def test_compound_overdue_phrases_are_not_payment_terms():
     assert unpaid == {"status": "not_found", "reason": "no_duration"}
 
 
-@pytest.mark.xfail(reason="v1 边界：付款后 N 天内交货的复合语序未区分方向", strict=True)
 def test_delivery_after_payment_is_boundary():
     facts = analysis.extract_payment_term([_clause("第八条 甲方付款后30天内，乙方交货。")])
     assert facts == {"status": "not_found", "reason": "no_duration"}
 
 
-@pytest.mark.xfail(reason="v1 边界：N 天内交货 + 下一分句付款", strict=True)
 def test_delivery_first_with_payment_next_is_boundary():
     facts = analysis.extract_payment_term([_clause("第八条 甲方应在30天内交货，乙方付款。")])
     assert facts == {"status": "not_found", "reason": "no_duration"}
@@ -1252,21 +1251,33 @@ def test_exception_primary_locator_prefers_exception_heading():
     assert 2 in (facts["clause_no_union"] or [])
 
 
-def test_acceptance_primary_points_to_invoice_reconciliation_clause():
-    """发票/对账概念只在付款条款出现时，主证据应指向该条款（真正的变化处）。"""
-    invoice_clauses = [
+def test_invoice_reconciliation_change_points_primary_to_payment_clause():
+    """发票/对账在付款条款新增时，差异感知主证据指向付款条款（变化处）。"""
+    base = [
+        _clause("第三条 付款期限：甲方应在验收合格后30天支付货款。", clause_no=[3]),
+        _clause("第四条 验收：乙方交付后10个工作日内完成验收。", clause_no=[4]),
+    ]
+    invoice = [
         _clause("第三条 付款期限：甲方应在收到发票后30天支付货款。", clause_no=[3]),
         _clause("第四条 验收：乙方交付后10个工作日内完成验收。", clause_no=[4]),
     ]
-    invoice_facts = analysis.extract_acceptance_invoice(invoice_clauses)
-    assert invoice_facts["clause_no"] == [3]
-
-    recon_clauses = [
+    recon = [
         _clause("第三条 付款期限：甲方应在验收合格并对账无误后30天支付货款。", clause_no=[3]),
         _clause("第四条 验收：乙方交付后10个工作日内完成验收。", clause_no=[4]),
     ]
-    recon_facts = analysis.extract_acceptance_invoice(recon_clauses)
-    assert recon_facts["clause_no"] == [3]
+    base_facts = analysis.extract_acceptance_invoice(base)
+    for revised in (invoice, recon):
+        revised_facts = analysis.extract_acceptance_invoice(revised)
+        assert analysis.align_item("acceptance_invoice", base_facts, revised_facts) == "modified"
+        analysis.refine_primary_locator(
+            "acceptance_invoice",
+            base_facts,
+            revised_facts,
+            "modified",
+            base_clauses=base,
+            revised_clauses=revised,
+        )
+        assert revised_facts["clause_no"] == [3]
 
 
 def test_change_aware_primary_fixes_acceptance_first_render():
@@ -1293,7 +1304,7 @@ def test_change_aware_primary_fixes_acceptance_first_render():
     assert revised_facts["clause_no"] == [3]
 
 
-def test_heading_concepts_built_from_text_are_order_independent():
+def test_mixed_heading_primary_is_order_independent():
     """混合标题「验收与付款」条款必须被选为主证据，且不依赖条款顺序/全局去重。"""
     mixed_text = "验收与付款：验收合格后凭发票付款，并对账无误后结算。"
     variants = [
@@ -1322,11 +1333,6 @@ def test_shared_term_union_keeps_acceptance_clause():
     facts = analysis.extract_acceptance_invoice(clauses)
     assert facts["clause_no"] == [4]
     assert {3, 4} <= set(facts["clause_no_union"])
-
-
-def test_acceptance_concept_map_covers_all_terms():
-    """ACCEPTANCE_TERMS 新增词必须同时配置概念映射，否则会被当成“新概念”误重定向。"""
-    assert set(analysis.ACCEPTANCE_TERMS) <= set(analysis.ACCEPTANCE_TERM_CONCEPTS)
 
 
 def test_refine_primary_locator_keeps_static_when_no_clause_numbers():
@@ -1663,3 +1669,249 @@ def test_exception_body_subject_list_covers_common_roles():
         facts = analysis.extract_payment_term([clause])
         assert facts["status"] == "identified", text
         assert (facts["value"], facts["unit"]) == (30, "day"), text
+
+
+# ── D9：中文数字月份 / 连谓归因 / 交付期限 ─────────────────────────────────
+
+
+def test_cn_month_durations_extracted():
+    three = analysis.extract_payment_term(
+        [_clause("第三条 付款期限：甲方应在验收合格后三个月内支付货款。", clause_no=[3])]
+    )
+    assert three["status"] == "identified"
+    assert (three["value"], three["unit"]) == (3, "month")
+
+    date_like = analysis.extract_payment_term(
+        [_clause("第三条 付款期限：合同于2025年3月签订，甲方应支付货款。", clause_no=[3])]
+    )
+    assert date_like["status"] == "not_found"
+    cn_date = analysis.extract_payment_term(
+        [_clause("第三条 付款期限：付款日为三月十五日，甲方应支付货款。", clause_no=[3])]
+    )
+    assert cn_date["status"] == "not_found"
+
+
+def test_connected_predicate_payment_duration_attribution():
+    """「30天内完成对账并支付」的 30 归付款；改天数不得污染起算/验收。"""
+    base = _contract_clauses("甲方应在验收合格后30天内完成对账并支付货款。", _ACC_TEXT)
+    revised = _contract_clauses("甲方应在验收合格后60天内完成对账并支付货款。", _ACC_TEXT)
+    assert (
+        analysis.align_item(
+            "payment_term",
+            analysis.extract_payment_term(base),
+            analysis.extract_payment_term(revised),
+        )
+        == "modified"
+    )
+    assert (
+        analysis.align_item(
+            "start_condition",
+            analysis.extract_start_condition(base),
+            analysis.extract_start_condition(revised),
+        )
+        == "unchanged"
+    )
+    assert (
+        analysis.align_item(
+            "acceptance_invoice",
+            analysis.extract_acceptance_invoice(base),
+            analysis.extract_acceptance_invoice(revised),
+        )
+        == "unchanged"
+    )
+
+
+def test_delivery_duration_is_not_payment_term():
+    """交付期限 10→15 个工作日归交付/验收，不被付款锚点吸走。"""
+    base = _contract_clauses(
+        "甲方应在验收合格后30天支付货款。", "乙方应在10个工作日内交付，甲方随后付款。"
+    )
+    revised = _contract_clauses(
+        "甲方应在验收合格后30天支付货款。", "乙方应在15个工作日内交付，甲方随后付款。"
+    )
+    assert (
+        analysis.align_item(
+            "acceptance_invoice",
+            analysis.extract_acceptance_invoice(base),
+            analysis.extract_acceptance_invoice(revised),
+        )
+        == "modified"
+    )
+    payment = analysis.extract_payment_term(base)
+    assert payment["status"] == "identified"
+    assert (payment["value"], payment["unit"]) == (30, "day")
+
+
+def test_acceptance_duration_with_payment_in_next_sentence_not_masked():
+    """后一句的「付款」不得把前一句的验收期限判成付款并吞掉变化（D9 阻断回归）。"""
+    base = [_clause("第四条 验收：乙方应在10个工作日内完成验收。甲方应付款。", clause_no=[4])]
+    revised = [_clause("第四条 验收：乙方应在15个工作日内完成验收。甲方应付款。", clause_no=[4])]
+    assert (
+        analysis.align_item(
+            "acceptance_invoice",
+            analysis.extract_acceptance_invoice(base),
+            analysis.extract_acceptance_invoice(revised),
+        )
+        == "modified"
+    )
+
+
+def test_arabic_month_leading_char_guard_matches_cn():
+    """「自第3个月起」与「自第三个月起」口径一致，均不抽为月份期限。"""
+    arabic = analysis.extract_payment_term(
+        [_clause("第三条 付款期限：甲方应自第3个月起支付货款。", clause_no=[3])]
+    )
+    chinese = analysis.extract_payment_term(
+        [_clause("第三条 付款期限：甲方应自第三个月起支付货款。", clause_no=[3])]
+    )
+    assert arabic["status"] == "not_found"
+    assert chinese["status"] == "not_found"
+
+
+def test_payment_after_delivery_event_is_still_payment():
+    """交货/交付作为触发事件时，期限后的付款动词仍应识别为付款期限（A-1）。"""
+    cases = {
+        "第三条 付款期限：交货后30日内，甲方支付货款。": ("ambiguous", 30),
+        "第三条 付款期限：交付后5个工作日内，甲方支付货款。": ("identified", 5),
+        "第三条 付款期限：甲方应在30天内交付货款。": ("identified", 30),
+        "第三条 付款期限：乙方发货后30天内甲方付款。": ("identified", 30),
+    }
+    for text, (status, value) in cases.items():
+        facts = analysis.extract_payment_term([_clause(text, clause_no=[3])])
+        assert facts["status"] == status, text
+        if status == "identified":
+            assert facts["value"] == value, text
+        else:
+            assert facts["candidates"][0]["value"] == value, text
+
+
+def test_payment_first_delivery_after_is_not_payment():
+    """「付款后30天内交货」的 30 是交付期限，不是付款期限。"""
+    facts = analysis.extract_payment_term([_clause("第八条 甲方付款后30天内，乙方交货。")])
+    assert facts == {"status": "not_found", "reason": "no_duration"}
+
+
+def test_refine_excludes_exception_candidates_without_moving_static():
+    """refine 候选排除独立例外条款：只剩例外候选时保留静态主证据（A-7）。"""
+    base_clause = _clause("第四条 验收：乙方交付后10个工作日内完成验收。", clause_no=[4])
+    exception_clause = _clause("第九条 例外 因不可抗力导致验收延迟的，顺延30天。", clause_no=[9])
+    base_facts = analysis.extract_acceptance_invoice([base_clause])
+    revised_facts = analysis.extract_acceptance_invoice([base_clause, exception_clause])
+    # 人工构造 modified 场景，直接验证 refine 的例外候选过滤。
+    static_chunk = revised_facts["chunk_id"]
+    analysis.refine_primary_locator(
+        "acceptance_invoice",
+        base_facts,
+        revised_facts,
+        "modified",
+        base_clauses=[base_clause],
+        revised_clauses=[base_clause, exception_clause],
+    )
+    assert revised_facts["chunk_id"] == static_chunk
+
+
+def test_acceptance_duration_with_payment_in_next_comma_clause_not_masked():
+    """逗号分句后的「随后付款」不得回吸前一片段的验收期限（B 残余 blocker）。"""
+    base = [_clause("第四条 验收：乙方应在10个工作日内完成验收，甲方随后付款。", clause_no=[4])]
+    revised = [_clause("第四条 验收：乙方应在15个工作日内完成验收，甲方随后付款。", clause_no=[4])]
+    assert (
+        analysis.align_item(
+            "acceptance_invoice",
+            analysis.extract_acceptance_invoice(base),
+            analysis.extract_acceptance_invoice(revised),
+        )
+        == "modified"
+    )
+
+
+def test_comma_conjunctive_payment_continuation_is_masked():
+    """逗号后「并/且支付」式谓语延续（无新主语）时，付款期限仍归付款。"""
+    variants = (
+        "甲方应在验收合格后30天内完成对账，并支付货款。",
+        "甲方应在验收合格后30天内，完成对账并支付货款。",
+    )
+    for text in variants:
+        base = _contract_clauses(text, _ACC_TEXT)
+        revised = _contract_clauses(text.replace("30", "60", 1), _ACC_TEXT)
+        assert (
+            analysis.align_item(
+                "payment_term",
+                analysis.extract_payment_term(base),
+                analysis.extract_payment_term(revised),
+            )
+            == "modified"
+        ), text
+        assert (
+            analysis.align_item(
+                "start_condition",
+                analysis.extract_start_condition(base),
+                analysis.extract_start_condition(revised),
+            )
+            == "unchanged"
+        ), text
+        assert (
+            analysis.align_item(
+                "acceptance_invoice",
+                analysis.extract_acceptance_invoice(base),
+                analysis.extract_acceptance_invoice(revised),
+            )
+            == "unchanged"
+        ), text
+
+
+def test_delivery_payment_compound_variants_are_payment():
+    """交付首期/剩余/合同约定 货款等词形仍按付款短语处理（A-2 残余）。"""
+    texts = (
+        "第三条 付款期限：甲方应在30天内向乙方交付首期货款。",
+        "第三条 付款期限：甲方应在30天内交付剩余价款。",
+        "第三条 付款期限：甲方应在30天内交付合同约定款项。",
+    )
+    for text in texts:
+        facts = analysis.extract_payment_term([_clause(text, clause_no=[3])])
+        assert facts["status"] == "identified", text
+        assert (facts["value"], facts["unit"]) == (30, "day"), text
+
+
+def test_comma_payment_without_conjunction_does_not_shield_acceptance():
+    """「，随后付款/付款/之后付款/再付款」是新谓语，不得屏蔽验收期限（B 回归）。"""
+    for tail in ("随后付款", "付款", "之后付款", "再付款"):
+        base = [_clause(f"第四条 验收：乙方应在10个工作日内完成验收，{tail}。", clause_no=[4])]
+        revised = [_clause(f"第四条 验收：乙方应在15个工作日内完成验收，{tail}。", clause_no=[4])]
+        assert (
+            analysis.align_item(
+                "acceptance_invoice",
+                analysis.extract_acceptance_invoice(base),
+                analysis.extract_acceptance_invoice(revised),
+            )
+            == "modified"
+        ), tail
+
+
+def test_conjunction_with_new_subject_does_not_shield_acceptance():
+    """连词后出现新主语时，付款是新主语的谓语，不得回吸验收期限（B 回归）。"""
+    for tail in ("并由甲方支付货款", "并约定甲方付款", "并要求甲方付款"):
+        base = [_clause(f"第四条 验收：乙方应在10个工作日内完成验收，{tail}。", clause_no=[4])]
+        revised = [_clause(f"第四条 验收：乙方应在15个工作日内完成验收，{tail}。", clause_no=[4])]
+        assert (
+            analysis.align_item(
+                "acceptance_invoice",
+                analysis.extract_acceptance_invoice(base),
+                analysis.extract_acceptance_invoice(revised),
+            )
+            == "modified"
+        ), tail
+
+
+def test_conjunction_with_notification_verb_does_not_shield_acceptance():
+    """连词后接通知/约定类动词时，付款只是被提及，不得回吸验收期限（B 回归）。"""
+    for tail in ("并通知甲方付款", "并提醒付款", "并确认付款方式"):
+        base = [_clause(f"第四条 验收：乙方应在10个工作日内完成验收，{tail}。", clause_no=[4])]
+        revised = [_clause(f"第四条 验收：乙方应在15个工作日内完成验收，{tail}。", clause_no=[4])]
+        assert (
+            analysis.align_item(
+                "acceptance_invoice",
+                analysis.extract_acceptance_invoice(base),
+                analysis.extract_acceptance_invoice(revised),
+            )
+            == "modified"
+        ), tail
