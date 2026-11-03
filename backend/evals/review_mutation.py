@@ -32,6 +32,19 @@ def _patched(target: Any, name: str, value: Any) -> Iterator[None]:
         setattr(target, name, original)
 
 
+def _hint_only_heading_end(text: str, heading_hint: str | None = None) -> int:
+    """hint 失配时不按当前文本回退的旧行为（期限屏蔽后标题无法剥离）。"""
+    if not heading_hint:
+        return 0
+    index = text.find(heading_hint)
+    if index == -1 or index > 20:
+        return 0
+    end = index + len(heading_hint)
+    if text[end : end + 1] in ":：":
+        end += 1
+    return end
+
+
 def _uncapped_heading_end(text: str, heading_hint: str | None = None) -> int:
     """忽略标题 hint、全文找冒号的旧行为：正文冒号也会被当标题分隔符。"""
     match = analysis._CLAUSE_NUMBER_PREFIX_RE.match(text)
@@ -117,6 +130,11 @@ def _mutation_specs() -> list[tuple[str, str, Any]]:
             "heading_colon_uncapped",
             "标题冒号不设 40 字上限（正文冒号被当标题）",
             lambda: _patched(analysis, "_heading_end", _uncapped_heading_end),
+        ),
+        (
+            "heading_hint_no_fallback",
+            "标题 hint 失配时不按当前文本回退（期限屏蔽后标题不剥离）",
+            lambda: _patched(analysis, "_heading_end", _hint_only_heading_end),
         ),
     ]
 

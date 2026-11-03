@@ -526,12 +526,18 @@ def _full_title(raw_text: str) -> str | None:
 def _heading_end(text: str, heading_hint: str | None = None) -> int:
     """标题结束位置（含分隔冒号）。用 raw 标题 hint 定位；无 hint 返回 0。
 
-    不再用固定 40 字窗口：长标题会被误判为非标题（评审 A 回退 2）。hint
-    只在紧邻「第X条」之后（前 20 字内）出现时才可信。
+    start/acceptance 哈希会先屏蔽付款期限，标题里的「30日」变成掩码，
+    raw hint 可能失配；此时按当前文本重新提取标题（评审 B B2）。hint 只在
+    紧邻「第X条」之后（前 20 字内）出现时才可信。
     """
     if not heading_hint:
         return 0
     index = text.find(heading_hint)
+    if index == -1:
+        heading_hint = _full_title(text)
+        if not heading_hint:
+            return 0
+        index = text.find(heading_hint)
     if index == -1 or index > 20:
         return 0
     end = index + len(heading_hint)

@@ -2636,3 +2636,50 @@ def test_multi_topic_heading_keeps_all_topics_for_evidence():
     facts = analysis.extract_acceptance_invoice(clauses)
     assert facts["clause_no"] == [4]
     assert {3, 4} <= set(facts["clause_no_union"])
+
+
+def test_penalty_title_with_duration_does_not_hide_changes():
+    """标题含「逾期30日付款违约金」时，期限屏蔽后 hint 失配不得吞掉变化（D13 R3）。"""
+    base = [
+        _clause(
+            "第十条 逾期30日付款违约金：乙方交付后10个工作日内完成验收，"
+            "验收后30天内向甲方支付货款。",
+            clause_no=[10],
+        )
+    ]
+    revised = [
+        _clause(
+            "第十条 逾期30日付款违约金：乙方交付后15个工作日内完成验收，"
+            "验收后30天内向甲方支付货款。",
+            clause_no=[10],
+        )
+    ]
+    assert (
+        analysis.align_item(
+            "acceptance_invoice",
+            analysis.extract_acceptance_invoice(base),
+            analysis.extract_acceptance_invoice(revised),
+        )
+        == "modified"
+    )
+
+    start_base = [
+        _clause(
+            "第五条 逾期30日付款违约金：甲方应在验收合格后30天内向乙方支付货款。",
+            clause_no=[5],
+        )
+    ]
+    start_revised = [
+        _clause(
+            "第五条 逾期30日付款违约金：甲方应在验收合格之日起30天内向乙方支付货款。",
+            clause_no=[5],
+        )
+    ]
+    assert (
+        analysis.align_item(
+            "start_condition",
+            analysis.extract_start_condition(start_base),
+            analysis.extract_start_condition(start_revised),
+        )
+        == "modified"
+    )
