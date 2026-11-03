@@ -2278,3 +2278,182 @@ def test_referenced_clause_acceptance_term_change_does_not_flip_payment():
         )
         == "modified"
     )
+
+
+def test_start_condition_ignores_liability_articles():
+    """违约/赔偿条款里的「合同生效」是责任成立条件，不是付款起算（N1）。"""
+    clauses = [
+        _clause("第三条 付款期限：甲方应在验收合格后30天内支付货款。", clause_no=[3]),
+        _clause(
+            "第六条 违约责任：合同生效后，违约方应向守约方支付违约金，违约金为合同总价的5%。",
+            clause_no=[6],
+        ),
+    ]
+    facts = analysis.extract_start_condition(clauses)
+    assert facts["events"] == ["验收合格"]
+
+    only_liability = analysis.extract_start_condition(
+        [
+            _clause(
+                "第六条 违约责任：合同生效后，违约方应向守约方支付违约金。",
+                clause_no=[6],
+            )
+        ]
+    )
+    assert only_liability["status"] == "not_found"
+
+
+def test_liability_heading_with_payment_terms_is_not_excluded():
+    """混合标题（付款期限及违约责任/逾期付款违约金）不得整条踢出起算（评审 B B1）。"""
+    for heading in ("付款期限及违约责任", "逾期付款违约金", "违约责任及付款期限"):
+        facts = analysis.extract_start_condition(
+            [
+                _clause(
+                    f"第六条 {heading}：甲方应在验收合格后30天内支付货款。",
+                    clause_no=[6],
+                )
+            ]
+        )
+        assert facts["status"] == "identified", heading
+        assert facts["events"] == ["验收合格"], heading
+
+
+def test_liability_heading_after_clause_number_colon_is_excluded():
+    """「第六条：违约责任：…」也是独立责任条款，应排除出起算。"""
+    facts = analysis.extract_start_condition(
+        [
+            _clause(
+                "第六条：违约责任：合同生效后，违约方应向守约方支付违约金。",
+                clause_no=[6],
+            )
+        ]
+    )
+    assert facts["status"] == "not_found"
+
+
+def test_mixed_liability_sentence_does_not_pollute_items():
+    """混合条款里的违约金句不得污染起算/付款/验收（评审 A 阻断 1）。"""
+    base = [
+        _clause(
+            "第三条 付款期限及违约责任：甲方应在验收合格后30天内支付货款。"
+            "合同生效后，违约方应向守约方支付违约金，违约金为合同总价的5%。",
+            clause_no=[3],
+        )
+    ]
+    revised = [
+        _clause(
+            "第三条 付款期限及违约责任：甲方应在验收合格后30天内支付货款。"
+            "合同生效后，违约方应向守约方支付违约金，违约金为合同总价的10%。",
+            clause_no=[3],
+        )
+    ]
+    for item in ("payment_term", "start_condition", "acceptance_invoice"):
+        assert (
+            analysis.align_item(
+                item,
+                analysis.EXTRACTORS[item](base),
+                analysis.EXTRACTORS[item](revised),
+            )
+            == "unchanged"
+        ), item
+    assert analysis.extract_start_condition(base)["events"] == ["验收合格"]
+
+
+def test_no_colon_liability_heading_is_excluded():
+    """「第六条 违约责任」换行正文（无冒号）也必须排除出起算（评审 A 阻断 2）。"""
+    facts = analysis.extract_start_condition(
+        [
+            _clause(
+                "第六条 违约责任\n合同生效后，违约方应向守约方支付违约金。",
+                clause_no=[6],
+            )
+        ]
+    )
+    assert facts["status"] == "not_found"
+
+
+def test_single_colon_liability_heading_is_excluded():
+    """「第六条：违约责任 合同生效后…」单冒号形态也应排除。"""
+    facts = analysis.extract_start_condition(
+        [
+            _clause(
+                "第六条：违约责任 合同生效后，违约方应向守约方支付违约金。",
+                clause_no=[6],
+            )
+        ]
+    )
+    assert facts["status"] == "not_found"
+
+
+def test_comma_connected_penalty_keeps_payment_obligation():
+    """逗号连接「付款货款，逾期按日支付违约金」：付款义务不得被整句屏蔽。"""
+    base = [
+        _clause(
+            "第三条 付款期限：甲方应在验收合格后30天内向乙方支付货款，"
+            "逾期付款的按应付款项每日万分之五支付违约金。",
+            clause_no=[3],
+        )
+    ]
+    assert analysis.extract_start_condition(base)["events"] == ["验收合格"]
+
+    start_changed = [
+        _clause(
+            "第三条 付款期限：甲方应在合同生效后30天内向乙方支付货款，"
+            "逾期付款的按应付款项每日万分之五支付违约金。",
+            clause_no=[3],
+        )
+    ]
+    assert (
+        analysis.align_item(
+            "start_condition",
+            analysis.extract_start_condition(base),
+            analysis.extract_start_condition(start_changed),
+        )
+        == "modified"
+    )
+
+    subject_changed = [
+        _clause(
+            "第三条 付款期限：甲方应在验收合格后30天内向丙方支付服务费，"
+            "逾期付款的按应付款项每日万分之五支付违约金。",
+            clause_no=[3],
+        )
+    ]
+    assert (
+        analysis.align_item(
+            "payment_term",
+            analysis.extract_payment_term(base),
+            analysis.extract_payment_term(subject_changed),
+        )
+        == "modified"
+    )
+
+    negated = [
+        _clause(
+            "第三条 付款期限：甲方应在验收合格后30天内不支付货款，"
+            "逾期付款的按应付款项每日万分之五支付违约金。",
+            clause_no=[3],
+        )
+    ]
+    assert (
+        analysis.align_item(
+            "payment_term",
+            analysis.extract_payment_term(base),
+            analysis.extract_payment_term(negated),
+        )
+        == "modified"
+    )
+
+
+def test_heading_with_clause_number_and_term_colon_keeps_start():
+    """「第六条：逾期付款违约金：…支付货款」标题冒号不得让正文被误屏蔽。"""
+    facts = analysis.extract_start_condition(
+        [
+            _clause(
+                "第六条：逾期付款违约金：甲方应在验收合格后30天内支付货款。",
+                clause_no=[6],
+            )
+        ]
+    )
+    assert facts["status"] == "identified"
+    assert facts["events"] == ["验收合格"]

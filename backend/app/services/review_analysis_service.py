@@ -481,14 +481,105 @@ def _is_exception_article(clause: Clause) -> bool:
     return False
 
 
+_LIABILITY_HEADING_TERMS = ("违约", "赔偿", "罚则")
+_LIABILITY_SENTENCE_TERMS = ("违约", "赔偿", "罚则", "滞纳金", "罚息", "罚款")
+_PENALTY_TERMS = ("违约金", "赔偿金", "滞纳金", "罚息", "罚款", "赔偿损失")
+_LIABILITY_BOUNDARY_RE = re.compile(r"[，,、。；;！!？?\n]")
+
+
+def _heading_segment(raw_text: str) -> str:
+    """取标题段：raw 首行、剥「第X条」与紧随冒号、按标点/空白切第一段。"""
+    first_line = raw_text.splitlines()[0] if raw_text else ""
+    body = _CLAUSE_NUMBER_PREFIX_RE.sub("", first_line, count=1).lstrip(":：").lstrip()
+    return re.split(r"[:：，,。；;、\s]+", body, maxsplit=1)[0][:40]
+
+
+def _heading_end(text: str) -> int:
+    """标题结束位置（含分隔冒号）：跳过「第X条」及其后冒号，再找下一个冒号。"""
+    match = _CLAUSE_NUMBER_PREFIX_RE.match(text)
+    start = match.end() if match else 0
+    if start < len(text) and text[start] in ":：":
+        start += 1
+    colon = _HEADING_SPLIT_RE.search(text, start)
+    return colon.end() if colon else 0
+
+
+def _is_liability_article(clause: Clause) -> bool:
+    """标题为违约/赔偿/罚则的条款：起算词是责任成立条件，不是付款起算。
+
+    标题同时含付款语义（付款期限及违约责任 / 逾期付款违约金）时不排除，
+    否则整条付款条款会被踢出起算（评审 B B1）；标题内的违约金片段与比例
+    由 `_mask_liability_sentences` 在事件与哈希层屏蔽（评审 A 阻断 1）。
+    无冒号标题用 raw 首行识别（评审 A 阻断 2）。
+    """
+    heading = _heading_segment(clause.raw_text or clause.text)
+    if any(keyword in heading for keyword in PAYMENT_KEYWORDS):
+        return False
+    return any(term in heading for term in _LIABILITY_HEADING_TERMS)
+
+
+def _is_liability_piece(piece: str) -> bool:
+    """责任片段：同时出现责任词与违约金/赔偿类词，期限/起算不归付款或验收。"""
+    return any(term in piece for term in _LIABILITY_SENTENCE_TERMS) and any(
+        term in piece for term in _PENALTY_TERMS
+    )
+
+
+def _contains_duration(text: str) -> bool:
+    return any(
+        pattern.search(text) for pattern in (DURATION_RE, MONTH_RE, CN_DURATION_RE, CN_MONTH_RE)
+    )
+
+
+def _mask_liability_sentences(text: str, *, mask_leading_bare: bool = False) -> str:
+    """按逗号/句读片段屏蔽责任片段（保留标题与付款片段）。
+
+    整句屏蔽会吞掉同句内的付款义务（「…支付货款，逾期付款的按日支付违约
+    金」），因此只在片段级替换：片段同时含责任词与违约金类词才屏蔽。
+    mask_leading_bare=True 时，紧邻责任片段之前、且不含付款锚点/期限的过渡
+    片段（如「合同生效后」）也屏蔽，供起算事件抽取使用。
+    """
+    head_end = _heading_end(text)
+    head, body = text[:head_end], text[head_end:]
+
+    pieces: list[tuple[int, int]] = []
+    separators: list[str] = []
+    cursor = 0
+    for match in _LIABILITY_BOUNDARY_RE.finditer(body):
+        pieces.append((cursor, match.start()))
+        separators.append(match.group(0))
+        cursor = match.end()
+    pieces.append((cursor, len(body)))
+    separators.append("")
+
+    flags = [_is_liability_piece(body[start:end]) for start, end in pieces]
+    if mask_leading_bare:
+        for index in range(len(pieces) - 1):
+            if not flags[index + 1] or flags[index]:
+                continue
+            fragment = body[pieces[index][0] : pieces[index][1]]
+            if any(keyword in fragment for keyword in PAYMENT_KEYWORDS):
+                continue
+            if _contains_duration(fragment):
+                continue
+            flags[index] = True
+
+    parts: list[str] = [head]
+    for index, (start, end) in enumerate(pieces):
+        parts.append(_MASK if flags[index] else body[start:end])
+        parts.append(separators[index])
+    return "".join(parts)
+
+
 def _mask_item_noise(text: str, item_key: str) -> str:
     """屏蔽“属于其它核验项”的词元，避免共享条款的文本哈希互相污染。"""
     if item_key == "payment_term":
+        text = _mask_liability_sentences(text)
         for term in sorted(START_EVENTS + ACCEPTANCE_TERMS, key=len, reverse=True):
             text = text.replace(term, _MASK)
         return _collapse_mask(text)
     if item_key in ("start_condition", "acceptance_invoice"):
-        return _mask_payment_durations(text)
+        return _collapse_mask(_mask_liability_sentences(_mask_payment_durations(text)))
     # exception：不屏蔽任何期限——“顺延30天→15天”本身就是例外项的变化。
     return text
 
@@ -987,15 +1078,20 @@ def _non_overlapping_events(text: str, events: tuple[str, ...]) -> set[str]:
 
 
 def extract_start_condition(clauses: list[Clause]) -> dict[str, Any]:
-    # 独立例外条款里的起算事件是顺延条件，不是付款起算条件本身。
+    # 独立例外条款里的起算事件是顺延条件，不是付款起算条件本身；
+    # 违约/赔偿条款里的起算词是责任成立条件，同样不是付款起算。
     payment_clauses = [
         c
         for c in clauses
-        if any(k in c.text for k in PAYMENT_KEYWORDS) and not _is_exception_article(c)
+        if any(k in c.text for k in PAYMENT_KEYWORDS)
+        and not _is_exception_article(c)
+        and not _is_liability_article(c)
     ]
     events: list[dict[str, Any]] = []
     for clause in payment_clauses:
-        clause_events = _non_overlapping_events(clause.text, START_EVENTS)
+        clause_events = _non_overlapping_events(
+            _mask_liability_sentences(clause.text, mask_leading_bare=True), START_EVENTS
+        )
         for event in START_EVENTS:
             if event in clause_events and all(e["event"] != event for e in events):
                 events.append({"event": event, "_clause": clause, **_primary_locator(clause)})

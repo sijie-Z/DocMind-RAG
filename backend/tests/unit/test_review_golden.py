@@ -1,6 +1,6 @@
 """核验 golden set：结构约束 + 评测器敏感性 + 基线快照（D5，评审 A/B 加固）。
 
-- 结构：12 组、每项 change_type 合法、用例文本 >500 字、期望证据条款号真实存在。
+- 结构：全部用例、每项 change_type 合法、用例文本 >500 字、条款号唯一、期望证据条款号真实存在。
 - 评测器不再“自证”：故意写错 gold 必须让指标下降（canary），比较器被削弱时变红。
 - “每条 <5 句”用 embedding 调用计数钉住；触发即硬失败（分块器会吞异常回退）。
 - 基线：指标 + 失败集合必须与 `evals/review_golden_baseline.json` 完全一致；
@@ -127,3 +127,22 @@ def test_golden_snapshot_matches_baseline(monkeypatch):
     assert result["failures"] == baseline["failures"], (
         "失败集合与基线不一致（修好一例、弄坏一例会在这里暴露）"
     )
+
+
+def test_golden_documents_have_unique_clause_numbers(monkeypatch):
+    """每份用例的条款号必须唯一（D10 曾出现两个第五条，靠 setdefault 取首个）。"""
+    _with_stub(monkeypatch)
+
+    async def _run():
+        for case in CASES:
+            for side in ("base", "revised"):
+                seen: dict[int, str] = {}
+                for clause in await golden._clauses(case[side]):
+                    for number in clause.clause_no:
+                        assert number not in seen, (
+                            f"{case['id']}/{side}: 第{number}条 重复"
+                            f"（{seen[number]} 与 {clause.chunk_id}）"
+                        )
+                        seen[number] = clause.chunk_id
+
+    asyncio.run(_run())
