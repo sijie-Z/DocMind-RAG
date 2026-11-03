@@ -2185,3 +2185,26 @@ def test_payment_reference_heading_form_covers_term_phrases():
         assert facts["status"] == "identified", heading
         assert (facts["value"], facts["unit"]) == (30, "day"), heading
         assert facts["clause_no"] == [4], heading
+
+
+def test_start_condition_recognizes_public_template_events():
+    """公开示范文本高频起算：合同签订生效 + 具备实施条件（D11）。"""
+    facts = analysis.extract_start_condition(
+        [
+            _clause(
+                "第三条 付款方式：合同签订生效并具备实施条件后5个工作日内支付预付款。",
+                clause_no=[3],
+            )
+        ]
+    )
+    assert facts["status"] == "identified"
+    assert set(facts["events"]) == {"合同签订生效", "具备实施条件"}
+
+
+def test_start_condition_recognizes_contract_effective():
+    """合同生效后起算（未写签署之日/生效之日）也应识别。"""
+    facts = analysis.extract_start_condition(
+        [_clause("第三条 付款期限：甲方应在合同生效后10个工作日内支付首期款。", clause_no=[3])]
+    )
+    assert facts["status"] == "identified"
+    assert facts["events"] == ["合同生效"]

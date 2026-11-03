@@ -892,6 +892,47 @@ CASES = [
         },
     },
     {
+        "id": "payment_prepay_and_balance_public_template",
+        "note": "公开示范文本结构：合同签订生效并具备实施条件预付30%，验收合格后支付70%",
+        "base": _doc(
+            _A1,
+            _A2,
+            "第三条 付款方式：合同签订生效并具备实施条件后5个工作日内，甲方向乙方预付"
+            "合同总价的30%；验收合格之日起5个工作日内，甲方支付合同总价的70%。",
+            "第四条 验收：甲方应在收到验收建议之日起7个工作日内组织实质性验收。",
+            _A5,
+            _A6,
+            _A7,
+            _A8,
+        ),
+        "revised": _doc(
+            _A1,
+            _A2,
+            "第三条 付款方式：合同签订生效并具备实施条件后5个工作日内，甲方向乙方预付"
+            "合同总价的30%；验收合格之日起5个工作日内，甲方支付合同总价的70%。",
+            "第四条 验收：甲方应在收到验收建议之日起7个工作日内组织实质性验收。",
+            _A5,
+            _A6,
+            _A7,
+            _A8,
+        ),
+        "items": {
+            "payment_term": _item(
+                "unchanged", {"status": "identified", "value": 5, "unit": "workday"}, ("revised", 3)
+            ),
+            "start_condition": _item(
+                "unchanged",
+                {
+                    "status": "identified",
+                    "events": ["验收合格", "合同签订生效", "具备实施条件"],
+                },
+                ("revised", 3),
+            ),
+            "acceptance_invoice": _item("unchanged", _ACCEPT_OK, ("revised", 4)),
+            "exception": _item("unidentified", _ABSENT),
+        },
+    },
+    {
         "id": "start_exception_new_event",
         "note": "新增例外条款提到验收合格+付款顺延：起算条件不得因此 modified（已知问题 #3）",
         "base": _doc(
