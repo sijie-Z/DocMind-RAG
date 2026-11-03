@@ -1915,3 +1915,95 @@ def test_conjunction_with_notification_verb_does_not_shield_acceptance():
             )
             == "modified"
         ), tail
+
+
+def test_payment_follows_explicit_clause_reference():
+    """付款条款显式引用另一条款定义账期：即使目标条款没有付款词也要识别（#1）。"""
+    clauses = [
+        _clause("第三条 付款期限：甲方以银行转账方式支付，具体账期按第四条执行。", clause_no=[3]),
+        _clause("第四条 期限：验收合格后30天内。", clause_no=[4]),
+    ]
+    facts = analysis.extract_payment_term(clauses)
+    assert facts["status"] == "identified"
+    assert (facts["value"], facts["unit"]) == (30, "day")
+    assert facts["clause_no"] == [4]
+
+
+def test_payment_reference_ignores_unrelated_pointer():
+    """「违约责任详见第九条」不是付款引用，不得把违约期限吸成账期。"""
+    clauses = [
+        _clause("第三条 付款期限：付款方式为银行转账，违约责任详见第九条。", clause_no=[3]),
+        _clause("第九条 违约：逾期超过30天的，甲方有权解除合同。", clause_no=[9]),
+    ]
+    assert analysis.extract_payment_term(clauses) == {
+        "status": "not_found",
+        "reason": "no_duration",
+    }
+
+
+def test_payment_reference_skips_exception_target():
+    """引用目标是独立例外条款时不按付款定义解析（例外归 exception 项）。"""
+    clauses = [
+        _clause("第三条 付款期限：具体账期按第九条执行。", clause_no=[3]),
+        _clause("第九条 例外：因不可抗力导致付款延迟的，期限顺延30天。", clause_no=[9]),
+    ]
+    assert analysis.extract_payment_term(clauses) == {
+        "status": "not_found",
+        "reason": "no_duration",
+    }
+
+
+def test_payment_reference_rejects_non_payment_context_duration():
+    """被引用条款里的质保期等非付款期限不得被引用解析吸成账期。"""
+    clauses = [
+        _clause("第三条 付款期限：具体账期按第四条执行。", clause_no=[3]),
+        _clause("第四条 期限：质量保证期为24个月。", clause_no=[4]),
+    ]
+    assert analysis.extract_payment_term(clauses) == {
+        "status": "not_found",
+        "reason": "no_duration",
+    }
+
+
+def test_start_condition_ignores_exception_article_events():
+    """新增例外条款里的新起算事件是顺延条件，不得让起算条件误报 modified（#3）。"""
+    base = [_clause("第三条 付款期限：甲方应在收到发票后30天内支付货款。", clause_no=[3])]
+    revised = base + [
+        _clause("第九条 例外：因不可抗力导致验收合格延迟的，付款相应顺延。", clause_no=[9])
+    ]
+    assert (
+        analysis.align_item(
+            "start_condition",
+            analysis.extract_start_condition(base),
+            analysis.extract_start_condition(revised),
+        )
+        == "unchanged"
+    )
+
+
+def test_acceptance_terms_ignore_exception_article_mentions():
+    """例外条款里的「验收合格」是顺延条件，不得成为验收项的事实词元。"""
+    base = [_clause("第四条 验收：乙方交付后10个工作日内完成验收。", clause_no=[4])]
+    revised = base + [
+        _clause("第九条 例外：因不可抗力导致验收合格延迟的，已验收部分相应顺延。", clause_no=[9])
+    ]
+    assert (
+        analysis.align_item(
+            "acceptance_invoice",
+            analysis.extract_acceptance_invoice(base),
+            analysis.extract_acceptance_invoice(revised),
+        )
+        == "unchanged"
+    )
+
+
+def test_payment_reference_does_not_cross_punctuation():
+    """引用必须与付款锚点同片段：「合同期限详见第九条」跨逗号不得吸成账期。"""
+    clauses = [
+        _clause("第三条 付款期限：付款方式为银行转账，合同期限详见第九条。", clause_no=[3]),
+        _clause("第九条 期限：自签署之日起12个月。", clause_no=[9]),
+    ]
+    assert analysis.extract_payment_term(clauses) == {
+        "status": "not_found",
+        "reason": "no_duration",
+    }

@@ -791,4 +791,69 @@ CASES = [
             "exception": _item("unidentified", _ABSENT),
         },
     },
+    {
+        "id": "payment_clause_reference_definition",
+        "note": "付款条款显式引用第四条，第四条只有期限无付款词：付款项须识别 30 天（已知问题 #1）",
+        "base": _doc(
+            _A1,
+            _A2,
+            _pay("三", "甲方以银行转账方式支付，具体账期按第四条执行，收款账户以附件三为准。"),
+            "第四条 期限：验收合格后30天内，双方应完成内部审批与用印手续，"
+            "相关安排以本条约定为准，任何变更须经双方书面确认后方可执行。",
+            _A5,
+            _A6,
+            _A7,
+            _A8,
+        ),
+        "revised": _doc(
+            _A1,
+            _A2,
+            _pay("三", "甲方以银行转账方式支付，具体账期按第四条执行，收款账户以附件三为准。"),
+            "第四条 期限：验收合格后30天内，双方应完成内部审批与用印手续，"
+            "相关安排以本条约定为准，任何变更须经双方书面确认后方可执行。",
+            _A5,
+            _A6,
+            _A7,
+            _A8,
+        ),
+        "items": {
+            "payment_term": _item("unchanged", _PAY_30, ("revised", 4)),
+            "start_condition": _item("unidentified", _ABSENT),
+            "acceptance_invoice": _item("unchanged", _ACCEPT_OK, ("revised", 4)),
+            "exception": _item("unidentified", _ABSENT),
+        },
+    },
+    {
+        "id": "start_exception_new_event",
+        "note": "新增例外条款提到验收合格+付款顺延：起算条件不得因此 modified（已知问题 #3）",
+        "base": _doc(
+            _A1,
+            _A2,
+            _pay("三", "甲方应在收到发票后30天内支付货款。"),
+            _acc("四", "乙方交付后10个工作日内完成验收，验收标准以本合同附件二为准。"),
+            _A5,
+            _A6,
+            _A7,
+            _A8,
+        ),
+        "revised": _doc(
+            _A1,
+            _A2,
+            _pay("三", "甲方应在收到发票后30天内支付货款。"),
+            _acc("四", "乙方交付后10个工作日内完成验收，验收标准以本合同附件二为准。"),
+            _A5,
+            _A6,
+            _A7,
+            _A8,
+            "第九条 例外：因不可抗力导致验收合格延迟的，付款相应顺延。",
+        ),
+        "items": {
+            "payment_term": _item("unchanged", _PAY_30, ("revised", 3)),
+            "start_condition": _item(
+                "unchanged", {"status": "identified", "events": ["收到发票"]}, ("revised", 3)
+            ),
+            "acceptance_invoice": _item("unchanged", _ACCEPT_OK, ("revised", 4)),
+            "exception": _item("added", _ACCEPT_OK, ("revised", 9)),
+        },
+    },
 ]

@@ -193,6 +193,15 @@ CROSS_REF_RE = re.compile(
     r"(?:详见|见|依据|根据|按照|参照)(?:本合同|本协议)?"
     r"第[一二三四五六七八九十百零〇0-9]+条"
 )
+# 付款语境内的显式条款引用：「具体账期按第四条执行」「付款期限详见第五条」。
+# 要求付款锚点与引用词同片段（不跨标点），避免把「违约责任详见第九条」这类
+# 邻近引用误当成付款定义。
+_PAYMENT_REF_RE = re.compile(
+    r"(?:付款|支付|账期|结算|货款|价款)(?:期限|时间|方式|比例|节点)?"
+    r"[^。；;，,]{0,12}?"
+    r"(?:详见|参见|见|按照|按|依据|依照|根据|参照|以)"
+    r"(?:本合同|本协议)?第([一二三四五六七八九十百零〇0-9]+)条"
+)
 
 
 @dataclass(frozen=True)
@@ -651,6 +660,46 @@ def _is_date_fragment(text: str, start: int, unit_raw: str) -> bool:
     return False
 
 
+def _payment_reference_clauses(
+    clauses: list[Clause], payment_clauses: list[Clause]
+) -> list[Clause]:
+    """付款条款显式引用其它条款时，把被引用条款纳入付款期限抽取（只跟一层）。
+
+    仅跟随付款语境同片段的引用；目标必须是本文件内的非例外条款，且未被
+    付款关键词直接命中（后者本来就在抽取范围内）。
+    """
+    by_no: dict[int, Clause] = {}
+    for clause in clauses:
+        for number in clause.clause_no or []:
+            by_no.setdefault(int(number), clause)
+    known = {clause.chunk_id for clause in payment_clauses}
+    referenced: list[Clause] = []
+    for clause in payment_clauses:
+        for match in _PAYMENT_REF_RE.finditer(clause.text):
+            raw = match.group(1)
+            target_no = int(raw) if raw.isdigit() else _cn_to_int(raw)
+            if target_no is None:
+                continue
+            target = by_no.get(target_no)
+            if target is None or target.chunk_id in known or _is_exception_article(target):
+                continue
+            known.add(target.chunk_id)
+            referenced.append(target)
+    return referenced
+
+
+def _referenced_duration_ok(sentence: str, start: int, end: int) -> bool:
+    """被显式引用的条款没有付款锚点，引用本身提供付款语境。
+
+    仅排除保修/逾期等非付款语境片段，避免「质保期 24 个月」被引用解析吸成账期。
+    """
+    for fragment, offset in _iter_fragments(sentence):
+        if start >= offset and end <= offset + len(fragment):
+            local_start, local_end = start - offset, end - offset
+            return _anchor_distance(fragment, local_start, local_end, NON_PAYMENT_CONTEXT) is None
+    return False
+
+
 def extract_payment_term(clauses: list[Clause]) -> dict[str, Any]:
     # 标题为「例外」的独立条款归 exception 项：其顺延期限不参与付款基线判定。
     payment_clauses = [
@@ -658,12 +707,20 @@ def extract_payment_term(clauses: list[Clause]) -> dict[str, Any]:
         for c in clauses
         if any(k in c.text for k in PAYMENT_KEYWORDS) and not _is_exception_article(c)
     ]
+    referenced_clauses = _payment_reference_clauses(clauses, payment_clauses)
+    referenced_ids = {clause.chunk_id for clause in referenced_clauses}
+
+    def _context_ok(clause: Clause, sentence: str, start: int, end: int) -> bool:
+        if _duration_context_ok(sentence, start, end):
+            return True
+        return clause.chunk_id in referenced_ids and _referenced_duration_ok(sentence, start, end)
+
     hits: list[dict[str, Any]] = []
-    for clause in payment_clauses:
+    for clause in payment_clauses + referenced_clauses:
         for sentence in _iter_sentences(clause.text):
             for match in DURATION_RE.finditer(sentence):
                 unit_raw = match.group(3)
-                if not _duration_context_ok(sentence, match.start(), match.end()):
+                if not _context_ok(clause, sentence, match.start(), match.end()):
                     continue
                 if _is_date_fragment(sentence, match.start(), unit_raw):
                     continue
@@ -680,7 +737,7 @@ def extract_payment_term(clauses: list[Clause]) -> dict[str, Any]:
                     }
                 )
             for match in MONTH_RE.finditer(sentence):
-                if not _duration_context_ok(sentence, match.start(), match.end()):
+                if not _context_ok(clause, sentence, match.start(), match.end()):
                     continue
                 if _is_date_fragment(sentence, match.start(), "月"):
                     continue
@@ -704,7 +761,7 @@ def extract_payment_term(clauses: list[Clause]) -> dict[str, Any]:
                 value = _cn_to_int(match.group(1))
                 if value is None:
                     continue
-                if not _duration_context_ok(sentence, match.start(), match.end()):
+                if not _context_ok(clause, sentence, match.start(), match.end()):
                     continue
                 if match.start() > 0 and sentence[match.start() - 1] in "第年月日同唯统数几千万":
                     continue
@@ -730,7 +787,7 @@ def extract_payment_term(clauses: list[Clause]) -> dict[str, Any]:
                 unit_raw = match.group(3)
                 if value is None:
                     continue
-                if not _duration_context_ok(sentence, match.start(), match.end()):
+                if not _context_ok(clause, sentence, match.start(), match.end()):
                     continue
                 if _is_date_fragment(sentence, match.start(), unit_raw):
                     continue
@@ -812,7 +869,12 @@ def extract_payment_term(clauses: list[Clause]) -> dict[str, Any]:
 
 
 def extract_start_condition(clauses: list[Clause]) -> dict[str, Any]:
-    payment_clauses = [c for c in clauses if any(k in c.text for k in PAYMENT_KEYWORDS)]
+    # 独立例外条款里的起算事件是顺延条件，不是付款起算条件本身。
+    payment_clauses = [
+        c
+        for c in clauses
+        if any(k in c.text for k in PAYMENT_KEYWORDS) and not _is_exception_article(c)
+    ]
     events: list[dict[str, Any]] = []
     for clause in payment_clauses:
         for event in START_EVENTS:
@@ -921,6 +983,10 @@ def _collect_terms(
 ) -> dict[str, Any]:
     hits: list[dict[str, Any]] = []
     for clause in clauses:
+        # 例外条款的术语归 exception 项：它的「验收合格/发票」是顺延条件，
+        # 不应成为验收/起算项的事实词元（否则新增例外会误报 modified）。
+        if item_key != "exception" and _is_exception_article(clause):
+            continue
         for term in _dedupe_terms(clause.text, terms):
             if all(hit["term"] != term for hit in hits):
                 hits.append({"term": term, "_clause": clause, **_primary_locator(clause)})
