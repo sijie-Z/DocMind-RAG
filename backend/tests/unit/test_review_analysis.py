@@ -1870,3 +1870,18 @@ def test_delivery_payment_compound_variants_are_payment():
         facts = analysis.extract_payment_term([_clause(text, clause_no=[3])])
         assert facts["status"] == "identified", text
         assert (facts["value"], facts["unit"]) == (30, "day"), text
+
+
+def test_comma_payment_without_conjunction_does_not_shield_acceptance():
+    """「，随后付款/付款/之后付款/再付款」是新谓语，不得屏蔽验收期限（B 回归）。"""
+    for tail in ("随后付款", "付款", "之后付款", "再付款"):
+        base = [_clause(f"第四条 验收：乙方应在10个工作日内完成验收，{tail}。", clause_no=[4])]
+        revised = [_clause(f"第四条 验收：乙方应在15个工作日内完成验收，{tail}。", clause_no=[4])]
+        assert (
+            analysis.align_item(
+                "acceptance_invoice",
+                analysis.extract_acceptance_invoice(base),
+                analysis.extract_acceptance_invoice(revised),
+            )
+            == "modified"
+        ), tail
