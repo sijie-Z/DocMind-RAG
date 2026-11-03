@@ -791,4 +791,137 @@ CASES = [
             "exception": _item("unidentified", _ABSENT),
         },
     },
+    {
+        "id": "payment_clause_reference_definition",
+        "note": "付款条款显式引用第四条，第四条只有期限无付款词：付款项须识别 30 天（已知问题 #1）",
+        "base": _doc(
+            _A1,
+            _A2,
+            _pay("三", "甲方以银行转账方式支付，具体账期按第四条执行，收款账户以附件三为准。"),
+            "第四条 期限：验收合格后30天内，双方应完成内部审批与用印手续，"
+            "相关安排以本条约定为准，任何变更须经双方书面确认后方可执行。",
+            _A5,
+            _A6,
+            _A7,
+            _A8,
+        ),
+        "revised": _doc(
+            _A1,
+            _A2,
+            _pay("三", "甲方以银行转账方式支付，具体账期按第四条执行，收款账户以附件三为准。"),
+            "第四条 期限：验收合格后30天内，双方应完成内部审批与用印手续，"
+            "相关安排以本条约定为准，任何变更须经双方书面确认后方可执行。",
+            _A5,
+            _A6,
+            _A7,
+            _A8,
+        ),
+        "items": {
+            "payment_term": _item("unchanged", _PAY_30, ("revised", 4)),
+            "start_condition": _item("unidentified", _ABSENT),
+            "acceptance_invoice": _item("unchanged", _ACCEPT_OK, ("revised", 4)),
+            "exception": _item("unidentified", _ABSENT),
+        },
+    },
+    {
+        "id": "payment_parallel_reference_targets",
+        "note": "并列引用第九条、第十条：首期/尾款两个期限都可见；尾款 60→90 必须 modified",
+        "base": _doc(
+            _A1,
+            _A2,
+            _pay("三", "付款期限分别按第九条、第十条执行。"),
+            "第九条 期限：首期款于验收合格后30天内结清，具体以财务确认时间为准，"
+            "双方应配合完成对账。",
+            "第十条 期限：尾款于交货后60天内结清，相关单据应齐全并经双方书面确认。",
+            _A5,
+            _A6,
+            _A7,
+            _A8,
+        ),
+        "revised": _doc(
+            _A1,
+            _A2,
+            _pay("三", "付款期限分别按第九条、第十条执行。"),
+            "第九条 期限：首期款于验收合格后30天内结清，具体以财务确认时间为准，"
+            "双方应配合完成对账。",
+            "第十条 期限：尾款于交货后90天内结清，相关单据应齐全并经双方书面确认。",
+            _A5,
+            _A6,
+            _A7,
+            _A8,
+        ),
+        "items": {
+            "payment_term": _item("modified", {"status": "ambiguous"}, ("revised", 10)),
+            "start_condition": _item("unidentified", _ABSENT),
+            "acceptance_invoice": _item("unchanged", _ACCEPT_OK, ("revised", 9)),
+            "exception": _item("unidentified", _ABSENT),
+        },
+    },
+    {
+        "id": "payment_reference_excludes_invoicing_term",
+        "note": "账期引用开票条款，但 10 个工作日是开票期限：付款项必须保持未识别（评审 B R2）",
+        "base": _doc(
+            _A1,
+            _A2,
+            _pay("三", "甲方应在收到发票后付款，具体账期详见第四条。"),
+            "第四条 开票：乙方应在交付后10个工作日内开具发票，发票内容应与合同"
+            "约定一致，双方应妥善保管相关凭证并配合完成核验。",
+            _A5,
+            _A6,
+            _A7,
+            _A8,
+        ),
+        "revised": _doc(
+            _A1,
+            _A2,
+            _pay("三", "甲方应在收到发票后付款，具体账期详见第四条。"),
+            "第四条 开票：乙方应在交付后10个工作日内开具发票，发票内容应与合同"
+            "约定一致，双方应妥善保管相关凭证并配合完成核验。",
+            _A5,
+            _A6,
+            _A7,
+            _A8,
+        ),
+        "items": {
+            "payment_term": _item("unidentified", _ABSENT),
+            "start_condition": _item(
+                "unchanged", {"status": "identified", "events": ["收到发票"]}, ("revised", 3)
+            ),
+            "acceptance_invoice": _item("unchanged", _ACCEPT_OK, ("revised", 3)),
+            "exception": _item("unidentified", _ABSENT),
+        },
+    },
+    {
+        "id": "start_exception_new_event",
+        "note": "新增例外条款提到验收合格+付款顺延：起算条件不得因此 modified（已知问题 #3）",
+        "base": _doc(
+            _A1,
+            _A2,
+            _pay("三", "甲方应在收到发票后30天内支付货款。"),
+            _acc("四", "乙方交付后10个工作日内完成验收，验收标准以本合同附件二为准。"),
+            _A5,
+            _A6,
+            _A7,
+            _A8,
+        ),
+        "revised": _doc(
+            _A1,
+            _A2,
+            _pay("三", "甲方应在收到发票后30天内支付货款。"),
+            _acc("四", "乙方交付后10个工作日内完成验收，验收标准以本合同附件二为准。"),
+            _A5,
+            _A6,
+            _A7,
+            _A8,
+            "第九条 例外：因不可抗力导致验收合格延迟的，付款相应顺延。",
+        ),
+        "items": {
+            "payment_term": _item("unchanged", _PAY_30, ("revised", 3)),
+            "start_condition": _item(
+                "unchanged", {"status": "identified", "events": ["收到发票"]}, ("revised", 3)
+            ),
+            "acceptance_invoice": _item("unchanged", _ACCEPT_OK, ("revised", 4)),
+            "exception": _item("added", _ACCEPT_OK, ("revised", 9)),
+        },
+    },
 ]
