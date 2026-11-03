@@ -194,15 +194,23 @@ CROSS_REF_RE = re.compile(
     r"第[一二三四五六七八九十百零〇0-9]+条"
 )
 # 付款语境内的显式条款引用：「具体账期按第四条执行」「付款期限详见第五条」。
-# 要求付款锚点与引用词同片段（不跨标点），避免把「违约责任详见第九条」这类
-# 邻近引用误当成付款定义；同一引用短语里的并列/范围目标（第四条、第五条，
-# 第四条至第六条）整体跟随，不得只取第一个。
+# 只认期限型短语（账期/付款期限/结算周期…），裸「付款/支付」会吞掉
+# 「支付违约金按第九条」「按第四条约定支付货款」这类非期限引用；引用词前的
+# 间隔不得跨句读与冒号，避免从条款标题横穿到远端子句。同一引用短语里的
+# 并列/范围目标（第四条、第五条，第四条至第六条）整体跟随，不得只取第一个。
+_PAYMENT_TERM_PHRASE = (
+    r"(?:付款期限|支付期限|付款时间|支付时间|付款日期|支付日期|"
+    r"付款节点|支付节点|付款安排|支付安排|结算期限|结算周期|结算时间|账期)"
+)
+_REF_VERB = r"(?:详见|参见|见|按照|按|依据|依照|根据|参照|以)"
+_REF_CLAUSE = r"(?:本合同|本协议)?第[一二三四五六七八九十百零〇0-9]+条"
+_REF_SERIES = r"(?:\s*(?:[、,，和及与]|以及|至)\s*第[一二三四五六七八九十百零〇0-9]+条)*"
 _PAYMENT_REF_RE = re.compile(
-    r"(?:付款|支付|账期|结算|货款|价款)(?:期限|时间|方式|比例|节点)?"
-    r"[^。；;，,]{0,12}?"
-    r"(?:详见|参见|见|按照|按|依据|依照|根据|参照|以)"
-    r"(?:本合同|本协议)?第[一二三四五六七八九十百零〇0-9]+条"
-    r"(?:\s*(?:[、,，和及与]|以及|至)\s*第[一二三四五六七八九十百零〇0-9]+条)*"
+    rf"(?:"
+    rf"{_PAYMENT_TERM_PHRASE}[^。；;：:，,]{{0,6}}?{_REF_VERB}{_REF_CLAUSE}{_REF_SERIES}"
+    rf"|(?:付款|支付)期限[:：]\s*(?:具体|应当|应|须|需|均|可)?\s*"
+    rf"{_REF_VERB}{_REF_CLAUSE}{_REF_SERIES}"
+    rf")"
 )
 _CLAUSE_NO_RE = re.compile(r"第([一二三四五六七八九十百零〇0-9]+)条")
 _REF_RANGE_RE = re.compile(
@@ -720,15 +728,55 @@ def _payment_reference_clauses(
     return referenced, unresolved
 
 
+# 被引用条款里，期限后若接动作谓语（完成验收/开具发票/提交对账单/赔偿…），
+# 期限约束的是该动作，不是付款：引用路径必须拒绝（宁漏不猜）。
+_REFERENCED_ACTION_VERBS = (
+    "完成",
+    "开具",
+    "提交",
+    "审批",
+    "用印",
+    "发起",
+    "办理",
+    "提出",
+    "通知",
+    "归档",
+    "签署",
+    "盖章",
+    "赔偿",
+    "整改",
+    "维修",
+    "安装",
+    "调试",
+    "培训",
+    "出具",
+    "申请",
+    "催告",
+    "履行",
+    "确认",
+    "对账",
+    "验收",
+    "开票",
+    "交货",
+    "交付",
+    "供货",
+    "发货",
+)
+
+
 def _referenced_duration_ok(sentence: str, start: int, end: int) -> bool:
     """被显式引用的条款没有付款锚点，引用本身提供付款语境。
 
-    仅排除保修/逾期等非付款语境片段，避免「质保期 24 个月」被引用解析吸成账期。
+    排除两类：保修/逾期等非付款语境片段；期限后接动作谓语（完成验收、
+    开具发票、提交对账单…）——此时期限约束动作而非付款。
     """
     for fragment, offset in _iter_fragments(sentence):
         if start >= offset and end <= offset + len(fragment):
             local_start, local_end = start - offset, end - offset
-            return _anchor_distance(fragment, local_start, local_end, NON_PAYMENT_CONTEXT) is None
+            if _anchor_distance(fragment, local_start, local_end, NON_PAYMENT_CONTEXT) is not None:
+                return False
+            tail = fragment[local_end:]
+            return not any(verb in tail for verb in _REFERENCED_ACTION_VERBS)
     return False
 
 

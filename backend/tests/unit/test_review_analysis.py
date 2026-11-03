@@ -1998,9 +1998,21 @@ def test_acceptance_terms_ignore_exception_article_mentions():
 
 
 def test_payment_reference_does_not_cross_punctuation():
-    """引用必须与付款锚点同片段：「合同期限详见第九条」跨逗号不得吸成账期。"""
+    """「付款期限：…收到发票后按第四条约定支付」跨冒号/插入语不得算期限引用。"""
     clauses = [
-        _clause("第三条 付款期限：付款方式为银行转账，合同期限详见第九条。", clause_no=[3]),
+        _clause("第三条 付款期限：甲方应在收到发票后按第四条约定支付货款。", clause_no=[3]),
+        _clause("第九条 期限：自签署之日起12个月。", clause_no=[9]),
+    ]
+    assert analysis.extract_payment_term(clauses) == {
+        "status": "not_found",
+        "reason": "no_duration",
+    }
+
+
+def test_payment_reference_does_not_cross_comma():
+    """期限型短语与引用词之间跨逗号（账期另行约定，详见第九条）不得命中。"""
+    clauses = [
+        _clause("第三条 付款期限：账期另行约定，详见第九条。", clause_no=[3]),
         _clause("第九条 期限：自签署之日起12个月。", clause_no=[9]),
     ]
     assert analysis.extract_payment_term(clauses) == {
@@ -2083,3 +2095,80 @@ def test_acceptance_union_excludes_exception_articles():
     ]
     facts = analysis.extract_acceptance_invoice(clauses)
     assert facts["clause_no_union"] == [4]
+
+
+def test_payment_reference_ignores_penalty_target():
+    """「支付违约金按第九条」不是付款期限引用：赔偿期限不得吸成账期（评审 B R1）。"""
+    clauses = [
+        _clause("第三条 付款期限：支付违约金按第九条执行。", clause_no=[3]),
+        _clause("第九条 责任：甲方应在15个工作日内向乙方赔偿全部损失。", clause_no=[9]),
+    ]
+    assert analysis.extract_payment_term(clauses) == {
+        "status": "not_found",
+        "reason": "no_duration",
+    }
+
+
+def test_payment_reference_rejects_invoicing_duration():
+    """被引用条款的期限后接开具发票：开票期限不是付款期限（评审 B R2）。"""
+    clauses = [
+        _clause("第三条 付款期限：甲方应在收到发票后付款，具体账期详见第四条。", clause_no=[3]),
+        _clause("第四条 开票：乙方应在交付后10个工作日内开具发票。", clause_no=[4]),
+    ]
+    assert analysis.extract_payment_term(clauses) == {
+        "status": "not_found",
+        "reason": "no_duration",
+    }
+
+
+def test_payment_reference_rejects_action_duration():
+    """被引用条款的期限后接提交对账单：对账期限不是付款期限。"""
+    clauses = [
+        _clause("第三条 付款期限：具体账期按第四条执行。", clause_no=[3]),
+        _clause("第四条 对账：乙方应在10个工作日内提交对账单。", clause_no=[4]),
+    ]
+    assert analysis.extract_payment_term(clauses) == {
+        "status": "not_found",
+        "reason": "no_duration",
+    }
+
+
+def test_payment_reference_ignores_process_change():
+    """付款期限已明示 30 天：流程引用的审批期限 60→90 不得污染付款项（评审 B B2）。"""
+    base = [
+        _clause(
+            "第三条 付款期限：甲方应在收到发票后30天内支付货款，具体付款流程按第四条执行。",
+            clause_no=[3],
+        ),
+        _clause("第四条 期限：材料齐备后60天内完成内部审批。", clause_no=[4]),
+    ]
+    revised = [
+        _clause(
+            "第三条 付款期限：甲方应在收到发票后30天内支付货款，具体付款流程按第四条执行。",
+            clause_no=[3],
+        ),
+        _clause("第四条 期限：材料齐备后90天内完成内部审批。", clause_no=[4]),
+    ]
+    facts = analysis.extract_payment_term(base)
+    assert facts["status"] == "identified"
+    assert (facts["value"], facts["unit"]) == (30, "day")
+    assert (
+        analysis.align_item(
+            "payment_term",
+            facts,
+            analysis.extract_payment_term(revised),
+        )
+        == "unchanged"
+    )
+
+
+def test_payment_reference_heading_form():
+    """标题形态「付款期限：按第四条执行」仍应跟随引用。"""
+    clauses = [
+        _clause("第三条 付款期限：按第四条执行。", clause_no=[3]),
+        _clause("第四条 期限：验收合格后30天内。", clause_no=[4]),
+    ]
+    facts = analysis.extract_payment_term(clauses)
+    assert facts["status"] == "identified"
+    assert (facts["value"], facts["unit"]) == (30, "day")
+    assert facts["clause_no"] == [4]

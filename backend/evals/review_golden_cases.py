@@ -858,6 +858,40 @@ CASES = [
         },
     },
     {
+        "id": "payment_reference_excludes_invoicing_term",
+        "note": "账期引用开票条款，但 10 个工作日是开票期限：付款项必须保持未识别（评审 B R2）",
+        "base": _doc(
+            _A1,
+            _A2,
+            _pay("三", "甲方应在收到发票后付款，具体账期详见第四条。"),
+            "第四条 开票：乙方应在交付后10个工作日内开具发票，发票内容应与合同"
+            "约定一致，双方应妥善保管相关凭证并配合完成核验。",
+            _A5,
+            _A6,
+            _A7,
+            _A8,
+        ),
+        "revised": _doc(
+            _A1,
+            _A2,
+            _pay("三", "甲方应在收到发票后付款，具体账期详见第四条。"),
+            "第四条 开票：乙方应在交付后10个工作日内开具发票，发票内容应与合同"
+            "约定一致，双方应妥善保管相关凭证并配合完成核验。",
+            _A5,
+            _A6,
+            _A7,
+            _A8,
+        ),
+        "items": {
+            "payment_term": _item("unidentified", _ABSENT),
+            "start_condition": _item(
+                "unchanged", {"status": "identified", "events": ["收到发票"]}, ("revised", 3)
+            ),
+            "acceptance_invoice": _item("unchanged", _ACCEPT_OK, ("revised", 3)),
+            "exception": _item("unidentified", _ABSENT),
+        },
+    },
+    {
         "id": "start_exception_new_event",
         "note": "新增例外条款提到验收合格+付款顺延：起算条件不得因此 modified（已知问题 #3）",
         "base": _doc(
