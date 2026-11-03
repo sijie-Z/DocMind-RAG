@@ -208,7 +208,7 @@ _REF_SERIES = r"(?:\s*(?:[、,，和及与]|以及|至)\s*第[一二三四五六
 _PAYMENT_REF_RE = re.compile(
     rf"(?:"
     rf"{_PAYMENT_TERM_PHRASE}[^。；;：:，,]{{0,6}}?{_REF_VERB}{_REF_CLAUSE}{_REF_SERIES}"
-    rf"|(?:付款|支付)期限[:：]\s*(?:具体|应当|应|须|需|均|可)?\s*"
+    rf"|{_PAYMENT_TERM_PHRASE}[:：]\s*(?:具体|应当|应|须|需|均|可)?\s*"
     rf"{_REF_VERB}{_REF_CLAUSE}{_REF_SERIES}"
     rf")"
 )

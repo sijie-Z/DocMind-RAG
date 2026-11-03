@@ -2172,3 +2172,16 @@ def test_payment_reference_heading_form():
     assert facts["status"] == "identified"
     assert (facts["value"], facts["unit"]) == (30, "day")
     assert facts["clause_no"] == [4]
+
+
+def test_payment_reference_heading_form_covers_term_phrases():
+    """标题形态覆盖全部期限型短语：账期/付款时间/结算周期：按第四条执行。"""
+    for heading in ("账期", "付款时间", "结算周期"):
+        clauses = [
+            _clause(f"第三条 {heading}：按第四条执行。", clause_no=[3]),
+            _clause("第四条 期限：验收合格后30天内。", clause_no=[4]),
+        ]
+        facts = analysis.extract_payment_term(clauses)
+        assert facts["status"] == "identified", heading
+        assert (facts["value"], facts["unit"]) == (30, "day"), heading
+        assert facts["clause_no"] == [4], heading
