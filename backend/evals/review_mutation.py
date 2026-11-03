@@ -16,8 +16,10 @@ import sys
 from contextlib import contextmanager
 from typing import Any, Iterator
 
+# review_golden 在 import 期设置离线配置默认值（干净 clone 无 .env 也能跑），
+# 必须先于 app.* 导入，否则配置加载会以生产模式校验 DATABASE_URL 失败。
+from evals import review_golden as golden  # isort: skip
 from app.services import review_analysis_service as analysis
-from evals import review_golden as golden
 
 
 @contextmanager
@@ -95,34 +97,38 @@ def main() -> int:
         if hasattr(stream, "reconfigure"):
             stream.reconfigure(encoding="utf-8")
 
+    original_embedding = golden.semantic_chunker_module.embedding_service
     golden.semantic_chunker_module.embedding_service = golden._NoEmbedding()
-    golden._NoEmbedding.calls = 0
-    baseline = asyncio.run(golden.evaluate())
-    if baseline["failures"]:
-        print("基线本身存在失败，先修好再跑变异自检：")
-        for failure in baseline["failures"]:
-            print("  -", failure)
-        return 1
-    print(f"baseline: {baseline['metrics']['cases']} 组，失败 0")
+    try:
+        golden._NoEmbedding.calls = 0
+        baseline = asyncio.run(golden.evaluate())
+        if baseline["failures"]:
+            print("基线本身存在失败，先修好再跑变异自检：")
+            for failure in baseline["failures"]:
+                print("  -", failure)
+            return 1
+        print(f"baseline: {baseline['metrics']['cases']} 组，失败 0")
 
-    undetected = 0
-    for name, description, factory in _mutation_specs():
-        with factory():
-            result = asyncio.run(golden.evaluate())
-        failures = result["failures"]
-        if failures:
-            print(f"[DETECTED] {name}: {description}（{len(failures)} 条失败）")
-            for failure in failures[:3]:
-                print("    -", failure)
-        else:
-            undetected += 1
-            print(f"[MISSED] {name}: {description} —— 变异后 golden 仍全绿，需补 gold/度量")
+        undetected = 0
+        for name, description, factory in _mutation_specs():
+            with factory():
+                result = asyncio.run(golden.evaluate())
+            failures = result["failures"]
+            if failures:
+                print(f"[DETECTED] {name}: {description}（{len(failures)} 条失败）")
+                for failure in failures[:3]:
+                    print("    -", failure)
+            else:
+                undetected += 1
+                print(f"[MISSED] {name}: {description} —— 变异后 golden 仍全绿，需补 gold/度量")
 
-    if undetected:
-        print(f"\n{undetected} 个变异未被 golden 捕获")
-        return 1
-    print("\n所有变异均被 golden 捕获")
-    return 0
+        if undetected:
+            print(f"\n{undetected} 个变异未被 golden 捕获")
+            return 1
+        print("\n所有变异均被 golden 捕获")
+        return 0
+    finally:
+        golden.semantic_chunker_module.embedding_service = original_embedding
 
 
 if __name__ == "__main__":

@@ -1,4 +1,4 @@
-"""核验 golden set（D5）：10 组人工编写的中文采购合同 V1/V2 与期望值。
+"""核验 golden set（D5）：35 组人工编写的中文采购合同 V1/V2 与期望值。
 
 gold 只依据合同文本人工判定，不从引擎输出反推；change_type 用产品语义：
 - 付款天数 30天→60天 = payment_term modified；
@@ -1135,6 +1135,40 @@ CASES = [
                 "unchanged", {"status": "identified", "events": ["验收合格"]}, ("revised", 3)
             ),
             "acceptance_invoice": _item("unchanged", _ACCEPT_OK, ("revised", 4)),
+            "exception": _item("unidentified", _ABSENT),
+        },
+    },
+    {
+        "id": "start_liability_heading_mixed",
+        "note": "标题从付款期限改为付款期限及违约责任：混合标题不得整条踢出起算（评审 B B1）",
+        "base": _doc(
+            _A1,
+            _A2,
+            _pay("三", "甲方应在验收合格后30天内支付货款。"),
+            _acc("四", "乙方交付后10个工作日内完成验收，验收标准以本合同附件二为准。"),
+            _A5,
+            _A6,
+            _A7,
+            _A8,
+        ),
+        "revised": _doc(
+            _A1,
+            _A2,
+            "第三条 付款期限及违约责任：甲方应在验收合格后30天内支付货款。",
+            _acc("四", "乙方交付后10个工作日内完成验收，验收标准以本合同附件二为准。"),
+            _A5,
+            _A6,
+            _A7,
+            _A8,
+        ),
+        "items": {
+            "payment_term": _item(
+                "modified", {"status": "identified", "value": 30, "unit": "day"}, ("revised", 3)
+            ),
+            "start_condition": _item(
+                "modified", {"status": "identified", "events": ["验收合格"]}, ("revised", 3)
+            ),
+            "acceptance_invoice": _item("modified", _ACCEPT_OK, ("revised", 3)),
             "exception": _item("unidentified", _ABSENT),
         },
     },

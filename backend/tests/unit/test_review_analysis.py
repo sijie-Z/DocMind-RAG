@@ -2301,3 +2301,31 @@ def test_start_condition_ignores_liability_articles():
         ]
     )
     assert only_liability["status"] == "not_found"
+
+
+def test_liability_heading_with_payment_terms_is_not_excluded():
+    """混合标题（付款期限及违约责任/逾期付款违约金）不得整条踢出起算（评审 B B1）。"""
+    for heading in ("付款期限及违约责任", "逾期付款违约金", "违约责任及付款期限"):
+        facts = analysis.extract_start_condition(
+            [
+                _clause(
+                    f"第六条 {heading}：甲方应在验收合格后30天内支付货款。",
+                    clause_no=[6],
+                )
+            ]
+        )
+        assert facts["status"] == "identified", heading
+        assert facts["events"] == ["验收合格"], heading
+
+
+def test_liability_heading_after_clause_number_colon_is_excluded():
+    """「第六条：违约责任：…」也是独立责任条款，应排除出起算。"""
+    facts = analysis.extract_start_condition(
+        [
+            _clause(
+                "第六条：违约责任：合同生效后，违约方应向守约方支付违约金。",
+                clause_no=[6],
+            )
+        ]
+    )
+    assert facts["status"] == "not_found"

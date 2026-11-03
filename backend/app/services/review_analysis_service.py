@@ -485,11 +485,17 @@ _LIABILITY_HEADING_TERMS = ("违约", "赔偿", "罚则")
 
 
 def _is_liability_article(clause: Clause) -> bool:
-    """标题为违约/赔偿/罚则的条款：起算词是责任成立条件，不是付款起算。"""
-    parts = _HEADING_SPLIT_RE.split(clause.text, maxsplit=1)
-    if len(parts) < 2:
+    """标题为违约/赔偿/罚则的条款：起算词是责任成立条件，不是付款起算。
+
+    标题同时含付款语义（付款期限及违约责任 / 逾期付款违约金）时不排除，
+    否则整条付款条款会被踢出起算抽取（评审 B B1）。无冒号标题按前 40 字
+    保守判断；正文里出现付款词时同样不排除。
+    """
+    body = _CLAUSE_NUMBER_PREFIX_RE.sub("", clause.text, count=1).lstrip(":：")
+    parts = _HEADING_SPLIT_RE.split(body, maxsplit=1)
+    heading = (parts[0] if len(parts) >= 2 else body)[:40]
+    if any(keyword in heading for keyword in PAYMENT_KEYWORDS):
         return False
-    heading = parts[0].split("\n", 1)[0][:40]
     return any(term in heading for term in _LIABILITY_HEADING_TERMS)
 
 
