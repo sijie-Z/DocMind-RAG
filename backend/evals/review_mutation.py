@@ -32,8 +32,8 @@ def _patched(target: Any, name: str, value: Any) -> Iterator[None]:
         setattr(target, name, original)
 
 
-def _uncapped_heading_end(text: str) -> int:
-    """不看 40 字上限的旧行为：正文冒号也会被当标题分隔符。"""
+def _uncapped_heading_end(text: str, heading_hint: str | None = None) -> int:
+    """忽略标题 hint、全文找冒号的旧行为：正文冒号也会被当标题分隔符。"""
     match = analysis._CLAUSE_NUMBER_PREFIX_RE.match(text)
     start = match.end() if match else 0
     if start < len(text) and text[start] in ":：":

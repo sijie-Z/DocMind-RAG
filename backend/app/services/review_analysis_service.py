@@ -486,29 +486,58 @@ _LIABILITY_SENTENCE_TERMS = ("违约", "赔偿", "罚则", "滞纳金", "罚息"
 _PENALTY_TERMS = ("违约金", "赔偿金", "滞纳金", "罚息", "罚款", "赔偿损失")
 _LIABILITY_BOUNDARY_RE = re.compile(r"[，,、。；;！!？?\n]")
 _LIABILITY_CONJUNCTION_RE = re.compile(
-    r"(?:并且|并|且|及|以及)(?=[^，,。；;]*?(?:违约金|赔偿金|滞纳金|罚息|罚款|赔偿损失))"
+    r"(?:并且|以及|并|且|及)(?=[^，,。；;]{0,64}?(?:违约金|赔偿金|滞纳金|罚息|罚款|赔偿损失))"
 )
 
 
 def _heading_segment(raw_text: str) -> str:
-    """取标题段：raw 首行、剥「第X条」与紧随冒号、按标点/空白切第一段。"""
-    first_line = raw_text.splitlines()[0] if raw_text else ""
+    """取标题段（无冒号标题的兜底）：raw 首行、剥「第X条」与紧随冒号，
+    按句读/空白切第一段；顿号保留，多主题标题不被截断。"""
+    first_line = next((line for line in raw_text.splitlines() if line.strip()), "")
     body = _CLAUSE_NUMBER_PREFIX_RE.sub("", first_line, count=1).lstrip(":：").lstrip()
-    return re.split(r"[:：，,。；;、\s]+", body, maxsplit=1)[0][:40]
+    return re.split(r"[:：，,。；;\s]+", body, maxsplit=1)[0][:80]
 
 
-def _heading_end(text: str) -> int:
-    """标题结束位置（含分隔冒号）：跳过「第X条」及其后冒号，再找下一个冒号。
+def _full_title(raw_text: str) -> str | None:
+    """标题全文（可跨行、含顿号）：取第一个非「第X条后冒号」的分隔冒号之前。
 
-    只在前 40 字内找分隔冒号：无冒号标题 + 正文冒号（「违约金：按日…」）
-    不能把正文当标题，否则责任片段不会被屏蔽（评审 A N2 边界）。
+    无分隔冒号、标题含句号/分号或过长（>80 字）时返回 None，避免把正文
+    当标题（评审 A 长标题/正文冒号回归）。
     """
-    match = _CLAUSE_NUMBER_PREFIX_RE.match(text)
+    if not raw_text:
+        return None
+    match = _CLAUSE_NUMBER_PREFIX_RE.match(raw_text)
     start = match.end() if match else 0
-    if start < len(text) and text[start] in ":：":
+    if start < len(raw_text) and raw_text[start] in ":：":
         start += 1
-    colon = _HEADING_SPLIT_RE.search(text, start, start + 40)
-    return colon.end() if colon else 0
+    colon = _HEADING_SPLIT_RE.search(raw_text, start)
+    if colon is None:
+        return None
+    head = raw_text[: colon.start()]
+    if any(char in head for char in "。；;"):
+        return None
+    normalized = normalize_clause_text(head)
+    body = _CLAUSE_NUMBER_PREFIX_RE.sub("", normalized, count=1).lstrip(":：").strip()
+    if not body or len(body) > 80:
+        return None
+    return body
+
+
+def _heading_end(text: str, heading_hint: str | None = None) -> int:
+    """标题结束位置（含分隔冒号）。用 raw 标题 hint 定位；无 hint 返回 0。
+
+    不再用固定 40 字窗口：长标题会被误判为非标题（评审 A 回退 2）。hint
+    只在紧邻「第X条」之后（前 20 字内）出现时才可信。
+    """
+    if not heading_hint:
+        return 0
+    index = text.find(heading_hint)
+    if index == -1 or index > 20:
+        return 0
+    end = index + len(heading_hint)
+    if text[end : end + 1] in ":：":
+        end += 1
+    return end
 
 
 def _is_liability_article(clause: Clause) -> bool:
@@ -519,7 +548,8 @@ def _is_liability_article(clause: Clause) -> bool:
     由 `_mask_liability_sentences` 在事件与哈希层屏蔽（评审 A 阻断 1）。
     无冒号标题用 raw 首行识别（评审 A 阻断 2）。
     """
-    heading = _heading_segment(clause.raw_text or clause.text)
+    raw = clause.raw_text or clause.text
+    heading = _full_title(raw) or _heading_segment(raw)
     if any(keyword in heading for keyword in PAYMENT_KEYWORDS):
         return False
     return any(term in heading for term in _LIABILITY_HEADING_TERMS)
@@ -538,7 +568,9 @@ def _contains_duration(text: str) -> bool:
     )
 
 
-def _mask_liability_sentences(text: str, *, mask_leading_bare: bool = False) -> str:
+def _mask_liability_sentences(
+    text: str, *, mask_leading_bare: bool = False, heading_hint: str | None = None
+) -> str:
     """按逗号/句读片段屏蔽责任片段（保留标题与付款片段）。
 
     整句屏蔽会吞掉同句内的付款义务（「…支付货款，逾期付款的按日支付违约
@@ -547,7 +579,7 @@ def _mask_liability_sentences(text: str, *, mask_leading_bare: bool = False) -> 
     mask_leading_bare=True 时，紧邻纯责任片段之前、且不含付款锚点/期限的过渡
     片段（如「合同生效后」）也屏蔽，供起算事件抽取使用。
     """
-    head_end = _heading_end(text)
+    head_end = _heading_end(text, heading_hint)
     head, body = text[:head_end], text[head_end:]
 
     pieces: list[tuple[int, int]] = []
@@ -573,11 +605,12 @@ def _mask_liability_sentences(text: str, *, mask_leading_bare: bool = False) -> 
         if (
             conjunction is not None
             and conjunction.start() > 0
-            and (
-                any(keyword in prefix for keyword in PAYMENT_KEYWORDS) or _contains_duration(prefix)
-            )
+            and any(keyword in prefix for keyword in PAYMENT_KEYWORDS)
+            and not any(term in prefix for term in _PENALTY_TERMS)
         ):
             # 同片段无标点连词：「支付货款并按日…违约金」只屏蔽连词后的责任子句。
+            # 前缀本身含违约金/赔偿类词时（「支付违约金及赔偿损失」）整片段屏蔽，
+            # 否则比例/金额变化会重新污染四项（评审 B B1）。
             replacements.append(prefix + _MASK)
             pure_liability.append(False)
         else:
@@ -602,32 +635,36 @@ def _mask_liability_sentences(text: str, *, mask_leading_bare: bool = False) -> 
     return "".join(parts)
 
 
-def _mask_item_noise(text: str, item_key: str) -> str:
+def _mask_item_noise(text: str, item_key: str, heading_hint: str | None = None) -> str:
     """屏蔽“属于其它核验项”的词元，避免共享条款的文本哈希互相污染。"""
     if item_key == "payment_term":
-        text = _mask_liability_sentences(text)
+        text = _mask_liability_sentences(text, heading_hint=heading_hint)
         for term in sorted(START_EVENTS + ACCEPTANCE_TERMS, key=len, reverse=True):
             text = text.replace(term, _MASK)
         return _collapse_mask(text)
     if item_key in ("start_condition", "acceptance_invoice"):
-        return _collapse_mask(_mask_liability_sentences(_mask_payment_durations(text)))
+        return _collapse_mask(
+            _mask_liability_sentences(_mask_payment_durations(text), heading_hint=heading_hint)
+        )
     # exception：不屏蔽任何期限——“顺延30天→15天”本身就是例外项的变化。
     return text
 
 
 def _content_sha_for(clause: Clause, item_key: str) -> str:
     content = _CLAUSE_NUMBER_PREFIX_RE.sub("", clause.text, count=1)
+    heading_hint = _full_title(clause.raw_text or clause.text)
     if item_key == "payment_term" and not any(
         keyword in clause.text for keyword in PAYMENT_KEYWORDS
     ):
         # 仅经引用纳入付款项的条款：起算词不屏蔽（否则 合同生效→合同签订生效
         # 会被付款屏蔽与起算不扫引用条款同时吞掉，评审 A B1）；验收词仍屏蔽，
         # 避免验收词变化把付款项一起报 modified（评审 B N7）。
+        content = _mask_liability_sentences(content, heading_hint=heading_hint)
         for term in sorted(ACCEPTANCE_TERMS, key=len, reverse=True):
             content = content.replace(term, _MASK)
         content = _collapse_mask(content)
         return hashlib.sha256(content.encode("utf-8")).hexdigest()
-    content = _mask_item_noise(content, item_key)
+    content = _mask_item_noise(content, item_key, heading_hint=heading_hint)
     return hashlib.sha256(content.encode("utf-8")).hexdigest()
 
 
@@ -1121,7 +1158,12 @@ def extract_start_condition(clauses: list[Clause]) -> dict[str, Any]:
     events: list[dict[str, Any]] = []
     for clause in payment_clauses:
         clause_events = _non_overlapping_events(
-            _mask_liability_sentences(clause.text, mask_leading_bare=True), START_EVENTS
+            _mask_liability_sentences(
+                clause.text,
+                mask_leading_bare=True,
+                heading_hint=_full_title(clause.raw_text or clause.text),
+            ),
+            START_EVENTS,
         )
         for event in START_EVENTS:
             if event in clause_events and all(e["event"] != event for e in events):
@@ -1145,16 +1187,14 @@ def extract_start_condition(clauses: list[Clause]) -> dict[str, Any]:
 
 
 def _heading_contains(clause: Clause, terms: tuple[str, ...]) -> bool:
-    """条款标题是否命中给定术语；标题必须有冒号分隔（raw 首行判断）。
+    """条款标题是否命中给定术语；标题必须有冒号分隔。
 
-    不能直接用 clause.text 的第一个冒号切标题：正文冒号（「违约金：按日…」）
-    会把正文当标题（评审 A N2 边界/D13）。
+    用 `_full_title` 取完整标题（可跨行、含顿号），不再按顿号切首段——
+    「交付、验收与付款」这类多主题标题下验收词仍在标题内（评审 A 回退 3）。
     """
-    raw = clause.raw_text or clause.text
-    first_line = raw.splitlines()[0] if raw else ""
-    if not _HEADING_SPLIT_RE.search(first_line):
+    heading = _full_title(clause.raw_text or clause.text)
+    if not heading:
         return False
-    heading = _heading_segment(raw)[:40]
     return any(term in heading for term in terms)
 
 

@@ -1,4 +1,4 @@
-"""核验 golden set（D5）：40 组人工编写的中文采购合同 V1/V2 与期望值。
+"""核验 golden set（D5）：42 组人工编写的中文采购合同 V1/V2 与期望值。
 
 gold 只依据合同文本人工判定，不从引擎输出反推；change_type 用产品语义：
 - 付款天数 30天→60天 = payment_term modified；
@@ -1335,6 +1335,78 @@ CASES = [
             "合同生效后，违约方应支付违约金：按日万分之十。",
             _acc("四", "乙方交付后10个工作日内完成验收，验收标准以本合同附件二为准。"),
             _A5,
+            _A7,
+            _A8,
+            _A9_EXTRA,
+        ),
+        "items": {
+            "payment_term": _item(
+                "unchanged", {"status": "identified", "value": 30, "unit": "day"}, ("revised", 6)
+            ),
+            "start_condition": _item(
+                "unchanged", {"status": "identified", "events": ["验收合格"]}, ("revised", 6)
+            ),
+            "acceptance_invoice": _item("unchanged", _ACCEPT_OK, ("revised", 4)),
+            "exception": _item("unidentified", _ABSENT),
+        },
+    },
+    {
+        "id": "start_conjunction_penalty_amount_change",
+        "note": "连词前含违约金类词的责任句：比例 万分之五→万分之十 不得污染四项（D13 R1）",
+        "base": _doc(
+            _A1,
+            _A2,
+            "第三条 付款期限：甲方应在验收合格后30天内支付货款。"
+            "逾期付款的，每逾期一日，应按未付款项的万分之五支付违约金及赔偿损失。",
+            _acc("四", "乙方交付后10个工作日内完成验收，验收标准以本合同附件二为准。"),
+            _A5,
+            _A6,
+            _A7,
+            _A8,
+        ),
+        "revised": _doc(
+            _A1,
+            _A2,
+            "第三条 付款期限：甲方应在验收合格后30天内支付货款。"
+            "逾期付款的，每逾期一日，应按未付款项的万分之十支付违约金及赔偿损失。",
+            _acc("四", "乙方交付后10个工作日内完成验收，验收标准以本合同附件二为准。"),
+            _A5,
+            _A6,
+            _A7,
+            _A8,
+        ),
+        "items": {
+            "payment_term": _item(
+                "unchanged", {"status": "identified", "value": 30, "unit": "day"}, ("revised", 3)
+            ),
+            "start_condition": _item(
+                "unchanged", {"status": "identified", "events": ["验收合格"]}, ("revised", 3)
+            ),
+            "acceptance_invoice": _item("unchanged", _ACCEPT_OK, ("revised", 4)),
+            "exception": _item("unidentified", _ABSENT),
+        },
+    },
+    {
+        "id": "start_long_title_heading",
+        "note": "超长/多主题标题（>40 字、含顿号）仍须剥离，起算与付款不得丢失（D13 R2）",
+        "base": _doc(
+            _A1,
+            _A2,
+            _acc("四", "乙方交付后10个工作日内完成验收，验收标准以本合同附件二为准。"),
+            _A5,
+            "第六条 付款期限、验收标准、发票开具要求、争议解决方式、"
+            "合同解除及逾期付款违约金的计算方式：甲方应在验收合格后30天内支付货款。",
+            _A7,
+            _A8,
+            _A9_EXTRA,
+        ),
+        "revised": _doc(
+            _A1,
+            _A2,
+            _acc("四", "乙方交付后10个工作日内完成验收，验收标准以本合同附件二为准。"),
+            _A5,
+            "第六条 付款期限、验收标准、发票开具要求、争议解决方式、"
+            "合同解除及逾期付款违约金的计算方式：甲方应在验收合格后30天内支付货款。",
             _A7,
             _A8,
             _A9_EXTRA,

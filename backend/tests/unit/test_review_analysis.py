@@ -2529,3 +2529,110 @@ def test_no_colon_mixed_heading_body_colon_keeps_start():
         )
         == "unchanged"
     )
+
+
+def test_conjunction_penalty_prefix_with_penalty_terms_is_fully_masked():
+    """连词前前缀含违约金类词时整片段屏蔽：比例/金额/期限变化不污染四项（D13 R1）。"""
+    base = [
+        _clause(
+            "第三条 付款期限：甲方应在验收合格后30天内支付货款。"
+            "逾期付款的，每逾期一日，应按未付款项的万分之五支付违约金及赔偿损失。",
+            clause_no=[3],
+        )
+    ]
+    revised = [
+        _clause(
+            "第三条 付款期限：甲方应在验收合格后30天内支付货款。"
+            "逾期付款的，每逾期一日，应按未付款项的万分之十支付违约金及赔偿损失。",
+            clause_no=[3],
+        )
+    ]
+    for item in ("payment_term", "start_condition", "acceptance_invoice"):
+        assert (
+            analysis.align_item(
+                item,
+                analysis.EXTRACTORS[item](base),
+                analysis.EXTRACTORS[item](revised),
+            )
+            == "unchanged"
+        ), item
+    assert analysis.extract_start_condition(base)["events"] == ["验收合格"]
+
+    amount_base = [
+        _clause(
+            "第三条 付款期限：甲方应在验收合格后30天内支付货款。按合同总价的5%支付违约金及赔偿金。",
+            clause_no=[3],
+        )
+    ]
+    amount_revised = [
+        _clause(
+            "第三条 付款期限：甲方应在验收合格后30天内支付货款。"
+            "按合同总价的10%支付违约金及赔偿金。",
+            clause_no=[3],
+        )
+    ]
+    for item in ("payment_term", "start_condition", "acceptance_invoice"):
+        assert (
+            analysis.align_item(
+                item,
+                analysis.EXTRACTORS[item](amount_base),
+                analysis.EXTRACTORS[item](amount_revised),
+            )
+            == "unchanged"
+        ), item
+
+    liability = [
+        _clause(
+            "第三条 付款期限：甲方应在验收合格后30天内支付货款。"
+            "违约方应在合同生效后支付违约金并赔偿损失。",
+            clause_no=[3],
+        )
+    ]
+    assert analysis.extract_start_condition(liability)["events"] == ["验收合格"]
+
+    duration_base = [
+        _clause(
+            "第三条 付款期限：甲方应在验收合格后30天内支付货款。甲方应在30日内及时支付违约金。",
+            clause_no=[3],
+        )
+    ]
+    duration_revised = [
+        _clause(
+            "第三条 付款期限：甲方应在验收合格后30天内支付货款。甲方应在60日内及时支付违约金。",
+            clause_no=[3],
+        )
+    ]
+    assert (
+        analysis.align_item(
+            "payment_term",
+            analysis.extract_payment_term(duration_base),
+            analysis.extract_payment_term(duration_revised),
+        )
+        == "unchanged"
+    )
+
+
+def test_long_title_heading_is_not_mistaken_for_body():
+    """超长标题（>40 字、含顿号）仍应作为标题剥离，起算不得丢失（D13 R2）。"""
+    facts = analysis.extract_start_condition(
+        [
+            _clause(
+                "第六条 付款期限、验收标准、发票开具要求、争议解决方式、"
+                "合同解除及逾期付款违约金的计算方式：甲方应在验收合格后30天内支付货款。",
+                clause_no=[6],
+            )
+        ]
+    )
+    assert facts["status"] == "identified"
+    assert facts["events"] == ["验收合格"]
+
+
+def test_multi_topic_heading_keeps_all_topics_for_evidence():
+    """「交付、验收与付款」多主题标题：验收主证据仍指向该条款（D13 R2）。"""
+    clauses = [
+        _clause("第三条 付款期限：甲方应在验收合格后30天支付货款。", clause_no=[3]),
+        _clause("第四条 交付、验收与付款：乙方交付后10个工作日内完成验收。", clause_no=[4]),
+    ]
+    facts = analysis.extract_acceptance_invoice(clauses)
+    assert facts["clause_no"] == [4]
+    assert {3, 4} <= set(facts["clause_no_union"])
