@@ -1173,6 +1173,78 @@ CASES = [
         },
     },
     {
+        "id": "start_mixed_liability_body",
+        "note": "混合条款（付款期限及违约责任）内违约金 5%→10%：四项不得误报（评审 A 阻断 1）",
+        "base": _doc(
+            _A1,
+            _A2,
+            "第三条 付款期限及违约责任：甲方应在验收合格后30天内支付货款。"
+            "合同生效后，违约方应向守约方支付违约金，违约金为合同总价的5%。",
+            _acc("四", "乙方交付后10个工作日内完成验收，验收标准以本合同附件二为准。"),
+            _A5,
+            _A6,
+            _A7,
+            _A8,
+        ),
+        "revised": _doc(
+            _A1,
+            _A2,
+            "第三条 付款期限及违约责任：甲方应在验收合格后30天内支付货款。"
+            "合同生效后，违约方应向守约方支付违约金，违约金为合同总价的10%。",
+            _acc("四", "乙方交付后10个工作日内完成验收，验收标准以本合同附件二为准。"),
+            _A5,
+            _A6,
+            _A7,
+            _A8,
+        ),
+        "items": {
+            "payment_term": _item(
+                "unchanged", {"status": "identified", "value": 30, "unit": "day"}, ("revised", 3)
+            ),
+            "start_condition": _item(
+                "unchanged", {"status": "identified", "events": ["验收合格"]}, ("revised", 3)
+            ),
+            "acceptance_invoice": _item("unchanged", _ACCEPT_OK, ("revised", 4)),
+            "exception": _item("unidentified", _ABSENT),
+        },
+    },
+    {
+        "id": "start_ignores_liability_clause_no_penalty",
+        "note": "责任条款含付款词但无违约金类词：仍不得贡献起算事件",
+        "base": _doc(
+            _A1,
+            _A2,
+            _pay("三", "甲方应在验收合格后30天内支付货款。"),
+            _acc("四", "乙方交付后10个工作日内完成验收，验收标准以本合同附件二为准。"),
+            _A5,
+            "第六条 违约责任：合同生效后，违约方应向守约方支付合同总价的5%作为赔偿，"
+            "并继续履行本合同约定的其他义务；协商不成的，可向有管辖权的人民法院起诉。",
+            _A7,
+            _A8,
+        ),
+        "revised": _doc(
+            _A1,
+            _A2,
+            _pay("三", "甲方应在验收合格后30天内支付货款。"),
+            _acc("四", "乙方交付后10个工作日内完成验收，验收标准以本合同附件二为准。"),
+            _A5,
+            "第六条 违约责任：合同生效后，违约方应向守约方支付合同总价的5%作为赔偿，"
+            "并继续履行本合同约定的其他义务；协商不成的，可向有管辖权的人民法院起诉。",
+            _A7,
+            _A8,
+        ),
+        "items": {
+            "payment_term": _item(
+                "unchanged", {"status": "identified", "value": 30, "unit": "day"}, ("revised", 3)
+            ),
+            "start_condition": _item(
+                "unchanged", {"status": "identified", "events": ["验收合格"]}, ("revised", 3)
+            ),
+            "acceptance_invoice": _item("unchanged", _ACCEPT_OK, ("revised", 4)),
+            "exception": _item("unidentified", _ABSENT),
+        },
+    },
+    {
         "id": "start_exception_new_event",
         "note": "新增例外条款提到验收合格+付款顺延：起算条件不得因此 modified（已知问题 #3）",
         "base": _doc(

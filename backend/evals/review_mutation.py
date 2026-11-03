@@ -89,6 +89,11 @@ def _mutation_specs() -> list[tuple[str, str, Any]]:
             "关闭违约/赔偿条款的起算排除",
             lambda: _patched(analysis, "_is_liability_article", lambda clause: False),
         ),
+        (
+            "liability_sentence_masking_disabled",
+            "关闭责任句屏蔽（违约金句污染起算/哈希）",
+            lambda: _patched(analysis, "_mask_liability_sentences", lambda text: text),
+        ),
     ]
 
 

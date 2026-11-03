@@ -482,31 +482,69 @@ def _is_exception_article(clause: Clause) -> bool:
 
 
 _LIABILITY_HEADING_TERMS = ("违约", "赔偿", "罚则")
+_LIABILITY_SENTENCE_TERMS = ("违约", "赔偿", "罚则", "滞纳金", "罚息", "罚款")
+_PENALTY_TERMS = ("违约金", "赔偿金", "滞纳金", "罚息", "罚款", "赔偿损失")
+
+
+def _heading_segment(raw_text: str) -> str:
+    """取标题段：raw 首行、剥「第X条」与紧随冒号、按标点/空白切第一段。"""
+    first_line = raw_text.splitlines()[0] if raw_text else ""
+    body = _CLAUSE_NUMBER_PREFIX_RE.sub("", first_line, count=1).lstrip(":：").lstrip()
+    return re.split(r"[:：，,。；;、\s]+", body, maxsplit=1)[0][:40]
 
 
 def _is_liability_article(clause: Clause) -> bool:
     """标题为违约/赔偿/罚则的条款：起算词是责任成立条件，不是付款起算。
 
     标题同时含付款语义（付款期限及违约责任 / 逾期付款违约金）时不排除，
-    否则整条付款条款会被踢出起算抽取（评审 B B1）。无冒号标题按前 40 字
-    保守判断；正文里出现付款词时同样不排除。
+    否则整条付款条款会被踢出起算（评审 B B1）；标题内的违约金句与比例
+    由 `_mask_liability_sentences` 在事件与哈希层屏蔽（评审 A 阻断 1）。
+    无冒号标题用 raw 首行识别（评审 A 阻断 2）。
     """
-    body = _CLAUSE_NUMBER_PREFIX_RE.sub("", clause.text, count=1).lstrip(":：")
-    parts = _HEADING_SPLIT_RE.split(body, maxsplit=1)
-    heading = (parts[0] if len(parts) >= 2 else body)[:40]
+    heading = _heading_segment(clause.raw_text or clause.text)
     if any(keyword in heading for keyword in PAYMENT_KEYWORDS):
         return False
     return any(term in heading for term in _LIABILITY_HEADING_TERMS)
 
 
+def _is_liability_sentence(sentence: str) -> bool:
+    """责任句：同时出现责任词与违约金/赔偿类词，期限/起算不归付款或验收。"""
+    return any(term in sentence for term in _LIABILITY_SENTENCE_TERMS) and any(
+        term in sentence for term in _PENALTY_TERMS
+    )
+
+
+def _mask_liability_sentences(text: str) -> str:
+    """把责任句整体替换为掩码（保留分隔符与标题），供事件抽取与按项哈希使用。
+
+    标题区（第一个冒号前）不参与责任句判定：`逾期付款违约金：甲方应…支付
+    货款` 的标题含责任词，但正文是付款义务，不能整句屏蔽。
+    """
+    match = _HEADING_SPLIT_RE.search(text)
+    head = text[: match.end()] if match else ""
+    body = text[match.end() :] if match else text
+
+    parts: list[str] = []
+    cursor = 0
+    for boundary in SENTENCE_SPLIT_RE.finditer(body):
+        segment = body[cursor : boundary.start()]
+        parts.append(_MASK if _is_liability_sentence(segment) else segment)
+        parts.append(boundary.group(0))
+        cursor = boundary.end()
+    tail = body[cursor:]
+    parts.append(_MASK if _is_liability_sentence(tail) else tail)
+    return head + "".join(parts)
+
+
 def _mask_item_noise(text: str, item_key: str) -> str:
     """屏蔽“属于其它核验项”的词元，避免共享条款的文本哈希互相污染。"""
     if item_key == "payment_term":
+        text = _mask_liability_sentences(text)
         for term in sorted(START_EVENTS + ACCEPTANCE_TERMS, key=len, reverse=True):
             text = text.replace(term, _MASK)
         return _collapse_mask(text)
     if item_key in ("start_condition", "acceptance_invoice"):
-        return _mask_payment_durations(text)
+        return _collapse_mask(_mask_liability_sentences(_mask_payment_durations(text)))
     # exception：不屏蔽任何期限——“顺延30天→15天”本身就是例外项的变化。
     return text
 
@@ -1016,7 +1054,9 @@ def extract_start_condition(clauses: list[Clause]) -> dict[str, Any]:
     ]
     events: list[dict[str, Any]] = []
     for clause in payment_clauses:
-        clause_events = _non_overlapping_events(clause.text, START_EVENTS)
+        clause_events = _non_overlapping_events(
+            _mask_liability_sentences(clause.text), START_EVENTS
+        )
         for event in START_EVENTS:
             if event in clause_events and all(e["event"] != event for e in events):
                 events.append({"event": event, "_clause": clause, **_primary_locator(clause)})

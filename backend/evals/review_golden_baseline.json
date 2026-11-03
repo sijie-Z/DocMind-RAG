@@ -1,6 +1,6 @@
 {
   "metrics": {
-    "cases": 35,
+    "cases": 37,
     "per_item": {
       "payment_term": {
         "extraction": 1.0,

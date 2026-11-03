@@ -2329,3 +2329,57 @@ def test_liability_heading_after_clause_number_colon_is_excluded():
         ]
     )
     assert facts["status"] == "not_found"
+
+
+def test_mixed_liability_sentence_does_not_pollute_items():
+    """混合条款里的违约金句不得污染起算/付款/验收（评审 A 阻断 1）。"""
+    base = [
+        _clause(
+            "第三条 付款期限及违约责任：甲方应在验收合格后30天内支付货款。"
+            "合同生效后，违约方应向守约方支付违约金，违约金为合同总价的5%。",
+            clause_no=[3],
+        )
+    ]
+    revised = [
+        _clause(
+            "第三条 付款期限及违约责任：甲方应在验收合格后30天内支付货款。"
+            "合同生效后，违约方应向守约方支付违约金，违约金为合同总价的10%。",
+            clause_no=[3],
+        )
+    ]
+    for item in ("payment_term", "start_condition", "acceptance_invoice"):
+        assert (
+            analysis.align_item(
+                item,
+                analysis.EXTRACTORS[item](base),
+                analysis.EXTRACTORS[item](revised),
+            )
+            == "unchanged"
+        ), item
+    assert analysis.extract_start_condition(base)["events"] == ["验收合格"]
+
+
+def test_no_colon_liability_heading_is_excluded():
+    """「第六条 违约责任」换行正文（无冒号）也必须排除出起算（评审 A 阻断 2）。"""
+    facts = analysis.extract_start_condition(
+        [
+            _clause(
+                "第六条 违约责任\n合同生效后，违约方应向守约方支付违约金。",
+                clause_no=[6],
+            )
+        ]
+    )
+    assert facts["status"] == "not_found"
+
+
+def test_single_colon_liability_heading_is_excluded():
+    """「第六条：违约责任 合同生效后…」单冒号形态也应排除。"""
+    facts = analysis.extract_start_condition(
+        [
+            _clause(
+                "第六条：违约责任 合同生效后，违约方应向守约方支付违约金。",
+                clause_no=[6],
+            )
+        ]
+    )
+    assert facts["status"] == "not_found"
