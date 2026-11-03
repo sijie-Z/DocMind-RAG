@@ -967,6 +967,178 @@ CASES = [
         },
     },
     {
+        "id": "start_bare_contract_effective",
+        "note": "裸「合同生效」起算：付款 10 个工作日，start events 必须含合同生效",
+        "base": _doc(
+            _A1,
+            _A2,
+            _pay("三", "甲方应在合同生效后10个工作日内支付首期款。"),
+            _acc("四", "乙方交付后10个工作日内完成验收，验收标准以本合同附件二为准。"),
+            _A5,
+            _A6,
+            _A7,
+            _A8,
+        ),
+        "revised": _doc(
+            _A1,
+            _A2,
+            _pay("三", "甲方应在合同生效后10个工作日内支付首期款。"),
+            _acc("四", "乙方交付后10个工作日内完成验收，验收标准以本合同附件二为准。"),
+            _A5,
+            _A6,
+            _A7,
+            _A8,
+        ),
+        "items": {
+            "payment_term": _item(
+                "unchanged",
+                {"status": "identified", "value": 10, "unit": "workday"},
+                ("revised", 3),
+            ),
+            "start_condition": _item(
+                "unchanged", {"status": "identified", "events": ["合同生效"]}, ("revised", 3)
+            ),
+            "acceptance_invoice": _item("unchanged", _ACCEPT_OK, ("revised", 4)),
+            "exception": _item("unidentified", _ABSENT),
+        },
+    },
+    {
+        "id": "start_event_overlap_dedupe",
+        "note": "合同生效之日起：只算一个起算事件，不得同时计 合同生效 + 生效之日",
+        "base": _doc(
+            _A1,
+            _A2,
+            _pay("三", "甲方应在合同生效之日起10个工作日内支付货款。"),
+            _acc("四", "乙方交付后10个工作日内完成验收，验收标准以本合同附件二为准。"),
+            _A5,
+            _A6,
+            _A7,
+            _A8,
+        ),
+        "revised": _doc(
+            _A1,
+            _A2,
+            _pay("三", "甲方应在合同生效之日起10个工作日内支付货款。"),
+            _acc("四", "乙方交付后10个工作日内完成验收，验收标准以本合同附件二为准。"),
+            _A5,
+            _A6,
+            _A7,
+            _A8,
+        ),
+        "items": {
+            "payment_term": _item(
+                "unchanged",
+                {"status": "identified", "value": 10, "unit": "workday"},
+                ("revised", 3),
+            ),
+            "start_condition": _item(
+                "unchanged", {"status": "identified", "events": ["合同生效"]}, ("revised", 3)
+            ),
+            "acceptance_invoice": _item("unchanged", _ACCEPT_OK, ("revised", 4)),
+            "exception": _item("unidentified", _ABSENT),
+        },
+    },
+    {
+        "id": "payment_reference_skips_exception",
+        "note": "账期引用独立例外条款：目标期限不得吸成付款期限",
+        "base": _doc(
+            _A1,
+            _A2,
+            _pay("三", "具体账期按第九条执行。"),
+            _acc("四", "乙方交付后10个工作日内完成验收，验收标准以本合同附件二为准。"),
+            _A5,
+            _A6,
+            _A7,
+            _A8,
+            "第九条 例外：因不可抗力导致付款延迟的，期限顺延30天。",
+        ),
+        "revised": _doc(
+            _A1,
+            _A2,
+            _pay("三", "具体账期按第九条执行。"),
+            _acc("四", "乙方交付后10个工作日内完成验收，验收标准以本合同附件二为准。"),
+            _A5,
+            _A6,
+            _A7,
+            _A8,
+            "第九条 例外：因不可抗力导致付款延迟的，期限顺延30天。",
+        ),
+        "items": {
+            "payment_term": _item("unidentified", _ABSENT),
+            "start_condition": _item("unidentified", _ABSENT),
+            "acceptance_invoice": _item("unchanged", _ACCEPT_OK, ("revised", 4)),
+            "exception": _item("unchanged", _ACCEPT_OK, ("revised", 9)),
+        },
+    },
+    {
+        "id": "payment_reference_cross_comma_negative",
+        "note": "账期与引用词跨逗号：不得把第九条 12 个月吸成付款期限",
+        "base": _doc(
+            _A1,
+            _A2,
+            _pay("三", "账期以其他方式约定，详见第九条。"),
+            _acc("四", "乙方交付后10个工作日内完成验收，验收标准以本合同附件二为准。"),
+            _A5,
+            _A6,
+            _A7,
+            _A8,
+            "第九条 期限：自签署之日起12个月。",
+        ),
+        "revised": _doc(
+            _A1,
+            _A2,
+            _pay("三", "账期以其他方式约定，详见第九条。"),
+            _acc("四", "乙方交付后10个工作日内完成验收，验收标准以本合同附件二为准。"),
+            _A5,
+            _A6,
+            _A7,
+            _A8,
+            "第九条 期限：自签署之日起12个月。",
+        ),
+        "items": {
+            "payment_term": _item("unidentified", _ABSENT),
+            "start_condition": _item("unidentified", _ABSENT),
+            "acceptance_invoice": _item("unchanged", _ACCEPT_OK, ("revised", 4)),
+            "exception": _item("unidentified", _ABSENT),
+        },
+    },
+    {
+        "id": "start_ignores_liability_clause",
+        "note": "违约责任条款里的合同生效不是付款起算；违约金 5%→10% 不得让 start modified（N1）",
+        "base": _doc(
+            _A1,
+            _A2,
+            _pay("三", "甲方应在验收合格后30天内支付货款。"),
+            _acc("四", "乙方交付后10个工作日内完成验收，验收标准以本合同附件二为准。"),
+            _A5,
+            "第六条 违约责任：合同生效后，违约方应向守约方支付违约金，违约金为合同总价的5%，"
+            "并赔偿由此造成的全部损失。",
+            _A7,
+            _A8,
+        ),
+        "revised": _doc(
+            _A1,
+            _A2,
+            _pay("三", "甲方应在验收合格后30天内支付货款。"),
+            _acc("四", "乙方交付后10个工作日内完成验收，验收标准以本合同附件二为准。"),
+            _A5,
+            "第六条 违约责任：合同生效后，违约方应向守约方支付违约金，违约金为合同总价的10%，"
+            "并赔偿由此造成的全部损失。",
+            _A7,
+            _A8,
+        ),
+        "items": {
+            "payment_term": _item(
+                "unchanged", {"status": "identified", "value": 30, "unit": "day"}, ("revised", 3)
+            ),
+            "start_condition": _item(
+                "unchanged", {"status": "identified", "events": ["验收合格"]}, ("revised", 3)
+            ),
+            "acceptance_invoice": _item("unchanged", _ACCEPT_OK, ("revised", 4)),
+            "exception": _item("unidentified", _ABSENT),
+        },
+    },
+    {
         "id": "start_exception_new_event",
         "note": "新增例外条款提到验收合格+付款顺延：起算条件不得因此 modified（已知问题 #3）",
         "base": _doc(

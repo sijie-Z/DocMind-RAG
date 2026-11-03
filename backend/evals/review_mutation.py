@@ -1,0 +1,129 @@
+"""核验 golden 变异敏感性自检（D12）：受控变异必须让 golden 失败。
+
+这是 harness 的“有牙齿”自检：对核验引擎做已知会破坏行为的受控变异，
+逐一跑完整 golden 评测；任何一个变异后指标仍全绿，说明对应守卫缺少
+gold 覆盖，脚本以非零码退出。
+
+用法（约 10 秒，离线确定性）：
+    cd backend && python -m evals.review_mutation
+"""
+
+from __future__ import annotations
+
+import asyncio
+import re
+import sys
+from contextlib import contextmanager
+from typing import Any, Iterator
+
+from app.services import review_analysis_service as analysis
+from evals import review_golden as golden
+
+
+@contextmanager
+def _patched(target: Any, name: str, value: Any) -> Iterator[None]:
+    original = getattr(target, name)
+    setattr(target, name, value)
+    try:
+        yield
+    finally:
+        setattr(target, name, original)
+
+
+def _events_without_dedupe(text: str, events: tuple[str, ...]) -> set[str]:
+    """去除重叠去重后的行为：只要词出现在文本里就算命中（合同生效之日起 双计）。"""
+    return {event for event in events if event in text}
+
+
+def _permissive_reference_re() -> re.Pattern[str]:
+    """把引用短语的标点边界去掉（逗号/冒号可跨越），模拟评审 M4 变异。"""
+    return re.compile(
+        r"(?:付款期限|支付期限|付款时间|支付时间|付款日期|支付日期|付款节点|支付节点|"
+        r"付款安排|支付安排|结算期限|结算周期|结算时间|账期)"
+        r"[^。；;]{0,12}?"
+        r"(?:详见|参见|见|按照|按|依据|依照|根据|参照|以)"
+        r"(?:本合同|本协议)?第[一二三四五六七八九十百零〇0-9]+条"
+        r"(?:\s*(?:[、,，和及与]|以及|至)\s*第[一二三四五六七八九十百零〇0-9]+条)*"
+    )
+
+
+def _mutation_specs() -> list[tuple[str, str, Any]]:
+    return [
+        (
+            "start_event_contract_effective_removed",
+            "删除起算事件「合同生效」",
+            lambda: _patched(
+                analysis,
+                "START_EVENTS",
+                tuple(event for event in analysis.START_EVENTS if event != "合同生效"),
+            ),
+        ),
+        (
+            "event_overlap_dedupe_disabled",
+            "关闭事件重叠去重（合同生效之日起 双计）",
+            lambda: _patched(analysis, "_non_overlapping_events", _events_without_dedupe),
+        ),
+        (
+            "reference_following_disabled",
+            "关闭付款条款引用跟随",
+            lambda: _patched(
+                analysis, "_payment_reference_clauses", lambda clauses, payment: ([], False)
+            ),
+        ),
+        (
+            "referenced_action_guard_disabled",
+            "关闭被引用期限的动作谓语守卫",
+            lambda: _patched(
+                analysis, "_referenced_duration_ok", lambda sentence, start, end: True
+            ),
+        ),
+        (
+            "reference_punctuation_guard_disabled",
+            "允许引用跨逗号/冒号（去掉引用短语标点边界）",
+            lambda: _patched(analysis, "_PAYMENT_REF_RE", _permissive_reference_re()),
+        ),
+        (
+            "liability_exclusion_disabled",
+            "关闭违约/赔偿条款的起算排除",
+            lambda: _patched(analysis, "_is_liability_article", lambda clause: False),
+        ),
+    ]
+
+
+def main() -> int:
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8")
+
+    golden.semantic_chunker_module.embedding_service = golden._NoEmbedding()
+    golden._NoEmbedding.calls = 0
+    baseline = asyncio.run(golden.evaluate())
+    if baseline["failures"]:
+        print("基线本身存在失败，先修好再跑变异自检：")
+        for failure in baseline["failures"]:
+            print("  -", failure)
+        return 1
+    print(f"baseline: {baseline['metrics']['cases']} 组，失败 0")
+
+    undetected = 0
+    for name, description, factory in _mutation_specs():
+        with factory():
+            result = asyncio.run(golden.evaluate())
+        failures = result["failures"]
+        if failures:
+            print(f"[DETECTED] {name}: {description}（{len(failures)} 条失败）")
+            for failure in failures[:3]:
+                print("    -", failure)
+        else:
+            undetected += 1
+            print(f"[MISSED] {name}: {description} —— 变异后 golden 仍全绿，需补 gold/度量")
+
+    if undetected:
+        print(f"\n{undetected} 个变异未被 golden 捕获")
+        return 1
+    print("\n所有变异均被 golden 捕获")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

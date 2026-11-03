@@ -2278,3 +2278,26 @@ def test_referenced_clause_acceptance_term_change_does_not_flip_payment():
         )
         == "modified"
     )
+
+
+def test_start_condition_ignores_liability_articles():
+    """违约/赔偿条款里的「合同生效」是责任成立条件，不是付款起算（N1）。"""
+    clauses = [
+        _clause("第三条 付款期限：甲方应在验收合格后30天内支付货款。", clause_no=[3]),
+        _clause(
+            "第六条 违约责任：合同生效后，违约方应向守约方支付违约金，违约金为合同总价的5%。",
+            clause_no=[6],
+        ),
+    ]
+    facts = analysis.extract_start_condition(clauses)
+    assert facts["events"] == ["验收合格"]
+
+    only_liability = analysis.extract_start_condition(
+        [
+            _clause(
+                "第六条 违约责任：合同生效后，违约方应向守约方支付违约金。",
+                clause_no=[6],
+            )
+        ]
+    )
+    assert only_liability["status"] == "not_found"

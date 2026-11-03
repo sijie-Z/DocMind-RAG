@@ -3,7 +3,7 @@
 .PHONY: help dev dev-backend dev-frontend install-backend install-frontend
 .PHONY: test test-backend test-frontend lint build build-frontend
 .PHONY: eval eval-check eval-ci eval-ci-baseline eval-public eval-v15-baselines eval-rerank-live
-.PHONY: review-eval review-eval-baseline
+.PHONY: review-eval review-eval-baseline review-mutation
 .PHONY: rc-accept
 .PHONY: docker-up docker-down docker-logs docker-build docker-migrate db-migrate
 .PHONY: clean clean-logs check
@@ -80,6 +80,9 @@ review-eval: ## 核验 golden set（离线、确定性）：三张表 + 基线�
 
 review-eval-baseline: ## 显式更新核验基线（改基线=显式 PR 行为，评审可见）
 	cd $(BACKEND_DIR) && python -m evals.review_golden --update-baseline
+
+review-mutation: ## golden 变异敏感性自检：已知破坏必须让 golden 变红
+	cd $(BACKEND_DIR) && python -m evals.review_mutation
 
 # v1.5 公开复现（issue #512）：只需 ES 8.11 + 伪嵌入，无 Ollama / 无网络。
 EVAL_PUBLIC_INDEX := docmind_knowledge_eval_public_v1

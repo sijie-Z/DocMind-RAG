@@ -481,6 +481,18 @@ def _is_exception_article(clause: Clause) -> bool:
     return False
 
 
+_LIABILITY_HEADING_TERMS = ("违约", "赔偿", "罚则")
+
+
+def _is_liability_article(clause: Clause) -> bool:
+    """标题为违约/赔偿/罚则的条款：起算词是责任成立条件，不是付款起算。"""
+    parts = _HEADING_SPLIT_RE.split(clause.text, maxsplit=1)
+    if len(parts) < 2:
+        return False
+    heading = parts[0].split("\n", 1)[0][:40]
+    return any(term in heading for term in _LIABILITY_HEADING_TERMS)
+
+
 def _mask_item_noise(text: str, item_key: str) -> str:
     """屏蔽“属于其它核验项”的词元，避免共享条款的文本哈希互相污染。"""
     if item_key == "payment_term":
@@ -987,11 +999,14 @@ def _non_overlapping_events(text: str, events: tuple[str, ...]) -> set[str]:
 
 
 def extract_start_condition(clauses: list[Clause]) -> dict[str, Any]:
-    # 独立例外条款里的起算事件是顺延条件，不是付款起算条件本身。
+    # 独立例外条款里的起算事件是顺延条件，不是付款起算条件本身；
+    # 违约/赔偿条款里的起算词是责任成立条件，同样不是付款起算。
     payment_clauses = [
         c
         for c in clauses
-        if any(k in c.text for k in PAYMENT_KEYWORDS) and not _is_exception_article(c)
+        if any(k in c.text for k in PAYMENT_KEYWORDS)
+        and not _is_exception_article(c)
+        and not _is_liability_article(c)
     ]
     events: list[dict[str, Any]] = []
     for clause in payment_clauses:
