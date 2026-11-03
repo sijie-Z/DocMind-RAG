@@ -310,25 +310,66 @@ def _mask_payment_durations(text: str) -> str:
     return "".join(parts)
 
 
+_CONTINUATION_SUBJECTS = (
+    "甲方",
+    "乙方",
+    "丙方",
+    "丁方",
+    "戊方",
+    "双方",
+    "各方",
+    "任何一方",
+    "卖方",
+    "买方",
+    "供方",
+    "需方",
+    "承包人",
+    "发包人",
+    "供应商",
+    "采购人",
+)
+
+# 连词后接通知/约定类动词时，付款只是被提及而非延续前一片段的谓语。
+_CONTINUATION_INTERVENING_VERBS = (
+    "通知",
+    "告知",
+    "提醒",
+    "要求",
+    "约定",
+    "确认",
+    "申请",
+    "催告",
+    "提交",
+)
+
+
 def _payment_continues_after_fragment(text: str, boundary_end: int, sentence_end: int) -> bool:
     """逗号后是否为“并/且/同时支付”式谓语延续。
 
     「完成对账，并支付货款」的付款期限可以跨逗号归付款；
-    「完成验收，随后付款/付款/之后付款/再付款」是新谓语，不得回吸前一片段的期限。
+    「完成验收，随后付款/付款/之后付款/再付款」是新谓语，不得回吸前一片段的期限；
+    「完成验收，并由甲方支付货款 / 并提醒付款」连接新主语或通知类动词，
+    期限只约束前一片段，同样不得跨逗号归付款。
     """
     tail = text[boundary_end:sentence_end].lstrip()
     if not tail:
         return False
-    conjugated = tail[0] in "并且" or tail.startswith("同时")
-    if conjugated and any(keyword in tail for keyword in PAYMENT_KEYWORDS):
-        return True
-    for keyword in PAYMENT_KEYWORDS:
-        index = tail.find(keyword)
-        if index > 0 and tail[index - 1] in "并且":
+    payment_positions = [tail.find(keyword) for keyword in PAYMENT_KEYWORDS if keyword in tail]
+    if not payment_positions:
+        return False
+    pay_pos = min(payment_positions)
+    if any(subject in tail[:pay_pos] for subject in _CONTINUATION_SUBJECTS):
+        return False
+    if tail[0] in "并且":
+        lead = tail[1:pay_pos]
+    elif tail.startswith("同时"):
+        lead = tail[2:pay_pos]
+    else:
+        # 连词紧贴付款词（「核对无误并支付」）仍算延续。
+        if pay_pos >= 1 and tail[pay_pos - 1] in "并且":
             return True
-        if index >= 2 and tail[index - 2 : index] == "同时":
-            return True
-    return False
+        return pay_pos >= 2 and tail[pay_pos - 2 : pay_pos] == "同时"
+    return not any(verb in lead for verb in _CONTINUATION_INTERVENING_VERBS)
 
 
 def _nearest_anchor_is_payment(text: str, start: int, end: int) -> bool:

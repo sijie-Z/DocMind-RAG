@@ -1885,3 +1885,33 @@ def test_comma_payment_without_conjunction_does_not_shield_acceptance():
             )
             == "modified"
         ), tail
+
+
+def test_conjunction_with_new_subject_does_not_shield_acceptance():
+    """连词后出现新主语时，付款是新主语的谓语，不得回吸验收期限（B 回归）。"""
+    for tail in ("并由甲方支付货款", "并约定甲方付款", "并要求甲方付款"):
+        base = [_clause(f"第四条 验收：乙方应在10个工作日内完成验收，{tail}。", clause_no=[4])]
+        revised = [_clause(f"第四条 验收：乙方应在15个工作日内完成验收，{tail}。", clause_no=[4])]
+        assert (
+            analysis.align_item(
+                "acceptance_invoice",
+                analysis.extract_acceptance_invoice(base),
+                analysis.extract_acceptance_invoice(revised),
+            )
+            == "modified"
+        ), tail
+
+
+def test_conjunction_with_notification_verb_does_not_shield_acceptance():
+    """连词后接通知/约定类动词时，付款只是被提及，不得回吸验收期限（B 回归）。"""
+    for tail in ("并通知甲方付款", "并提醒付款", "并确认付款方式"):
+        base = [_clause(f"第四条 验收：乙方应在10个工作日内完成验收，{tail}。", clause_no=[4])]
+        revised = [_clause(f"第四条 验收：乙方应在15个工作日内完成验收，{tail}。", clause_no=[4])]
+        assert (
+            analysis.align_item(
+                "acceptance_invoice",
+                analysis.extract_acceptance_invoice(base),
+                analysis.extract_acceptance_invoice(revised),
+            )
+            == "modified"
+        ), tail
