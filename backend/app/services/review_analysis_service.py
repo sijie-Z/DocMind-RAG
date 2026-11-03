@@ -485,6 +485,9 @@ _LIABILITY_HEADING_TERMS = ("违约", "赔偿", "罚则")
 _LIABILITY_SENTENCE_TERMS = ("违约", "赔偿", "罚则", "滞纳金", "罚息", "罚款")
 _PENALTY_TERMS = ("违约金", "赔偿金", "滞纳金", "罚息", "罚款", "赔偿损失")
 _LIABILITY_BOUNDARY_RE = re.compile(r"[，,、。；;！!？?\n]")
+_LIABILITY_CONJUNCTION_RE = re.compile(
+    r"(?:并且|并|且|及|以及)(?=[^，,。；;]*?(?:违约金|赔偿金|滞纳金|罚息|罚款|赔偿损失))"
+)
 
 
 def _heading_segment(raw_text: str) -> str:
@@ -495,12 +498,16 @@ def _heading_segment(raw_text: str) -> str:
 
 
 def _heading_end(text: str) -> int:
-    """标题结束位置（含分隔冒号）：跳过「第X条」及其后冒号，再找下一个冒号。"""
+    """标题结束位置（含分隔冒号）：跳过「第X条」及其后冒号，再找下一个冒号。
+
+    只在前 40 字内找分隔冒号：无冒号标题 + 正文冒号（「违约金：按日…」）
+    不能把正文当标题，否则责任片段不会被屏蔽（评审 A N2 边界）。
+    """
     match = _CLAUSE_NUMBER_PREFIX_RE.match(text)
     start = match.end() if match else 0
     if start < len(text) and text[start] in ":：":
         start += 1
-    colon = _HEADING_SPLIT_RE.search(text, start)
+    colon = _HEADING_SPLIT_RE.search(text, start, start + 40)
     return colon.end() if colon else 0
 
 
@@ -535,8 +542,9 @@ def _mask_liability_sentences(text: str, *, mask_leading_bare: bool = False) -> 
     """按逗号/句读片段屏蔽责任片段（保留标题与付款片段）。
 
     整句屏蔽会吞掉同句内的付款义务（「…支付货款，逾期付款的按日支付违约
-    金」），因此只在片段级替换：片段同时含责任词与违约金类词才屏蔽。
-    mask_leading_bare=True 时，紧邻责任片段之前、且不含付款锚点/期限的过渡
+    金」），因此只在片段级替换：片段同时含责任词与违约金类词才屏蔽；同片段
+    无标点连词（「支付货款并按日…违约金」）只屏蔽连词后的责任子句。
+    mask_leading_bare=True 时，紧邻纯责任片段之前、且不含付款锚点/期限的过渡
     片段（如「合同生效后」）也屏蔽，供起算事件抽取使用。
     """
     head_end = _heading_end(text)
@@ -552,21 +560,44 @@ def _mask_liability_sentences(text: str, *, mask_leading_bare: bool = False) -> 
     pieces.append((cursor, len(body)))
     separators.append("")
 
-    flags = [_is_liability_piece(body[start:end]) for start, end in pieces]
+    replacements: list[str] = []
+    pure_liability: list[bool] = []
+    for start, end in pieces:
+        piece = body[start:end]
+        if not _is_liability_piece(piece):
+            replacements.append(piece)
+            pure_liability.append(False)
+            continue
+        conjunction = _LIABILITY_CONJUNCTION_RE.search(piece)
+        prefix = piece[: conjunction.start()] if conjunction else ""
+        if (
+            conjunction is not None
+            and conjunction.start() > 0
+            and (
+                any(keyword in prefix for keyword in PAYMENT_KEYWORDS) or _contains_duration(prefix)
+            )
+        ):
+            # 同片段无标点连词：「支付货款并按日…违约金」只屏蔽连词后的责任子句。
+            replacements.append(prefix + _MASK)
+            pure_liability.append(False)
+        else:
+            replacements.append(_MASK)
+            pure_liability.append(True)
+
     if mask_leading_bare:
         for index in range(len(pieces) - 1):
-            if not flags[index + 1] or flags[index]:
+            if not pure_liability[index + 1] or pure_liability[index]:
                 continue
             fragment = body[pieces[index][0] : pieces[index][1]]
             if any(keyword in fragment for keyword in PAYMENT_KEYWORDS):
                 continue
             if _contains_duration(fragment):
                 continue
-            flags[index] = True
+            replacements[index] = _MASK
 
     parts: list[str] = [head]
-    for index, (start, end) in enumerate(pieces):
-        parts.append(_MASK if flags[index] else body[start:end])
+    for index in range(len(pieces)):
+        parts.append(replacements[index])
         parts.append(separators[index])
     return "".join(parts)
 
@@ -1114,11 +1145,16 @@ def extract_start_condition(clauses: list[Clause]) -> dict[str, Any]:
 
 
 def _heading_contains(clause: Clause, terms: tuple[str, ...]) -> bool:
-    """条款标题（必须有冒号分隔）是否命中给定术语；无冒号不判定为标题。"""
-    parts = _HEADING_SPLIT_RE.split(clause.text, maxsplit=1)
-    if len(parts) < 2:
+    """条款标题是否命中给定术语；标题必须有冒号分隔（raw 首行判断）。
+
+    不能直接用 clause.text 的第一个冒号切标题：正文冒号（「违约金：按日…」）
+    会把正文当标题（评审 A N2 边界/D13）。
+    """
+    raw = clause.raw_text or clause.text
+    first_line = raw.splitlines()[0] if raw else ""
+    if not _HEADING_SPLIT_RE.search(first_line):
         return False
-    heading = parts[0].split("\n", 1)[0][:40]
+    heading = _heading_segment(raw)[:40]
     return any(term in heading for term in terms)
 
 

@@ -2457,3 +2457,75 @@ def test_heading_with_clause_number_and_term_colon_keeps_start():
     )
     assert facts["status"] == "identified"
     assert facts["events"] == ["验收合格"]
+
+
+def test_unpunctuated_penalty_keeps_payment_and_start():
+    """同片段无标点连词「支付货款并按日…违约金」只屏蔽责任子句（D13）。"""
+    base = [
+        _clause(
+            "第三条 付款期限：甲方应在验收合格后30天内向乙方支付货款并按日万分之五支付违约金。",
+            clause_no=[3],
+        )
+    ]
+    assert analysis.extract_start_condition(base)["events"] == ["验收合格"]
+
+    subject_changed = [
+        _clause(
+            "第三条 付款期限：甲方应在验收合格后30天内向丙方支付服务费并按日万分之五支付违约金。",
+            clause_no=[3],
+        )
+    ]
+    assert (
+        analysis.align_item(
+            "payment_term",
+            analysis.extract_payment_term(base),
+            analysis.extract_payment_term(subject_changed),
+        )
+        == "modified"
+    )
+
+    rate_changed = [
+        _clause(
+            "第三条 付款期限：甲方应在验收合格后30天内向乙方支付货款并按日万分之十支付违约金。",
+            clause_no=[3],
+        )
+    ]
+    for item in ("payment_term", "start_condition", "acceptance_invoice"):
+        assert (
+            analysis.align_item(
+                item,
+                analysis.EXTRACTORS[item](base),
+                analysis.EXTRACTORS[item](rate_changed),
+            )
+            == "unchanged"
+        ), item
+
+
+def test_no_colon_mixed_heading_body_colon_keeps_start():
+    """无冒号混合标题 + 正文冒号（违约金：按日…）不得把正文当标题（D13）。"""
+    base = [
+        _clause(
+            "第六条 付款期限及违约责任\n甲方应在验收合格后30天内支付货款。"
+            "合同生效后，违约方应支付违约金：按日万分之五。",
+            clause_no=[6],
+        )
+    ]
+    facts = analysis.extract_start_condition(base)
+    assert facts["status"] == "identified"
+    assert facts["events"] == ["验收合格"]
+
+    rate_changed = [
+        _clause(
+            "第六条 付款期限及违约责任\n甲方应在验收合格后30天内支付货款。"
+            "合同生效后，违约方应支付违约金：按日万分之十。",
+            clause_no=[6],
+        )
+    ]
+    assert (
+        analysis.align_item(
+            "start_condition",
+            facts,
+            analysis.extract_start_condition(rate_changed),
+        )
+        == "unchanged"
+    )

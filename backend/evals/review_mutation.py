@@ -32,6 +32,16 @@ def _patched(target: Any, name: str, value: Any) -> Iterator[None]:
         setattr(target, name, original)
 
 
+def _uncapped_heading_end(text: str) -> int:
+    """不看 40 字上限的旧行为：正文冒号也会被当标题分隔符。"""
+    match = analysis._CLAUSE_NUMBER_PREFIX_RE.match(text)
+    start = match.end() if match else 0
+    if start < len(text) and text[start] in ":：":
+        start += 1
+    colon = analysis._HEADING_SPLIT_RE.search(text, start)
+    return colon.end() if colon else 0
+
+
 def _events_without_dedupe(text: str, events: tuple[str, ...]) -> set[str]:
     """去除重叠去重后的行为：只要词出现在文本里就算命中（合同生效之日起 双计）。"""
     return {event for event in events if event in text}
@@ -93,6 +103,20 @@ def _mutation_specs() -> list[tuple[str, str, Any]]:
             "liability_sentence_masking_disabled",
             "关闭责任句屏蔽（违约金句污染起算/哈希）",
             lambda: _patched(analysis, "_mask_liability_sentences", lambda text, **kwargs: text),
+        ),
+        (
+            "liability_conjunction_split_disabled",
+            "关闭同片段连词切分（付款货款并按日…违约金 整片段屏蔽）",
+            lambda: _patched(
+                analysis,
+                "_LIABILITY_CONJUNCTION_RE",
+                re.compile(r"(?!x)x"),
+            ),
+        ),
+        (
+            "heading_colon_uncapped",
+            "标题冒号不设 40 字上限（正文冒号被当标题）",
+            lambda: _patched(analysis, "_heading_end", _uncapped_heading_end),
         ),
     ]
 
