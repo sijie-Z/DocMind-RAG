@@ -498,9 +498,12 @@ def _content_sha_for(clause: Clause, item_key: str) -> str:
     if item_key == "payment_term" and not any(
         keyword in clause.text for keyword in PAYMENT_KEYWORDS
     ):
-        # 仅经引用纳入付款项的条款：不做跨项词元屏蔽。否则起算词变化
-        # （合同生效→合同签订生效）会被付款屏蔽与起算不扫引用条款同时吞掉，
-        # 四项全报 unchanged（评审 A B1）。
+        # 仅经引用纳入付款项的条款：起算词不屏蔽（否则 合同生效→合同签订生效
+        # 会被付款屏蔽与起算不扫引用条款同时吞掉，评审 A B1）；验收词仍屏蔽，
+        # 避免验收词变化把付款项一起报 modified（评审 B N7）。
+        for term in sorted(ACCEPTANCE_TERMS, key=len, reverse=True):
+            content = content.replace(term, _MASK)
+        content = _collapse_mask(content)
         return hashlib.sha256(content.encode("utf-8")).hexdigest()
     content = _mask_item_noise(content, item_key)
     return hashlib.sha256(content.encode("utf-8")).hexdigest()

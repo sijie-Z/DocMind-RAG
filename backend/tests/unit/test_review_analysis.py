@@ -2246,3 +2246,35 @@ def test_overlapping_start_events_do_not_double_count():
     )
     assert facts["status"] == "identified"
     assert facts["events"] == ["合同生效"]
+
+
+def test_referenced_clause_acceptance_term_change_does_not_flip_payment():
+    """引用条款内验收词变化只归验收项，付款项不得一起报 modified（评审 B N7）。"""
+    base = [
+        _clause("第三条 付款方式：验收合格后，具体账期按第四条执行。", clause_no=[3]),
+        _clause(
+            "第四条 履行期限：合同生效后10个工作日内，验收安排按本条约定办理。",
+            clause_no=[4],
+        ),
+    ]
+    revised = [
+        _clause("第三条 付款方式：验收合格后，具体账期按第四条执行。", clause_no=[3]),
+        _clause(
+            "第四条 履行期限：合同生效后10个工作日内，对账安排按本条约定办理。",
+            clause_no=[4],
+        ),
+    ]
+    base_payment = analysis.extract_payment_term(base)
+    assert (base_payment["value"], base_payment["unit"]) == (10, "workday")
+    assert (
+        analysis.align_item("payment_term", base_payment, analysis.extract_payment_term(revised))
+        == "unchanged"
+    )
+    assert (
+        analysis.align_item(
+            "acceptance_invoice",
+            analysis.extract_acceptance_invoice(base),
+            analysis.extract_acceptance_invoice(revised),
+        )
+        == "modified"
+    )
