@@ -2748,3 +2748,68 @@ def test_full_title_supports_89_char_heading():
     )
     assert facts["status"] == "identified"
     assert facts["events"] == ["验收合格"]
+
+
+def test_penalty_synonyms_do_not_pollute_items():
+    """罚金/赔偿款/损失赔偿/逾期利息/律师费变化不得污染四项（D14 R1）。"""
+    cases = (
+        (
+            "第三条 付款期限：甲方应在验收合格后30天内支付货款，支付违约金并按日万分之五支付罚金。",
+            "万分之五",
+            "万分之三",
+        ),
+        (
+            "第三条 付款期限：甲方应在验收合格后30天内支付货款，赔偿款5万元并支付违约金。",
+            "5万",
+            "8万",
+        ),
+        (
+            "第三条 付款期限：甲方应在验收合格后30天内支付货款，损失赔偿款5万元并支付违约金。",
+            "5万",
+            "8万",
+        ),
+        (
+            "第三条 付款期限：甲方应在验收合格后30天内支付货款，"
+            "逾期利息按日万分之五计收并支付违约金。",
+            "万分之五",
+            "万分之三",
+        ),
+        (
+            "第三条 付款期限：甲方应在验收合格后30天内支付货款，律师费5万元并支付违约金。",
+            "5万",
+            "8万",
+        ),
+    )
+    for text, old, new in cases:
+        base = [_clause(text, clause_no=[3])]
+        revised = [_clause(text.replace(old, new), clause_no=[3])]
+        for item in ("payment_term", "start_condition", "acceptance_invoice"):
+            assert (
+                analysis.align_item(
+                    item,
+                    analysis.EXTRACTORS[item](base),
+                    analysis.EXTRACTORS[item](revised),
+                )
+                == "unchanged"
+            ), (item, text)
+
+
+def test_long_preamble_with_comma_is_not_treated_as_title():
+    """81–120 字、含逗号的正文前言不得被当标题（D14 R1）。"""
+    preamble = (
+        "经甲乙双方友好协商，就甲方向乙方采购办公设备事宜，双方一致同意按照本合同约定"
+        "的价格、质量、交付、验收、付款及售后服务等条件严格履行，并特别约定逾期付款"
+        "按日万分之五支付违约金如下"
+    )
+    raw = f"第六条 {preamble}：甲方应在验收合格后30天内支付货款。"
+    assert analysis._full_title(raw) is None
+    revised = raw.replace("万分之五", "万分之三")
+    for item in ("payment_term", "acceptance_invoice"):
+        assert (
+            analysis.align_item(
+                item,
+                analysis.EXTRACTORS[item]([_clause(raw, clause_no=[6])]),
+                analysis.EXTRACTORS[item]([_clause(revised, clause_no=[6])]),
+            )
+            == "unchanged"
+        ), item

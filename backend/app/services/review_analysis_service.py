@@ -483,7 +483,21 @@ def _is_exception_article(clause: Clause) -> bool:
 
 _LIABILITY_HEADING_TERMS = ("违约", "赔偿", "罚则")
 _LIABILITY_SENTENCE_TERMS = ("违约", "赔偿", "罚则", "滞纳金", "罚息", "罚款")
-_PENALTY_TERMS = ("违约金", "赔偿金", "滞纳金", "罚息", "罚款", "赔偿损失")
+_PENALTY_TERMS = (
+    "违约金",
+    "赔偿金",
+    "滞纳金",
+    "罚息",
+    "罚款",
+    "赔偿损失",
+    "罚金",
+    "赔偿款",
+    "损失赔偿",
+    "逾期利息",
+    "律师费",
+)
+_PAYMENT_NOUNS = ("付款", "货款", "价款", "账期", "结算", "款项")
+_SUFFIX_LIABILITY_TERMS = ("违约", "赔偿", "罚", "滞纳", "利息", "律师费")
 _LIABILITY_BOUNDARY_RE = re.compile(r"[，,、。；;！!？?\n]")
 _LIABILITY_CONJUNCTION_RE = re.compile(
     r"(?:并且|以及|并|且|(?<!涉)及(?!时))"
@@ -506,8 +520,8 @@ def _heading_segment(raw_text: str) -> str:
 def _full_title(raw_text: str) -> str | None:
     """标题全文（可跨行、含顿号）：取第一个非「第X条后冒号」的分隔冒号之前。
 
-    无分隔冒号、标题含句号/分号或过长（>80 字）时返回 None，避免把正文
-    当标题（评审 A 长标题/正文冒号回归）。
+    无分隔冒号、标题含句号/分号/逗号或过长（>120 字）时返回 None，避免
+    把正文前言当标题（评审 A 长标题/正文冒号回归、评审 B D14 R1）。
     """
     if not raw_text:
         return None
@@ -519,7 +533,7 @@ def _full_title(raw_text: str) -> str | None:
     if colon is None:
         return None
     head = raw_text[: colon.start()]
-    if any(char in head for char in "。；;"):
+    if any(char in head for char in "。；;，,"):
         return None
     normalized = normalize_clause_text(head)
     body = _CLAUSE_NUMBER_PREFIX_RE.sub("", normalized, count=1).lstrip(":：").strip()
@@ -620,8 +634,10 @@ def _mask_liability_sentences(
         prefix_is_payment = any(keyword in prefix for keyword in PAYMENT_KEYWORDS) and not any(
             term in prefix for term in _PENALTY_TERMS
         )
-        suffix_is_payment = any(keyword in suffix for keyword in PAYMENT_KEYWORDS) and not any(
-            term in suffix for term in _PENALTY_TERMS
+        suffix_is_payment = (
+            any(noun in suffix for noun in _PAYMENT_NOUNS)
+            and not any(term in suffix for term in _PENALTY_TERMS)
+            and not any(term in suffix for term in _SUFFIX_LIABILITY_TERMS)
         )
         if conjunction is not None and conjunction.start() > 0 and prefix_is_payment:
             # 同片段无标点连词：「支付货款并按日…违约金」只屏蔽连词后的责任子句。
