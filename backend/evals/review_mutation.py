@@ -145,6 +145,11 @@ def _mutation_specs() -> list[tuple[str, str, Any]]:
             "标题 hint 失配时不按当前文本回退（期限屏蔽后标题不剥离）",
             lambda: _patched(analysis, "_heading_end", _hint_only_heading_end),
         ),
+        (
+            "liability_colon_split_disabled",
+            "关闭责任片段正文冒号切分（违约金：付款期限… 整段屏蔽）",
+            lambda: _patched(analysis, "_liability_colon_replacement", lambda piece: None),
+        ),
     ]
 
 
