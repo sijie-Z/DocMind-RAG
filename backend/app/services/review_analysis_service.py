@@ -657,10 +657,11 @@ def _liability_colon_replacement(piece: str) -> str | None:
     suffix = piece[colon.end() :]
     if not suffix:
         return None
-    has_payment_context = (
-        any(noun in suffix for noun in _PAYMENT_NOUNS)
-        or any(event in suffix for event in START_EVENTS)
-    ) and any(verb in suffix for verb in _PAYMENT_VERBS)
+    # 必须同时有强付款名词与付款动词：仅起算事件/期限不构成付款子句
+    # （罚则支付起算不得污染四项，评审 B D14 R6）。
+    has_payment_context = any(noun in suffix for noun in _PAYMENT_NOUNS) and any(
+        verb in suffix for verb in _PAYMENT_VERBS
+    )
     if not has_payment_context:
         return None
     if any(term in suffix for term in _PENALTY_TERMS):

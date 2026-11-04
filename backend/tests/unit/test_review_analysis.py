@@ -2938,3 +2938,30 @@ def test_word_internal_ji_in_sheji_is_not_conjunction():
     """「涉及」中的及不是连词；「付款及违约金」才是（D14 判别性测试）。"""
     assert analysis._LIABILITY_CONJUNCTION_RE.search("涉及付款违约金") is None
     assert analysis._LIABILITY_CONJUNCTION_RE.search("付款及违约金") is not None
+
+
+def test_liability_colon_event_without_payment_noun_is_masked():
+    """起算事件+付款动词但无付款名词（违约金：合同生效之日起支付）不得保留。"""
+    base = [
+        _clause(
+            "第三条 付款期限：甲方应在验收合格后30天内支付货款。应支付违约金：合同生效之日起支付。",
+            clause_no=[3],
+        )
+    ]
+    revised = [
+        _clause(
+            "第三条 付款期限：甲方应在验收合格后30天内支付货款。"
+            "应支付违约金：合同签订生效之日起支付。",
+            clause_no=[3],
+        )
+    ]
+    for item in ("payment_term", "start_condition", "acceptance_invoice"):
+        assert (
+            analysis.align_item(
+                item,
+                analysis.EXTRACTORS[item](base),
+                analysis.EXTRACTORS[item](revised),
+            )
+            == "unchanged"
+        ), item
+    assert analysis.extract_start_condition(base)["events"] == ["验收合格"]
