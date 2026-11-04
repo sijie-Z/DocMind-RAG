@@ -2683,3 +2683,68 @@ def test_penalty_title_with_duration_does_not_hide_changes():
         )
         == "modified"
     )
+
+
+def test_reverse_penalty_payment_order_keeps_start_and_payment():
+    """反向语序：责任在前、付款在后（支付违约金并在验收合格后30天内付款）。"""
+    base = [
+        _clause(
+            "第三条 付款期限：甲方应支付违约金并在验收合格后30天内向乙方支付货款。",
+            clause_no=[3],
+        )
+    ]
+    facts = analysis.extract_start_condition(base)
+    assert facts["status"] == "identified"
+    assert facts["events"] == ["验收合格"]
+    payment = analysis.extract_payment_term(base)
+    assert payment["status"] == "identified"
+    assert (payment["value"], payment["unit"]) == (30, "day")
+
+    subject_changed = [
+        _clause(
+            "第三条 付款期限：甲方应支付违约金并在验收合格后30天内向丙方支付服务费。",
+            clause_no=[3],
+        )
+    ]
+    assert (
+        analysis.align_item(
+            "payment_term",
+            payment,
+            analysis.extract_payment_term(subject_changed),
+        )
+        == "modified"
+    )
+
+
+def test_jishi_word_internal_conjunction_is_not_split():
+    """「及时」中的及不是连词：付款义务与起算事件不得被责任片段吞掉。"""
+    facts = analysis.extract_start_condition(
+        [
+            _clause(
+                "第三条 付款期限：甲方应在验收合格后30天内及时支付货款并按日万分之五支付违约金。",
+                clause_no=[3],
+            )
+        ]
+    )
+    assert facts["status"] == "identified"
+    assert facts["events"] == ["验收合格"]
+
+
+def test_full_title_supports_89_char_heading():
+    """超长标题（>80 字、≤120 字）仍应剥离并保留起算。"""
+    title = (
+        "付款期限、验收标准、发票开具要求、争议解决方式、合同解除及逾期付款违约金的"
+        "计算方式与支付安排特别说明补充条款汇总一二三四五六七八九十、最终解释口径与"
+        "争议处理及补充说明"
+    )
+    assert len(title) > 80
+    facts = analysis.extract_start_condition(
+        [
+            _clause(
+                f"第六条 {title}：甲方应在验收合格后30天内支付货款。",
+                clause_no=[6],
+            )
+        ]
+    )
+    assert facts["status"] == "identified"
+    assert facts["events"] == ["验收合格"]

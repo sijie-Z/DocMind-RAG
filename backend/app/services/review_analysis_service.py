@@ -486,7 +486,12 @@ _LIABILITY_SENTENCE_TERMS = ("违约", "赔偿", "罚则", "滞纳金", "罚息"
 _PENALTY_TERMS = ("违约金", "赔偿金", "滞纳金", "罚息", "罚款", "赔偿损失")
 _LIABILITY_BOUNDARY_RE = re.compile(r"[，,、。；;！!？?\n]")
 _LIABILITY_CONJUNCTION_RE = re.compile(
-    r"(?:并且|以及|并|且|及)(?=[^，,。；;]{0,64}?(?:违约金|赔偿金|滞纳金|罚息|罚款|赔偿损失))"
+    r"(?:并且|以及|并|且|(?<!涉)及(?!时))"
+    r"(?=[^，,。；;]{0,64}?(?:违约金|赔偿金|滞纳金|罚息|罚款|赔偿损失))"
+)
+_PAYMENT_CONJUNCTION_RE = re.compile(
+    r"(?:并且|以及|并|且|(?<!涉)及(?!时))"
+    r"(?=[^，,。；;]{0,64}?(?:付款|支付|账期|结算|价款|货款))"
 )
 
 
@@ -518,7 +523,7 @@ def _full_title(raw_text: str) -> str | None:
         return None
     normalized = normalize_clause_text(head)
     body = _CLAUSE_NUMBER_PREFIX_RE.sub("", normalized, count=1).lstrip(":：").strip()
-    if not body or len(body) > 80:
+    if not body or len(body) > 120:
         return None
     return body
 
@@ -607,17 +612,26 @@ def _mask_liability_sentences(
             pure_liability.append(False)
             continue
         conjunction = _LIABILITY_CONJUNCTION_RE.search(piece)
+        if conjunction is None:
+            # 反向语序：连词后是付款锚点（责任在前、付款在后）。
+            conjunction = _PAYMENT_CONJUNCTION_RE.search(piece)
         prefix = piece[: conjunction.start()] if conjunction else ""
-        if (
-            conjunction is not None
-            and conjunction.start() > 0
-            and any(keyword in prefix for keyword in PAYMENT_KEYWORDS)
-            and not any(term in prefix for term in _PENALTY_TERMS)
-        ):
+        suffix = piece[conjunction.end() :] if conjunction else ""
+        prefix_is_payment = any(keyword in prefix for keyword in PAYMENT_KEYWORDS) and not any(
+            term in prefix for term in _PENALTY_TERMS
+        )
+        suffix_is_payment = any(keyword in suffix for keyword in PAYMENT_KEYWORDS) and not any(
+            term in suffix for term in _PENALTY_TERMS
+        )
+        if conjunction is not None and conjunction.start() > 0 and prefix_is_payment:
             # 同片段无标点连词：「支付货款并按日…违约金」只屏蔽连词后的责任子句。
             # 前缀本身含违约金/赔偿类词时（「支付违约金及赔偿损失」）整片段屏蔽，
             # 否则比例/金额变化会重新污染四项（评审 B B1）。
             replacements.append(prefix + _MASK)
+            pure_liability.append(False)
+        elif conjunction is not None and suffix_is_payment:
+            # 反向语序：责任在前、付款在后（支付违约金并在验收合格后30天内付款）。
+            replacements.append(_MASK + conjunction.group(0) + suffix)
             pure_liability.append(False)
         else:
             replacements.append(_MASK)

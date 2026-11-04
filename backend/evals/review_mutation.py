@@ -55,6 +55,14 @@ def _uncapped_heading_end(text: str, heading_hint: str | None = None) -> int:
     return colon.end() if colon else 0
 
 
+@contextmanager
+def _conjunctions_disabled() -> Iterator[None]:
+    """同时关闭正向/反向连词正则，模拟“完全不切分”的旧行为。"""
+    with _patched(analysis, "_LIABILITY_CONJUNCTION_RE", re.compile(r"(?!x)x")):
+        with _patched(analysis, "_PAYMENT_CONJUNCTION_RE", re.compile(r"(?!x)x")):
+            yield
+
+
 def _events_without_dedupe(text: str, events: tuple[str, ...]) -> set[str]:
     """去除重叠去重后的行为：只要词出现在文本里就算命中（合同生效之日起 双计）。"""
     return {event for event in events if event in text}
@@ -120,9 +128,14 @@ def _mutation_specs() -> list[tuple[str, str, Any]]:
         (
             "liability_conjunction_split_disabled",
             "关闭同片段连词切分（付款货款并按日…违约金 整片段屏蔽）",
+            lambda: _conjunctions_disabled(),
+        ),
+        (
+            "reverse_conjunction_split_disabled",
+            "关闭反向语序连词切分（支付违约金并在…付款 整片段屏蔽）",
             lambda: _patched(
                 analysis,
-                "_LIABILITY_CONJUNCTION_RE",
+                "_PAYMENT_CONJUNCTION_RE",
                 re.compile(r"(?!x)x"),
             ),
         ),
