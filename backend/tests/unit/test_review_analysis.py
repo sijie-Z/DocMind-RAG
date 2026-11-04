@@ -2738,14 +2738,9 @@ def test_full_title_supports_89_char_heading():
         "争议处理及补充说明"
     )
     assert len(title) > 80
-    facts = analysis.extract_start_condition(
-        [
-            _clause(
-                f"第六条 {title}：甲方应在验收合格后30天内支付货款。",
-                clause_no=[6],
-            )
-        ]
-    )
+    raw = f"第六条 {title}：甲方应在验收合格后30天内支付货款。"
+    assert analysis._full_title(raw) is not None, "83 字标题必须被 _full_title 接受"
+    facts = analysis.extract_start_condition([_clause(raw, clause_no=[6])])
     assert facts["status"] == "identified"
     assert facts["events"] == ["验收合格"]
 
@@ -2937,3 +2932,9 @@ def test_liability_colon_nonpayment_suffix_is_not_kept():
                 )
                 == "unchanged"
             ), (item, tail)
+
+
+def test_word_internal_ji_in_sheji_is_not_conjunction():
+    """「涉及」中的及不是连词；「付款及违约金」才是（D14 判别性测试）。"""
+    assert analysis._LIABILITY_CONJUNCTION_RE.search("涉及付款违约金") is None
+    assert analysis._LIABILITY_CONJUNCTION_RE.search("付款及违约金") is not None
