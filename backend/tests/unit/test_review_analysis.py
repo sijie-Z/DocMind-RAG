@@ -2683,3 +2683,285 @@ def test_penalty_title_with_duration_does_not_hide_changes():
         )
         == "modified"
     )
+
+
+def test_reverse_penalty_payment_order_keeps_start_and_payment():
+    """反向语序：责任在前、付款在后（支付违约金并在验收合格后30天内付款）。"""
+    base = [
+        _clause(
+            "第三条 付款期限：甲方应支付违约金并在验收合格后30天内向乙方支付货款。",
+            clause_no=[3],
+        )
+    ]
+    facts = analysis.extract_start_condition(base)
+    assert facts["status"] == "identified"
+    assert facts["events"] == ["验收合格"]
+    payment = analysis.extract_payment_term(base)
+    assert payment["status"] == "identified"
+    assert (payment["value"], payment["unit"]) == (30, "day")
+
+    subject_changed = [
+        _clause(
+            "第三条 付款期限：甲方应支付违约金并在验收合格后30天内向丙方支付服务费。",
+            clause_no=[3],
+        )
+    ]
+    assert (
+        analysis.align_item(
+            "payment_term",
+            payment,
+            analysis.extract_payment_term(subject_changed),
+        )
+        == "modified"
+    )
+
+
+def test_jishi_word_internal_conjunction_is_not_split():
+    """「及时」中的及不是连词：付款义务与起算事件不得被责任片段吞掉。"""
+    facts = analysis.extract_start_condition(
+        [
+            _clause(
+                "第三条 付款期限：甲方应在验收合格后30天内及时支付货款并按日万分之五支付违约金。",
+                clause_no=[3],
+            )
+        ]
+    )
+    assert facts["status"] == "identified"
+    assert facts["events"] == ["验收合格"]
+
+
+def test_full_title_supports_89_char_heading():
+    """超长标题（>80 字、≤120 字）仍应剥离并保留起算。"""
+    title = (
+        "付款期限、验收标准、发票开具要求、争议解决方式、合同解除及逾期付款违约金的"
+        "计算方式与支付安排特别说明补充条款汇总一二三四五六七八九十、最终解释口径与"
+        "争议处理及补充说明"
+    )
+    assert len(title) > 80
+    raw = f"第六条 {title}：甲方应在验收合格后30天内支付货款。"
+    assert analysis._full_title(raw) is not None, "83 字标题必须被 _full_title 接受"
+    facts = analysis.extract_start_condition([_clause(raw, clause_no=[6])])
+    assert facts["status"] == "identified"
+    assert facts["events"] == ["验收合格"]
+
+
+def test_penalty_synonyms_do_not_pollute_items():
+    """罚金/赔偿款/损失赔偿/逾期利息/律师费变化不得污染四项（D14 R1）。"""
+    cases = (
+        (
+            "第三条 付款期限：甲方应在验收合格后30天内支付货款，支付违约金并按日万分之五支付罚金。",
+            "万分之五",
+            "万分之三",
+        ),
+        (
+            "第三条 付款期限：甲方应在验收合格后30天内支付货款，赔偿款5万元并支付违约金。",
+            "5万",
+            "8万",
+        ),
+        (
+            "第三条 付款期限：甲方应在验收合格后30天内支付货款，损失赔偿款5万元并支付违约金。",
+            "5万",
+            "8万",
+        ),
+        (
+            "第三条 付款期限：甲方应在验收合格后30天内支付货款，"
+            "逾期利息按日万分之五计收并支付违约金。",
+            "万分之五",
+            "万分之三",
+        ),
+        (
+            "第三条 付款期限：甲方应在验收合格后30天内支付货款，律师费5万元并支付违约金。",
+            "5万",
+            "8万",
+        ),
+    )
+    for text, old, new in cases:
+        base = [_clause(text, clause_no=[3])]
+        revised = [_clause(text.replace(old, new), clause_no=[3])]
+        for item in ("payment_term", "start_condition", "acceptance_invoice"):
+            assert (
+                analysis.align_item(
+                    item,
+                    analysis.EXTRACTORS[item](base),
+                    analysis.EXTRACTORS[item](revised),
+                )
+                == "unchanged"
+            ), (item, text)
+
+
+def test_long_preamble_with_comma_is_not_treated_as_title():
+    """81–120 字、含逗号的正文前言不得被当标题（D14 R1）。"""
+    preamble = (
+        "经甲乙双方友好协商，就甲方向乙方采购办公设备事宜，双方一致同意按照本合同约定"
+        "的价格、质量、交付、验收、付款及售后服务等条件严格履行，并特别约定逾期付款"
+        "按日万分之五支付违约金如下"
+    )
+    raw = f"第六条 {preamble}：甲方应在验收合格后30天内支付货款。"
+    assert analysis._full_title(raw) is None
+    revised = raw.replace("万分之五", "万分之三")
+    for item in ("payment_term", "acceptance_invoice"):
+        assert (
+            analysis.align_item(
+                item,
+                analysis.EXTRACTORS[item]([_clause(raw, clause_no=[6])]),
+                analysis.EXTRACTORS[item]([_clause(revised, clause_no=[6])]),
+            )
+            == "unchanged"
+        ), item
+
+
+def test_short_comma_title_is_not_mistaken_for_liability_article():
+    """短混合标题（违约责任，付款期限）仍按标题处理，起算不得丢失（D14 R2）。"""
+    facts = analysis.extract_start_condition(
+        [
+            _clause(
+                "第六条 违约责任，付款期限：甲方应在验收合格后30天内支付货款。",
+                clause_no=[6],
+            )
+        ]
+    )
+    assert facts["status"] == "identified"
+    assert facts["events"] == ["验收合格"]
+
+
+def test_reverse_order_with_other_payment_nouns():
+    """反向语序后缀为尾款/服务费等付款名词时仍保留付款与起算（D14 R2）。"""
+    for noun in ("尾款", "服务费"):
+        clauses = [
+            _clause(
+                f"第三条 付款期限：甲方应支付违约金并在验收合格后30天内向乙方支付{noun}。",
+                clause_no=[3],
+            )
+        ]
+        assert analysis.extract_start_condition(clauses)["events"] == ["验收合格"]
+        facts = analysis.extract_payment_term(clauses)
+        assert facts["status"] == "identified", noun
+        assert (facts["value"], facts["unit"]) == (30, "day"), noun
+
+
+def test_compensation_synonyms_do_not_pollute_items():
+    """补偿金/补偿款/损失费/抚慰金变化不得污染四项（D14 R2）。"""
+    for tail in ("补偿金5万元", "补偿款5万元", "损失费5万元", "精神损害抚慰金5万元"):
+        text = f"第三条 付款期限：甲方应在验收合格后30天内支付货款，{tail}并支付违约金。"
+        base = [_clause(text, clause_no=[3])]
+        revised = [_clause(text.replace("5万", "8万"), clause_no=[3])]
+        for item in ("payment_term", "start_condition", "acceptance_invoice"):
+            assert (
+                analysis.align_item(
+                    item,
+                    analysis.EXTRACTORS[item](base),
+                    analysis.EXTRACTORS[item](revised),
+                )
+                == "unchanged"
+            ), (item, tail)
+
+
+def test_liability_body_colon_keeps_payment_and_start_suffix():
+    """责任前缀 + 正文冒号（违约金：付款期限为验收合格后30天）不得吞掉起算（D14 R3）。"""
+    base = [
+        _clause(
+            "第三条 甲方逾期付款的，应支付违约金：付款期限为验收合格后30天，甲方应按期支付货款。",
+            clause_no=[3],
+        )
+    ]
+    facts = analysis.extract_start_condition(base)
+    assert facts["status"] == "identified"
+    assert facts["events"] == ["验收合格"]
+    payment = analysis.extract_payment_term(base)
+    assert payment["status"] == "identified"
+    assert (payment["value"], payment["unit"]) == (30, "day")
+
+    wording_changed = [
+        _clause(
+            "第三条 甲方逾期付款的，应支付赔偿金：付款期限为验收合格后30天，甲方应按期支付货款。",
+            clause_no=[3],
+        )
+    ]
+    for item in ("payment_term", "start_condition", "acceptance_invoice"):
+        assert (
+            analysis.align_item(
+                item,
+                analysis.EXTRACTORS[item](base),
+                analysis.EXTRACTORS[item](wording_changed),
+            )
+            == "unchanged"
+        ), item
+
+
+def test_penalty_title_duration_does_not_hide_acceptance_standard_change():
+    """标题含逾期30日：验收标准附件二→附件三必须 modified（D14 R3 hint 回退）。"""
+    base = [
+        _clause(
+            "第十条 逾期30日付款违约金：验收标准为本合同附件二。",
+            clause_no=[10],
+        )
+    ]
+    revised = [
+        _clause(
+            "第十条 逾期30日付款违约金：验收标准为本合同附件三。",
+            clause_no=[10],
+        )
+    ]
+    assert (
+        analysis.align_item(
+            "acceptance_invoice",
+            analysis.extract_acceptance_invoice(base),
+            analysis.extract_acceptance_invoice(revised),
+        )
+        == "modified"
+    )
+
+
+def test_liability_colon_nonpayment_suffix_is_not_kept():
+    """正文冒号后缀无付款动词/含责任语义词时不得保留（D14 R4）。"""
+    cases = (
+        ("逾期付款的，应支付违约金：合同生效之日起按日万分之五计算。", "合同生效", "合同签订生效"),
+        ("应支付违约金：乙方应在30天内完成整改。", "30天内完成整改", "60天内完成整改"),
+        ("应支付违约金：货款损失由乙方承担5万元。", "5万", "8万"),
+    )
+    for tail, old, new in cases:
+        text = f"第三条 付款期限：甲方应在验收合格后30天内支付货款。{tail}"
+        base = [_clause(text, clause_no=[3])]
+        revised = [_clause(text.replace(old, new), clause_no=[3])]
+        for item in ("payment_term", "start_condition", "acceptance_invoice"):
+            assert (
+                analysis.align_item(
+                    item,
+                    analysis.EXTRACTORS[item](base),
+                    analysis.EXTRACTORS[item](revised),
+                )
+                == "unchanged"
+            ), (item, tail)
+
+
+def test_word_internal_ji_in_sheji_is_not_conjunction():
+    """「涉及」中的及不是连词；「付款及违约金」才是（D14 判别性测试）。"""
+    assert analysis._LIABILITY_CONJUNCTION_RE.search("涉及付款违约金") is None
+    assert analysis._LIABILITY_CONJUNCTION_RE.search("付款及违约金") is not None
+
+
+def test_liability_colon_event_without_payment_noun_is_masked():
+    """起算事件+付款动词但无付款名词（违约金：合同生效之日起支付）不得保留。"""
+    base = [
+        _clause(
+            "第三条 付款期限：甲方应在验收合格后30天内支付货款。应支付违约金：合同生效之日起支付。",
+            clause_no=[3],
+        )
+    ]
+    revised = [
+        _clause(
+            "第三条 付款期限：甲方应在验收合格后30天内支付货款。"
+            "应支付违约金：合同签订生效之日起支付。",
+            clause_no=[3],
+        )
+    ]
+    for item in ("payment_term", "start_condition", "acceptance_invoice"):
+        assert (
+            analysis.align_item(
+                item,
+                analysis.EXTRACTORS[item](base),
+                analysis.EXTRACTORS[item](revised),
+            )
+            == "unchanged"
+        ), item
+    assert analysis.extract_start_condition(base)["events"] == ["验收合格"]

@@ -1,4 +1,4 @@
-"""核验 golden set（D5）：43 组人工编写的中文采购合同 V1/V2 与期望值。
+"""核验 golden set（D5）：49 组人工编写的中文采购合同 V1/V2 与期望值。
 
 gold 只依据合同文本人工判定，不从引擎输出反推；change_type 用产品语义：
 - 付款天数 30天→60天 = payment_term modified；
@@ -1453,6 +1453,218 @@ CASES = [
             ),
             "start_condition": _item("unidentified", _ABSENT),
             "acceptance_invoice": _item("modified", _ACCEPT_OK, ("revised", 10)),
+            "exception": _item("unidentified", _ABSENT),
+        },
+    },
+    {
+        "id": "start_reverse_penalty_payment_order",
+        "note": "反向语序：支付违约金并在验收合格后30天内付款，起算与付款必须保留（D14）",
+        "base": _doc(
+            _A1,
+            _A2,
+            "第三条 付款期限：甲方应支付违约金并在验收合格后30天内向乙方支付货款。",
+            _acc("四", "乙方交付后10个工作日内完成验收，验收标准以本合同附件二为准。"),
+            _A5,
+            _A6,
+            _A7,
+            _A8,
+            _A9_EXTRA,
+        ),
+        "revised": _doc(
+            _A1,
+            _A2,
+            "第三条 付款期限：甲方应支付违约金并在验收合格后30天内向乙方支付货款。",
+            _acc("四", "乙方交付后10个工作日内完成验收，验收标准以本合同附件二为准。"),
+            _A5,
+            _A6,
+            _A7,
+            _A8,
+            _A9_EXTRA,
+        ),
+        "items": {
+            "payment_term": _item(
+                "unchanged", {"status": "identified", "value": 30, "unit": "day"}, ("revised", 3)
+            ),
+            "start_condition": _item(
+                "unchanged", {"status": "identified", "events": ["验收合格"]}, ("revised", 3)
+            ),
+            "acceptance_invoice": _item("unchanged", _ACCEPT_OK, ("revised", 4)),
+            "exception": _item("unidentified", _ABSENT),
+        },
+    },
+    {
+        "id": "start_forward_conjunction_penalty_suffix",
+        "note": "正向连词+责任后缀（支付货款并赔偿损失）：起算与付款保留（D14 R1）",
+        "base": _doc(
+            _A1,
+            _A2,
+            "第三条 付款期限：甲方应在验收合格后30天内支付货款并赔偿损失。",
+            _acc("四", "乙方交付后10个工作日内完成验收，验收标准以本合同附件二为准。"),
+            _A5,
+            _A6,
+            _A7,
+            _A8,
+            _A9_EXTRA,
+        ),
+        "revised": _doc(
+            _A1,
+            _A2,
+            "第三条 付款期限：甲方应在验收合格后30天内支付货款并赔偿损失。",
+            _acc("四", "乙方交付后10个工作日内完成验收，验收标准以本合同附件二为准。"),
+            _A5,
+            _A6,
+            _A7,
+            _A8,
+            _A9_EXTRA,
+        ),
+        "items": {
+            "payment_term": _item(
+                "unchanged", {"status": "identified", "value": 30, "unit": "day"}, ("revised", 3)
+            ),
+            "start_condition": _item(
+                "unchanged", {"status": "identified", "events": ["验收合格"]}, ("revised", 3)
+            ),
+            "acceptance_invoice": _item("unchanged", _ACCEPT_OK, ("revised", 4)),
+            "exception": _item("unidentified", _ABSENT),
+        },
+    },
+    {
+        "id": "start_short_comma_title",
+        "note": "短混合标题（违约责任，付款期限）：仍按标题处理，起算必须保留（D14 R2）",
+        "base": _doc(
+            _A1,
+            _A2,
+            "第六条 违约责任，付款期限：甲方应在验收合格后30天内支付货款。",
+            _acc("四", "乙方交付后10个工作日内完成验收，验收标准以本合同附件二为准。"),
+            _A5,
+            _A7,
+            _A8,
+            _A9_EXTRA,
+        ),
+        "revised": _doc(
+            _A1,
+            _A2,
+            "第六条 违约责任，付款期限：甲方应在验收合格后30天内支付货款。",
+            _acc("四", "乙方交付后10个工作日内完成验收，验收标准以本合同附件二为准。"),
+            _A5,
+            _A7,
+            _A8,
+            _A9_EXTRA,
+        ),
+        "items": {
+            "payment_term": _item(
+                "unchanged", {"status": "identified", "value": 30, "unit": "day"}, ("revised", 6)
+            ),
+            "start_condition": _item(
+                "unchanged", {"status": "identified", "events": ["验收合格"]}, ("revised", 6)
+            ),
+            "acceptance_invoice": _item("unchanged", _ACCEPT_OK, ("revised", 4)),
+            "exception": _item("unidentified", _ABSENT),
+        },
+    },
+    {
+        "id": "start_liability_body_colon_suffix",
+        "note": "责任前缀+正文冒号（违约金：付款期限为验收合格后30天）：起算与付款保留（D14 R3）",
+        "base": _doc(
+            _A1,
+            _A2,
+            "第三条 甲方逾期付款的，应支付违约金：付款期限为验收合格后30天，甲方应按期支付货款。",
+            _acc("四", "乙方交付后10个工作日内完成验收，验收标准以本合同附件二为准。"),
+            _A5,
+            _A6,
+            _A7,
+            _A8,
+            _A9_EXTRA,
+        ),
+        "revised": _doc(
+            _A1,
+            _A2,
+            "第三条 甲方逾期付款的，应支付违约金：付款期限为验收合格后30天，甲方应按期支付货款。",
+            _acc("四", "乙方交付后10个工作日内完成验收，验收标准以本合同附件二为准。"),
+            _A5,
+            _A6,
+            _A7,
+            _A8,
+            _A9_EXTRA,
+        ),
+        "items": {
+            "payment_term": _item(
+                "unchanged", {"status": "identified", "value": 30, "unit": "day"}, ("revised", 3)
+            ),
+            "start_condition": _item(
+                "unchanged", {"status": "identified", "events": ["验收合格"]}, ("revised", 3)
+            ),
+            "acceptance_invoice": _item("unchanged", _ACCEPT_OK, ("revised", 4)),
+            "exception": _item("unidentified", _ABSENT),
+        },
+    },
+    {
+        "id": "acceptance_penalty_title_standard_change",
+        "note": "标题含逾期30日：验收标准附件二→附件三必须 modified（D14 R3 hint 回退）",
+        "base": _doc(
+            _A1,
+            _A2,
+            _acc("四", "乙方交付后10个工作日内完成验收，验收标准以本合同附件二为准。"),
+            _A5,
+            _A6,
+            _A7,
+            _A8,
+            "第十条 逾期30日付款违约金：验收标准为本合同附件二。",
+            _A9_EXTRA,
+        ),
+        "revised": _doc(
+            _A1,
+            _A2,
+            _acc("四", "乙方交付后10个工作日内完成验收，验收标准以本合同附件二为准。"),
+            _A5,
+            _A6,
+            _A7,
+            _A8,
+            "第十条 逾期30日付款违约金：验收标准为本合同附件三。",
+            _A9_EXTRA,
+        ),
+        "items": {
+            "payment_term": _item("unidentified", _ABSENT),
+            "start_condition": _item("unidentified", _ABSENT),
+            "acceptance_invoice": _item("modified", _ACCEPT_OK, ("revised", 10)),
+            "exception": _item("unidentified", _ABSENT),
+        },
+    },
+    {
+        "id": "start_liability_colon_nonpayment_suffix",
+        "note": "正文冒号后缀是罚则计算起算：合同生效→合同签订生效 不得污染四项（D14 R4）",
+        "base": _doc(
+            _A1,
+            _A2,
+            "第三条 付款期限：甲方应在验收合格后30天内支付货款。"
+            "逾期付款的，应支付违约金：合同生效之日起按日万分之五计算。",
+            _acc("四", "乙方交付后10个工作日内完成验收，验收标准以本合同附件二为准。"),
+            _A5,
+            _A6,
+            _A7,
+            _A8,
+            _A9_EXTRA,
+        ),
+        "revised": _doc(
+            _A1,
+            _A2,
+            "第三条 付款期限：甲方应在验收合格后30天内支付货款。"
+            "逾期付款的，应支付违约金：合同签订生效之日起按日万分之五计算。",
+            _acc("四", "乙方交付后10个工作日内完成验收，验收标准以本合同附件二为准。"),
+            _A5,
+            _A6,
+            _A7,
+            _A8,
+            _A9_EXTRA,
+        ),
+        "items": {
+            "payment_term": _item(
+                "unchanged", {"status": "identified", "value": 30, "unit": "day"}, ("revised", 3)
+            ),
+            "start_condition": _item(
+                "unchanged", {"status": "identified", "events": ["验收合格"]}, ("revised", 3)
+            ),
+            "acceptance_invoice": _item("unchanged", _ACCEPT_OK, ("revised", 4)),
             "exception": _item("unidentified", _ABSENT),
         },
     },
