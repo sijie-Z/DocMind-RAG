@@ -2915,3 +2915,25 @@ def test_penalty_title_duration_does_not_hide_acceptance_standard_change():
         )
         == "modified"
     )
+
+
+def test_liability_colon_nonpayment_suffix_is_not_kept():
+    """正文冒号后缀无付款动词/含责任语义词时不得保留（D14 R4）。"""
+    cases = (
+        ("逾期付款的，应支付违约金：合同生效之日起按日万分之五计算。", "合同生效", "合同签订生效"),
+        ("应支付违约金：乙方应在30天内完成整改。", "30天内完成整改", "60天内完成整改"),
+        ("应支付违约金：货款损失由乙方承担5万元。", "5万", "8万"),
+    )
+    for tail, old, new in cases:
+        text = f"第三条 付款期限：甲方应在验收合格后30天内支付货款。{tail}"
+        base = [_clause(text, clause_no=[3])]
+        revised = [_clause(text.replace(old, new), clause_no=[3])]
+        for item in ("payment_term", "start_condition", "acceptance_invoice"):
+            assert (
+                analysis.align_item(
+                    item,
+                    analysis.EXTRACTORS[item](base),
+                    analysis.EXTRACTORS[item](revised),
+                )
+                == "unchanged"
+            ), (item, tail)

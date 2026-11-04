@@ -540,6 +540,8 @@ _SUFFIX_LIABILITY_TERMS = (
     "抚慰金",
     "损失费",
 )
+_PAYMENT_VERBS = ("支付", "付款", "结算")
+_COLON_REJECT_TERMS = ("计算", "计收", "起算", "整改", "承担", "损失")
 _LIABILITY_BOUNDARY_RE = re.compile(r"[，,、。；;！!？?\n]")
 _LIABILITY_CONJUNCTION_RE = re.compile(
     r"(?:并且|以及|并|且|(?<!涉)及(?!时))"
@@ -658,13 +660,14 @@ def _liability_colon_replacement(piece: str) -> str | None:
     has_payment_context = (
         any(noun in suffix for noun in _PAYMENT_NOUNS)
         or any(event in suffix for event in START_EVENTS)
-        or _contains_duration(suffix)
-    )
+    ) and any(verb in suffix for verb in _PAYMENT_VERBS)
     if not has_payment_context:
         return None
     if any(term in suffix for term in _PENALTY_TERMS):
         return None
     if any(term in suffix for term in _SUFFIX_LIABILITY_TERMS):
+        return None
+    if any(term in suffix for term in _COLON_REJECT_TERMS):
         return None
     return _MASK + colon.group(0) + suffix
 
