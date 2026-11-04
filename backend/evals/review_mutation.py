@@ -32,6 +32,23 @@ def _patched(target: Any, name: str, value: Any) -> Iterator[None]:
         setattr(target, name, original)
 
 
+def _permissive_colon_replacement(piece: str) -> str | None:
+    """旧版过宽上下文：付款名词/起算事件/期限任一命中就保留后缀。"""
+    colon = analysis._HEADING_SPLIT_RE.search(piece)
+    if colon is None:
+        return None
+    suffix = piece[colon.end() :]
+    if not suffix:
+        return None
+    if not (
+        any(noun in suffix for noun in analysis._PAYMENT_NOUNS)
+        or any(event in suffix for event in analysis.START_EVENTS)
+        or analysis._contains_duration(suffix)
+    ):
+        return None
+    return analysis._MASK + colon.group(0) + suffix
+
+
 def _hint_only_heading_end(text: str, heading_hint: str | None = None) -> int:
     """hint 失配时不按当前文本回退的旧行为（期限屏蔽后标题无法剥离）。"""
     if not heading_hint:
@@ -119,10 +136,19 @@ def _mutation_specs() -> list[tuple[str, str, Any]]:
         ),
         (
             "liability_conjunction_split_disabled",
-            "关闭同片段连词切分（付款货款并按日…违约金 整片段屏蔽）",
+            "关闭正向责任连词切分（支付货款并赔偿损失 整片段屏蔽）",
             lambda: _patched(
                 analysis,
                 "_LIABILITY_CONJUNCTION_RE",
+                re.compile(r"(?!x)x"),
+            ),
+        ),
+        (
+            "reverse_conjunction_split_disabled",
+            "关闭反向语序连词切分（支付违约金并在…付款 整片段屏蔽）",
+            lambda: _patched(
+                analysis,
+                "_PAYMENT_CONJUNCTION_RE",
                 re.compile(r"(?!x)x"),
             ),
         ),
@@ -135,6 +161,18 @@ def _mutation_specs() -> list[tuple[str, str, Any]]:
             "heading_hint_no_fallback",
             "标题 hint 失配时不按当前文本回退（期限屏蔽后标题不剥离）",
             lambda: _patched(analysis, "_heading_end", _hint_only_heading_end),
+        ),
+        (
+            "liability_colon_split_disabled",
+            "关闭责任片段正文冒号切分（违约金：付款期限… 整段屏蔽）",
+            lambda: _patched(analysis, "_liability_colon_replacement", lambda piece: None),
+        ),
+        (
+            "liability_colon_context_too_broad",
+            "正文冒号后缀上下文过宽（罚则计算/整改/损失被保留）",
+            lambda: _patched(
+                analysis, "_liability_colon_replacement", _permissive_colon_replacement
+            ),
         ),
     ]
 
