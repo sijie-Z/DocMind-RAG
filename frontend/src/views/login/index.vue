@@ -141,7 +141,7 @@
                     <span class="block truncate text-sm font-medium text-slate-800 dark:text-slate-100">
                       {{ account.label }}
                     </span>
-                    <span class="block truncate text-xs text-slate-400">
+                    <span class="block truncate text-xs text-slate-500 dark:text-slate-400">
                       {{ account.username }}
                     </span>
                   </span>

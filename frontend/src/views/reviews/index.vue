@@ -30,7 +30,7 @@
             data-testid="archived-filter"
             @update:value="applyFilter"
           />
-          <n-button type="primary" data-testid="create-case-open" @click="createVisible = true">
+          <n-button type="primary" round data-testid="create-case-open" @click="createVisible = true">
             {{ t('reviews.createCase') }}
           </n-button>
         </div>
