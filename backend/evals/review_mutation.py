@@ -254,6 +254,11 @@ def _mutation_specs() -> list[tuple[str, str, Any]]:
             "关闭责任句后缀非付款宾语守卫（缴纳社保费用泄漏起算）",
             lambda: _patched(analysis, "_has_nonpayment_object", lambda text: False),
         ),
+        (
+            "conjunct_payment_neutralization_disabled",
+            "关闭并列义务中性化（支付货款并承担税费 丢失付款期限）",
+            lambda: _patched(analysis, "_payment_precedes", lambda fragment, start: False),
+        ),
     ]
 
 

@@ -695,11 +695,17 @@ def _liability_colon_replacement(piece: str) -> str | None:
     suffix = piece[colon.end() :]
     if not suffix:
         return None
+    head = piece[: colon.start()]
     # 责任头 + 罚则缴纳（「违约金：相关费用应在合同生效后10日内缴纳」）不得
-    # 保留成付款子句；只有明确定义付款期限的正文冒号（「违约金：付款期限为
-    # 验收合格后30天」）才继续保留（评审 A D15 R2）。
-    if any(term in piece[: colon.start()] for term in _PENALTY_TERMS) and not any(
-        term in suffix for term in ("付款期限", "付款时间", "付款方式", "付款条件", "账期")
+    # 保留成付款子句；混合标签含严格付款关键词（「逾期付款违约金：…」）或
+    # 冒号后定义付款期限（「违约金：付款期限为验收合格后30天」）时继续保留
+    # （评审 A D15 R2/B3）。
+    if (
+        any(term in head for term in _PENALTY_TERMS)
+        and not any(keyword in head for keyword in PAYMENT_KEYWORDS)
+        and not any(
+            term in suffix for term in ("付款期限", "付款时间", "付款方式", "付款条件", "账期")
+        )
     ):
         return None
     # 必须同时有强付款名词与付款动词：仅起算事件/期限不构成付款子句
@@ -719,8 +725,8 @@ def _liability_colon_replacement(piece: str) -> str | None:
 
 
 def _has_nonpayment_object(text: str) -> bool:
-    """付款谓语的宾语是否为税费/社保类非付款对象（评审 B N2）。"""
-    return any(term in text for term in NON_PAYMENT_OBJECT_TERMS)
+    """付款谓语的宾语是否含真正的非付款对象（定语化排除词不算，评审 B N4）。"""
+    return _object_exclusion_present(text)
 
 
 def _leading_subject(prefix: str) -> str:
@@ -949,6 +955,13 @@ def _adjacent_to_exclusion(fragment: str, start: int, end: int) -> bool:
         while index != -1:
             exclusion_start, exclusion_end = index, index + len(exclusion)
             if start <= exclusion_end + 1 and exclusion_start <= end + 1:
+                # 定语化的领域排除词（含增值税的合同价款）不否决邻近付款锚点
+                # （评审 B N4）。
+                if exclusion in NON_PAYMENT_OBJECT_TERMS and _object_exclusion_is_modifier(
+                    fragment, exclusion, exclusion_start, exclusion_end
+                ):
+                    index = fragment.find(exclusion, index + 1)
+                    continue
                 return True
             index = fragment.find(exclusion, index + 1)
     return False
@@ -1019,7 +1032,23 @@ def _weak_anchor_object_ok(fragment: str, anchor_end: int) -> bool:
     obj = window[:cut]
     if not obj:
         return True
-    if any(term in obj for term in NON_PAYMENT_OBJECT_TERMS):
+    object_term_hit = False
+    for term in NON_PAYMENT_OBJECT_TERMS:
+        index = obj.find(term)
+        if index == -1:
+            continue
+        object_term_hit = True
+        after = obj[index + len(term) :]
+        for noun in _PAYMENT_NOUNS:
+            nindex = after.find(noun)
+            while nindex != -1:
+                between = after[:nindex]
+                if between == "的":
+                    between = ""
+                if any(marker in between for marker in _EXCLUSION_HEAD_MARKERS):
+                    return True
+                nindex = after.find(noun, nindex + 1)
+    if object_term_hit:
         return False
     return any(noun in obj for noun in _PAYMENT_NOUNS)
 
@@ -1035,28 +1064,41 @@ def _inside_parentheses(fragment: str, start: int, end: int) -> bool:
     return any(char in fragment[end:] for char in "）)")
 
 
-def _object_exclusion_is_modifier(fragment: str, term: str, start: int, end: int) -> bool:
-    """领域排除词只是付款宾语的定语/括号注释，而非期限的真正归属。"""
-    if _inside_parentheses(fragment, start, end):
-        return True
-    # 同片段前文已有强付款宾语（「支付货款并承担税费」）：排除词只是并列的
-    # 另一项义务，期限仍归前文的付款谓语。
+def _payment_precedes(fragment: str, start: int) -> bool:
+    """排除词前同片段是否已有付款谓语+宾语（「结清尾款并缴纳增值税」）。
+
+    弱动词（结清/付清/清偿/缴纳）与强动词（支付/付款/结算）一视同仁：
+    任一「付款动词+12 字内付款名词」序列都说明排除词只是并列义务
+    （评审 A D15 B1）。
+    """
     head = fragment[:start]
-    for verb in ("支付", "付款", "结算"):
+    for verb in _PAYMENT_VERBS:
         index = head.rfind(verb)
         if index == -1:
             continue
         object_tail = head[index + len(verb) : index + len(verb) + _WEAK_OBJECT_WINDOW]
         if any(noun in object_tail for noun in _PAYMENT_NOUNS):
             return True
+    return False
+
+
+def _object_exclusion_is_modifier(fragment: str, term: str, start: int, end: int) -> bool:
+    """领域排除词只是付款宾语的定语/括号注释，而非期限的真正归属。"""
+    if _inside_parentheses(fragment, start, end):
+        return True
+    # 同片段前文已有付款谓语+宾语（「结清尾款并缴纳增值税」）：排除词只是
+    # 并列的另一项义务，期限仍归前文的付款谓语。
+    if _payment_precedes(fragment, start):
+        return True
     tail = fragment[end : end + _EXCLUSION_HEAD_WINDOW]
     for noun in _PAYMENT_NOUNS:
         index = tail.find(noun)
         while index != -1:
             between = tail[:index]
-            # 「社会保险的费用」：的费用是排除词短语自身的中心语，不算付款宾语。
-            if between.endswith("的"):
-                between = between[:-1]
+            # 「社会保险的费用」：的费用是排除词短语自身的中心语，不算付款宾语；
+            # 「往来账目中的货款」的 中的 是结构标记，仍算定语化。
+            if between == "的":
+                between = ""
             if any(marker in between for marker in _EXCLUSION_HEAD_MARKERS):
                 return True
             index = tail.find(noun, index + 1)

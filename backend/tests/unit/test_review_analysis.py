@@ -3118,6 +3118,44 @@ def test_liability_suffix_with_nonpayment_object_is_masked():
         assert analysis.extract_start_condition(clauses)["status"] == "not_found", suffix
 
 
+def test_liability_suffix_with_payment_modifier_keeps_payment():
+    """责任句后缀的税费只是付款宾语定语时不得整段屏蔽（评审 B D15 N4）。"""
+    for suffix in (
+        "支付含增值税的合同价款",
+        "支付增值税专用发票所列货款",
+        "结清往来账目中的货款",
+    ):
+        clauses = [_clause(f"第四条 付款期限：甲方应支付违约金并在验收合格后30天内{suffix}。")]
+        facts = analysis.extract_payment_term(clauses)
+        assert facts["status"] == "identified", suffix
+        assert (facts["value"], facts["unit"]) == (30, "day"), suffix
+        start = analysis.extract_start_condition(clauses)
+        assert start["events"] == ["验收合格"], suffix
+
+    base = [
+        _clause("第四条 付款期限：甲方应支付违约金并在验收合格后30天内支付含增值税的合同价款。")
+    ]
+    revised = [
+        _clause("第四条 付款期限：甲方应支付违约金并在验收合格后60天内支付含增值税的合同价款。")
+    ]
+    assert (
+        analysis.align_item(
+            "payment_term",
+            analysis.extract_payment_term(base),
+            analysis.extract_payment_term(revised),
+        )
+        == "modified"
+    )
+    assert (
+        analysis.align_item(
+            "start_condition",
+            analysis.extract_start_condition(base),
+            analysis.extract_start_condition(revised),
+        )
+        == "unchanged"
+    )
+
+
 def test_reverse_order_subject_change_is_modified():
     """反向语序付款主体 甲方→乙方 必须报 payment modified（评审 A S1）。"""
     base = [_clause("第三条 付款期限：甲方应支付违约金并在验收合格后30天内结清尾款。")]
