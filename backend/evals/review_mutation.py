@@ -220,6 +220,40 @@ def _mutation_specs() -> list[tuple[str, str, Any]]:
             "回退付款锚点词表（结清/付清/清偿/缴纳）",
             lambda: _anchor_lexicon_reverted(),
         ),
+        (
+            "object_exclusion_veto_disabled",
+            "关闭税费/社保/账目类片段级否决（同义词改写回退）",
+            lambda: _patched(analysis, "_object_exclusion_present", lambda fragment: False),
+        ),
+        (
+            "object_exclusion_neutralization_disabled",
+            "关闭排除词的付款宾语中性化（增值税专用发票/含税价款回退）",
+            lambda: _patched(
+                analysis,
+                "_object_exclusion_is_modifier",
+                lambda fragment, term, start, end: False,
+            ),
+        ),
+        (
+            "weak_anchor_object_guard_disabled",
+            "关闭弱支付动词宾语守卫（结清关系/缴纳相关税费被吸成付款）",
+            lambda: _patched(analysis, "_weak_anchor_object_ok", lambda fragment, anchor_end: True),
+        ),
+        (
+            "penalty_colon_scope_disabled",
+            "关闭责任头冒号否决（违约金：相关费用缴纳 回退成付款）",
+            lambda: _patched(analysis, "_penalty_colon_scope", lambda fragment: False),
+        ),
+        (
+            "reverse_subject_preservation_disabled",
+            "反向语序付款主体不保留（甲方→乙方 假 unchanged）",
+            lambda: _patched(analysis, "_leading_subject", lambda prefix: ""),
+        ),
+        (
+            "liability_suffix_nonpayment_object_disabled",
+            "关闭责任句后缀非付款宾语守卫（缴纳社保费用泄漏起算）",
+            lambda: _patched(analysis, "_has_nonpayment_object", lambda text: False),
+        ),
     ]
 
 
