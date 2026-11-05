@@ -164,7 +164,7 @@ npm run dev
 
 ### AI 模型配置
 
-模型/向量维度默认值以代码真源 `backend/app/core/config/ai.py` 为准：
+模型/向量维度默认值以代码真源 `backend/app/core/config/ai.py` 为准（当前本地部署通过 `.env` 覆盖为 `qwen3-embedding:0.6b` / 1024 维）：
 
 | 配置项 | 默认值 | 用途 |
 |--------|--------|------|
@@ -174,7 +174,7 @@ npm run dev
 
 Embedding 默认走本机 Ollama（`EMBEDDING_API_URL=http://localhost:11434/v1`），
 无需单独的 Embedding Key（复用 `DEEPSEEK_API_KEY`）；使用云端 Embedding 时
-URL / 模型 / 维度三键必须配套修改（例如智谱 `embedding-3` 为 2048 维）。
+URL / 模型 / 维度三键必须配套修改（例如百炼 `text-embedding-v3` 为 1024 维）。
 Rerank 默认使用本地 BGE，无需 API Key。Chat API Key 需自行填入 `.env` /
 `.env.docker`（模板不含真实密钥）。
 

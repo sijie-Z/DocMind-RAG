@@ -12,7 +12,7 @@
 
 ### 🔍 知识检索
 - **混合搜索**: 结合关键词搜索和向量语义搜索
-- **向量嵌入**: 使用OpenAI嵌入模型将文本转换为向量
+- **向量嵌入**: 使用 Ollama `qwen3-embedding` 或 OpenAI 兼容 Embedding 接口将文本转换为向量
 - **相似度匹配**: 基于余弦相似度的语义匹配
 - **权限控制**: 基于组织的知识库访问控制
 
@@ -37,7 +37,7 @@
 - **缓存**: Redis 7.0
 - **搜索引擎**: Elasticsearch 8.11
 - **对象存储**: MinIO
-- **AI模型**: DeepSeek + OpenAI Embeddings
+- **AI模型**: DeepSeek + Ollama/OpenAI 兼容 Embeddings
 - **消息队列**: Kafka (可选)
 - **部署**: Docker + Docker Compose
 
@@ -138,14 +138,14 @@ docker-compose up -d
 - `ELASTICSEARCH_HOSTS`: Elasticsearch节点地址
 - `MINIO_ENDPOINT`: MinIO服务器地址
 - `DEEPSEEK_API_KEY`: DeepSeek API密钥
-- `OPENAI_API_KEY`: OpenAI API密钥（用于嵌入）
+- `EMBEDDING_API_URL` / `EMBEDDING_API_KEY`: Embedding 服务地址与密钥（本地 Ollama 默认无需密钥；云端为 OpenAI 兼容接口）
 
 ### 文件上传配置
 - `MAX_FILE_SIZE`: 最大文件大小（默认100MB）
 - `CHUNK_SIZE`: 分块大小（默认5MB）
 
 ### AI配置
-- `VECTOR_DIMENSION`: 向量维度（默认768）
+- `VECTOR_DIMENSION`: 向量维度（模板默认 768，对应 nomic-embed-text；未显式配置时可能按硬件档位自动选择；当前本地部署由 `.env` 覆盖为 1024，对应 qwen3-embedding:0.6b）
 - `TOP_K_RESULTS`: 搜索结果数量（默认10）
 
 ## 📚 API文档
