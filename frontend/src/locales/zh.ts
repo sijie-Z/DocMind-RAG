@@ -1,4 +1,16 @@
 export default {
+  app: {
+    documentTitle: 'DocMind - 文档问答与合同核验平台',
+    metaDescription: '文档问答与合同核验平台：答案带原文出处，合同差异逐条给证据。',
+  },
+  layout: {
+    userMenu: '用户菜单',
+    openMenu: '打开菜单',
+    closeMenu: '关闭菜单',
+    collapseSidebar: '收起侧栏',
+    expandSidebar: '展开侧栏',
+    mainNavigation: '主导航',
+  },
   common: {
     save: '保存',
     cancel: '取消',

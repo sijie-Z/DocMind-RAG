@@ -37,6 +37,29 @@ const i18n = createI18n({
   messages: { zh },
 })
 
+const LOCALE_TAGS: Record<LanguageCode, string> = {
+  zh: 'zh-CN',
+  en: 'en',
+  ja: 'ja',
+  fr: 'fr',
+}
+
+/**
+ * 同步 <html lang>、document.title 与 meta description。
+ * 屏幕阅读器与浏览器翻译依赖 lang；标题/描述跟随界面语言，避免英文界面仍是中文标题。
+ */
+function applyDocumentLocale(code: LanguageCode): void {
+  if (typeof document === 'undefined') return
+  document.documentElement.lang = LOCALE_TAGS[code]
+  const translate = i18n.global.t as (key: string) => string
+  const title = translate('app.documentTitle')
+  if (title && title !== 'app.documentTitle') document.title = title
+  const description = translate('app.metaDescription')
+  if (description && description !== 'app.metaDescription') {
+    document.querySelector('meta[name="description"]')?.setAttribute('content', description)
+  }
+}
+
 /**
  * 落 locale。schema 类型由内置 messages（仅 zh）收窄，而运行时语言集合是
  * LanguageCode（en/ja/fr 动态补装）——在此单点断开编译期窄化，避免每个调用点
@@ -44,6 +67,7 @@ const i18n = createI18n({
  */
 function applyLocale(code: LanguageCode): void {
   ;(i18n.global.locale as WritableComputedRef<LanguageCode>).value = code
+  applyDocumentLocale(code)
 }
 
 /** 非内置语言包加载器：动态 import → 独立 chunk，按需拉取 */
@@ -102,6 +126,7 @@ export async function setLanguage(code: LanguageCode): Promise<void> {
 export async function prepareCurrentLocale(): Promise<void> {
   const current = i18n.global.locale.value as LanguageCode
   if (isLanguageCode(current)) await ensureLocale(current)
+  if (isLanguageCode(current)) applyDocumentLocale(current)
 }
 
 export default i18n

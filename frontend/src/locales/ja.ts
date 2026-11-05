@@ -1,4 +1,16 @@
 export default {
+  app: {
+    documentTitle: 'DocMind - ドキュメントQ&Aと契約レビュー',
+    metaDescription: 'ドキュメントQ&Aと契約レビュー：回答は出典付き、契約差分は条項ごとに証拠付き。',
+  },
+  layout: {
+    userMenu: 'ユーザーメニュー',
+    openMenu: 'メニューを開く',
+    closeMenu: 'メニューを閉じる',
+    collapseSidebar: 'サイドバーを折りたたむ',
+    expandSidebar: 'サイドバーを展開',
+    mainNavigation: 'メインナビゲーション',
+  },
   common: {
     save: '保存',
     cancel: 'キャンセル',
