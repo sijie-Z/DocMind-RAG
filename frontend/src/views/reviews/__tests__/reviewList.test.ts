@@ -85,6 +85,15 @@ describe('合同核验列表页', () => {
     expect(wrapper.find('[data-testid="create-case-empty"]').exists()).toBe(true)
   })
 
+  it('加载失败时不显示空态引导，只保留错误与重试', async () => {
+    api.list.mockRejectedValue(new Error('boom'))
+    const wrapper = mountList()
+    await flushPromises()
+    expect(wrapper.text()).toContain('加载核验案件失败')
+    expect(wrapper.text()).toContain('重试')
+    expect(wrapper.find('[data-testid="reviews-empty-state"]').exists()).toBe(false)
+  })
+
   it('筛选状态回到第一页并带 status 参数', async () => {
     const wrapper = mountList()
     await flushPromises()

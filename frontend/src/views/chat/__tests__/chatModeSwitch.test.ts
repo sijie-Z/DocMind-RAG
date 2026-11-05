@@ -174,12 +174,22 @@ describe('连接状态徽标语义', () => {
   it('未连接用中性灰，不把初始闲置态渲染成红色告警', () => {
     const chip = mountInput('disconnected', '未连接').find('[data-testid="connection-status"]')
     expect(chip.exists()).toBe(true)
-    expect(chip.classes().join(' ')).toContain('text-gray-500')
-    expect(chip.classes().join(' ')).not.toContain('text-red-600')
+    expect(chip.classes().join(' ')).toContain('text-gray-600')
+    expect(chip.classes().join(' ')).not.toContain('text-red-700')
+    expect(chip.attributes('role')).toBe('status')
+    expect(chip.attributes('aria-live')).toBe('polite')
   })
 
   it('真正的错误态才用红色告警', () => {
     const chip = mountInput('error', '连接失败').find('[data-testid="connection-status"]')
-    expect(chip.classes().join(' ')).toContain('text-red-600')
+    expect(chip.classes().join(' ')).toContain('text-red-700')
+  })
+
+  it('已连接/连接中分别用绿色与琥珀色', () => {
+    const connected = mountInput('connected', '已连接').find('[data-testid="connection-status"]')
+    expect(connected.classes().join(' ')).toContain('text-emerald-700')
+    expect(connected.text()).toContain('SSE 已连接')
+    const connecting = mountInput('connecting', '连接中').find('[data-testid="connection-status"]')
+    expect(connecting.classes().join(' ')).toContain('text-amber-700')
   })
 })

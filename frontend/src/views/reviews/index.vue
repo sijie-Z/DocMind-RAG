@@ -3,9 +3,13 @@
     <div class="max-w-7xl mx-auto">
       <div class="mb-6 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h1 class="text-3xl font-bold text-gray-800 dark:text-white">{{ t('menu.reviews') }}</h1>
-          <span class="mt-2 block h-0.5 w-6 rounded-full bg-blue-500"></span>
-          <p class="mt-2 text-sm text-gray-500 dark:text-gray-400">{{ t('reviews.subtitle') }}</p>
+          <h1 class="text-2xl md:text-3xl font-bold tracking-tight text-slate-800 dark:text-slate-100">
+            {{ t('menu.reviews') }}
+          </h1>
+          <p class="text-slate-500 dark:text-slate-400 mt-1 text-sm flex items-center gap-2">
+            <span class="w-6 h-0.5 bg-blue-500 rounded-full"></span>
+            {{ t('reviews.subtitle') }}
+          </p>
         </div>
         <div class="flex flex-wrap items-center gap-3">
           <n-select
@@ -39,32 +43,19 @@
 
       <n-spin :show="loading">
         <div
-          v-if="!loading && rows.length === 0"
-          class="mt-2 rounded-2xl border border-dashed border-slate-200/80 bg-white/70 px-6 py-16 text-center dark:border-slate-700 dark:bg-slate-900/40"
+          v-if="!loading && !loadError && rows.length === 0"
+          class="flex flex-col items-center justify-center py-24 px-6 bg-white/80 dark:bg-gray-800/50 backdrop-blur-md rounded-3xl border border-dashed border-slate-200 dark:border-gray-600/50 shadow-inner"
           data-testid="reviews-empty-state"
         >
           <div
-            class="mx-auto flex h-16 w-16 items-center justify-center rounded-2xl bg-blue-50 text-blue-500 dark:bg-blue-500/10 dark:text-blue-300"
+            class="w-24 h-24 rounded-2xl bg-gradient-to-br from-blue-100 to-slate-100 dark:from-blue-900/30 dark:to-slate-900/30 flex items-center justify-center mb-6 ring-4 ring-blue-100/50 dark:ring-blue-900/30"
           >
-            <svg
-              class="h-8 w-8"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="1.6"
-              stroke-linecap="round"
-              stroke-linejoin="round"
-              aria-hidden="true"
-            >
-              <path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z" />
-              <path d="M14 3v5h5" />
-              <path d="M9 13h6M9 17h4" />
-            </svg>
+            <n-icon size="48" class="text-blue-500 dark:text-blue-400"><DocumentTextOutline /></n-icon>
           </div>
-          <h2 class="mt-5 text-lg font-semibold text-slate-800 dark:text-slate-100">
+          <h2 class="text-xl font-bold text-slate-800 dark:text-slate-100 mb-2">
             {{ archivedFilter === 'archived' ? t('reviews.emptyArchived') : t('reviews.empty') }}
           </h2>
-          <p class="mx-auto mt-2 max-w-lg text-sm leading-6 text-slate-500 dark:text-slate-400">
+          <p class="text-slate-500 dark:text-slate-400 mb-8 max-w-sm text-center text-sm leading-relaxed">
             {{
               archivedFilter === 'archived'
                 ? t('reviews.emptyArchivedHint')
@@ -74,15 +65,16 @@
           <n-button
             v-if="archivedFilter !== 'archived'"
             type="primary"
+            round
             size="large"
-            class="mt-6"
+            class="px-8 shadow-lg shadow-blue-500/20"
             data-testid="create-case-empty"
             @click="createVisible = true"
           >
             {{ t('reviews.createCase') }}
           </n-button>
         </div>
-        <div v-else>
+        <div v-else-if="rows.length > 0">
           <n-data-table
             :columns="columns"
             :data="rows"
@@ -111,6 +103,7 @@ import { computed, h, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { NButton, NPagination, NTag } from 'naive-ui'
+import { DocumentTextOutline } from '@vicons/ionicons5'
 import { reviewsApi, type ReviewCaseStatus, type ReviewCaseSummary } from '@/api/reviews'
 import { apiUnwrap } from '@/utils/apiUnwrap'
 import { reasonsLabel } from './reviewReasons'

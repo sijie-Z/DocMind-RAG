@@ -110,19 +110,21 @@
             <span
               class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border"
               data-testid="connection-status"
+              role="status"
+              aria-live="polite"
               :class="connectionStatus === 'connected'
-                ? 'bg-emerald-50 dark:bg-emerald-900/20 text-emerald-600 dark:text-emerald-400 border-emerald-200 dark:border-emerald-800/50'
+                ? 'bg-emerald-50 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-400 border-emerald-200 dark:border-emerald-800/50'
                 : (connectionStatus === 'connecting'
-                ? 'bg-amber-50 dark:bg-amber-900/20 text-amber-600 dark:text-amber-400 border-amber-200 dark:border-amber-800/50'
+                ? 'bg-amber-50 dark:bg-amber-900/20 text-amber-700 dark:text-amber-400 border-amber-200 dark:border-amber-800/50'
                 : (connectionStatus === 'error'
-                ? 'bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 border-red-200 dark:border-red-800/50'
-                : 'bg-gray-50 dark:bg-gray-900/20 text-gray-500 dark:text-gray-400 border-gray-200 dark:border-gray-700/50'))"
+                ? 'bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-400 border-red-200 dark:border-red-800/50'
+                : 'bg-gray-50 dark:bg-gray-900/20 text-gray-600 dark:text-gray-400 border-gray-200 dark:border-gray-700/50'))"
             >
               <span
                 class="w-2 h-2 rounded-full shrink-0"
                 :class="connectionStatus === 'connected' ? 'bg-emerald-500 animate-pulse' : connectionStatus === 'connecting' ? 'bg-amber-500 animate-pulse' : connectionStatus === 'error' ? 'bg-red-500' : 'bg-gray-400'"
               ></span>
-              {{ useSSE ? 'SSE' : '' }}{{ connectionStatusText }}
+              {{ useSSE ? 'SSE ' : '' }}{{ connectionStatusText }}
             </span>
 
             <n-popover trigger="hover" placement="top">
