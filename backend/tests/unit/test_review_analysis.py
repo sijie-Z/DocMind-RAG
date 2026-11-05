@@ -2965,3 +2965,284 @@ def test_liability_colon_event_without_payment_noun_is_masked():
             == "unchanged"
         ), item
     assert analysis.extract_start_condition(base)["events"] == ["验收合格"]
+
+
+def test_reverse_order_with_settlement_verbs_and_contract_total():
+    """反向语序后缀为结清尾款/合同总价 70% 时仍保留起算与付款（D15）。"""
+    for text in (
+        "第三条 付款期限：甲方应支付违约金并在验收合格后30天内结清尾款。",
+        "第三条 付款期限：甲方应支付违约金并在验收合格后30天内支付合同总价的70%。",
+    ):
+        clauses = [_clause(text, clause_no=[3])]
+        assert analysis.extract_start_condition(clauses)["events"] == ["验收合格"]
+        facts = analysis.extract_payment_term(clauses)
+        assert facts["status"] == "identified", text
+        assert (facts["value"], facts["unit"]) == (30, "day"), text
+
+
+def test_word_internal_ji_in_boji_chuji_is_not_conjunction():
+    """波及/触及/提及/普及中的及不是连词；付款及违约金 才是（D15）。"""
+    for word in ("波及付款违约金", "触及付款违约金", "提及付款违约金", "普及付款违约金"):
+        assert analysis._LIABILITY_CONJUNCTION_RE.search(word) is None, word
+    assert analysis._LIABILITY_CONJUNCTION_RE.search("付款及违约金") is not None
+
+
+def test_anchor_words_do_not_absorb_liability_tax_or_settlement():
+    """缴纳/结清 不得把责任条款、税费社保、往来账目吸成付款（D15 R1）。"""
+    liability = [
+        _clause(
+            "第九条 违约金的缴纳：乙方应在验收合格后10天内缴纳；逾期每日按0.05%支付违约金。",
+            clause_no=[9],
+        )
+    ]
+    assert analysis.extract_payment_term(liability)["status"] == "not_found"
+    assert analysis.extract_start_condition(liability)["status"] == "not_found"
+
+    expense = [
+        _clause(
+            "第四条 付款期限：甲方应支付违约金并在验收合格后30天内承担验收费用。",
+            clause_no=[4],
+        )
+    ]
+    assert analysis.extract_payment_term(expense)["status"] == "not_found"
+    assert analysis.extract_start_condition(expense)["status"] == "not_found"
+
+    mixed = [
+        _clause(
+            "第五条 付款与税费：甲方应在验收合格后10天内支付货款。"
+            "乙方应在验收合格后30天内缴纳增值税及社会保险费。",
+            clause_no=[5],
+        )
+    ]
+    facts = analysis.extract_payment_term(mixed)
+    assert facts["status"] == "identified"
+    assert (facts["value"], facts["unit"]) == (10, "day")
+
+    settlement = [
+        _clause(
+            "第六条 付款期限：甲方应支付货款；合同解除后30天内双方结清往来账目。",
+            clause_no=[6],
+        )
+    ]
+    assert analysis.extract_payment_term(settlement)["status"] == "not_found"
+
+
+def test_tax_object_modifiers_do_not_veto_payment_duration():
+    """增值税/税费只是付款宾语的定语时，30 天仍归付款（评审 B D15 N1）。"""
+    for body in (
+        "甲方应在验收合格后30天内凭增值税专用发票支付货款。",
+        "甲方应在验收合格后30天内支付含增值税的合同价款。",
+        "甲方应在验收合格后30天内支付增值税专用发票所列货款。",
+        "甲方应在验收合格后30天内支付含税费的合同价款。",
+        "甲方应在验收合格后30天内结清往来账目并支付货款。",
+        "甲方应在验收合格后30天内支付货款并承担税费。",
+        "甲方应在验收合格后30天内支付货款并缴纳增值税。",
+    ):
+        facts = analysis.extract_payment_term([_clause(f"第三条 付款期限：{body}")])
+        assert facts["status"] == "identified", body
+        assert (facts["value"], facts["unit"]) == (30, "day"), body
+
+    # 引用路径同样不得回退（评审 B 复现 6）。
+    referenced = [
+        _clause("第三条 付款期限：具体付款期限按第四条执行。", clause_no=[3]),
+        _clause(
+            "第四条 付款安排：甲方应在验收合格后30天内凭增值税专用发票支付货款。",
+            clause_no=[4],
+        ),
+    ]
+    facts = analysis.extract_payment_term(referenced)
+    assert facts["status"] == "identified"
+    assert (facts["value"], facts["unit"]) == (30, "day")
+
+
+def test_tax_synonyms_and_settlement_relations_are_not_payment():
+    """相关税费/税款/印花税/结清关系等改写不得与付款期限并列（评审 A N1/N3）。"""
+    for tail in (
+        "乙方应在验收合格后30天内缴纳相关税费。",
+        "乙方应在验收合格后30天内缴纳各项税费。",
+        "乙方应在验收合格后30天内缴纳税款。",
+        "乙方应在验收合格后30天内支付印花税。",
+    ):
+        clauses = [
+            _clause("第三条 付款期限：甲方应在验收合格后10天内支付货款。"),
+            _clause(f"第五条 付款与税费：{tail}"),
+        ]
+        facts = analysis.extract_payment_term(clauses)
+        assert facts["status"] == "identified", tail
+        assert (facts["value"], facts["unit"]) == (10, "day"), tail
+
+    for tail in (
+        "合同解除后30天内双方结清关系。",
+        "合同解除后30天内双方结清全部账目。",
+        "合同解除后30天内双方结清所有往来关系。",
+    ):
+        facts = analysis.extract_payment_term([_clause(f"第六条 付款期限：甲方应支付货款；{tail}")])
+        assert facts["status"] == "not_found", tail
+
+
+def test_penalty_colon_fee_duration_is_not_payment():
+    """「违约金：相关费用应在…缴纳」的期限不归付款/起算（评审 A D15 N2）。"""
+    base = [_clause("第三条 付款期限：违约金：相关费用应在合同生效后10日内缴纳。")]
+    revised = [_clause("第三条 付款期限：违约金：相关费用应在合同生效后20日内缴纳。")]
+    assert analysis.extract_payment_term(base)["status"] == "not_found"
+    assert analysis.extract_start_condition(base)["status"] == "not_found"
+    for item in ("payment_term", "start_condition"):
+        assert (
+            analysis.align_item(
+                item,
+                analysis.EXTRACTORS[item](base),
+                analysis.EXTRACTORS[item](revised),
+            )
+            == "unidentified"
+        ), item
+    assert (
+        analysis.align_item(
+            "acceptance_invoice",
+            analysis.extract_acceptance_invoice(base),
+            analysis.extract_acceptance_invoice(revised),
+        )
+        == "unidentified"
+    )
+
+
+def test_penalty_colon_mixed_label_fee_is_not_payment():
+    """混合标签「逾期付款违约金：…费用缴纳」不得放行付款/起算（评审 B R4）。"""
+    for text in (
+        "第三条 付款期限：逾期付款违约金：相关费用应在合同生效后10天内缴纳。",
+        "第三条 付款期限：逾期付款违约金：甲方应在验收合格后30天内缴纳验收费用。",
+        "第三条 付款期限：逾期付款违约金：甲方应在验收合格后30天内缴纳社保费用。",
+    ):
+        clauses = [_clause(text)]
+        assert analysis.extract_payment_term(clauses)["status"] == "not_found", text
+        assert analysis.extract_start_condition(clauses)["status"] == "not_found", text
+
+    # 混合标签 + 强付款宾语仍是付款定义（起算保留）。
+    nested = [_clause("第三条 付款期限：逾期付款违约金：甲方应在验收合格后30天内支付货款。")]
+    facts = analysis.extract_payment_term(nested)
+    assert (facts["status"], facts["value"], facts["unit"]) == ("identified", 30, "day")
+    assert analysis.extract_start_condition(nested)["events"] == ["验收合格"]
+
+
+def test_liability_suffix_with_nonpayment_object_is_masked():
+    """责任句后缀「付款动词+税费/社保类宾语」仍属罚则，不得泄漏起算（评审 B N2）。"""
+    for suffix in (
+        "缴纳社保费用",
+        "支付诉讼费用",
+        "支付报销差旅费用",
+        "缴纳公积金费用",
+    ):
+        clauses = [_clause(f"第四条 付款期限：甲方应支付违约金并在验收合格后30天内{suffix}。")]
+        assert analysis.extract_payment_term(clauses)["status"] == "not_found", suffix
+        assert analysis.extract_start_condition(clauses)["status"] == "not_found", suffix
+
+
+def test_liability_suffix_with_payment_modifier_keeps_payment():
+    """责任句后缀的税费只是付款宾语定语时不得整段屏蔽（评审 B D15 N4）。"""
+    for suffix in (
+        "支付含增值税的合同价款",
+        "支付增值税专用发票所列货款",
+        "结清往来账目中的货款",
+    ):
+        clauses = [_clause(f"第四条 付款期限：甲方应支付违约金并在验收合格后30天内{suffix}。")]
+        facts = analysis.extract_payment_term(clauses)
+        assert facts["status"] == "identified", suffix
+        assert (facts["value"], facts["unit"]) == (30, "day"), suffix
+        start = analysis.extract_start_condition(clauses)
+        assert start["events"] == ["验收合格"], suffix
+
+    base = [
+        _clause("第四条 付款期限：甲方应支付违约金并在验收合格后30天内支付含增值税的合同价款。")
+    ]
+    revised = [
+        _clause("第四条 付款期限：甲方应支付违约金并在验收合格后60天内支付含增值税的合同价款。")
+    ]
+    assert (
+        analysis.align_item(
+            "payment_term",
+            analysis.extract_payment_term(base),
+            analysis.extract_payment_term(revised),
+        )
+        == "modified"
+    )
+    assert (
+        analysis.align_item(
+            "start_condition",
+            analysis.extract_start_condition(base),
+            analysis.extract_start_condition(revised),
+        )
+        == "unchanged"
+    )
+
+
+def test_reverse_order_subject_change_is_modified():
+    """反向语序付款主体 甲方→乙方 必须报 payment modified（评审 A S1）。"""
+    base = [_clause("第三条 付款期限：甲方应支付违约金并在验收合格后30天内结清尾款。")]
+    revised = [_clause("第三条 付款期限：乙方应支付违约金并在验收合格后30天内结清尾款。")]
+    assert (
+        analysis.align_item(
+            "payment_term",
+            analysis.extract_payment_term(base),
+            analysis.extract_payment_term(revised),
+        )
+        == "modified"
+    )
+    for item in ("start_condition", "acceptance_invoice"):
+        assert (
+            analysis.align_item(
+                item,
+                analysis.EXTRACTORS[item](base),
+                analysis.EXTRACTORS[item](revised),
+            )
+            == "unchanged"
+        ), item
+
+
+def test_settlement_debt_object_keeps_start_condition():
+    """清偿全部债务带付款宾语：起算不得丢失（评审 A S2）。"""
+    clauses = [_clause("第四条 付款期限：甲方应支付违约金并在验收合格后30天内清偿全部债务。")]
+    facts = analysis.extract_start_condition(clauses)
+    assert facts["status"] == "identified"
+    assert facts["events"] == ["验收合格"]
+    payment = analysis.extract_payment_term(clauses)
+    assert (payment["status"], payment["value"], payment["unit"]) == ("identified", 30, "day")
+
+
+def test_liability_article_body_payment_is_intentionally_excluded():
+    """违约责任标题下的付款期限整体不抽取：有意取舍，防未来被当 bug 修回（N3）。"""
+    clauses = [
+        _clause(
+            "第六条 违约责任：甲方应在验收合格后30天内支付货款，逾期每日按0.05%支付违约金。",
+            clause_no=[6],
+        )
+    ]
+    assert analysis.extract_payment_term(clauses)["status"] == "not_found"
+    assert analysis.extract_start_condition(clauses)["status"] == "not_found"
+
+
+def test_repeated_payment_verb_conjunct_is_not_vetoed():
+    """同一付款动词重复时，任一次「动词+付款宾语」都算并列义务（评审 A R4）。"""
+    for body in (
+        "甲方应在验收合格后30天内支付货款并支付相关税费。",
+        "甲方应在验收合格后30天内支付货款并支付印花税。",
+        "甲方应在验收合格后30天内支付货款并支付增值税。",
+        "甲方应在验收合格后30天内结清尾款并结清往来账目。",
+    ):
+        facts = analysis.extract_payment_term([_clause(f"第三条 付款期限：{body}")])
+        assert facts["status"] == "identified", body
+        assert (facts["value"], facts["unit"]) == (30, "day"), body
+
+
+def test_penalty_colon_mixed_label_service_fee_is_payment():
+    """混合标签下服务费/工程款/劳务费是强付款宾语，付款与起算保留（评审 B R4）。"""
+    assert "服务费" in analysis._COLON_STRONG_PAYMENT_NOUNS
+    assert "费用" not in analysis._COLON_STRONG_PAYMENT_NOUNS
+    for body in (
+        "甲方应在验收合格后30天内支付服务费。",
+        "甲方应在验收合格后30天内支付工程款。",
+        "甲方应在验收合格后30天内支付劳务费。",
+    ):
+        clauses = [_clause(f"第三条 付款期限：逾期付款违约金：{body}")]
+        facts = analysis.extract_payment_term(clauses)
+        assert facts["status"] == "identified", body
+        assert (facts["value"], facts["unit"]) == (30, "day"), body
+        assert analysis.extract_start_condition(clauses)["events"] == ["验收合格"], body

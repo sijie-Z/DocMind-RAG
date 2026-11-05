@@ -32,6 +32,42 @@ def _patched(target: Any, name: str, value: Any) -> Iterator[None]:
         setattr(target, name, original)
 
 
+@contextmanager
+def _anchor_lexicon_reverted() -> Iterator[None]:
+    """回退付款锚点词表（结清/付清/清偿/缴纳），模拟 D15 新词缺失。"""
+    with _patched(analysis, "PAYMENT_ANCHOR_KEYWORDS", analysis.PAYMENT_KEYWORDS):
+        yield
+
+
+@contextmanager
+def _payment_lexicon_reverted() -> Iterator[None]:
+    """回退 D15 新增的付款动词/名词，模拟词表缺口。"""
+    with _patched(
+        analysis,
+        "_PAYMENT_VERBS",
+        ("支付", "付款", "结算"),
+    ):
+        with _patched(
+            analysis,
+            "_PAYMENT_NOUNS",
+            (
+                "付款",
+                "货款",
+                "价款",
+                "账期",
+                "结算",
+                "款项",
+                "尾款",
+                "进度款",
+                "服务费",
+                "预付款",
+                "首付款",
+                "余款",
+            ),
+        ):
+            yield
+
+
 def _permissive_colon_replacement(piece: str) -> str | None:
     """旧版过宽上下文：付款名词/起算事件/期限任一命中就保留后缀。"""
     colon = analysis._HEADING_SPLIT_RE.search(piece)
@@ -47,6 +83,19 @@ def _permissive_colon_replacement(piece: str) -> str | None:
     ):
         return None
     return analysis._MASK + colon.group(0) + suffix
+
+
+def _last_occurrence_payment_precedes(fragment: str, start: int) -> bool:
+    """并列中性化只检查每个动词最后一次出现的旧行为。"""
+    head = fragment[:start]
+    for verb in analysis._PAYMENT_VERBS:
+        index = head.rfind(verb)
+        if index == -1:
+            continue
+        object_tail = head[index + len(verb) : index + len(verb) + analysis._WEAK_OBJECT_WINDOW]
+        if any(noun in object_tail for noun in analysis._PAYMENT_NOUNS):
+            return True
+    return False
 
 
 def _hint_only_heading_end(text: str, heading_hint: str | None = None) -> int:
@@ -173,6 +222,65 @@ def _mutation_specs() -> list[tuple[str, str, Any]]:
             lambda: _patched(
                 analysis, "_liability_colon_replacement", _permissive_colon_replacement
             ),
+        ),
+        (
+            "payment_lexicon_reverted",
+            "回退新增付款动词/名词（结清/付清/合同总价等）",
+            lambda: _payment_lexicon_reverted(),
+        ),
+        (
+            "payment_anchor_lexicon_reverted",
+            "回退付款锚点词表（结清/付清/清偿/缴纳）",
+            lambda: _anchor_lexicon_reverted(),
+        ),
+        (
+            "object_exclusion_veto_disabled",
+            "关闭税费/社保/账目类片段级否决（同义词改写回退）",
+            lambda: _patched(analysis, "_object_exclusion_present", lambda fragment: False),
+        ),
+        (
+            "object_exclusion_neutralization_disabled",
+            "关闭排除词的付款宾语中性化（增值税专用发票/含税价款回退）",
+            lambda: _patched(
+                analysis,
+                "_object_exclusion_is_modifier",
+                lambda fragment, term, start, end: False,
+            ),
+        ),
+        (
+            "weak_anchor_object_guard_disabled",
+            "关闭弱支付动词宾语守卫（结清关系/缴纳相关税费被吸成付款）",
+            lambda: _patched(analysis, "_weak_anchor_object_ok", lambda fragment, anchor_end: True),
+        ),
+        (
+            "penalty_colon_scope_disabled",
+            "关闭责任头冒号否决（违约金：相关费用缴纳 回退成付款）",
+            lambda: _patched(analysis, "_penalty_colon_scope", lambda fragment: False),
+        ),
+        (
+            "reverse_subject_preservation_disabled",
+            "反向语序付款主体不保留（甲方→乙方 假 unchanged）",
+            lambda: _patched(analysis, "_leading_subject", lambda prefix: ""),
+        ),
+        (
+            "liability_suffix_nonpayment_object_disabled",
+            "关闭责任句后缀非付款宾语守卫（缴纳社保费用泄漏起算）",
+            lambda: _patched(analysis, "_has_nonpayment_object", lambda text: False),
+        ),
+        (
+            "conjunct_payment_neutralization_disabled",
+            "关闭并列义务中性化（支付货款并承担税费 丢失付款期限）",
+            lambda: _patched(analysis, "_payment_precedes", lambda fragment, start: False),
+        ),
+        (
+            "penalty_colon_mixed_label_released",
+            "混合标签罚则费用放行（相关费用/社保费用被当付款定义）",
+            lambda: _patched(analysis, "_COLON_STRONG_PAYMENT_NOUNS", analysis._PAYMENT_NOUNS),
+        ),
+        (
+            "payment_precedes_last_occurrence_only",
+            "并列中性化只查动词最后一次出现（支付货款并支付相关税费 丢失）",
+            lambda: _patched(analysis, "_payment_precedes", _last_occurrence_payment_precedes),
         ),
     ]
 
