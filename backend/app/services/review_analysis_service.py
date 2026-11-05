@@ -61,6 +61,7 @@ CHANGE_TYPES = (
 )
 
 PAYMENT_KEYWORDS = ("付款", "支付", "账期", "价款", "货款", "结算")
+PAYMENT_ANCHOR_KEYWORDS = PAYMENT_KEYWORDS + ("结清", "付清", "清偿", "缴纳")
 # 期限匹配必须离付款锚点比这些「非付款期限」语境更近（保修期/日期签署等）。
 NON_PAYMENT_CONTEXT = (
     "保修",
@@ -295,7 +296,8 @@ def _duration_owned_by_delivery(sentence: str, start: int, end: int) -> bool:
         (after.find(term) for term in DELIVERY_TERMS if term in after), default=None
     )
     payment_index = min(
-        (after.find(keyword) for keyword in PAYMENT_KEYWORDS if keyword in after), default=None
+        (after.find(keyword) for keyword in PAYMENT_ANCHOR_KEYWORDS if keyword in after),
+        default=None,
     )
     if delivery_index is None:
         return False
@@ -381,7 +383,9 @@ def _payment_continues_after_fragment(text: str, boundary_end: int, sentence_end
     tail = text[boundary_end:sentence_end].lstrip()
     if not tail:
         return False
-    payment_positions = [tail.find(keyword) for keyword in PAYMENT_KEYWORDS if keyword in tail]
+    payment_positions = [
+        tail.find(keyword) for keyword in PAYMENT_ANCHOR_KEYWORDS if keyword in tail
+    ]
     if not payment_positions:
         return False
     pay_pos = min(payment_positions)
@@ -427,7 +431,7 @@ def _nearest_anchor_is_payment(text: str, start: int, end: int) -> bool:
             fragment_end = sentence_end
     span_end = min(next_starts + [sentence_end, fragment_end])
     span = text[end:span_end]
-    if any(keyword in span for keyword in PAYMENT_KEYWORDS) and not any(
+    if any(keyword in span for keyword in PAYMENT_ANCHOR_KEYWORDS) and not any(
         delivery in span for delivery in DELIVERY_TERMS
     ):
         return True
@@ -435,7 +439,7 @@ def _nearest_anchor_is_payment(text: str, start: int, end: int) -> bool:
     after: list[tuple[int, int]] = []
     before: list[tuple[int, int]] = []
     for kind, terms in (
-        (0, PAYMENT_KEYWORDS),
+        (0, PAYMENT_ANCHOR_KEYWORDS),
         (1, START_EVENTS + ACCEPTANCE_TERMS + DELIVERY_TERMS),
     ):
         for term in terms:
@@ -528,6 +532,11 @@ _PAYMENT_NOUNS = (
     "预付款",
     "首付款",
     "余款",
+    "合同总价",
+    "总价",
+    "金额",
+    "费用",
+    "全款",
 )
 _SUFFIX_LIABILITY_TERMS = (
     "违约",
@@ -540,16 +549,17 @@ _SUFFIX_LIABILITY_TERMS = (
     "抚慰金",
     "损失费",
 )
-_PAYMENT_VERBS = ("支付", "付款", "结算")
+_PAYMENT_VERBS = ("支付", "付款", "结算", "结清", "付清", "清偿", "缴纳")
 _COLON_REJECT_TERMS = ("计算", "计收", "起算", "整改", "承担", "损失")
 _LIABILITY_BOUNDARY_RE = re.compile(r"[，,、。；;！!？?\n]")
 _LIABILITY_CONJUNCTION_RE = re.compile(
-    r"(?:并且|以及|并|且|(?<!涉)及(?!时))"
+    r"(?:并且|以及|并|且|(?<![涉波触提普])及(?!时))"
     r"(?=[^，,。；;]{0,64}?(?:违约金|赔偿金|滞纳金|罚息|罚款|赔偿损失))"
 )
 _PAYMENT_CONJUNCTION_RE = re.compile(
-    r"(?:并且|以及|并|且|(?<!涉)及(?!时))"
-    r"(?=[^，,。；;]{0,64}?(?:付款|支付|账期|结算|价款|货款))"
+    r"(?:并且|以及|并|且|(?<![涉波触提普])及(?!时))"
+    r"(?=[^，,。；;]{0,64}?(?:付款|支付|账期|结算|价款|货款|款项|尾款|进度款|"
+    r"服务费|预付款|首付款|余款|合同总价|总价|金额|费用|全款|结清|付清|清偿|缴纳))"
 )
 
 
@@ -627,7 +637,7 @@ def _is_liability_article(clause: Clause) -> bool:
     """
     raw = clause.raw_text or clause.text
     heading = _full_title(raw) or _heading_segment(raw)
-    if any(keyword in heading for keyword in PAYMENT_KEYWORDS):
+    if any(keyword in heading for keyword in PAYMENT_ANCHOR_KEYWORDS):
         return False
     return any(term in heading for term in _LIABILITY_HEADING_TERMS)
 
@@ -716,9 +726,9 @@ def _mask_liability_sentences(
             conjunction = _PAYMENT_CONJUNCTION_RE.search(piece)
         prefix = piece[: conjunction.start()] if conjunction else ""
         suffix = piece[conjunction.end() :] if conjunction else ""
-        prefix_is_payment = any(keyword in prefix for keyword in PAYMENT_KEYWORDS) and not any(
-            term in prefix for term in _PENALTY_TERMS
-        )
+        prefix_is_payment = any(
+            keyword in prefix for keyword in PAYMENT_ANCHOR_KEYWORDS
+        ) and not any(term in prefix for term in _PENALTY_TERMS)
         suffix_is_payment = (
             any(noun in suffix for noun in _PAYMENT_NOUNS)
             and not any(term in suffix for term in _PENALTY_TERMS)
@@ -743,7 +753,7 @@ def _mask_liability_sentences(
             if not pure_liability[index + 1] or pure_liability[index]:
                 continue
             fragment = body[pieces[index][0] : pieces[index][1]]
-            if any(keyword in fragment for keyword in PAYMENT_KEYWORDS):
+            if any(keyword in fragment for keyword in PAYMENT_ANCHOR_KEYWORDS):
                 continue
             if _contains_duration(fragment):
                 continue
@@ -886,7 +896,7 @@ def _payment_anchor_distance(fragment: str, start: int, end: int) -> int | None:
     同样跳过（「逾期支付货款」里的「货款」），避免复合语境被任一近义词带回。
     """
     spans: list[tuple[int, int]] = []
-    for anchor in PAYMENT_KEYWORDS:
+    for anchor in PAYMENT_ANCHOR_KEYWORDS:
         index = fragment.find(anchor)
         while index != -1:
             spans.append((index, index + len(anchor)))

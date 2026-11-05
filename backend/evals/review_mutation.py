@@ -32,6 +32,35 @@ def _patched(target: Any, name: str, value: Any) -> Iterator[None]:
         setattr(target, name, original)
 
 
+@contextmanager
+def _payment_lexicon_reverted() -> Iterator[None]:
+    """回退 D15 新增的付款动词/名词，模拟词表缺口。"""
+    with _patched(
+        analysis,
+        "_PAYMENT_VERBS",
+        ("支付", "付款", "结算"),
+    ):
+        with _patched(
+            analysis,
+            "_PAYMENT_NOUNS",
+            (
+                "付款",
+                "货款",
+                "价款",
+                "账期",
+                "结算",
+                "款项",
+                "尾款",
+                "进度款",
+                "服务费",
+                "预付款",
+                "首付款",
+                "余款",
+            ),
+        ):
+            yield
+
+
 def _permissive_colon_replacement(piece: str) -> str | None:
     """旧版过宽上下文：付款名词/起算事件/期限任一命中就保留后缀。"""
     colon = analysis._HEADING_SPLIT_RE.search(piece)
@@ -173,6 +202,11 @@ def _mutation_specs() -> list[tuple[str, str, Any]]:
             lambda: _patched(
                 analysis, "_liability_colon_replacement", _permissive_colon_replacement
             ),
+        ),
+        (
+            "payment_lexicon_reverted",
+            "回退新增付款动词/名词（结清/付清/合同总价等）",
+            lambda: _payment_lexicon_reverted(),
         ),
     ]
 

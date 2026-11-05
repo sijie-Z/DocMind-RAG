@@ -2965,3 +2965,23 @@ def test_liability_colon_event_without_payment_noun_is_masked():
             == "unchanged"
         ), item
     assert analysis.extract_start_condition(base)["events"] == ["验收合格"]
+
+
+def test_reverse_order_with_settlement_verbs_and_contract_total():
+    """反向语序后缀为结清尾款/合同总价 70% 时仍保留起算与付款（D15）。"""
+    for text in (
+        "第三条 付款期限：甲方应支付违约金并在验收合格后30天内结清尾款。",
+        "第三条 付款期限：甲方应支付违约金并在验收合格后30天内支付合同总价的70%。",
+    ):
+        clauses = [_clause(text, clause_no=[3])]
+        assert analysis.extract_start_condition(clauses)["events"] == ["验收合格"]
+        facts = analysis.extract_payment_term(clauses)
+        assert facts["status"] == "identified", text
+        assert (facts["value"], facts["unit"]) == (30, "day"), text
+
+
+def test_word_internal_ji_in_boji_chuji_is_not_conjunction():
+    """波及/触及/提及/普及中的及不是连词；付款及违约金 才是（D15）。"""
+    for word in ("波及付款违约金", "触及付款违约金", "提及付款违约金", "普及付款违约金"):
+        assert analysis._LIABILITY_CONJUNCTION_RE.search(word) is None, word
+    assert analysis._LIABILITY_CONJUNCTION_RE.search("付款及违约金") is not None

@@ -1,4 +1,4 @@
-"""核验 golden set（D5）：49 组人工编写的中文采购合同 V1/V2 与期望值。
+"""核验 golden set（D5）：51 组人工编写的中文采购合同 V1/V2 与期望值。
 
 gold 只依据合同文本人工判定，不从引擎输出反推；change_type 用产品语义：
 - 付款天数 30天→60天 = payment_term modified；
@@ -1650,6 +1650,78 @@ CASES = [
             _A2,
             "第三条 付款期限：甲方应在验收合格后30天内支付货款。"
             "逾期付款的，应支付违约金：合同签订生效之日起按日万分之五计算。",
+            _acc("四", "乙方交付后10个工作日内完成验收，验收标准以本合同附件二为准。"),
+            _A5,
+            _A6,
+            _A7,
+            _A8,
+            _A9_EXTRA,
+        ),
+        "items": {
+            "payment_term": _item(
+                "unchanged", {"status": "identified", "value": 30, "unit": "day"}, ("revised", 3)
+            ),
+            "start_condition": _item(
+                "unchanged", {"status": "identified", "events": ["验收合格"]}, ("revised", 3)
+            ),
+            "acceptance_invoice": _item("unchanged", _ACCEPT_OK, ("revised", 4)),
+            "exception": _item("unidentified", _ABSENT),
+        },
+    },
+    {
+        "id": "start_reverse_settle_balance",
+        "note": "反向语序+结清尾款：起算与 30 天付款必须保留（D15）",
+        "base": _doc(
+            _A1,
+            _A2,
+            "第三条 付款期限：甲方应支付违约金并在验收合格后30天内结清尾款。",
+            _acc("四", "乙方交付后10个工作日内完成验收，验收标准以本合同附件二为准。"),
+            _A5,
+            _A6,
+            _A7,
+            _A8,
+            _A9_EXTRA,
+        ),
+        "revised": _doc(
+            _A1,
+            _A2,
+            "第三条 付款期限：甲方应支付违约金并在验收合格后30天内结清尾款。",
+            _acc("四", "乙方交付后10个工作日内完成验收，验收标准以本合同附件二为准。"),
+            _A5,
+            _A6,
+            _A7,
+            _A8,
+            _A9_EXTRA,
+        ),
+        "items": {
+            "payment_term": _item(
+                "unchanged", {"status": "identified", "value": 30, "unit": "day"}, ("revised", 3)
+            ),
+            "start_condition": _item(
+                "unchanged", {"status": "identified", "events": ["验收合格"]}, ("revised", 3)
+            ),
+            "acceptance_invoice": _item("unchanged", _ACCEPT_OK, ("revised", 4)),
+            "exception": _item("unidentified", _ABSENT),
+        },
+    },
+    {
+        "id": "start_reverse_contract_total_payment",
+        "note": "反向语序+合同总价70%：起算与 30 天付款必须保留（D15）",
+        "base": _doc(
+            _A1,
+            _A2,
+            "第三条 付款期限：甲方应支付违约金并在验收合格后30天内支付合同总价的70%。",
+            _acc("四", "乙方交付后10个工作日内完成验收，验收标准以本合同附件二为准。"),
+            _A5,
+            _A6,
+            _A7,
+            _A8,
+            _A9_EXTRA,
+        ),
+        "revised": _doc(
+            _A1,
+            _A2,
+            "第三条 付款期限：甲方应支付违约金并在验收合格后30天内支付合同总价的70%。",
             _acc("四", "乙方交付后10个工作日内完成验收，验收标准以本合同附件二为准。"),
             _A5,
             _A6,
