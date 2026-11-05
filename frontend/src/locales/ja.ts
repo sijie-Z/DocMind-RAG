@@ -9,6 +9,7 @@ export default {
     closeMenu: 'メニューを閉じる',
     collapseSidebar: 'サイドバーを折りたたむ',
     expandSidebar: 'サイドバーを展開',
+    mainNavigation: 'メインナビゲーション',
   },
   common: {
     save: '保存',

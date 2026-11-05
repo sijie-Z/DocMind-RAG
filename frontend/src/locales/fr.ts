@@ -9,6 +9,7 @@ export default {
     closeMenu: 'Fermer le menu',
     collapseSidebar: 'Réduire la barre latérale',
     expandSidebar: 'Développer la barre latérale',
+    mainNavigation: 'Navigation principale',
   },
   common: {
     save: 'Enregistrer',

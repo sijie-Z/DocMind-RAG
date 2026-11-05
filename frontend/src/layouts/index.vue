@@ -4,14 +4,16 @@
     <div
       v-if="mobileMenuOpen"
       class="fixed inset-0 bg-black/40 z-40 md:hidden"
-      @click="mobileMenuOpen = false"
+      @click="closeMobileMenu"
     />
 
     <!-- 侧边栏 -->
     <div
+      ref="drawerRef"
       class="bg-white dark:bg-gray-900 border-r border-gray-200 dark:border-gray-800 flex flex-col shrink-0 transition-all duration-300"
       :inert="sidebarInert"
       :aria-hidden="sidebarInert ? 'true' : undefined"
+      @keydown="handleDrawerKeydown"
       :class="[
         appStore.sidebarCollapsed ? 'w-20' : 'w-64',
         'max-md:fixed max-md:inset-y-0 max-md:left-0 max-md:z-50',
@@ -35,17 +37,23 @@
           </span>
         </div>
         <button
+          ref="drawerCloseRef"
           type="button"
-          class="ml-auto flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-gray-500 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-800 md:hidden"
+          data-testid="mobile-drawer-close"
+          class="ml-auto flex h-11 w-11 shrink-0 items-center justify-center rounded-lg text-gray-500 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-800 md:hidden"
           :aria-label="t('layout.closeMenu')"
-          @click.stop="mobileMenuOpen = false"
+          @click.stop="closeMobileMenu"
         >
           <n-icon size="20"><CloseOutline /></n-icon>
         </button>
       </div>
       
       <!-- 导航菜单 -->
-      <nav class="min-h-0 flex-1 overflow-y-auto py-4" aria-label="Main navigation">
+      <nav
+        ref="navRef"
+        class="min-h-0 flex-1 overflow-y-auto py-4"
+        :aria-label="t('layout.mainNavigation')"
+      >
         <n-menu
           :collapsed="appStore.sidebarCollapsed"
           :collapsed-width="80"
@@ -150,18 +158,20 @@
     </div>
     
     <!-- 主内容区 -->
-    <div class="flex-1 flex flex-col bg-gray-50 dark:bg-gray-950 transition-colors duration-300">
+    <div class="flex-1 min-w-0 flex flex-col bg-gray-50 dark:bg-gray-950 transition-colors duration-300">
       <!-- 顶部栏 -->
       <header class="h-14 md:h-16 bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-800 flex items-center justify-between px-4 md:px-6 sticky top-0 z-20">
         <div class="flex items-center gap-3 min-w-0">
           <!-- 移动端汉堡菜单 -->
           <n-button
+            ref="hamburgerRef"
+            data-testid="mobile-menu-toggle"
             text
             size="small"
             class="md:hidden !h-11 !w-11"
             :aria-label="mobileMenuOpen ? t('layout.closeMenu') : t('layout.openMenu')"
             :aria-expanded="mobileMenuOpen"
-            @click="mobileMenuOpen = !mobileMenuOpen"
+            @click="toggleMobileMenu"
           >
             <template #icon>
               <n-icon size="20"><MenuOutline /></n-icon>
@@ -309,7 +319,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, h, onMounted, onUnmounted, type Component } from 'vue'
+import { computed, ref, h, nextTick, onMounted, onUnmounted, watch, type Component } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useMediaQuery } from '@vueuse/core'
@@ -372,12 +382,101 @@ const isMobileViewport = useMediaQuery('(max-width: 639.98px)')
 // 抽屉（max-md）关闭时对辅助技术隐藏并移出焦点顺序；桌面侧栏不受影响。
 const isDrawerViewport = useMediaQuery('(max-width: 767.98px)')
 const sidebarInert = computed(() => isDrawerViewport.value && !mobileMenuOpen.value)
+const navRef = ref<HTMLElement | null>(null)
+const drawerRef = ref<HTMLElement | null>(null)
+const drawerCloseRef = ref<HTMLElement | null>(null)
+const hamburgerRef = ref<{ $el?: HTMLElement } | null>(null)
+let drawerWasOpen = false
+
+watch(mobileMenuOpen, async (open) => {
+  if (!isDrawerViewport.value) return
+  if (open) {
+    drawerWasOpen = true
+    await nextTick()
+    drawerCloseRef.value?.focus()
+  } else if (drawerWasOpen) {
+    drawerWasOpen = false
+    await nextTick()
+    hamburgerRef.value?.$el?.focus()
+  }
+})
+
+function closeMobileMenu() {
+  if (mobileMenuOpen.value) mobileMenuOpen.value = false
+}
+
+function toggleMobileMenu() {
+  if (mobileMenuOpen.value) closeMobileMenu()
+  else mobileMenuOpen.value = true
+}
+
+function drawerFocusables(): HTMLElement[] {
+  const root = drawerRef.value
+  if (!root) return []
+  return Array.from(
+    root.querySelectorAll<HTMLElement>('a[href],button:not([disabled]),[tabindex="0"],input,select,textarea'),
+  ).filter((el) => el.offsetParent !== null)
+}
+
+function handleDrawerKeydown(event: KeyboardEvent) {
+  if (!isDrawerViewport.value || !mobileMenuOpen.value) return
+  if (event.key === 'Escape') {
+    event.preventDefault()
+    closeMobileMenu()
+    return
+  }
+  if (event.key !== 'Tab') return
+  const items = drawerFocusables()
+  if (!items.length) return
+  const first = items[0]
+  const last = items[items.length - 1]
+  if (event.shiftKey && document.activeElement === first) {
+    event.preventDefault()
+    last.focus()
+  } else if (!event.shiftKey && document.activeElement === last) {
+    event.preventDefault()
+    first.focus()
+  }
+}
+
+function handleNavKeydown(event: KeyboardEvent) {
+  const root = drawerRef.value
+  if (!root) return
+  const items = Array.from(root.querySelectorAll<HTMLElement>('[role="menuitem"]'))
+  const index = items.indexOf(document.activeElement as HTMLElement)
+  if (index === -1) return
+  if (event.key === 'ArrowDown' || event.key === 'ArrowUp' || event.key === 'Home' || event.key === 'End') {
+    event.preventDefault()
+    const next =
+      event.key === 'Home'
+        ? 0
+        : event.key === 'End'
+          ? items.length - 1
+          : event.key === 'ArrowDown'
+            ? Math.min(index + 1, items.length - 1)
+            : Math.max(index - 1, 0)
+    items[next]?.focus()
+    return
+  }
+  if (event.key === 'Enter' || event.key === ' ') {
+    event.preventDefault()
+    const key = (document.activeElement as HTMLElement | null)?.getAttribute('data-menu-key')
+    if (key) void handleMenuSelect(key)
+  }
+}
 
 function handleGlobalKeydown(event: KeyboardEvent) {
-  if (event.key === 'Escape' && mobileMenuOpen.value) mobileMenuOpen.value = false
+  if (event.key === 'Escape' && mobileMenuOpen.value) closeMobileMenu()
 }
-onMounted(() => window.addEventListener('keydown', handleGlobalKeydown))
-onUnmounted(() => window.removeEventListener('keydown', handleGlobalKeydown))
+onMounted(() => {
+  window.addEventListener('keydown', handleGlobalKeydown)
+  // 捕获阶段监听：Naive Menu 会在菜单项上停止冒泡，普通 @keydown 收不到。
+  navRef.value?.addEventListener('keydown', handleNavKeydown, true)
+})
+onUnmounted(() => {
+  window.removeEventListener('keydown', handleGlobalKeydown)
+  navRef.value?.removeEventListener('keydown', handleNavKeydown, true)
+})
 
 // Language options：单一事实源 utils/languages.ts（beta 字段驱动徽标展示）
 const languageOptions = LANGUAGES
@@ -582,16 +681,19 @@ const renderGroupLabel = (label: string) => () => {
 }
 
 const menuNodeProps = (option: MenuOption): Record<string, string> => {
-  if ((option as MenuGroupOption).type === 'group' && appStore.sidebarCollapsed) {
-    return { class: 'sidebar-group-title--collapsed', 'aria-hidden': 'true' }
+  if ((option as MenuGroupOption).type === 'group') {
+    // 分组标题不是可操作项：不进入 Tab 顺序（折叠态额外 aria-hidden）。
+    return appStore.sidebarCollapsed
+      ? { class: 'sidebar-group-title--collapsed', 'aria-hidden': 'true' }
+      : {}
   }
-  // Naive Menu 默认不把菜单项放进 Tab 顺序；当前项 tabindex=0 作为入口，
-  // 进入后用方向键在菜单内移动，解决「主导航无法用键盘到达」（a11y G1）。
+  // Naive Menu 默认不把菜单项放进 Tab 顺序：全部菜单项 tabindex=0 可 Tab 到达，
+  // 当前项标 aria-current；方向键/Enter 由 handleNavKeydown 处理（a11y G1）。
   const key = String((option as MenuOption).key ?? '')
   if (key && key === String(activeKey.value)) {
-    return { tabindex: '0', 'aria-current': 'page' }
+    return { tabindex: '0', 'aria-current': 'page', 'data-menu-key': key }
   }
-  return {}
+  return { tabindex: '0', 'data-menu-key': key }
 }
 
 const menuOptions = computed<MenuOption[]>(() => {

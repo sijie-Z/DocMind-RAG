@@ -9,6 +9,7 @@ export default {
     closeMenu: 'Close menu',
     collapseSidebar: 'Collapse sidebar',
     expandSidebar: 'Expand sidebar',
+    mainNavigation: 'Main navigation',
   },
   common: {
     save: 'Save',

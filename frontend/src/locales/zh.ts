@@ -9,6 +9,7 @@ export default {
     closeMenu: '关闭菜单',
     collapseSidebar: '收起侧栏',
     expandSidebar: '展开侧栏',
+    mainNavigation: '主导航',
   },
   common: {
     save: '保存',
