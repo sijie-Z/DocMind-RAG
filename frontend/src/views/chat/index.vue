@@ -15,7 +15,7 @@
     <!-- Mobile overlay for sidebar -->
     <div
       v-if="sidebarOpen && windowWidth < 1024"
-      class="fixed inset-0 z-10 bg-black/40 md:hidden"
+      class="fixed inset-0 z-10 bg-black/40 lg:hidden"
       @click="toggleSidebar"
     />
 
@@ -865,6 +865,7 @@ onMounted(async () => {
 
 /* Mobile: sidebar as fixed overlay */
 @media (max-width: 1023.98px) {
+  /* 平板/移动端：会话列表是浮层抽屉（不挤压主区，不覆盖全局导航的布局） */
   aside[class*="flex-shrink-0"] {
     position: fixed !important;
     inset: 0 !important;
@@ -874,15 +875,17 @@ onMounted(async () => {
     max-width: 320px !important;
     border-radius: 0 16px 16px 0;
   }
+}
+
+@media (max-width: 767.98px) {
   main {
     padding-bottom: env(safe-area-inset-bottom, 0px);
   }
-  /* Chat input footer: fixed at bottom on mobile */
+  /* 手机：输入条固定在视口底部；768–1023 仍有全局导航，保持流内定位 */
   footer[class*="absolute bottom-0"] {
     position: fixed !important;
     padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 12px) !important;
   }
-  /* Messages area: adjust bottom padding for fixed input (44px 工具条 + 两行控制) */
   div[class*="pt-20 pb-40"] {
     padding-bottom: 248px !important;
   }

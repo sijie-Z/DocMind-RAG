@@ -12,8 +12,8 @@
         >
           <n-icon size="16" class="mr-1" aria-hidden="true"><ArrowBackOutline /></n-icon>{{ t('agent.backToChat') }}
         </button>
-        <h1 class="header-title hidden md:block">{{ t('menu.agent') }}</h1>
-        <span class="header-badge hidden md:inline-flex">{{ t('agent.headerBadge') }}</span>
+        <h1 class="header-title hidden lg:block">{{ t('menu.agent') }}</h1>
+        <span class="header-badge hidden lg:inline-flex">{{ t('agent.headerBadge') }}</span>
       </div>
       <div class="header-center">
         <SessionSelector
@@ -2546,7 +2546,7 @@ async function loadInit() {
 }
 
 /* === Responsive: collapse 3-column to single column === */
-@media (max-width: 767px) {
+@media (max-width: 1023.98px) {
   .agent-body {
     flex-direction: column;
   }

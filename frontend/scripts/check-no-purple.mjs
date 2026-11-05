@@ -56,15 +56,17 @@ for (const file of walk(ROOT)) {
     }
     for (const m of line.matchAll(HEX)) {
       const x = m[1]
-      const { h, s } = hue(parseInt(x.slice(0, 2), 16), parseInt(x.slice(2, 4), 16), parseInt(x.slice(4, 6), 16))
-      if (h >= 245 && h <= 335 && s > 0.15) {
+      const r = parseInt(x.slice(0, 2), 16), g = parseInt(x.slice(2, 4), 16), b = parseInt(x.slice(4, 6), 16)
+      const { h, s } = hue(r, g, b)
+      // 近黑深色面（max<64）是中性底，不计为紫色强调色
+      if (h >= 232 && h <= 335 && s > 0.15 && Math.max(r, g, b) >= 64) {
         hits.push(`${where}  #${x}（hue ${h.toFixed(0)}°，sat ${(s * 100).toFixed(0)}%）：${line.trim().slice(0, 110)}`)
       }
     }
     for (const m of line.matchAll(RGB)) {
       const [r, g, b] = m.slice(1, 4).map(Number)
       const { h, s } = hue(r, g, b)
-      if (h >= 245 && h <= 335 && s > 0.15) {
+      if (h >= 232 && h <= 335 && s > 0.15 && Math.max(r, g, b) >= 64) {
         hits.push(`${where}  rgb(${r},${g},${b})（hue ${h.toFixed(0)}°，sat ${(s * 100).toFixed(0)}%）：${line.trim().slice(0, 110)}`)
       }
     }

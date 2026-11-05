@@ -190,7 +190,7 @@ function emitSaveApprove() {
 
 .dark .plan-approval-card {
   background: rgba(37, 99, 235, 0.12);
-  border-color: rgba(129, 140, 248, 0.4);
+  border-color: rgba(37, 99, 235, 0.4);
 }
 
 .card-header {
