@@ -347,6 +347,7 @@ export function useChatSend(
       if (!sent) {
         message.error(t('chat.sendFailed'))
         isLoading.value = false
+        sseStatus.value = 'error'
         cleanupActiveRegenerate(aiMsgId)
         if (!isRegenerate) attachedFiles.value = currentFiles
       } else if (isRegenerate && !terminalReceived) {
@@ -355,12 +356,14 @@ export function useChatSend(
         cleanupActiveRegenerate(aiMsgId)
         isLoading.value = false
         isRetrieving.value = false
+        sseStatus.value = 'idle'
       }
     } catch {
       if (!ownsGeneration()) return
       if (!ownsActiveStream()) return
       message.error(t('chat.networkError'))
       isLoading.value = false
+      sseStatus.value = 'error'
       cleanupActiveRegenerate(aiMsgId)
       if (!isRegenerate) attachedFiles.value = currentFiles
     }
@@ -483,6 +486,8 @@ export function useChatSend(
     sseService.abort()
     isLoading.value = false
     isRetrieving.value = false
+    // 中止/换会话后不能把「连接中」留在徽标上，直到下一次发送才恢复。
+    sseStatus.value = 'idle'
     cleanupActiveRegenerate()
   }
 

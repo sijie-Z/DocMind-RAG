@@ -280,7 +280,7 @@ export default {
     fileParsed: 'Parse complete',
     fileIndexed: 'Completed',
     fileProcessing: 'Processing',
-    fileReady: '✅ Ready',
+    fileReady: '✓ Ready',
     fileTimeout: 'Processing timeout, please check status in knowledge base',
     fileFromChat: 'From chat upload',
     fileUploadFailed: 'Upload failed',

@@ -82,7 +82,7 @@
 
 ## 验收（提交前自检）
 
-1. `grep -riE "purple|violet|indigo|fuchsia|pink|rgba\(\s*(99|139)\s*,\s*(102|92)\s*,\s*(241|246)" src` 为 0；无动态 HSL 彩虹色（如 `hsl(idx*45+220)`）。
+1. `npm run check:no-purple` 通过：按色相扫描源码中的十六进制/RGB 颜色（hue 245–335、饱和度 >15%）与动态 HSL，并拦截 purple/violet/indigo/fuchsia/pink 关键词。
 2. 新增文字对比度：白底 ≥4.5:1（可用 #2563eb / #047857 / #b45309 / #dc2626 / #64748b）。
 3. 键盘可完成主流程；焦点环可见且不被遮挡；图标按钮有 `aria-label`。
 4. 375 / 768 / 1440 无意外横向滚动；触控目标 ≥44px。

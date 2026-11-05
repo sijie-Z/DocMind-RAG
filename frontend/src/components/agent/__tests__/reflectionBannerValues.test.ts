@@ -22,22 +22,22 @@ describe('ReflectionBanner · 六值域（B28）', () => {
   it('unavailable（评估服务不可用）：专属图标 + 专属 class（不再无样式裸文本）', () => {
     const wrapper = mountBanner('unavailable')
     expect(wrapper.find('.reflection-banner').classes()).toContain('reflection-unavailable')
-    expect(wrapper.find('.reflection-icon').text()).toBe('⏸️')
+    expect(wrapper.find('.reflection-icon').text()).toBe('–')
     expect(wrapper.text()).toContain('本轮未获得完成度判定')
   })
 
   it('unparsed（模型输出无可用判定）：专属图标 + 专属 class', () => {
     const wrapper = mountBanner('unparsed')
     expect(wrapper.find('.reflection-banner').classes()).toContain('reflection-unparsed')
-    expect(wrapper.find('.reflection-icon').text()).toBe('❔')
+    expect(wrapper.find('.reflection-icon').text()).toBe('?')
   })
 
   it('四主态回归：pass/retry/replan/escalate 图标与 class 不变', () => {
     const cases: Array<[string, string]> = [
-      ['pass', '✅'],
-      ['retry', '🔄'],
-      ['replan', '📝'],
-      ['escalate', '⚠️'],
+      ['pass', '✓'],
+      ['retry', '↻'],
+      ['replan', '✎'],
+      ['escalate', '!'],
     ]
     for (const [result, icon] of cases) {
       const wrapper = mountBanner(result)

@@ -14,7 +14,7 @@
         </n-button>
       </div>
 
-      <div class="bg-white dark:bg-gray-800 rounded-2xl shadow-[0_8px_30px_rgb(0,0,0,0.08)] border border-gray-200 dark:border-gray-700 p-2 transition-all duration-300 focus-within:shadow-[0_8px_30px_rgb(0,0,0,0.12)] focus-within:border-primary-300 dark:focus-within:border-primary-700">
+      <div class="composer-card bg-white dark:bg-gray-800 rounded-2xl shadow-[0_8px_30px_rgb(0,0,0,0.08)] border border-gray-200 dark:border-gray-700 p-2 transition-all duration-300 focus-within:shadow-[0_8px_30px_rgb(0,0,0,0.12)] focus-within:border-primary-300 dark:focus-within:border-primary-700">
         <!-- Attached files -->
         <div v-if="attachedFiles.length > 0" class="flex flex-wrap gap-2 px-3 pt-2 items-center">
           <div v-for="(file, index) in attachedFiles" :key="index"
@@ -304,6 +304,12 @@ const onKeydown = (e: KeyboardEvent) => {
 </script>
 
 <style scoped>
+/* 键盘焦点：Naive textarea 内部会吃掉 outline，焦点环画在整张输入卡上 */
+.composer-card:focus-within {
+  outline: 2px solid rgba(37, 99, 235, 0.45);
+  outline-offset: 2px;
+}
+
 /* 移动端触控目标：工具条图标按钮 44×44，发送键加高（视觉密度让位于可点性） */
 @media (max-width: 639.98px) {
   .chat-toolbar :deep(.n-button) {

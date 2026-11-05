@@ -286,7 +286,7 @@ export default {
     fileParsed: '解析完成',
     fileIndexed: '已完成',
     fileProcessing: '处理中',
-    fileReady: '✅ 已就绪',
+    fileReady: '✓ 已就绪',
     fileTimeout: '处理超时，请稍后在知识库中查看状态',
     fileFromChat: '来自聊天上传',
     fileUploadFailed: '上传失败',

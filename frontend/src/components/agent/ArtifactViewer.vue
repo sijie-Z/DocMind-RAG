@@ -11,7 +11,7 @@
         :title="t('artifacts.download')"
         @click="handleDownload"
       >
-        ⬇ {{ t('artifacts.download') }}
+        {{ t('artifacts.download') }}
       </button>
     </div>
 

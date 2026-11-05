@@ -5,7 +5,7 @@
     :inert="inert"
     :aria-hidden="inert ? 'true' : undefined"
     :class="[
-      sidebarOpen ? 'w-72 translate-x-0' : 'w-0 -translate-x-full overflow-hidden opacity-0 md:opacity-100 md:w-0 md:translate-x-0'
+      sidebarOpen ? 'w-72 translate-x-0' : 'w-0 -translate-x-full overflow-hidden opacity-0 lg:opacity-100 lg:w-0 lg:translate-x-0'
     ]"
   >
     <!-- Header -->
@@ -31,7 +31,7 @@
         quaternary
         circle
         size="small"
-        class="chat-sidebar-close ml-1 md:hidden"
+        class="chat-sidebar-close ml-1 lg:hidden"
         data-testid="chat-sidebar-close"
         :aria-label="t('chat.closeSidebar')"
         @click="$emit('close')"
@@ -182,7 +182,7 @@ const formatDate = (dateStr: string) => {
   }
 }
 
-@media (max-width: 767.98px) {
+@media (max-width: 1023.98px) {
   .chat-sidebar-close.n-button {
     height: 44px !important;
     width: 44px !important;

@@ -14,7 +14,7 @@
   <div class="flex h-full w-full bg-gray-50 dark:bg-gray-950 overflow-hidden transition-colors duration-300">
     <!-- Mobile overlay for sidebar -->
     <div
-      v-if="sidebarOpen && windowWidth < 768"
+      v-if="sidebarOpen && windowWidth < 1024"
       class="fixed inset-0 z-10 bg-black/40 md:hidden"
       @click="toggleSidebar"
     />
@@ -64,7 +64,7 @@
 
       <!-- Mobile back-to-conversations button -->
       <div
-        v-if="sidebarOpen && windowWidth < 768"
+        v-if="sidebarOpen && windowWidth < 1024"
         class="fixed left-72 top-20 z-20 md:hidden"
       >
         <n-button size="tiny" quaternary @click="toggleSidebar" class="bg-white/90 dark:bg-gray-800/90 shadow-sm rounded-lg">
@@ -239,12 +239,12 @@ const closeSidebar = () => {
   if (sidebarOpen.value) sidebarOpen.value = false
 }
 watch(sidebarOpen, (open) => {
-  if (windowWidth.value >= 768) return
+  if (windowWidth.value >= 1024) return
   nextTick(open ? focusSidebarFirstItem : focusSidebarToggle)
 })
 // capture 阶段接管：抽屉内 Tab 循环、Escape 关闭；桌面端不干预。
 const handleSidebarKeydown = (event: KeyboardEvent) => {
-  if (!sidebarOpen.value || windowWidth.value >= 768) return
+  if (!sidebarOpen.value || windowWidth.value >= 1024) return
   if (event.key === 'Escape') {
     event.preventDefault()
     closeSidebar()
@@ -283,20 +283,7 @@ const {
   effectiveConnectionStatus, connectWebSocket, disconnectWebSocket
 } = useChatConnection(messages, baseScrollToBottom, fetchConversations, getConversationOwner)
 
-// 传输方式切换立即生效：切到 WS 立刻建连（修复旧实现切过去后仍无 socket，
-// 首条消息才暴露未连接）；切回 SSE 释放 WS 并把状态归位到「就绪」。
-// 挂载期的传输选择由 onMounted 末尾统一建连（此时 store/路由已对齐）；
-// 该开关只响应用户在页面就绪后的主动切换，避免拿到挂载前的陈旧会话 id。
-let transportSwitchReady = false
-watch(useSSE, (sse) => {
-  if (!transportSwitchReady) return
-  if (sse) {
-    disconnectWebSocket()
-    sseStatus.value = 'idle'
-  } else {
-    void connectWebSocket()
-  }
-})
+// 传输切换的 watcher 放在 useChatSend 之后（需要 stopGeneration 收尾在途生成）。
 
 // E7：历史加载态与生成态分离 —— 切会话拉历史不再复用 isLoading（修前会误现
 // 「停止生成」按钮、生成 loading 与流式光标）。停止生成统一走 useChatSend 版本
@@ -342,6 +329,24 @@ const {
   isLoading, isRetrieving, sseStatus, useSSE, useStream, debugEnabled, debugData,
   getConversationOwner,
 )
+
+// 传输方式切换立即生效：切到 WS 立刻建连（修复旧实现切过去后仍无 socket，
+// 首条消息才暴露未连接）；切回 SSE 释放 WS 并把状态归位到「就绪」。
+// 挂载期的传输选择由 onMounted 末尾统一建连（此时 store/路由已对齐）；
+// 该开关只响应用户在页面就绪后的主动切换，避免拿到挂载前的陈旧会话 id。
+let transportSwitchReady = false
+watch(useSSE, (sse) => {
+  if (!transportSwitchReady) return
+  // 在途生成先按「停止」收尾：直接关 socket 会让 WS 流永远等不到终态，
+  // isLoading 挂起，UI 停不下来。
+  if (isLoading.value) stopGeneration()
+  if (sse) {
+    disconnectWebSocket()
+    sseStatus.value = 'idle'
+  } else {
+    void connectWebSocket()
+  }
+})
 
 // issue #508（方案 B）：深度分析（Agent/PER）只在 /agent 工作台提供（审批/计划
 // 审批/取消/回放 UI 完整）。Chat 的深度分析入口改为导航——不再以
@@ -539,7 +544,7 @@ const newConversation = () => {
   if (!route.query.conversation_id) resetConversationView(true)
   attachedFiles.value = []
   router.push({ query: {} })
-  if (window.innerWidth < 768) sidebarOpen.value = false
+  if (window.innerWidth < 1024) sidebarOpen.value = false
 }
 
 const handleSelectConversation = async (conv: Conversation) => {
@@ -548,7 +553,7 @@ const handleSelectConversation = async (conv: Conversation) => {
   // route.name 后同页 query 变化不再整页重挂；此处不再直接调 loadConversation，
   // 避免一次切换双重拉取）
   await router.push({ query: { conversation_id: conv.id } })
-  if (window.innerWidth < 768) sidebarOpen.value = false
+  if (window.innerWidth < 1024) sidebarOpen.value = false
 }
 
 const loadConversation = async (id: string, ownerGeneration?: string) => {
@@ -859,7 +864,7 @@ onMounted(async () => {
 .scrollbar-thin:hover::-webkit-scrollbar-thumb { background-color: rgba(156, 163, 175, 0.5); }
 
 /* Mobile: sidebar as fixed overlay */
-@media (max-width: 767px) {
+@media (max-width: 1023.98px) {
   aside[class*="flex-shrink-0"] {
     position: fixed !important;
     inset: 0 !important;

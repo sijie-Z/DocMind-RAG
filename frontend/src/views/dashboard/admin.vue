@@ -612,7 +612,7 @@ const initLlmChart = () => {
       itemStyle: { color: CHART_COLORS.sky },
       areaStyle: { opacity: 0.15, color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
         { offset: 0, color: CHART_COLORS.sky },
-        { offset: 1, color: 'rgba(168,85,247,0.0)' }
+        { offset: 1, color: 'rgba(37,99,235,0.0)' }
       ]) },
       symbol: 'circle',
       symbolSize: 5,

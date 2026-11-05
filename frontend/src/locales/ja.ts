@@ -264,7 +264,7 @@ export default {
     fileParsed: '解析完了',
     fileIndexed: '完了',
     fileProcessing: '処理中',
-    fileReady: '✅ 準備完了',
+    fileReady: '✓ 準備完了',
     fileTimeout: '処理がタイムアウトしました。しばらくしてからナレッジベースで状態を確認してください',
     fileFromChat: 'チャットからのアップロード',
     fileUploadFailed: 'アップロード失敗',

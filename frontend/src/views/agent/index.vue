@@ -629,6 +629,10 @@ const lineageBadgeTitle = computed(() => {
 // 宽屏默认展开右侧配置（≥1280 时中央区仍有 ≥740px）；窄屏与测试环境保持收起。
 const showConfig = ref(typeof window !== 'undefined' && window.innerWidth >= 1280)
 const showTerminal = ref(false)
+// 窄屏时收起右侧配置栏（用户手动打开的宽屏状态不跨断点保留）。
+const handleViewportResize = () => {
+  if (window.innerWidth < 1024) showConfig.value = false
+}
 // 空计划时不占左栏宽度；计划到来时自动展开（见下方 watch）。
 const showPlan = ref(false)
 const centerPanel = ref<HTMLElement>()
@@ -670,8 +674,11 @@ const currentPlanSteps = computed<PlanStep[]>(() => {
 watch(
   () => currentPlanSteps.value.length,
   (length, previous) => {
-    if (length > 0 && previous === 0) showPlan.value = true
+    // 清空/切换无计划会话时收起，避免残留空面板；计划首次出现时自动展开。
+    if (length === 0) showPlan.value = false
+    else if (previous === 0) showPlan.value = true
   },
+  { immediate: true },
 )
 
 function getLastThinkingType(msg: AgentChatMessage): ThinkingType {
@@ -1494,6 +1501,7 @@ watch(
 
 // 组件卸载时中止进行中的 Agent SSE 流，防止请求悬挂
 onUnmounted(() => {
+  window.removeEventListener('resize', handleViewportResize)
   currentChatController?.abort()
   currentChatController = null
   if (stopFallbackTimer) {
@@ -1708,6 +1716,7 @@ function handleConfigApply(config: typeof agentStore.config) {
 // Load initial data — wrap in try/catch to prevent errors from
 // propagating through Suspense and triggering the ErrorBoundary.
 onMounted(async () => {
+  window.addEventListener('resize', handleViewportResize)
   try {
     await loadInit()
     // HITL：刷新/重连后回到审批现场（last task id 持久化 + 权威状态）
@@ -1853,16 +1862,16 @@ async function loadInit() {
   padding: 2px 8px;
   border-radius: 6px;
   font-size: 10px;
-  color: #6d28d9;
-  background: rgba(109, 40, 217, 0.1);
-  border: 1px solid rgba(109, 40, 217, 0.3);
+  color: #1d4ed8;
+  background: rgba(37, 99, 235, 0.1);
+  border: 1px solid rgba(37, 99, 235, 0.3);
   cursor: help;
   white-space: nowrap;
 }
 
 .dark .lineage-badge {
   color: #93c5fd;
-  background: rgba(109, 40, 217, 0.2);
+  background: rgba(37, 99, 235, 0.2);
   border-color: rgba(37, 99, 235, 0.45);
 }
 
@@ -1940,11 +1949,11 @@ async function loadInit() {
 .fork-seed-note {
   margin: 0 0 12px;
   padding: 8px 12px;
-  border: 1px solid rgba(109, 40, 217, 0.3);
-  border-left: 3px solid #6d28d9;
+  border: 1px solid rgba(37, 99, 235, 0.3);
+  border-left: 3px solid #1d4ed8;
   border-radius: 8px;
-  background: rgba(109, 40, 217, 0.07);
-  color: #5b21b6;
+  background: rgba(37, 99, 235, 0.07);
+  color: #1e40af;
   font-size: 12px;
 }
 
@@ -1960,9 +1969,9 @@ async function loadInit() {
 .user-bubble .fork-here-line { justify-content: flex-end; }
 
 .fork-here-btn {
-  border: 1px dashed rgba(109, 40, 217, 0.45);
-  color: #6d28d9;
-  background: rgba(109, 40, 217, 0.06);
+  border: 1px dashed rgba(37, 99, 235, 0.45);
+  color: #1d4ed8;
+  background: rgba(37, 99, 235, 0.06);
   border-radius: 6px;
   font-size: 11px;
   padding: 2px 8px;

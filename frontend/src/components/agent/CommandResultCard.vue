@@ -25,7 +25,7 @@
         :title="t('agentCommand.download', { filename: exportFilename })"
         @click="downloadExport"
       >
-        ⬇ {{ t('agentCommand.download', { filename: exportFilename }) }}
+        {{ t('agentCommand.download', { filename: exportFilename }) }}
       </button>
     </div>
 

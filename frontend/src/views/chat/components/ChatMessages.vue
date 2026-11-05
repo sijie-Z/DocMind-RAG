@@ -7,7 +7,7 @@
     <div class="max-w-3xl mx-auto space-y-6">
       <!-- Welcome screen（E7：历史加载中不显示空态欢迎屏，避免「加载中」与「新会话」混淆）
            纸面式首屏：小字品牌眉题 + 标题 + 任务卡，不再用大色块/彩色阴影抢占输入区焦点。 -->
-      <div v-if="messages.length === 0 && !isLoadingHistory" class="mt-10 md:mt-16 animate-fade-in">
+      <div v-if="messages.length === 0 && !isLoadingHistory" class="mt-4 animate-fade-in sm:mt-10 md:mt-16">
         <div class="max-w-2xl">
           <div class="mb-4 text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500 dark:text-slate-400">
             DocMind
@@ -15,15 +15,15 @@
           <h2 class="mb-3 text-2xl font-semibold tracking-tight text-slate-900 dark:text-white md:text-3xl" style="text-wrap: balance">
             {{ t('chat.welcome') }}
           </h2>
-          <p class="mb-8 max-w-xl text-base leading-relaxed text-slate-600 dark:text-slate-400">
+          <p class="mb-6 max-w-xl text-base leading-relaxed text-slate-600 dark:text-slate-400 sm:mb-8">
             {{ t('chat.welcomeDesc') }}
           </p>
         </div>
-        <div class="grid max-w-2xl grid-cols-1 gap-3 sm:grid-cols-2">
+        <div class="grid max-w-2xl grid-cols-1 gap-2.5 sm:grid-cols-2 sm:gap-3">
           <button
             v-for="(suggestion, index) in suggestions"
             :key="index"
-            class="group flex items-start gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3.5 text-left transition-colors duration-200 hover:border-slate-300 hover:bg-slate-50/70 dark:border-slate-700/70 dark:bg-slate-900 dark:hover:border-slate-600 dark:hover:bg-slate-800/60"
+            class="group flex items-start gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3 text-left transition-colors duration-200 hover:border-slate-300 hover:bg-slate-50/70 sm:py-3.5 dark:border-slate-700/70 dark:bg-slate-900 dark:hover:border-slate-600 dark:hover:bg-slate-800/60"
             @click="$emit('useSuggestion', suggestion)"
           >
             <n-icon class="mt-0.5 shrink-0 text-slate-400 transition-colors group-hover:text-blue-600 dark:group-hover:text-blue-400" size="18">

@@ -265,7 +265,7 @@ export default {
     fileParsed: 'Analyse terminée',
     fileIndexed: 'Indexé',
     fileProcessing: 'Traitement en cours',
-    fileReady: '✅ Prêt',
+    fileReady: '✓ Prêt',
     fileTimeout: 'Délai de traitement dépassé, vérifiez l\'état plus tard dans la base de connaissances',
     fileFromChat: 'Envoyé depuis le chat',
     fileUploadFailed: 'Échec du téléchargement',

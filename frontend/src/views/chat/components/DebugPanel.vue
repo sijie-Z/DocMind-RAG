@@ -1,7 +1,7 @@
 <template>
   <div v-if="debugData" class="border-t border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/50">
     <div class="px-4 py-2 flex items-center justify-between text-xs text-gray-500 border-b border-gray-200 dark:border-gray-700">
-      <span class="font-medium">🔍 检索调试面板</span>
+      <span class="font-medium">检索调试面板</span>
       <div class="flex items-center gap-2">
         <span class="text-gray-400">{{ debugData.elapsed_ms ? `${debugData.elapsed_ms}ms` : '' }}</span>
         <span v-if="debugData.cache_hit" class="px-1.5 py-0.5 rounded bg-yellow-100 dark:bg-yellow-900/30 text-yellow-600 dark:text-yellow-400">
@@ -17,7 +17,7 @@
     <div v-if="expanded" class="p-3 space-y-3 text-xs font-mono max-h-96 overflow-y-auto">
       <!-- Cache hit -->
       <div v-if="debugData.cache_hit" class="p-2 rounded bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800/40">
-        ⚡ 缓存命中（{{ debugData.cache_type }}），跳过检索
+        缓存命中（{{ debugData.cache_type }}），跳过检索
       </div>
 
       <!-- 顶层附加项：final_context 由 chat_service 挂顶层（chat_service.py:305-313）、

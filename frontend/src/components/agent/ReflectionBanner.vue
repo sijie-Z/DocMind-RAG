@@ -24,7 +24,7 @@ const icon = computed(() => {
     case 'escalate': return '!'
     // 反思降级两态（events.py 六值域；此前无分支 → '❓' 且无 CSS 类，
     // 横幅退化为无底色裸文本）
-    case 'unavailable': return '⏸️'
+    case 'unavailable': return '–'
     case 'unparsed': return '?'
     default: return '?'
   }
