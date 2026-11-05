@@ -28,7 +28,9 @@
     />
 
     <ChatSidebar
+      ref="sidebarRef"
       :sidebarOpen="sidebarOpen"
+      :inert="sidebarInert"
       :conversations="conversations"
       :isListLoading="isListLoading"
       :convLoadError="convLoadError"
@@ -37,6 +39,7 @@
       @refresh="fetchConversations"
       @selectConversation="handleSelectConversation"
       @deleteConversation="handleDeleteConversation"
+      @close="closeSidebar"
     />
 
     <main
@@ -189,11 +192,15 @@ onBeforeUnmount(() => {
   conversationViewActive = false
   conversationGeneration += 1
   resetDownloadState()
+  window.removeEventListener('keydown', handleSidebarKeydown, true)
+  window.removeEventListener('resize', checkScreenSize)
+  window.removeEventListener('resize', handleWindowResize)
 })
 
 const chatMessagesRef = ref()
 const msgLoadError = ref(false)
 const windowWidth = ref(window.innerWidth)
+const handleWindowResize = () => { windowWidth.value = window.innerWidth }
 
 // W2-T7：提示词「应用」内容上限（与 prompts/index.vue 表单 maxlength 对齐；
 // 改一处必须同步另一处，chatPromptApply.test.ts 钉住边界）。
@@ -217,6 +224,53 @@ const {
   fetchConversations, handleDeleteConversation, convLoadError
 } = useChatSessions(getConversationOwner)
 
+const sidebarRef = ref<InstanceType<typeof ChatSidebar> | null>(null)
+// 收起时无论桌面/移动端都把会话列表移出 tab 序（视觉上已不可见）。
+const sidebarInert = computed(() => !sidebarOpen.value)
+const chatSidebarToggleSelector = '[data-testid="chat-sidebar-toggle"]'
+const sidebarRoot = () => (sidebarRef.value as unknown as { $el?: HTMLElement } | null)?.$el
+
+// 移动端会话抽屉：打开时把焦点送进去，关闭时还给顶栏开关（键盘用户不丢位置）。
+const focusSidebarFirstItem = () => {
+  sidebarRoot()?.querySelector<HTMLElement>('button:not([disabled])')?.focus()
+}
+const focusSidebarToggle = () => {
+  document.querySelector<HTMLElement>(chatSidebarToggleSelector)?.focus()
+}
+const closeSidebar = () => {
+  if (sidebarOpen.value) sidebarOpen.value = false
+}
+watch(sidebarOpen, (open) => {
+  if (windowWidth.value >= 768) return
+  nextTick(open ? focusSidebarFirstItem : focusSidebarToggle)
+})
+// capture 阶段接管：抽屉内 Tab 循环、Escape 关闭；桌面端不干预。
+const handleSidebarKeydown = (event: KeyboardEvent) => {
+  if (!sidebarOpen.value || windowWidth.value >= 768) return
+  if (event.key === 'Escape') {
+    event.preventDefault()
+    closeSidebar()
+    nextTick(focusSidebarToggle)
+    return
+  }
+  if (event.key !== 'Tab') return
+  const root = sidebarRoot()
+  if (!root) return
+  const focusables = Array.from(root.querySelectorAll<HTMLElement>(
+    'button:not([disabled]), [href], input:not([disabled]), [tabindex]:not([tabindex="-1"])',
+  )).filter((el) => el.getClientRects().length > 0)
+  if (focusables.length === 0) return
+  const first = focusables[0]
+  const last = focusables[focusables.length - 1]
+  if (event.shiftKey && document.activeElement === first) {
+    event.preventDefault()
+    last.focus()
+  } else if (!event.shiftKey && document.activeElement === last) {
+    event.preventDefault()
+    first.focus()
+  }
+}
+
 const advanceConversationGeneration = () => {
   conversationGeneration += 1
   // 过期下载结果不得写回，但本视图 loading/error 必须随 generation 一同收敛。
@@ -230,6 +284,21 @@ const {
   sseStatus, useSSE, useStream, isLoading, isRetrieving,
   effectiveConnectionStatus, connectWebSocket, disconnectWebSocket
 } = useChatConnection(messages, baseScrollToBottom, fetchConversations, getConversationOwner)
+
+// 传输方式切换立即生效：切到 WS 立刻建连（修复旧实现切过去后仍无 socket，
+// 首条消息才暴露未连接）；切回 SSE 释放 WS 并把状态归位到「就绪」。
+// 挂载期的传输选择由 onMounted 末尾统一建连（此时 store/路由已对齐）；
+// 该开关只响应用户在页面就绪后的主动切换，避免拿到挂载前的陈旧会话 id。
+let transportSwitchReady = false
+watch(useSSE, (sse) => {
+  if (!transportSwitchReady) return
+  if (sse) {
+    disconnectWebSocket()
+    sseStatus.value = 'idle'
+  } else {
+    void connectWebSocket()
+  }
+})
 
 // E7：历史加载态与生成态分离 —— 切会话拉历史不再复用 isLoading（修前会误现
 // 「停止生成」按钮、生成 loading 与流式光标）。停止生成统一走 useChatSend 版本
@@ -396,10 +465,10 @@ const handleExportChat = () => {
 }
 
 const suggestions = computed(() => [
-  { title: t('chat.suggestions.quantum'), desc: t('chat.suggestions.quantumDesc') },
-  { title: t('chat.suggestions.code'), desc: t('chat.suggestions.codeDesc') },
-  { title: t('chat.suggestions.report'), desc: t('chat.suggestions.reportDesc') },
-  { title: t('chat.suggestions.travel'), desc: t('chat.suggestions.travelDesc') }
+  { title: t('chat.suggestions.summarize'), desc: t('chat.suggestions.summarizeDesc') },
+  { title: t('chat.suggestions.contract'), desc: t('chat.suggestions.contractDesc') },
+  { title: t('chat.suggestions.compare'), desc: t('chat.suggestions.compareDesc') },
+  { title: t('chat.suggestions.policy'), desc: t('chat.suggestions.policyDesc') }
 ])
 
 const useSuggestion = (s: { title: string; desc: string }) => { inputMessage.value = s.title + '，' + s.desc }
@@ -648,6 +717,7 @@ const getConnectionStatusText = (status?: string) => {
   switch (s) {
     case 'connected': return t('chat.status.connected')
     case 'connecting': return t('chat.status.connecting')
+    case 'idle': return t('chat.status.idle')
     case 'disconnected': return t('chat.status.disconnected')
     case 'error': return t('chat.status.error')
     default: return t('chat.status.unknown')
@@ -705,73 +775,79 @@ const handleOpenSource = async (source: KnowledgeSource) => {
 }
 
 onMounted(async () => {
-  const token = userStore.token || getToken()
-  if (!token) { router.push({ name: 'Login' }); return }
-  const conversationId = routeConversationId()
-  // 初始 query 仅是候选；每个 await 后都要重新核对当前路由与 generation。
-  if (conversationId) advanceConversationGeneration()
-  else resetConversationView()
-  const generation = getConversationOwner()
-  checkScreenSize()
-  window.addEventListener('resize', checkScreenSize)
-  const handleResize = () => { windowWidth.value = window.innerWidth }
-  window.addEventListener('resize', handleResize)
-  void loadOrgPrivacyPolicy()
-  await fetchConversations()
-  if (!ownsConversationOwner(generation, conversationId)) return
-  if (conversationId) await loadConversation(conversationId, generation)
-  if (!ownsConversationOwner(generation, conversationId)) return
+  try {
+    const token = userStore.token || getToken()
+    if (!token) { router.push({ name: 'Login' }); return }
+    const conversationId = routeConversationId()
+    // 初始 query 仅是候选；每个 await 后都要重新核对当前路由与 generation。
+    if (conversationId) advanceConversationGeneration()
+    else resetConversationView()
+    const generation = getConversationOwner()
+    checkScreenSize()
+    window.addEventListener('resize', checkScreenSize)
+    window.addEventListener('resize', handleWindowResize)
+    window.addEventListener('keydown', handleSidebarKeydown, true)
+    void loadOrgPrivacyPolicy()
+    await fetchConversations()
+    if (!ownsConversationOwner(generation, conversationId)) return
+    if (conversationId) await loadConversation(conversationId, generation)
+    if (!ownsConversationOwner(generation, conversationId)) return
 
-  // URL 消费型参数一次性捕获 + 统一清理：prompt（提示词填入输入框）与
-  // q/context（搜索「问问 AI」跨页上下文）用后即清；promptName 为旧链接
-  // 兼容清理（E14/P2 起不再有消费方）。分开 replace 会因导航异步互相覆盖
-  // （后一次 spread 仍读到旧 query），故合并为一次。
-  const promptContent = route.query.prompt as string
-  const searchQuestion = route.query.q as string
-  const searchContext = route.query.context as string
-  if (promptContent || searchQuestion) {
-    router.replace({
-      query: {
-        ...route.query,
-        prompt: undefined,
-        promptName: undefined,
-        q: undefined,
-        context: undefined,
-      },
-    })
-  }
-
-  if (promptContent) {
-    // W2-T7：上限与提示词表单 maxlength（prompts/index.vue）对齐 5000——
-    // 修前这里只接受 <=2000 且无 else 分支：2001~5000 字的提示词点「应用」后
-    // 静默丢弃（第三轮终检 §2.4）。超限改为明确报错，不再无声失败。
-    // E14/P2：B3 后模板不再随消息发送——不写 activeSystemPrompt 死键、
-    // 不声称「已应用」；改为把提示词填入输入框，由用户确认后自行发送。
-    if (typeof promptContent === 'string' && promptContent.length <= MAX_PROMPT_LENGTH) {
-      inputMessage.value = promptContent
-      message.info(t('chat.promptFilled'))
-    } else {
-      message.error(t('chat.promptTooLong', { max: MAX_PROMPT_LENGTH }))
+    // URL 消费型参数一次性捕获 + 统一清理：prompt（提示词填入输入框）与
+    // q/context（搜索「问问 AI」跨页上下文）用后即清；promptName 为旧链接
+    // 兼容清理（E14/P2 起不再有消费方）。分开 replace 会因导航异步互相覆盖
+    // （后一次 spread 仍读到旧 query），故合并为一次。
+    const promptContent = route.query.prompt as string
+    const searchQuestion = route.query.q as string
+    const searchContext = route.query.context as string
+    if (promptContent || searchQuestion) {
+      router.replace({
+        query: {
+          ...route.query,
+          prompt: undefined,
+          promptName: undefined,
+          q: undefined,
+          context: undefined,
+        },
+      })
     }
-  }
 
-  // E11-①：搜索页「问问 AI」跨页带参——q 预填输入框，context（所点结果正文
-  // 片段）以 Markdown 引用块随行，保留跨页用户意图；参数用后即从 URL 清除，
-  // 刷新不重复预填。选择预填而非自动发送：用户可编辑/确认，避免未经确认
-  // 触发模型调用与计费。
-  if (typeof searchQuestion === 'string' && searchQuestion.trim()) {
-    inputMessage.value = typeof searchContext === 'string' && searchContext.trim()
-      ? `${searchQuestion}\n\n> ${searchContext}`
-      : searchQuestion
-  }
+    if (promptContent) {
+      // W2-T7：上限与提示词表单 maxlength（prompts/index.vue）对齐 5000——
+      // 修前这里只接受 <=2000 且无 else 分支：2001~5000 字的提示词点「应用」后
+      // 静默丢弃（第三轮终检 §2.4）。超限改为明确报错，不再无声失败。
+      // E14/P2：B3 后模板不再随消息发送——不写 activeSystemPrompt 死键、
+      // 不声称「已应用」；改为把提示词填入输入框，由用户确认后自行发送。
+      if (typeof promptContent === 'string' && promptContent.length <= MAX_PROMPT_LENGTH) {
+        inputMessage.value = promptContent
+        message.info(t('chat.promptFilled'))
+      } else {
+        message.error(t('chat.promptTooLong', { max: MAX_PROMPT_LENGTH }))
+      }
+    }
 
-  // 确保连接 WebSocket（不依赖 watcher 的时序问题）
-  if (!userStore.userInfo?.id) {
-    try { await userStore.getUserInfo() } catch { /* 已登录但获取失败，仍尝试连接 */ }
-  }
-  if (!ownsConversationOwner(generation, conversationId)) return
-  if (userStore.token || getToken()) {
-    connectWebSocket()
+    // E11-①：搜索页「问问 AI」跨页带参——q 预填输入框，context（所点结果正文
+    // 片段）以 Markdown 引用块随行，保留跨页用户意图；参数用后即从 URL 清除，
+    // 刷新不重复预填。选择预填而非自动发送：用户可编辑/确认，避免未经确认
+    // 触发模型调用与计费。
+    if (typeof searchQuestion === 'string' && searchQuestion.trim()) {
+      inputMessage.value = typeof searchContext === 'string' && searchContext.trim()
+        ? `${searchQuestion}\n\n> ${searchContext}`
+        : searchQuestion
+    }
+
+    // 确保连接 WebSocket（不依赖 watcher 的时序问题）
+    if (!userStore.userInfo?.id) {
+      try { await userStore.getUserInfo() } catch { /* 已登录但获取失败，仍尝试连接 */ }
+    }
+    if (!ownsConversationOwner(generation, conversationId)) return
+    if (userStore.token || getToken()) {
+      connectWebSocket()
+    }
+  } finally {
+    // 初次加载（含会话历史）落地后才响应用户的传输切换，避免用挂载前的
+    // 陈旧会话 id 建连；加载被并发导航打断时同样放行后续切换。
+    transportSwitchReady = true
   }
 })
 </script>

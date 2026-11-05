@@ -13,7 +13,7 @@
           <span aria-hidden="true">←</span> {{ t('agent.backToChat') }}
         </button>
         <h1 class="header-title">{{ t('menu.agent') }}</h1>
-        <span class="header-badge">PER 架构</span>
+        <span class="header-badge">{{ t('agent.headerBadge') }}</span>
       </div>
       <div class="header-center">
         <SessionSelector
@@ -100,7 +100,7 @@
           />
         </n-popover>
         <button class="header-btn" @click="showConfig = !showConfig" :class="{ active: showConfig }">
-          ⚙ 配置
+          ⚙ {{ t('agent.config') }}
         </button>
         <button
           class="header-btn"
@@ -110,8 +110,8 @@
         >
           <span aria-hidden="true">&gt;_</span> {{ t('agent.terminal.open') }}
         </button>
-        <button class="header-btn" @click="handleNewSession">+ 新建</button>
-        <button class="header-btn" @click="handleClearMessages">清空</button>
+        <button class="header-btn" @click="handleNewSession">+ {{ t('agent.newSession') }}</button>
+        <button class="header-btn" @click="handleClearMessages">{{ t('agent.clearMessages') }}</button>
       </div>
     </div>
 
@@ -120,17 +120,17 @@
       <!-- Loading state -->
       <div v-if="initLoading" class="loading-overlay">
         <n-spin size="large" />
-        <p class="loading-text">加载 Agent 数据...</p>
+        <p class="loading-text">{{ t('agent.loadingInit') }}</p>
       </div>
       <!-- Error state -->
       <div v-else-if="initError" class="error-overlay">
         <p class="error-icon">⚠️</p>
-        <p class="error-text">加载失败，请检查后端服务是否运行</p>
-        <n-button type="primary" size="small" @click="reloadInit">重试</n-button>
+        <p class="error-text">{{ t('agent.loadFailed') }}</p>
+        <n-button type="primary" size="small" @click="reloadInit">{{ t('common.retry') }}</n-button>
       </div>
       <template v-else>
       <!-- Left: Plan Tree -->
-      <div class="left-panel" :class="{ collapsed: !showPlan }">
+      <div class="left-panel" :class="{ collapsed: !showPlan, empty: currentPlanSteps.length === 0 }">
         <div class="panel-toggle" @click="showPlan = !showPlan">
           {{ showPlan ? '◀' : '▶' }}
         </div>
@@ -148,8 +148,8 @@
       <div class="center-panel" ref="centerPanel">
         <!-- Empty state -->
         <div v-if="agentStore.messages.length === 0" class="empty-state">
-          <h2>DocMind 智能助手</h2>
-          <p class="empty-subtitle">Planning → Execution → Reflection</p>
+          <h2>{{ t('agent.emptyTitle') }}</h2>
+          <p class="empty-subtitle">{{ t('agent.emptySubtitle') }}</p>
           <div class="suggestion-grid">
             <button
               v-for="s in suggestions"
@@ -161,10 +161,10 @@
             </button>
           </div>
           <div class="feature-list">
-            <div class="feature-item">📋 自动规划：复杂任务自动拆分</div>
-            <div class="feature-item">🔧 33 个内置工具：搜索、分析、代码、翻译</div>
-            <div class="feature-item">🧠 记忆系统：记住你的偏好和历史</div>
-            <div class="feature-item">🔍 自我反思：执行后自动评估纠正</div>
+            <div class="feature-item">📋 {{ t('agent.emptyFeaturePlan') }}</div>
+            <div class="feature-item">🔧 {{ toolsFeatureText }}</div>
+            <div class="feature-item">🧠 {{ t('agent.emptyFeatureMemory') }}</div>
+            <div class="feature-item">🔍 {{ t('agent.emptyFeatureReview') }}</div>
           </div>
         </div>
 
@@ -478,7 +478,7 @@
 
     <!-- Input -->
     <AgentInput
-      :placeholder="'输入复杂任务，Agent 自动规划执行...'"
+      :placeholder="t('agent.inputPlaceholder')"
       :disabled="planApprovalPending"
       :loading="agentStore.isLoading"
       :stopping="stopping"
@@ -621,9 +621,11 @@ const lineageBadgeTitle = computed(() => {
   return parts.join(' · ')
 })
 
-const showConfig = ref(false)
+// 宽屏默认展开右侧配置（≥1280 时中央区仍有 ≥740px）；窄屏与测试环境保持收起。
+const showConfig = ref(typeof window !== 'undefined' && window.innerWidth >= 1280)
 const showTerminal = ref(false)
-const showPlan = ref(true)
+// 空计划时不占左栏宽度；计划到来时自动展开（见下方 watch）。
+const showPlan = ref(false)
 const centerPanel = ref<HTMLElement>()
 const initLoading = ref(true)
 const initError = ref(false)
@@ -640,18 +642,32 @@ const showTasks = ref(false)
 const recentTasks = ref<AgentTaskListItem[]>([])
 const tasksLoading = ref(false)
 
-const suggestions = [
-  '知识库中有哪些文档？请帮我总结关键主题',
-  '搜索公司相关的所有政策文档，提取合规要求',
-  '分析最近上传的文档，找出共同点和差异',
-  '帮我翻译这段中文到英文，并检测语言',
-]
+const suggestions = computed(() => [
+  t('agent.emptySuggestion1'),
+  t('agent.emptySuggestion2'),
+  t('agent.emptySuggestion3'),
+  t('agent.emptySuggestion4'),
+])
+
+// 工具数以初始化信封（store）为准；未加载/为 0 时不宣称具体数量。
+const toolsFeatureText = computed(() => (
+  agentStore.toolCount > 0
+    ? t('agent.emptyFeatureToolsCount', { count: agentStore.toolCount })
+    : t('agent.emptyFeatureTools')
+))
 
 const currentPlanSteps = computed<PlanStep[]>(() => {
   // Get plan steps from the last assistant message
   const last = [...agentStore.messages].reverse().find((m) => m.role === 'assistant')
   return last?.planSteps || agentStore.planSteps
 })
+
+watch(
+  () => currentPlanSteps.value.length,
+  (length, previous) => {
+    if (length > 0 && previous === 0) showPlan.value = true
+  },
+)
 
 function getLastThinkingType(msg: AgentChatMessage): ThinkingType {
   const thinkEvents = msg.events.filter((e) => e.type === 'thinking')
@@ -2523,6 +2539,10 @@ async function loadInit() {
     border-right: none;
     border-bottom: 1px solid var(--border-color, #e5e7eb);
     transition: max-height 0.3s ease, padding 0.3s ease;
+  }
+  /* 空计划且未手动展开：整块隐藏（移动端没有可见的展开按钮，空面板没有信息量）。 */
+  .left-panel.empty.collapsed {
+    display: none;
   }
   .dark .left-panel {
     border-bottom-color: var(--border-color-dark, #1e293b);

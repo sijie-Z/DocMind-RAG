@@ -37,10 +37,9 @@ class WebSocketService {
   private connectionSeq = 0
 
   private getWsBaseUrl(): string {
-    if (import.meta.env.DEV) {
-      // Route through Vite proxy (port 5173) so the proxy forwards to backend
-      return `ws://${window.location.hostname}:5173`
-    }
+    // 开发/生产同口径：跟随当前页面的 host（协议 + 主机 + 端口）。
+    // 开发态 Vite 的 '/ws' 代理（ws: true）负责转发到后端；旧实现把端口写死为
+    // 5173，切到 5174/5177 等开发端口（或多 worktree 并行）时 WS 永远连不上。
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
     return `${protocol}//${window.location.host}`
   }

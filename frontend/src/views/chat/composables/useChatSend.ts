@@ -125,6 +125,8 @@ export function useChatSend(
     scrollToBottom()
     isLoading.value = true
     isRetrieving.value = true
+    // SSE 是按请求建立的连接：发送即建连，终态后回到就绪（见 onMessage）。
+    sseStatus.value = 'connecting'
 
     const aiMsgId = 'sse-' + Date.now()
     let fullContent = ''
@@ -265,6 +267,8 @@ export function useChatSend(
       // 侧栏列表在流完成时刷新（chunk 路径不再触发，见 onChunk）
       fetchConversations()
       scrollToBottom()
+      // 请求结束即无连接；「已连接」只应出现在传输进行中。
+      sseStatus.value = 'idle'
     }
 
     const onError = (data: SSEMessage) => {
@@ -498,6 +502,7 @@ export function useChatSend(
     }
     isLoading.value = false
     isRetrieving.value = false
+    if (useSSE.value) sseStatus.value = 'idle'
     // abort 会让 sseService.post 正常返回；必须在这里恢复被隐藏的旧答案，
     // 否则停止生成后旧气泡永久空白。
     cleanupActiveRegenerate()
