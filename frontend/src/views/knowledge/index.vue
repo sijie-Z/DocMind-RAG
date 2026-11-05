@@ -1,7 +1,7 @@
 <template>
   <div class="knowledge-page h-full min-h-0 flex flex-col bg-gradient-to-b from-slate-50/80 to-slate-100/60 dark:from-gray-950 dark:to-gray-900/80 transition-colors duration-300">
-    <div class="flex-1 overflow-y-auto p-5 lg:p-8">
-      <div class="max-w-7xl mx-auto space-y-6">
+    <div class="min-w-0 flex-1 overflow-y-auto p-5 lg:p-8">
+      <div class="mx-auto min-w-0 max-w-7xl space-y-6">
 
         <!-- 页面标题与描述 -->
         <div class="flex flex-col md:flex-row md:items-end md:justify-between gap-4">
@@ -25,18 +25,20 @@
               <template #icon><n-icon><TrashOutline /></n-icon></template>
               {{ t('common.batchDelete') || '批量删除' }} ({{ selectedIds.length }})
             </n-button>
-            <n-input
-              v-model:value="searchText"
-              :placeholder="t('knowledge.searchPlaceholder')"
-              clearable
-              round
-              class="w-56 md:w-72"
-              size="medium"
-            >
-              <template #prefix>
-                <n-icon class="text-slate-400"><SearchOutline /></n-icon>
-              </template>
-            </n-input>
+            <div class="w-56 shrink-0 md:w-72">
+              <n-input
+                v-model:value="searchText"
+                :placeholder="t('knowledge.searchPlaceholder')"
+                clearable
+                round
+                class="w-full"
+                size="medium"
+              >
+                <template #prefix>
+                  <n-icon class="text-slate-400"><SearchOutline /></n-icon>
+                </template>
+              </n-input>
+            </div>
             <n-button
               type="primary"
               round
@@ -47,29 +49,35 @@
               <template #icon><n-icon><CloudUploadOutline /></n-icon></template>
               {{ t('knowledge.upload') }}
             </n-button>
-            <n-button secondary circle size="medium" @click="loadKnowledgeBases">
+            <n-button secondary circle size="medium" :aria-label="t('knowledge.actionRefresh')" @click="loadKnowledgeBases">
               <template #icon><n-icon><RefreshOutline /></n-icon></template>
             </n-button>
             <n-button secondary size="medium" @click="$router.push('/knowledge/graph')">
               <template #icon><n-icon><GitNetworkOutline /></n-icon></template>
               {{ t('router.knowledgeGraph') }}
             </n-button>
-            <n-button secondary round size="medium" @click="handleRebuildLatestFailedDoc">
-              最近失败文档重建
+            <n-button
+              v-if="stats.failed > 0"
+              secondary
+              round
+              size="medium"
+              @click="handleRebuildLatestFailedDoc"
+            >
+              {{ t('knowledge.rebuildLatestFailed') }}
             </n-button>
 
           </div>
         </div>
 
         <!-- 统计卡片条 -->
-        <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <div v-if="loading || loadError || pageTotal > 0" class="grid grid-cols-2 md:grid-cols-4 gap-3">
           <div class="bg-white/90 dark:bg-gray-800/90 backdrop-blur rounded-2xl border border-slate-200/60 dark:border-gray-700/60 p-4 shadow-sm">
             <div class="flex items-center gap-3">
               <div class="w-10 h-10 rounded-xl bg-blue-100 dark:bg-blue-900/40 flex items-center justify-center">
                 <n-icon size="20" class="text-blue-600 dark:text-blue-400"><DocumentTextOutline /></n-icon>
               </div>
               <div>
-                <p class="text-2xl font-bold text-slate-800 dark:text-slate-100">{{ loadError ? '—' : stats.total }}</p>
+                <p class="text-2xl font-bold text-slate-800 dark:text-slate-100">{{ loadError ? '—' : pageTotal }}</p>
                 <p class="text-xs text-slate-500 dark:text-slate-400">{{ t('knowledge.stats.total') || '文档总数' }}</p>
               </div>
             </div>
@@ -81,7 +89,7 @@
               </div>
               <div>
                 <p class="text-2xl font-bold text-slate-800 dark:text-slate-100">{{ loadError ? '—' : stats.completed }}</p>
-                <p class="text-xs text-slate-500 dark:text-slate-400">{{ t('knowledge.stats.completed') || '已索引' }}</p>
+                <p class="text-xs text-slate-500 dark:text-slate-400">{{ t('knowledge.stats.completed') }}<span class="opacity-70"> · {{ t('knowledge.pageScope') }}</span></p>
               </div>
             </div>
           </div>
@@ -92,7 +100,7 @@
               </div>
               <div>
                 <p class="text-2xl font-bold text-slate-800 dark:text-slate-100">{{ loadError ? '—' : stats.processing }}</p>
-                <p class="text-xs text-slate-500 dark:text-slate-400">{{ t('knowledge.stats.processing') || '处理中' }}</p>
+                <p class="text-xs text-slate-500 dark:text-slate-400">{{ t('knowledge.stats.processing') }}<span class="opacity-70"> · {{ t('knowledge.pageScope') }}</span></p>
               </div>
             </div>
           </div>
@@ -103,16 +111,16 @@
               </div>
               <div>
                 <p class="text-2xl font-bold text-slate-800 dark:text-slate-100">{{ loadError ? '—' : stats.failed }}</p>
-                <p class="text-xs text-slate-500 dark:text-slate-400">{{ t('knowledge.stats.failed') || '失败' }}</p>
+                <p class="text-xs text-slate-500 dark:text-slate-400">{{ t('knowledge.stats.failed') }}<span class="opacity-70"> · {{ t('knowledge.pageScope') }}</span></p>
               </div>
             </div>
           </div>
         </div>
 
         <!-- RAG 指标卡 -->
-        <div class="flex items-center justify-between mt-3" v-if="ragMetrics">
+        <div class="flex items-center justify-between mt-3" v-if="ragMetrics && pageTotal > 0">
           <div class="text-xs text-slate-500 dark:text-slate-400 space-y-1">
-            <div>RAG 指标窗口：{{ metricWindowLabel }}</div>
+            <div>{{ t('knowledge.ragWindowLabel', { window: metricWindowLabel }) }}</div>
             <div>{{ metricsUpdatedLabel }}</div>
           </div>
           <n-select
@@ -120,24 +128,23 @@
             :options="metricWindowOptions"
             size="small"
             class="w-40"
-            @update:value="loadKnowledgeBases"
           />
         </div>
-        <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mt-2" v-if="ragMetrics">
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mt-2" v-if="ragMetrics && pageTotal > 0">
           <div class="bg-white/90 dark:bg-gray-800/90 backdrop-blur rounded-2xl border border-slate-200/60 dark:border-gray-700/60 p-4 shadow-sm">
-            <p class="text-xs text-slate-500 dark:text-slate-400">检索命中率</p>
+            <p class="text-xs text-slate-500 dark:text-slate-400">{{ t('knowledge.ragHitRate') }}</p>
             <p class="text-xl font-bold text-slate-800 dark:text-slate-100">{{ ragMetricDisplay.hitRate }}</p>
           </div>
           <div class="bg-white/90 dark:bg-gray-800/90 backdrop-blur rounded-2xl border border-slate-200/60 dark:border-gray-700/60 p-4 shadow-sm">
-            <p class="text-xs text-slate-500 dark:text-slate-400">有据回答率</p>
+            <p class="text-xs text-slate-500 dark:text-slate-400">{{ t('knowledge.ragGroundedness') }}</p>
             <p class="text-xl font-bold text-slate-800 dark:text-slate-100">{{ ragMetricDisplay.groundedness }}</p>
           </div>
           <div class="bg-white/90 dark:bg-gray-800/90 backdrop-blur rounded-2xl border border-slate-200/60 dark:border-gray-700/60 p-4 shadow-sm">
-            <p class="text-xs text-slate-500 dark:text-slate-400">平均延迟</p>
+            <p class="text-xs text-slate-500 dark:text-slate-400">{{ t('knowledge.ragLatency') }}</p>
             <p class="text-xl font-bold text-slate-800 dark:text-slate-100">{{ ragMetricDisplay.latency }}</p>
           </div>
           <div class="bg-white/90 dark:bg-gray-800/90 backdrop-blur rounded-2xl border border-slate-200/60 dark:border-gray-700/60 p-4 shadow-sm">
-            <p class="text-xs text-slate-500 dark:text-slate-400">缓存命中 / 重试</p>
+            <p class="text-xs text-slate-500 dark:text-slate-400">{{ t('knowledge.ragCacheRetry') }}</p>
             <p class="text-xl font-bold text-slate-800 dark:text-slate-100">{{ ragMetricDisplay.cacheRetry }}</p>
           </div>
         </div>
@@ -162,8 +169,8 @@
             <!-- 切换视图模式按钮 (可选) -->
             <div class="flex justify-end mb-4 px-2">
                <n-radio-group v-model:value="viewMode" size="small">
-                  <n-radio-button value="grid"><n-icon><GridOutline /></n-icon></n-radio-button>
-                  <n-radio-button value="list"><n-icon><ListOutline /></n-icon></n-radio-button>
+                  <n-radio-button value="grid" :aria-label="t('knowledge.viewModeGrid')"><n-icon><GridOutline /></n-icon></n-radio-button>
+                  <n-radio-button value="list" :aria-label="t('knowledge.viewModeList')"><n-icon><ListOutline /></n-icon></n-radio-button>
                </n-radio-group>
             </div>
 
@@ -197,7 +204,7 @@
                           <h3 class="font-medium text-gray-900 dark:text-gray-100 truncate text-sm leading-tight mb-1" :title="item.title">
                             {{ item.title }}
                           </h3>
-                          <p class="text-xs text-gray-400 truncate">{{ item.file_name }}</p>
+                          <p class="text-xs text-gray-500 dark:text-gray-400 truncate">{{ item.file_name }}</p>
                         </div>
                       </div>
 
@@ -231,41 +238,42 @@
                               <n-icon v-else-if="item.status === 'failed'"><AlertCircleOutline /></n-icon>
                               <n-icon v-else><TimeOutline /></n-icon>
                             </template>
+                            <span class="sr-only">{{ getStatusLabel(item) }}</span>
                           </n-tag>
-                          <span class="text-[10px] text-gray-400">{{ formatFileSize(item.file_size) }}</span>
+                          <span class="text-xs text-gray-500 dark:text-gray-400">{{ formatFileSize(item.file_size) }}</span>
                         </div>
                         
                         <div class="flex gap-1 kb-card-actions">
                            <n-tooltip trigger="hover">
                              <template #trigger>
-                               <n-button size="tiny" quaternary circle @click.stop="viewKnowledge(item)">
+                               <n-button size="tiny" quaternary circle :aria-label="t('knowledge.actionView')" @click.stop="viewKnowledge(item)">
                                  <template #icon><n-icon><EyeOutline /></n-icon></template>
                                </n-button>
                              </template>
-                             查看
+                             {{ t('knowledge.actionView') }}
                            </n-tooltip>
                            <n-tooltip v-if="item.status === 'failed'" trigger="hover">
                              <template #trigger>
-                               <n-button size="tiny" quaternary circle type="primary" @click.stop="handleRebuild(item)">
+                               <n-button size="tiny" quaternary circle type="primary" :aria-label="t('knowledge.actionRebuild')" @click.stop="handleRebuild(item)">
                                  <template #icon><n-icon><RefreshOutline /></n-icon></template>
                                </n-button>
                              </template>
-                             重新解析
+                             {{ t('knowledge.actionRebuild') }}
                            </n-tooltip>
-                           <n-button size="tiny" quaternary circle type="error" @click.stop="deleteKnowledge(item)">
+                           <n-button size="tiny" quaternary circle type="error" :aria-label="t('knowledge.actionDelete')" @click.stop="deleteKnowledge(item)">
                               <template #icon><n-icon><TrashOutline /></n-icon></template>
                            </n-button>
                         </div>
                         </div>
                         <div 
                           v-if="item.status === 'failed' && item.parse_error" 
-                          class="mt-2 text-[11px] leading-4 text-red-500 bg-red-50/70 dark:bg-red-900/20 border border-red-100 dark:border-red-800/50 rounded-md px-2 py-1.5 break-all line-clamp-2 cursor-pointer hover:bg-red-100 dark:hover:bg-red-900/30 transition-colors shadow-sm" 
+                          class="mt-2 text-xs leading-4 text-red-600 dark:text-red-400 bg-red-50/70 dark:bg-red-900/20 border border-red-100 dark:border-red-800/50 rounded-md px-2 py-1.5 break-all line-clamp-2 cursor-pointer hover:bg-red-100 dark:hover:bg-red-900/30 transition-colors shadow-sm" 
                           :title="item.parse_error"
                           @click.stop="showErrorDetail(item.parse_error)"
                         >
                           <div class="flex items-center gap-1 mb-0.5">
                             <n-icon size="12"><AlertCircleOutline /></n-icon>
-                            <span class="font-bold">解析失败 (点击查看详情)</span>
+                            <span class="font-bold">{{ t('knowledge.parseFailedDetail') }}</span>
                           </div>
                           {{ item.parse_error }}
                         </div>
@@ -277,17 +285,17 @@
             </div>
             
             <!-- 列表模式 -->
-            <div v-else class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 overflow-x-auto">
+            <div v-else class="w-full min-w-0 overflow-x-auto rounded-xl border border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-800">
                <table class="w-full text-left text-sm min-w-[600px]">
                   <thead class="bg-gray-50 dark:bg-gray-900/50 text-gray-500 border-b border-gray-200 dark:border-gray-700">
                     <tr>
                       <th class="p-4 w-12"><n-checkbox :checked="isAllSelected" @update:checked="toggleSelectAll" /></th>
-                      <th class="p-4 font-medium">文件名称</th>
-                      <th class="p-4 font-medium hidden md:table-cell">标签</th>
-                      <th class="p-4 font-medium">大小</th>
-                      <th class="p-4 font-medium hidden sm:table-cell">上传时间</th>
-                      <th class="p-4 font-medium">状态</th>
-                      <th class="p-4 font-medium text-right">操作</th>
+                      <th class="p-4 font-medium">{{ t('knowledge.table.name') }}</th>
+                      <th class="p-4 font-medium hidden md:table-cell">{{ t('knowledge.tableTags') }}</th>
+                      <th class="p-4 font-medium">{{ t('knowledge.table.size') }}</th>
+                      <th class="p-4 font-medium hidden sm:table-cell">{{ t('knowledge.table.uploadTime') }}</th>
+                      <th class="p-4 font-medium">{{ t('knowledge.table.status') }}</th>
+                      <th class="p-4 font-medium text-right">{{ t('knowledge.table.actions') }}</th>
                     </tr>
                   </thead>
                   <tbody class="divide-y divide-gray-100 dark:divide-gray-700/50">
@@ -302,7 +310,7 @@
                             </n-icon>
                             <div>
                               <div class="font-medium text-gray-900 dark:text-gray-100">{{ item.title }}</div>
-                              <div class="text-xs text-gray-400">{{ item.file_name }}</div>
+                              <div class="text-xs text-gray-500 dark:text-gray-400">{{ item.file_name }}</div>
                             </div>
                          </div>
                        </td>
@@ -325,7 +333,7 @@
                             </n-tag>
                             <div 
                               v-if="item.status === 'failed' && item.parse_error" 
-                              class="text-[11px] text-red-500 max-w-[220px] truncate cursor-pointer hover:underline decoration-dotted" 
+                              class="text-xs text-red-600 dark:text-red-400 max-w-[220px] truncate cursor-pointer hover:underline decoration-dotted" 
                               :title="item.parse_error"
                               @click.stop="showErrorDetail(item.parse_error)"
                             >
@@ -335,9 +343,9 @@
                        </td>
                        <td class="p-4 text-right">
                           <div class="flex justify-end gap-2 kb-row-actions">
-                             <n-button size="tiny" secondary circle @click="viewKnowledge(item)"><template #icon><n-icon><EyeOutline /></n-icon></template></n-button>
-                             <n-button v-if="item.status === 'failed'" size="tiny" secondary circle type="primary" @click="handleRebuild(item)"><template #icon><n-icon><RefreshOutline /></n-icon></template></n-button>
-                             <n-button size="tiny" secondary circle type="error" @click="deleteKnowledge(item)"><template #icon><n-icon><TrashOutline /></n-icon></template></n-button>
+                             <n-button size="tiny" secondary circle :aria-label="t('knowledge.actionView')" @click="viewKnowledge(item)"><template #icon><n-icon><EyeOutline /></n-icon></template></n-button>
+                             <n-button v-if="item.status === 'failed'" size="tiny" secondary circle type="primary" :aria-label="t('knowledge.actionRebuild')" @click="handleRebuild(item)"><template #icon><n-icon><RefreshOutline /></n-icon></template></n-button>
+                             <n-button size="tiny" secondary circle type="error" :aria-label="t('knowledge.actionDelete')" @click="deleteKnowledge(item)"><template #icon><n-icon><TrashOutline /></n-icon></template></n-button>
                           </div>
                        </td>
                     </tr>
@@ -345,14 +353,15 @@
                </table>
             </div>
 
-            <div class="flex justify-end mt-5">
+            <div class="mt-5 flex max-w-full justify-end overflow-x-auto">
               <n-pagination
                 v-model:page="pagination.page"
                 v-model:page-size="pagination.pageSize"
                 :item-count="pagination.itemCount"
                 :page-sizes="pagination.pageSizes"
-                show-size-picker
-                show-quick-jumper
+                :simple="isCompactPager"
+                :show-size-picker="!isCompactPager"
+                :show-quick-jumper="!isCompactPager"
                 @update:page="loadKnowledgeBases"
                 @update:page-size="handlePageSizeChange"
               />
@@ -415,6 +424,7 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
+import { useMediaQuery } from '@vueuse/core'
 import { NIcon, NButton, NTag } from 'naive-ui'
 import { useDialog } from 'naive-ui'
 import { useDedupedMessage } from '@/utils/message'
@@ -532,22 +542,25 @@ const clearFinishedTasks = () => {
 }
 const ragMetrics = ref<RagMetrics | null>(null)
 const metricWindow = ref<number>(300)
-const metricWindowOptions = [
-  { label: '最近5分钟', value: 300 },
-  { label: '最近1小时', value: 3600 },
-  { label: '累计', value: 0 }
-]
+const isCompactPager = useMediaQuery('(max-width: 767.98px)')
+const metricWindowOptions = computed(() => [
+  { label: t('knowledge.ragLastMinutes', { n: 5 }), value: 300 },
+  { label: t('knowledge.ragLastHours', { n: 1 }), value: 3600 },
+  { label: t('knowledge.ragCumulative'), value: 0 }
+])
 const metricsUpdatedAt = ref<string>('')
 
 const metricWindowLabel = computed(() => {
-  if (metricWindow.value === 0) return '累计'
-  if (metricWindow.value >= 3600) return `最近 ${Math.floor(metricWindow.value / 3600)} 小时`
-  return `最近 ${Math.floor(metricWindow.value / 60)} 分钟`
+  if (metricWindow.value === 0) return t('knowledge.ragCumulative')
+  if (metricWindow.value >= 3600) {
+    return t('knowledge.ragLastHours', { n: Math.floor(metricWindow.value / 3600) })
+  }
+  return t('knowledge.ragLastMinutes', { n: Math.floor(metricWindow.value / 60) })
 })
 
-const metricsUpdatedLabel = computed(() => {
-  return metricsUpdatedAt.value ? `最近刷新：${metricsUpdatedAt.value}` : '最近刷新：--'
-})
+const metricsUpdatedLabel = computed(() =>
+  t('knowledge.ragUpdated', { time: metricsUpdatedAt.value || '--' })
+)
 
 const ragMetricDisplay = computed(() => {
   const m = ragMetrics.value
@@ -619,6 +632,7 @@ const isSearchEmpty = computed(
 )
 
 const stats = computed(() => computeDocStats(knowledgeBases.value))
+const pageTotal = computed(() => pagination.value.itemCount)
 
 const isAllSelected = computed(() => {
   return filteredKnowledgeBases.value.length > 0 && selectedIds.value.length === filteredKnowledgeBases.value.length
