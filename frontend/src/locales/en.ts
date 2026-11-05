@@ -375,7 +375,6 @@ export default {
     rebuildSuccess: 'Rebuild index job submitted',
     rebuildFailed: 'Failed to rebuild index',
     pageScope: 'this page',
-    pageTotal: 'Documents',
     rebuildLatestFailed: 'Rebuild latest failed document',
     actionView: 'View',
     actionRebuild: 'Reparse',

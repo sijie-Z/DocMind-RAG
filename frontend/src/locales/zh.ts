@@ -382,7 +382,6 @@ export default {
     rebuildSuccess: '重建索引任务已提交',
     rebuildFailed: '重建索引失败',
     pageScope: '本页',
-    pageTotal: '文档总数',
     rebuildLatestFailed: '最近失败文档重建',
     actionView: '查看',
     actionRebuild: '重新解析',

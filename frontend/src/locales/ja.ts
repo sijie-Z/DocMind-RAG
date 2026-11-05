@@ -336,7 +336,6 @@ export default {
     subtitle: '企業ナレッジドキュメントをアップロード・管理します',
     searchPlaceholder: 'ナレッジベースを検索...',
     pageScope: 'このページ',
-    pageTotal: 'ドキュメント数',
     rebuildLatestFailed: '直近の失敗ドキュメントを再構築',
     actionView: '表示',
     actionRebuild: '再解析',

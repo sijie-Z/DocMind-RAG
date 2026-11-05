@@ -337,7 +337,6 @@ export default {
     subtitle: 'Téléchargez et gérez vos documents de connaissances d\'entreprise',
     searchPlaceholder: 'Rechercher dans la base...',
     pageScope: 'cette page',
-    pageTotal: 'Documents',
     rebuildLatestFailed: 'Reconstruire le dernier document en échec',
     actionView: 'Voir',
     actionRebuild: 'Réanalyser',

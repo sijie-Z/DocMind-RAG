@@ -89,7 +89,7 @@
               </div>
               <div>
                 <p class="text-2xl font-bold text-slate-800 dark:text-slate-100">{{ loadError ? '—' : stats.completed }}</p>
-                <p class="text-xs text-slate-500 dark:text-slate-400">{{ t('knowledge.stats.completed') }}<span class="opacity-70"> · {{ t('knowledge.pageScope') }}</span></p>
+                <p class="text-xs text-slate-500 dark:text-slate-400">{{ t('knowledge.stats.completed') }}<span> · {{ t('knowledge.pageScope') }}</span></p>
               </div>
             </div>
           </div>
@@ -100,7 +100,7 @@
               </div>
               <div>
                 <p class="text-2xl font-bold text-slate-800 dark:text-slate-100">{{ loadError ? '—' : stats.processing }}</p>
-                <p class="text-xs text-slate-500 dark:text-slate-400">{{ t('knowledge.stats.processing') }}<span class="opacity-70"> · {{ t('knowledge.pageScope') }}</span></p>
+                <p class="text-xs text-slate-500 dark:text-slate-400">{{ t('knowledge.stats.processing') }}<span> · {{ t('knowledge.pageScope') }}</span></p>
               </div>
             </div>
           </div>
@@ -111,7 +111,7 @@
               </div>
               <div>
                 <p class="text-2xl font-bold text-slate-800 dark:text-slate-100">{{ loadError ? '—' : stats.failed }}</p>
-                <p class="text-xs text-slate-500 dark:text-slate-400">{{ t('knowledge.stats.failed') }}<span class="opacity-70"> · {{ t('knowledge.pageScope') }}</span></p>
+                <p class="text-xs text-slate-500 dark:text-slate-400">{{ t('knowledge.stats.failed') }}<span> · {{ t('knowledge.pageScope') }}</span></p>
               </div>
             </div>
           </div>
