@@ -165,7 +165,7 @@ cp .env.docker.example .env.docker
 
 - Host app requires `SECRET_KEY`, `JWT_SECRET_KEY` (generate with `python -c "import secrets; print(secrets.token_hex(32))"`).
 - `.env.docker` requires self-generated values for `MYSQL_ROOT_PASSWORD`, `MYSQL_PASSWORD`, `MINIO_ACCESS_KEY`, `MINIO_SECRET_KEY`, `GRAFANA_PASSWORD` (no default passwords).
-- Backend startup requires `SECRET_KEY`, `JWT_SECRET_KEY`; chat requires `DEEPSEEK_API_KEY`. Embedding defaults to local Ollama (nomic-embed-text / 768 dims, reusing the chat key); configure `EMBEDDING_API_KEY` / `EMBEDDING_API_URL` for a cloud provider.
+- Backend startup requires `SECRET_KEY`, `JWT_SECRET_KEY`; chat requires `DEEPSEEK_API_KEY`. Embedding defaults to local Ollama (nomic-embed-text / 768 dims, reusing the chat key; **the current local deployment overrides this via `.env` to qwen3-embedding:0.6b / 1024 dims**); configure `EMBEDDING_API_KEY` / `EMBEDDING_API_URL` for a cloud provider.
 - Compose does whole-file interpolation before service selection: `GRAFANA_PASSWORD` is required even without selecting Grafana.
 
 ### 3. Start Infrastructure

@@ -145,7 +145,7 @@ docker-compose up -d
 - `CHUNK_SIZE`: 分块大小（默认5MB）
 
 ### AI配置
-- `VECTOR_DIMENSION`: 向量维度（默认768）
+- `VECTOR_DIMENSION`: 向量维度（默认 768，对应 nomic-embed-text；当前本地部署由 `.env` 覆盖为 1024，对应 qwen3-embedding:0.6b）
 - `TOP_K_RESULTS`: 搜索结果数量（默认10）
 
 ## 📚 API文档

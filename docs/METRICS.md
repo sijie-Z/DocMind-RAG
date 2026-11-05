@@ -59,5 +59,5 @@
 
 - 文档引用写法：数字旁标注 `（见 docs/METRICS.md）`；同一文档同一指标只能出现一个数字，漂移由 `backend/scripts/check_doc_facts.py` 校验（多数字先告警，facts 七项不一致则红）。
 - 父目录 `AI_projects/CLAUDE.md` 不在本仓库内，其 `25+ tools` 表述无法在本仓库修订；本仓库对外一律以本表 `registered_tools=31` / `default_tools=10`（2026-10-25）为准。
-- `docs/USER_GUIDE*.md` 仍描述 develop 当前的 Eval v1（28 条）；Eval v1.5 数字随 PR #525 合并生效，本 issue 不改该两文件。
+- `docs/USER_GUIDE*.md` 已同步 Eval v1.5（80 条，PR #617）。
 - 本表不是 CI 实时结果；测试与评测的实时真源是 CI artifact / 报告。

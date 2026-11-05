@@ -83,7 +83,7 @@
 | S11 | 开源 merged PR | 14 个 merged，覆盖 11 个项目 | `curl -H "User-Agent: DocMind-career-research/1.0" "https://api.github.com/search/issues?q=is%3Apr+author%3Asijie-Z+is%3Amerged+-user%3Asijie-Z&per_page=100"` → `total_count=14`（保存于 `_scratch/career-gh/opensource_merged.json`） | 当前态 | 统计口径排除了本人仓库 |
 | S12 | 2 个有实质 review 的 OSS PR | pnpm #12284（12 reviews，zkochan 多轮 + approve）；storybook #35055（7 reviews，2× CHANGES_REQUESTED → APPROVED） | `GET /repos/pnpm/pnpm/pulls/12284/reviews`、`GET /repos/storybookjs/storybook/pulls/35055/reviews`（保存于 `_scratch/career-gh/reviews_*.json`） | 当前态 | 不写 redis #15323、click #3556、element-plus |
 | S13 | MiqroForge 241 PR / 188 merged | 241 / 188（2026.06–09） | `_scratch/audit/REDTEAM_FINDINGS.md` §2；本次核查 `GET /repos/sijie-Z/MiqroForge-Desktop` → 404，`search/repositories?q=MiqroForge+user:sijie-Z` → 0 条 | 待确认（未核实） | 性质与公开范围待本人确认；未确认前不投 |
-| S14 | 工具面现状（内部口径，不上简历） | 31 个注册工具 / 默认 10 个（2026-11-05，`docs/facts.json`）；本文件撰写基线 2b0574ab 时点为 39 / 36，schema 19,001 chars ≈ 5,026 tok/步 | `docs/facts.json`；`backend/scripts/check_doc_facts.py --print-derived`；历史测量见 `_scratch/audit/STRATEGY.md` §4.2 / `REDTEAM_FINDINGS.md` B3 | 内部参考 | 只在面试 Q9 讲技术债，不作简历亮点 |
+| S14 | 工具面现状（内部口径，不上简历） | 31 个注册工具 / 默认 10 个（2026-11-05，`docs/facts.json`）；PR #534 合入前（2026-10-24 审计）为 39 / 36，schema 19,001 chars ≈ 5,026 tok/步；合入后默认 schema 实测 1,464 tokens | `docs/facts.json`；`backend/scripts/check_doc_facts.py --print-derived`；历史测量见 `_scratch/audit/STRATEGY.md` §4.2 / `REDTEAM_FINDINGS.md` B3 | 内部参考 | 只在面试 Q9 讲技术债，不作简历亮点 |
 | S15 | 多租户 / 缓存现状（内部口径） | 23 个 RBAC 权限点；检索缓存键 = org + topk + mode + q（不含 user_id） | `backend/app/models/rbac.py:24-92`；`backend/app/rag/cache.py:330-338` | 内部参考 | 外部 ACL 缺失，见 #511 |
 
 ---
@@ -150,7 +150,7 @@ curl -sS -H "User-Agent: DocMind-career-research/1.0" \
 
 | 禁写表述 | 原因 / 当前真实状态 | 何时可写 |
 |---|---|---|
-| 120 条 eval / 4 组基线 / bootstrap / 87% / 0.89 | 当前只有 28 条、1 个 fake 基线、Wilson；#512 只承诺 80 条 + 2 组基线 + rerank live；120 条是 M2 条件项 | 数据与报告入库后，按实际数字重写 |
+| 120 条 eval / 4 组基线 / bootstrap / 87% / 0.89 | 当前为 Eval v1.5 80 条、dense/hybrid 双基线已入库；120 条是 M2 条件项，尚未开始 | 数据与报告入库后，按实际数字重写 |
 | fork 50 并发同键 → 1 | 修复前实测 5 并发建 5 个、10 并发建 10 个；#518 已合入契约 / 幂等，但没有 50 并发复测 | 复测并记录后才可写 |
 | ACP cancel < 2s | 无任何产物；#520 已合入 cancel 真取消，但延迟未测 | 有复测报告后 |
 | Locust / 火焰图 | 未使用；压测是 Python urllib 脚本；PR #501 closed 未合并 | 引入工具并产出报告后 |
@@ -160,7 +160,7 @@ curl -sS -H "User-Agent: DocMind-career-research/1.0" \
 | 2223 passed / 51 skipped | README 2026-10-15 冻结快照，早于本轮合并 | 用当前 CI / 复跑数字替换 |
 | "CI 全绿" / "8 项全部完成" | 代码合并 ≠ 能力可用；以具体 issue / PR 状态为准 | 每项有验收证据后 |
 | 精通 / 企业级 / 高并发 / 丰富 / 深度 | 无证据形容词 | 永不 |
-| "39 个工具"作为简历亮点 | 功能通胀；schema 19,001 chars；默认 36 个约 5,026 tok/步；#509 才做门控 | 工具收敛并实测 schema 后 |
+| "39 个工具"作为简历亮点 | 39/36 为 PR #534 合入前的历史口径；当前 31 注册 / 10 默认，默认 schema 实测 1,464 tokens（PR #534） | 工具收敛并实测 schema 后 |
 | redis #15323 / click #3556 / element-plus | 自关 / AI spam / 全关 | 永不 |
 
 ---
