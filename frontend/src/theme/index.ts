@@ -36,7 +36,7 @@ export const lightThemeOverrides: GlobalThemeOverrides = {
     borderHover: '1px solid #cbd5e1',
     borderFocus: '1px solid #64748b',
     boxShadowFocus: '0 0 0 3px rgba(100, 116, 139, 0.12)',
-    placeholderColor: 'rgba(148, 163, 184, 1)',
+    placeholderColor: '#64748b',
     paddingMedium: '8px 12px',
   },
   Popover: {
@@ -100,7 +100,7 @@ export const darkThemeOverrides: GlobalThemeOverrides = {
     borderHover: '1px solid rgba(255, 255, 255, 0.14)',
     borderFocus: '1px solid rgba(148, 163, 184, 0.5)',
     textColor: '#f1f5f9',
-    placeholderColor: 'rgba(148, 163, 184, 0.6)',
+    placeholderColor: 'rgba(203, 213, 225, 0.85)',
     borderRadius: '8px',
     boxShadowFocus: '0 0 0 3px rgba(148, 163, 184, 0.2)',
   },

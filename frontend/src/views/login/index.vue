@@ -11,9 +11,10 @@
 
       <div class="relative z-10 flex flex-col items-center text-center">
         <div class="login-halo relative mb-10 flex h-44 w-44 items-center justify-center">
-          <span class="login-halo-ring absolute inset-0 rounded-full border border-white/10"></span>
-          <span class="login-halo-ring absolute inset-5 rounded-full border border-white/15" style="animation-delay: 0.9s"></span>
-          <span class="login-halo-ring absolute inset-10 rounded-full border border-white/20" style="animation-delay: 1.8s"></span>
+          <span class="login-halo-ring absolute inset-0 rounded-full border border-white/15"></span>
+          <span class="login-halo-ring absolute inset-5 rounded-full border border-white/20" style="animation-delay: 0.9s"></span>
+          <span class="login-halo-ring absolute inset-10 rounded-full border border-white/25" style="animation-delay: 1.8s"></span>
+          <div class="absolute h-28 w-28 rounded-full bg-sky-500/10 blur-2xl"></div>
           <div class="relative flex h-20 w-20 items-center justify-center rounded-2xl border border-white/20 bg-white/5 backdrop-blur">
             <svg viewBox="0 0 48 48" fill="none" class="h-10 w-10 text-sky-300" aria-hidden="true">
               <path d="M14 6h14l8 8v24a4 4 0 0 1-4 4H14a4 4 0 0 1-4-4V10a4 4 0 0 1 4-4Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" />
@@ -48,12 +49,6 @@
         </ul>
       </div>
 
-      <div class="relative z-10 text-slate-500 text-sm">
-        &copy; DocMind ·
-        <a :href="PRIVACY_URL" class="hover:text-slate-300 hover:underline underline-offset-2 transition-colors">{{ t('login.privacy') }}</a>
-        ·
-        <a :href="TERMS_URL" class="hover:text-slate-300 hover:underline underline-offset-2 transition-colors">{{ t('login.terms') }}</a>
-      </div>
       <!-- 装饰光晕 -->
       <div class="absolute -bottom-24 -right-20 w-72 h-72 bg-sky-500/10 rounded-full blur-3xl"></div>
       <div class="absolute top-1/4 -left-16 w-48 h-48 bg-blue-500/10 rounded-full blur-3xl"></div>
@@ -68,7 +63,7 @@
           <div class="w-14 h-14 rounded-2xl bg-slate-800 dark:bg-slate-700 text-white font-bold text-lg flex items-center justify-center mx-auto mb-4">
             DM
           </div>
-          <h2 class="text-2xl font-bold text-slate-900 dark:text-white">DocMind</h2>
+          <h1 class="text-2xl font-bold text-slate-900 dark:text-white">DocMind</h1>
         </div>
 
         <div class="mb-8 text-center md:text-left">
@@ -94,7 +89,7 @@
                 v-model:value="form.username"
                 :placeholder="t('login.usernamePlaceholder')"
                 clearable
-                class="!rounded-xl"
+                class="login-input !rounded-xl"
               >
                 <template #prefix>
                   <n-icon class="text-slate-400"><UserOutline /></n-icon>
@@ -107,7 +102,7 @@
                 v-model:value="form.email"
                 :placeholder="t('login.emailPlaceholder')"
                 clearable
-                class="!rounded-xl"
+                class="login-input !rounded-xl"
               >
                 <template #prefix>
                   <n-icon class="text-slate-400"><MailOutline /></n-icon>
@@ -122,7 +117,7 @@
                 :placeholder="t('login.passwordPlaceholder')"
                 show-password-on="click"
                 clearable
-                class="!rounded-xl"
+                class="login-input !rounded-xl"
               >
                 <template #prefix>
                   <n-icon class="text-slate-400"><LockClosedOutline /></n-icon>
@@ -138,7 +133,7 @@
                 :disabled="loading"
                 block
                 attr-type="submit"
-                class="!rounded-xl !h-12 !font-semibold bg-slate-800 hover:bg-slate-700 dark:bg-slate-100 dark:text-slate-900 dark:hover:bg-white btn-bounce"
+                class="!rounded-xl !h-12 !font-semibold bg-slate-800 hover:bg-slate-700 focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 focus-visible:ring-offset-white dark:bg-slate-100 dark:text-slate-900 dark:hover:bg-white dark:focus-visible:ring-offset-slate-900 btn-bounce"
               >
                 {{ isRegister ? t('login.register') : t('login.login') }}
               </n-button>
@@ -148,7 +143,8 @@
           <div class="text-center text-sm text-slate-500 dark:text-slate-400">
             {{ isRegister ? t('login.hasAccount') : t('login.noAccount') }}
             <button
-              class="text-slate-800 dark:text-slate-200 font-semibold ml-1 hover:underline"
+              type="button"
+              class="ml-1 inline-flex min-h-11 items-center border-0 bg-transparent px-1 font-semibold text-slate-800 hover:underline dark:text-slate-200"
               @click.prevent="toggleMode"
             >
               {{ isRegister ? t('login.goToLogin') : t('login.goToRegister') }}
@@ -192,8 +188,17 @@
             </div>
           </div>
         </div>
+
+        <!-- 页脚法务链接：DOM 顺序放在表单之后（Tab 先到主任务），移动端也可见 -->
+        <div class="mt-6 text-center text-xs text-slate-500 dark:text-slate-400">
+          &copy; DocMind ·
+          <a :href="PRIVACY_URL" class="text-slate-500 hover:text-slate-700 hover:underline underline-offset-2 transition-colors dark:text-slate-400 dark:hover:text-slate-200">{{ t('login.privacy') }}</a>
+          ·
+          <a :href="TERMS_URL" class="text-slate-500 hover:text-slate-700 hover:underline underline-offset-2 transition-colors dark:text-slate-400 dark:hover:text-slate-200">{{ t('login.terms') }}</a>
+        </div>
       </div>
     </div>
+  </div>
   </div>
 </template>
 
@@ -264,21 +269,21 @@ watch(() => route.name, (newName) => {
 })
 const rules = computed(() => ({
   username: [
-    { required: true, message: t('login.usernamePlaceholder'), trigger: 'blur' },
+    { required: true, message: t('login.usernamePlaceholder'), trigger: 'input' },
     // 长度规则只属于注册：登录是"验证已有凭据"，不能用注册策略把老用户挡在门外。
     ...(isRegister.value
-      ? [{ min: 3, message: t('validation.usernameLength'), trigger: 'blur' }]
+      ? [{ min: 3, message: t('validation.usernameLength'), trigger: 'input' }]
       : [])
   ],
   password: [
-    { required: true, message: t('login.passwordPlaceholder'), trigger: 'blur' },
+    { required: true, message: t('login.passwordPlaceholder'), trigger: 'input' },
     ...(isRegister.value
-      ? [{ min: 8, message: t('validation.passwordLength'), trigger: 'blur' }]
+      ? [{ min: 8, message: t('validation.passwordLength'), trigger: 'input' }]
       : [])
   ],
   email: isRegister.value ? [
-    { required: true, message: t('login.emailPlaceholder'), trigger: 'blur' },
-    { type: 'email', message: t('validation.emailInvalid'), trigger: 'blur' }
+    { required: true, message: t('login.emailPlaceholder'), trigger: 'input' },
+    { type: 'email', message: t('validation.emailInvalid'), trigger: 'input' }
   ] : []
 }))
 
@@ -370,6 +375,10 @@ const quickLogin = async (account: DemoAccount) => {
 
 .login-form-card {
   box-shadow: 0 25px 50px -12px rgba(15, 23, 42, 0.18);
+}
+
+.login-input {
+  --n-height: 44px;
 }
 
 @media (prefers-reduced-motion: reduce) {

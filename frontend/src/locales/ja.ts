@@ -466,7 +466,7 @@ export default {
     loginDesc: '認証情報を入力してログインしてください',
     createAccount: 'アカウント作成',
     registerDesc: '情報を入力して登録してください',
-    brandHeadline: '文書Q&Aと契約レビュー',
+    brandHeadline: 'ドキュメントQ&Aと契約レビュー',
     brandSubtitle: '規程・テンプレート・契約版をアップロード。回答は出典付き、差分は条項ごとに証拠付きで提示します。',
     brandFeatureTrace: '原文の出所を追跡でき、証拠を確認できる',
     brandFeatureEvidence: '条項ごとの差分と証拠を提示し、要約に依存しない',
