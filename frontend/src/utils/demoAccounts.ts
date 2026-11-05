@@ -10,6 +10,7 @@ export interface DemoAccount {
   label: string
   username: string
   password: string
+  description?: string
 }
 
 export function parseDemoAccounts(raw: unknown): DemoAccount[] {
@@ -23,15 +24,21 @@ export function parseDemoAccounts(raw: unknown): DemoAccount[] {
   if (!Array.isArray(data)) return []
   return data
     .filter((item): item is Record<string, unknown> => !!item && typeof item === 'object')
-    .map((item) => ({
-      label:
-        typeof item.label === 'string' && item.label.trim()
-          ? item.label.trim()
-          : typeof item.username === 'string'
-            ? item.username
-            : '',
-      username: typeof item.username === 'string' ? item.username : '',
-      password: typeof item.password === 'string' ? item.password : ''
-    }))
+    .map((item) => {
+      const account: DemoAccount = {
+        label:
+          typeof item.label === 'string' && item.label.trim()
+            ? item.label.trim()
+            : typeof item.username === 'string'
+              ? item.username
+              : '',
+        username: typeof item.username === 'string' ? item.username : '',
+        password: typeof item.password === 'string' ? item.password : ''
+      }
+      if (typeof item.description === 'string' && item.description.trim()) {
+        account.description = item.description.trim()
+      }
+      return account
+    })
     .filter((item) => item.username && item.password)
 }

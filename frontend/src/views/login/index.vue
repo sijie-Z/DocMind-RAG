@@ -1,21 +1,53 @@
 <template>
   <div class="min-h-screen bg-[#fafafa] dark:bg-gray-950 flex flex-col md:flex-row overflow-hidden transition-colors duration-300">
-    <!-- 左侧：品牌区 -->
-    <div class="hidden md:flex md:w-[44%] bg-slate-900 dark:bg-slate-950 p-12 flex-col justify-between relative overflow-hidden login-animate-in">
+    <!-- 左侧：品牌区（取苏式园林项目的分屏品牌区构图：中央图形 + 品牌叙事 + 能力点） -->
+    <div class="login-brand-panel hidden md:flex md:w-[46%] p-12 flex-col justify-between relative overflow-hidden login-animate-in">
       <div class="relative z-10 flex items-center gap-3">
-        <div class="w-10 h-10 rounded-xl bg-slate-700 flex items-center justify-center text-white font-bold text-sm">
+        <div class="w-10 h-10 rounded-xl bg-white/10 ring-1 ring-white/15 flex items-center justify-center text-white font-bold text-sm">
           DM
         </div>
         <span class="text-white text-xl font-bold tracking-tight">DocMind</span>
       </div>
-      <div class="relative z-10 space-y-6 max-w-sm">
+
+      <div class="relative z-10 flex flex-col items-center text-center">
+        <div class="login-halo relative mb-10 flex h-44 w-44 items-center justify-center">
+          <span class="login-halo-ring absolute inset-0 rounded-full border border-white/10"></span>
+          <span class="login-halo-ring absolute inset-5 rounded-full border border-white/15" style="animation-delay: 0.9s"></span>
+          <span class="login-halo-ring absolute inset-10 rounded-full border border-white/20" style="animation-delay: 1.8s"></span>
+          <div class="relative flex h-20 w-20 items-center justify-center rounded-2xl border border-white/20 bg-white/5 backdrop-blur">
+            <svg viewBox="0 0 48 48" fill="none" class="h-10 w-10 text-sky-300" aria-hidden="true">
+              <path d="M14 6h14l8 8v24a4 4 0 0 1-4 4H14a4 4 0 0 1-4-4V10a4 4 0 0 1 4-4Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" />
+              <path d="M28 6v8h8" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" />
+              <path d="M16 24h10M16 31h7" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" />
+              <circle cx="34" cy="34" r="7" fill="currentColor" fill-opacity="0.12" stroke="currentColor" stroke-width="1.8" />
+              <path d="m31 34 2.2 2.2L37 32.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" />
+            </svg>
+          </div>
+        </div>
+
         <h1 class="text-4xl font-bold text-white leading-tight">
           {{ t('login.brandHeadline') }}
         </h1>
-        <p class="text-slate-400 text-base leading-relaxed">
+        <p class="mt-4 max-w-sm text-base text-slate-400 leading-relaxed">
           {{ t('login.brandSubtitle') }}
         </p>
+
+        <ul class="mt-10 space-y-3 text-left">
+          <li
+            v-for="feature in brandFeatures"
+            :key="feature"
+            class="flex items-center gap-3 text-sm text-slate-300"
+          >
+            <span class="flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-sky-400/30 bg-sky-400/10 text-sky-300">
+              <svg viewBox="0 0 16 16" fill="none" class="h-3.5 w-3.5" aria-hidden="true">
+                <path d="m3.5 8.5 3 3 6-7" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" />
+              </svg>
+            </span>
+            {{ feature }}
+          </li>
+        </ul>
       </div>
+
       <div class="relative z-10 text-slate-500 text-sm">
         &copy; DocMind ·
         <a :href="PRIVACY_URL" class="hover:text-slate-300 hover:underline underline-offset-2 transition-colors">{{ t('login.privacy') }}</a>
@@ -23,14 +55,16 @@
         <a :href="TERMS_URL" class="hover:text-slate-300 hover:underline underline-offset-2 transition-colors">{{ t('login.terms') }}</a>
       </div>
       <!-- 装饰光晕 -->
-      <div class="absolute -bottom-20 -right-20 w-64 h-64 bg-blue-500/10 rounded-full blur-3xl"></div>
-      <div class="absolute top-1/3 -left-10 w-40 h-40 bg-indigo-500/10 rounded-full blur-3xl"></div>
+      <div class="absolute -bottom-24 -right-20 w-72 h-72 bg-sky-500/10 rounded-full blur-3xl"></div>
+      <div class="absolute top-1/4 -left-16 w-48 h-48 bg-blue-500/10 rounded-full blur-3xl"></div>
     </div>
 
-    <!-- 右侧：表单 -->
+    <!-- 右侧：表单（卡片式表单 + 顶部渐变条，取园林项目登录卡的构图） -->
     <div class="flex-1 flex items-center justify-center p-6 md:p-12 bg-[#fafafa] dark:bg-gray-950">
-      <div class="max-w-md w-full login-card-animate">
-        <div class="md:hidden text-center mb-8">
+      <div class="w-full max-w-md">
+        <div class="login-form-card relative overflow-hidden rounded-3xl border border-slate-200/70 bg-white/95 p-7 shadow-xl backdrop-blur-xl dark:border-slate-800 dark:bg-slate-900/90 md:p-10 login-card-animate">
+          <div class="absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-sky-500 via-blue-500 to-sky-400"></div>
+          <div class="md:hidden text-center mb-8">
           <div class="w-14 h-14 rounded-2xl bg-slate-800 dark:bg-slate-700 text-white font-bold text-lg flex items-center justify-center mx-auto mb-4">
             DM
           </div>
@@ -132,17 +166,22 @@
                   v-for="account in demoAccounts"
                   :key="account.username"
                   type="button"
-                  class="group flex w-full items-center justify-between gap-3 rounded-lg border border-slate-200 bg-white px-3 py-2 text-left transition-colors hover:border-blue-300 hover:bg-blue-50/60 disabled:cursor-not-allowed disabled:opacity-60 dark:border-slate-700 dark:bg-slate-900/60 dark:hover:border-blue-500/50 dark:hover:bg-blue-500/10"
+                  class="group flex w-full items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 text-left transition-all hover:-translate-y-px hover:border-blue-300 hover:shadow-md hover:shadow-blue-500/5 disabled:cursor-not-allowed disabled:opacity-60 dark:border-slate-700 dark:bg-slate-900/60 dark:hover:border-blue-500/50 dark:hover:bg-blue-500/10"
                   :disabled="loading"
                   :data-testid="`demo-login-${account.username}`"
                   @click="quickLogin(account)"
                 >
                   <span class="min-w-0">
-                    <span class="block truncate text-sm font-medium text-slate-800 dark:text-slate-100">
-                      {{ account.label }}
+                    <span class="flex items-center gap-2">
+                      <span class="truncate text-sm font-semibold text-slate-800 dark:text-slate-100">
+                        {{ account.label }}
+                      </span>
+                      <span class="shrink-0 rounded-full border border-amber-200 bg-amber-50 px-1.5 py-0.5 text-[10px] font-medium text-amber-700 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-300">
+                        {{ t('login.demoTag') }}
+                      </span>
                     </span>
-                    <span class="block truncate text-xs text-slate-500 dark:text-slate-400">
-                      {{ account.username }}
+                    <span class="mt-0.5 block truncate text-xs text-slate-500 dark:text-slate-400">
+                      {{ account.description || account.username }}
                     </span>
                   </span>
                   <span class="shrink-0 text-xs font-medium text-blue-600 dark:text-blue-400">
@@ -179,6 +218,11 @@ const userStore = useUserStore()
 const { t } = useI18n()
 const demoMode = import.meta.env.VITE_DEMO_MODE
 const demoAccounts = parseDemoAccounts(import.meta.env.VITE_DEMO_ACCOUNTS)
+const brandFeatures = computed(() => [
+  t('login.brandFeatureTrace'),
+  t('login.brandFeatureEvidence'),
+  t('login.brandFeatureDeterministic')
+])
 
 // T13：法务页面真链接 —— 占位路由；正式法务页上线后仅需在此替换为实际站内路径或外链常量
 const PRIVACY_URL = '/privacy'
@@ -301,3 +345,36 @@ const quickLogin = async (account: DemoAccount) => {
   await handleSubmit()
 }
 </script>
+
+<style scoped>
+/* 品牌区：深墨蓝径向渐变（保留 DocMind 蓝系，不照搬园林绿）。 */
+.login-brand-panel {
+  background: radial-gradient(circle at 30% 42%, #10304f 0%, #0a1b30 48%, #030712 100%);
+}
+
+.login-halo-ring {
+  animation: halo-pulse 7s ease-in-out infinite;
+}
+
+@keyframes halo-pulse {
+  0%,
+  100% {
+    opacity: 0.25;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.55;
+    transform: scale(1.04);
+  }
+}
+
+.login-form-card {
+  box-shadow: 0 25px 50px -12px rgba(15, 23, 42, 0.18);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .login-halo-ring {
+    animation: none;
+  }
+}
+</style>

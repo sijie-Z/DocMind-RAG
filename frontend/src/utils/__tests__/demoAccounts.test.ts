@@ -26,4 +26,15 @@ describe('parseDemoAccounts', () => {
       )
     ).toEqual([{ label: 'b', username: 'b', password: 'q' }])
   })
+
+  it('解析可选 description（去空白），非法类型忽略', () => {
+    expect(
+      parseDemoAccounts(
+        '[{"username":"a","password":"p","description":"  合同核验、逐条证据与导出  "},{"username":"b","password":"q","description":123}]'
+      )
+    ).toEqual([
+      { label: 'a', username: 'a', password: 'p', description: '合同核验、逐条证据与导出' },
+      { label: 'b', username: 'b', password: 'q' }
+    ])
+  })
 })
