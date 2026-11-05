@@ -39,17 +39,17 @@
 
 ## 4. 不允许 mock / 必须走真实路径
 
-- **RAG 检索路径**(Qdrant / 向量检索 / rerank):用 fake embedding + 真向量库,或 in-memory fake
+- **RAG 检索路径**(Elasticsearch / 向量检索 / rerank):用 fake embedding + 真向量库,或 in-memory fake
 - **Memory 召回逻辑**(4 层 + bridge):走真 `AgentMemorySystem`,只 mock 外部 LLM
 - **Agent planner → tool selection**:走真 ToolRegistry,只 mock LLM 决策
 - **Streaming 输出组装**:走真 loop,不 mock event 构造
 
 ## 5. 允许 mock(外部不可控)
 
-- LLM API(智谱 / OpenAI / Ollama 远端)
+- LLM API(DeepSeek / OpenAI / Ollama 远端)
 - Redis(用 `fakeredis` 或真 redis container)
 - MySQL(用 sqlite 或真 mysql container)
-- Qdrant(用 in-memory fake 或真 qdrant container)
+- Elasticsearch(用 in-memory fake 或真 Elasticsearch container)
 - Prometheus(用 `prometheus_client.REGISTRY` 重置)
 - HTTP 外部 API
 
@@ -88,7 +88,7 @@
 ### Integration (~25%,`backend/tests/integration/`)
 
 已有 9 个文件,需要审视。多数是 mock-heavy 的实现测试,**多数需重写或删**。
-目标:留下真链路集成测试,需要 Qdrant/Redis 真容器或 docker-compose。
+目标:留下真链路集成测试,需要 Elasticsearch/Redis 真容器或 docker-compose。
 
 ### E2E (~5%,`e2e/`)
 
@@ -131,8 +131,8 @@ def fake_llm():
     """替 LLM API,根据 prompt 模板返回固定结构。"""
 
 @pytest.fixture
-def in_memory_qdrant():
-    """替代 Qdrant,纯 dict 实现余弦检索。"""
+def in_memory_elasticsearch():
+    """替代 Elasticsearch,纯 dict 实现余弦检索。"""
 
 @pytest.fixture
 def fakeredis_client():

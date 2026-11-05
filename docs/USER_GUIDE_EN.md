@@ -34,7 +34,7 @@
 | Python | 3.11+ | `backend/pyproject.toml` sets `target-version = "py311"`; README badge says Python 3.11+ |
 | Node.js | **22.12+** (CI uses Node 22) | `frontend/package-lock.json`: Vite 8 requires `^20.19.0 \|\| >=22.12.0`, Vitest 5 requires `^22.12.0 \|\| ^24.0.0 \|\| >=26.0.0`; `.github/workflows/ci-fast.yml` uses Node 22. The root README's "Node.js 18+" is stale — trust the lockfile engines |
 | Docker Desktop | with Compose v2 (WSL2 backend recommended on Windows) | `backend/docker-compose.yml`; `SETUP.md` |
-| Ollama | default embeddings use local `nomic-embed-text` (768 dims) | defaults in `backend/app/core/config/ai.py` |
+| Ollama | default embeddings use local `nomic-embed-text` (768 dims); **the current local deployment overrides this via `.env` to `qwen3-embedding:0.6b` / 1024 dims** | defaults in `backend/app/core/config/ai.py` |
 | Ports | 8000, 5173; infrastructure 3308, 6390, 9200/9300, 9000/9001, 9092, 2181, 9090, 3001 | `backend/docker-compose.yml` |
 
 Prepare Ollama (needed for the default embedding path; skip if you switch to a cloud embedding provider):
@@ -952,7 +952,7 @@ Per `.github/workflows/ci-fast.yml` and `ci-hygiene.yml`, a PR must pass at leas
 | **Migration smoke** | `alembic upgrade head` → `check_schema.py`; the MySQL job also downgrades and upgrades again |
 | **Backend tests** | `pytest tests/unit/ tests/api/ tests/behavior/`; the Python 3.12 leg adds `--cov-fail-under=42` |
 | **Integration** | `pytest tests/` on PR/push to `develop` (MySQL + Redis + ES) |
-| **Eval gate** | `make eval-ci`: rebuild the eval index with fake embeddings → run 28 golden-set items → zero-tolerance compare against `backend/evals/baselines/ci_baseline.json`; any drop fails |
+| **Eval gate** | `make eval-ci`: rebuild the eval index with fake embeddings → run 80 golden-set items (Eval v1.5) → zero-tolerance compare against `backend/evals/baselines/ci_baseline.json`; any drop fails |
 | **Frontend** | `eslint .`, `vue-tsc --noEmit`, `vitest run --coverage`, `vite build` |
 | **Frontend ratchets** | hardcoded-CJK baseline, i18n completeness, naming consistency, translation-key usage (shrink-only) |
 | **E2E** | `playwright test` |

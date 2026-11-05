@@ -11,7 +11,7 @@
 - **生成时间**：`2026-06-15T16:48:24`（报告内 `timestamp` 字段）。
 - **性质**：2026-06 的旧 benchmark 失败快照——`total_scenarios = 10`、`passed = 0`、`failed = 10`、`overall_success_rate = 0.0`，平均耗时 2276.9 ms。按分类：analysis 3、feishu 2、mixed 2、search 2、general 1，全部失败；工具调用错误以 `not_found` 为主。
 - **为何保留**：这是「评测跑出来了但没人接门禁，等于没跑」的工程教训证据（复盘见 `docs/roadmap.md` 的 S3 一节与 `docs/decisions/2026-10-06-harness-refactor-plan.md`）。
-- **当前口径**：评测已由 **clause-level eval-gate** 取代——28 条 golden set（25 正例 + 3 负例），ClauseHit@1/@3/@5、MRR、EmptyAcc、NearMiss@5、errors 七项指标零容差，逐 PR 在 CI 中 fail-closed 执行（见根 README「质量与门禁」与 `backend/docs/eval-gate-phase1.md`）。
+- **现行口径**：评测已由 **clause-level eval-gate** 取代——当时为 28 条 golden set（25 正例 + 3 负例）；现行 **Eval v1.5 为 80 条（60 正例 + 20 负例）**，ClauseHit@1/@3/@5、MRR、EmptyAcc、NearMiss@5、errors 七项指标零容差，逐 PR 在 CI 中 fail-closed 执行（见根 README「质量与门禁」、`docs/METRICS.md` 与 `backend/docs/eval-gate-phase1.md`）。
 - **重要**：本文件的 0/10 **不代表当前质量**，请勿引用为现行评测结果。
 
 ### 历史查询

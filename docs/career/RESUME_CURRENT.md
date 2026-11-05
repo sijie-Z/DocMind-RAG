@@ -83,7 +83,7 @@
 | S11 | 开源 merged PR | 14 个 merged，覆盖 11 个项目 | `curl -H "User-Agent: DocMind-career-research/1.0" "https://api.github.com/search/issues?q=is%3Apr+author%3Asijie-Z+is%3Amerged+-user%3Asijie-Z&per_page=100"` → `total_count=14`（保存于 `_scratch/career-gh/opensource_merged.json`） | 当前态 | 统计口径排除了本人仓库 |
 | S12 | 2 个有实质 review 的 OSS PR | pnpm #12284（12 reviews，zkochan 多轮 + approve）；storybook #35055（7 reviews，2× CHANGES_REQUESTED → APPROVED） | `GET /repos/pnpm/pnpm/pulls/12284/reviews`、`GET /repos/storybookjs/storybook/pulls/35055/reviews`（保存于 `_scratch/career-gh/reviews_*.json`） | 当前态 | 不写 redis #15323、click #3556、element-plus |
 | S13 | MiqroForge 241 PR / 188 merged | 241 / 188（2026.06–09） | `_scratch/audit/REDTEAM_FINDINGS.md` §2；本次核查 `GET /repos/sijie-Z/MiqroForge-Desktop` → 404，`search/repositories?q=MiqroForge+user:sijie-Z` → 0 条 | 待确认（未核实） | 性质与公开范围待本人确认；未确认前不投 |
-| S14 | 工具面现状（内部口径，不上简历） | 39 个注册工具；schema 19,001 chars；默认 36 个约 17,592 chars ≈ 5,026 tok/步 | `docs/facts.json`；`backend/scripts/check_doc_facts.py --print-derived`；schema 测量见 `_scratch/audit/STRATEGY.md` §4.2 / `REDTEAM_FINDINGS.md` B3 | 内部参考 | 只在面试 Q9 讲技术债，不作简历亮点 |
+| S14 | 工具面现状（内部口径，不上简历） | 31 个注册工具 / 默认 10 个（2026-11-05，`docs/facts.json`）；本文件撰写基线 2b0574ab 时点为 39 / 36，schema 19,001 chars ≈ 5,026 tok/步 | `docs/facts.json`；`backend/scripts/check_doc_facts.py --print-derived`；历史测量见 `_scratch/audit/STRATEGY.md` §4.2 / `REDTEAM_FINDINGS.md` B3 | 内部参考 | 只在面试 Q9 讲技术债，不作简历亮点 |
 | S15 | 多租户 / 缓存现状（内部口径） | 23 个 RBAC 权限点；检索缓存键 = org + topk + mode + q（不含 user_id） | `backend/app/models/rbac.py:24-92`；`backend/app/rag/cache.py:330-338` | 内部参考 | 外部 ACL 缺失，见 #511 |
 
 ---

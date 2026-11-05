@@ -164,7 +164,7 @@ cp .env.docker.example .env.docker
 
 - 本地开发必填：`SECRET_KEY`、`JWT_SECRET_KEY`（生成：`python -c "import secrets; print(secrets.token_hex(32))"`）。
 - `.env.docker` 的 compose 必填项（不提供默认密码，全部自行生成）：`MYSQL_ROOT_PASSWORD`、`MYSQL_PASSWORD`、`MINIO_ACCESS_KEY`、`MINIO_SECRET_KEY`、`GRAFANA_PASSWORD`。
-- 后端启动必填 `SECRET_KEY`、`JWT_SECRET_KEY`，Chat 需要 `DEEPSEEK_API_KEY`；Embedding 默认走本机 Ollama（nomic-embed-text / 768 维，复用 Chat Key），云端 Embedding 再配置 `EMBEDDING_API_KEY` / `EMBEDDING_API_URL`。
+- 后端启动必填 `SECRET_KEY`、`JWT_SECRET_KEY`，Chat 需要 `DEEPSEEK_API_KEY`；Embedding 默认走本机 Ollama（nomic-embed-text / 768 维，复用 Chat Key；**当前本地部署以 `.env` 覆盖为 qwen3-embedding:0.6b / 1024 维**），云端 Embedding 再配置 `EMBEDDING_API_KEY` / `EMBEDDING_API_URL`。
 - Compose 的**全文件插值**先于服务选择：即使不选择 Grafana，`GRAFANA_PASSWORD` 仍为必填。
 
 ### 3. 启动基础设施

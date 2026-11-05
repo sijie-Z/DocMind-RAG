@@ -34,7 +34,7 @@
 | Python | 3.11+ | `backend/pyproject.toml` 的 `target-version = "py311"`；README 徽标 `Python 3.11+` |
 | Node.js | **22.12+**（CI 使用 Node 22） | `frontend/package-lock.json` 中 Vite 8 要求 `^20.19.0 \|\| >=22.12.0`、Vitest 5 要求 `^22.12.0 \|\| ^24.0.0 \|\| >=26.0.0`；`.github/workflows/ci-fast.yml` 使用 Node 22。根 `README.md` 的「Node.js 18+」是旧口径，以 lockfile 的 engines 为准 |
 | Docker Desktop | 含 Compose v2（Windows 建议启用 WSL2 backend） | `backend/docker-compose.yml`；`SETUP.md` |
-| Ollama | 默认 Embedding 走本机 `nomic-embed-text`（768 维） | `backend/app/core/config/ai.py` 的 `EMBEDDING_API_URL` / `EMBEDDING_MODEL` 默认值 |
+| Ollama | 默认 Embedding 走本机 `nomic-embed-text`（768 维）；**当前本地部署以 `.env` 覆盖为 `qwen3-embedding:0.6b` / 1024 维** | `backend/app/core/config/ai.py` 的 `EMBEDDING_API_URL` / `EMBEDDING_MODEL` 默认值 |
 | 端口 | 8000、5173；基础设施 3308、6390、9200/9300、9000/9001、9092、2181、9090、3001 | `backend/docker-compose.yml` |
 
 准备 Ollama（默认 Embedding 路径需要它；改用云端 Embedding 可跳过）：
@@ -956,7 +956,7 @@ npm run test:e2e          # playwright test（需要已安装浏览器）
 | **迁移冒烟** | `alembic upgrade head` → `check_schema.py`；MySQL job 还做 downgrade/upgrade 往返 |
 | **后端测试** | `pytest tests/unit/ tests/api/ tests/behavior/`；Python 3.12 腿带 `--cov-fail-under=42` |
 | **集成测试** | 对 `develop` 的 PR/push 跑 `pytest tests/`（MySQL + Redis + ES） |
-| **评测门禁（Eval Gate）** | `make eval-ci`：重建评估索引（伪嵌入）→ 跑 28 条 golden set → 与 `backend/evals/baselines/ci_baseline.json` 零容差比对；任何下跌即红 |
+| **评测门禁（Eval Gate）** | `make eval-ci`：重建评估索引（伪嵌入）→ 跑 80 条 golden set（Eval v1.5）→ 与 `backend/evals/baselines/ci_baseline.json` 零容差比对；任何下跌即红 |
 | **前端** | `eslint .`、`vue-tsc --noEmit`、`vitest run --coverage`、`vite build` |
 | **前端棘轮** | 硬编码中文基线、i18n 完备性、命名一致、用键定义（只允许缩小，不允许增长） |
 | **E2E** | `playwright test` |

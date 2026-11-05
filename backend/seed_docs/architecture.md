@@ -24,7 +24,7 @@
 
 ### 4. AI/LLM 层
 - DeepSeek API 提供大语言模型能力
-- ZhipuAI Embedding 模型用于文本向量化
+- Ollama `qwen3-embedding`（或 OpenAI 兼容 Embedding 接口）用于文本向量化；智谱用于 Rerank（可选）
 - 语义缓存减少重复 LLM 调用
 - 流式输出提供实时响应体验
 
