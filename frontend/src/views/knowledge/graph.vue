@@ -198,8 +198,8 @@ const typeColors: Record<string, string> = {
   ORGANIZATION: '#3B82F6',
   LOCATION: '#10B981',
   EVENT: '#EF4444',
-  CONCEPT: '#8B5CF6',
-  PRODUCT: '#EC4899',
+  CONCEPT: '#0EA5E9',
+  PRODUCT: '#0F766E',
   TECHNOLOGY: '#06B6D4',
   UNKNOWN: '#6B7280',
 }

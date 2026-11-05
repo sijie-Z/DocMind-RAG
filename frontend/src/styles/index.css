@@ -14,6 +14,48 @@ html, body {
   height: 100%;
 }
 
+/* 全局可见焦点：Naive 组件自带焦点样式，这里补原生控件与自定义元素的缺口 */
+:where(a, button, input, select, textarea, [tabindex]):focus-visible {
+  outline: 2px solid #2563eb;
+  outline-offset: 2px;
+}
+
+/* 跳转主内容（键盘用户首个可聚焦元素） */
+.skip-link {
+  position: fixed;
+  left: 12px;
+  top: -56px;
+  z-index: 100;
+  padding: 8px 12px;
+  border-radius: 6px;
+  background: #1d4ed8;
+  color: #ffffff;
+  font-size: 13px;
+  font-weight: 600;
+  transition: top 0.15s ease;
+}
+
+.skip-link:focus {
+  top: 12px;
+}
+
+/* 跳转目标由脚本移动焦点，不再给整页描绘焦点环（skip link 自身仍有焦点态） */
+#main-content:focus {
+  outline: none;
+}
+
+/* 尊重减少动态偏好：保留颜色反馈，停用位移/循环动画 */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
 /* 滚动条样式 */
 ::-webkit-scrollbar {
   width: 6px;

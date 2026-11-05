@@ -1,10 +1,10 @@
 import type { GlobalThemeOverrides } from 'naive-ui'
 
 const sharedCommon = {
-  primaryColor: '#64748b',
-  primaryColorHover: '#475569',
-  primaryColorPressed: '#334155',
-  primaryColorSuppl: '#94a3b8',
+  primaryColor: '#2563eb',
+  primaryColorHover: '#1d4ed8',
+  primaryColorPressed: '#1e40af',
+  primaryColorSuppl: '#60a5fa',
   infoColor: '#3b82f6',
   successColor: '#10b981',
   warningColor: '#f59e0b',
@@ -77,10 +77,10 @@ export const lightThemeOverrides: GlobalThemeOverrides = {
 export const darkThemeOverrides: GlobalThemeOverrides = {
   common: {
     ...sharedCommon,
-    primaryColor: '#94a3b8',
-    primaryColorHover: '#64748b',
-    primaryColorPressed: '#475569',
-    primaryColorSuppl: '#cbd5e1',
+    primaryColor: '#60a5fa',
+    primaryColorHover: '#93c5fd',
+    primaryColorPressed: '#bfdbfe',
+    primaryColorSuppl: '#3b82f6',
     bodyColor: '#0a0a0f',
     cardColor: '#111118',
     modalColor: '#111118',

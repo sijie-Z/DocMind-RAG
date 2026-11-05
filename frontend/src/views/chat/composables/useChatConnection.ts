@@ -18,8 +18,10 @@ export function useChatConnection(
   const chatStore = useChatStore()
   const userStore = useUserStore()
 
-  const connectionStatus = ref<'connected' | 'disconnected' | 'connecting' | 'error'>('disconnected')
-  const sseStatus = ref<'connected' | 'disconnected' | 'connecting' | 'error'>('disconnected')
+  // idle = 就绪但当前没有在途连接（SSE 空闲态、WS 手动断开）；避免把
+  // 「还没开始」渲染成「未连接」告警。error 一旦出现则保持到重新连上为止。
+  const connectionStatus = ref<'idle' | 'connected' | 'disconnected' | 'connecting' | 'error'>('idle')
+  const sseStatus = ref<'idle' | 'connected' | 'disconnected' | 'connecting' | 'error'>('idle')
   const useSSE = ref(true)
   const useStream = ref(true)
   const isLoading = ref(false)
@@ -56,7 +58,10 @@ export function useChatConnection(
       if (ownsGeneration()) connectionStatus.value = 'connected'
     })
     wsService.on('disconnect', () => {
-      if (ownsGeneration()) connectionStatus.value = 'disconnected'
+      // 失败后连接器会继续自动重连：状态保持在 error，直到真正重连成功，
+      // 不把一次失败「降级」成看似正常的未连接。
+      if (!ownsGeneration()) return
+      if (connectionStatus.value !== 'error') connectionStatus.value = 'disconnected'
     })
     wsService.on('error', (data: WebSocketMessage) => {
       if (!ownsGeneration()) return
@@ -126,7 +131,8 @@ export function useChatConnection(
 
   const disconnectWebSocket = () => {
     if (wsService && typeof wsService.disconnect === 'function') wsService.disconnect()
-    connectionStatus.value = 'disconnected'
+    // 主动断开 = 回到就绪，而不是断线。
+    connectionStatus.value = 'idle'
   }
 
   const stopGeneration = () => {

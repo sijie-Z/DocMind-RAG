@@ -14,7 +14,7 @@
         </n-button>
       </div>
 
-      <div class="bg-white dark:bg-gray-800 rounded-2xl shadow-[0_8px_30px_rgb(0,0,0,0.08)] border border-gray-200 dark:border-gray-700 p-2 transition-all duration-300 focus-within:shadow-[0_8px_30px_rgb(0,0,0,0.12)] focus-within:border-primary-300 dark:focus-within:border-primary-700">
+      <div class="composer-card bg-white dark:bg-gray-800 rounded-2xl shadow-[0_8px_30px_rgb(0,0,0,0.08)] border border-gray-200 dark:border-gray-700 p-2 transition-all duration-300 focus-within:shadow-[0_8px_30px_rgb(0,0,0,0.12)] focus-within:border-primary-300 dark:focus-within:border-primary-700">
         <!-- Attached files -->
         <div v-if="attachedFiles.length > 0" class="flex flex-wrap gap-2 px-3 pt-2 items-center">
           <div v-for="(file, index) in attachedFiles" :key="index"
@@ -96,22 +96,24 @@
           {{ t('chat.slashCommandsAgentOnly') }}
         </div>
 
-        <div class="flex justify-between items-center mt-2 px-2 pb-1">
-          <div class="flex gap-2 items-center">
+        <div class="mt-2 flex items-center justify-between gap-2 px-2 pb-1">
+          <div class="chat-toolbar flex min-w-0 flex-1 flex-wrap items-center gap-1.5 sm:gap-2">
             <n-tooltip trigger="hover">
               <template #trigger>
-                <n-button size="tiny" quaternary circle class="text-gray-400 hover:text-primary-600 dark:hover:text-primary-400" @click="$emit('triggerFileUpload')">
+                <n-button size="tiny" quaternary circle class="text-gray-400 hover:text-primary-600 dark:hover:text-primary-400" :aria-label="t('chat.uploadFile')" @click="$emit('triggerFileUpload')">
                   <template #icon><n-icon size="18"><AttachOutline /></n-icon></template>
                 </n-button>
               </template>
               {{ t('chat.uploadFile') }}
             </n-tooltip>
 
+            <!-- 移动端只留状态点（完整状态走 aria-label / 桌面文字），避免控制条撑破 375px -->
             <span
-              class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border"
+              class="inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full border px-2 py-1 text-xs font-medium sm:px-2.5"
               data-testid="connection-status"
               role="status"
               aria-live="polite"
+              :aria-label="`${useSSE ? 'SSE ' : ''}${connectionStatusText}`"
               :class="connectionStatus === 'connected'
                 ? 'bg-emerald-50 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-400 border-emerald-200 dark:border-emerald-800/50'
                 : (connectionStatus === 'connecting'
@@ -124,12 +126,12 @@
                 class="w-2 h-2 rounded-full shrink-0"
                 :class="connectionStatus === 'connected' ? 'bg-emerald-500 animate-pulse' : connectionStatus === 'connecting' ? 'bg-amber-500 animate-pulse' : connectionStatus === 'error' ? 'bg-red-500' : 'bg-gray-400'"
               ></span>
-              {{ useSSE ? 'SSE ' : '' }}{{ connectionStatusText }}
+              <span>{{ useSSE ? 'SSE ' : '' }}{{ connectionStatusText }}</span>
             </span>
 
             <n-popover trigger="hover" placement="top">
               <template #trigger>
-                <n-button size="tiny" quaternary circle :class="useStream ? 'text-primary-600 dark:text-primary-400' : 'text-gray-400'">
+                <n-button size="tiny" quaternary circle :aria-label="t('chat.streamResponse')" :aria-pressed="useStream" :class="useStream ? 'text-primary-600 dark:text-primary-400' : 'text-gray-400'">
                   <template #icon><n-icon size="18"><FlashOutline /></n-icon></template>
                 </n-button>
               </template>
@@ -146,6 +148,8 @@
                     size="tiny"
                     quaternary
                     circle
+                    :aria-label="t('chat.privacyMode')"
+                    :aria-pressed="privacyMode && orgPrivacyAllowed"
                     :class="privacyMode && orgPrivacyAllowed ? 'text-green-600 dark:text-green-400' : 'text-gray-400'"
                   >
                     <template #icon><n-icon size="18"><ShieldCheckmarkOutline /></n-icon></template>
@@ -178,6 +182,8 @@
                     size="tiny"
                     quaternary
                     circle
+                    :aria-label="t('chat.sseMode')"
+                    :aria-pressed="useSSE"
                     :class="useSSE ? 'text-amber-600 dark:text-amber-400' : 'text-gray-400'"
                   >
                     <template #icon><n-icon size="18"><RocketOutline /></n-icon></template>
@@ -201,16 +207,17 @@
             <n-button
               size="tiny"
               quaternary
-              class="text-purple-600 dark:text-purple-400"
+              class="shrink-0 text-blue-600 dark:text-blue-400"
               data-testid="agent-workbench-entry"
+              :aria-label="t('chat.openAgentWorkbench')"
               @click="openAgentWorkbench"
             >
               <template #icon><n-icon size="16"><OpenOutline /></n-icon></template>
-              {{ t('chat.openAgentWorkbench') }}
+              <span class="hidden sm:inline">{{ t('chat.openAgentWorkbench') }}</span>
             </n-button>
             <span
               v-if="!orgPrivacyAllowed"
-              class="text-[11px] text-gray-400 max-w-[260px] truncate"
+              class="hidden max-w-[260px] truncate text-[11px] text-gray-400 md:inline"
               data-testid="privacy-policy-note-inline"
             >
               {{ t('chat.orgPrivacyDisabled') }}
@@ -218,15 +225,15 @@
 
           </div>
 
-          <div class="flex items-center gap-3">
+          <div class="flex shrink-0 items-center gap-3">
             <n-button
               type="primary"
               round
               size="small"
+              class="chat-send !px-4"
               :loading="isLoading"
               :disabled="!inputMessage.trim() || isLoading"
               @click="$emit('send')"
-              class="!px-4"
             >
               <template #icon>
                 <n-icon><SendOutline /></n-icon>
@@ -237,7 +244,7 @@
         </div>
       </div>
 
-      <div class="text-center mt-3 text-xs text-gray-400 dark:text-gray-500 hidden sm:block">
+      <div class="text-center mt-3 text-xs text-gray-500 dark:text-gray-400 hidden sm:block">
         {{ t('chat.disclaimer') }}
       </div>
     </div>
@@ -295,3 +302,23 @@ const onKeydown = (e: KeyboardEvent) => {
   if (!e.shiftKey) emit('send')
 }
 </script>
+
+<style scoped>
+/* 键盘焦点：Naive textarea 内部会吃掉 outline，焦点环画在整张输入卡上 */
+.composer-card:focus-within {
+  outline: 2px solid rgba(37, 99, 235, 0.45);
+  outline-offset: 2px;
+}
+
+/* 移动端触控目标：工具条图标按钮 44×44，发送键加高（视觉密度让位于可点性） */
+@media (max-width: 639.98px) {
+  .chat-toolbar :deep(.n-button) {
+    height: 44px !important;
+    width: 44px !important;
+  }
+  .chat-send.n-button {
+    height: 44px !important;
+    min-width: 88px;
+  }
+}
+</style>

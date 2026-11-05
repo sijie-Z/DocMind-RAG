@@ -52,7 +52,6 @@
         data-testid="ref-option"
         @mousedown.prevent="selectDoc(doc)"
       >
-        <span class="ref-option-icon">📄</span>
         <span class="ref-option-title">{{ doc.title || doc.file_name || doc.id }}</span>
       </button>
     </div>
@@ -65,7 +64,7 @@
         class="ref-chip"
         data-testid="ref-chip"
       >
-        📄 {{ doc.title }}
+        {{ doc.title }}
         <button
           class="ref-chip-remove"
           :title="t('refPicker.remove')"
@@ -107,7 +106,7 @@
           :disabled="stopping"
           @click="$emit('stop')"
         >
-          {{ stopping ? '⏳ 停止中…' : '⏹ 停止' }}
+          {{ stopping ? '停止中…' : '停止' }}
         </button>
       </template>
       <button
@@ -124,7 +123,7 @@
         :disabled="stopping"
         @click="$emit('stop')"
       >
-        {{ stopping ? '⏳ 停止中…' : '⏹ 停止' }}
+        {{ stopping ? '停止中…' : '停止' }}
       </button>
     </div>
     <div class="input-hint">
@@ -552,15 +551,15 @@ defineExpose({ clear: () => { inputText.value = ''; selectedDocs.value = []; clo
 
 /* A：运行中转向——蓝色系（与"停止"的红形成动作区分），深色下同色仍达标 */
 .steer-btn {
-  background: #6366f1;
+  background: #2563eb;
   color: white;
 }
 
-.steer-btn:hover:not(:disabled) { background: #4f46e5; }
+.steer-btn:hover:not(:disabled) { background: #1d4ed8; }
 .steer-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 
-.dark .steer-btn { background: #818cf8; }
-.dark .steer-btn:hover:not(:disabled) { background: #6366f1; }
+.dark .steer-btn { background: #60a5fa; }
+.dark .steer-btn:hover:not(:disabled) { background: #2563eb; }
 
 .stop-btn {
   background: #ef4444;

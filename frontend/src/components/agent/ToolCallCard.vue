@@ -66,9 +66,9 @@ const resultEl = ref<HTMLElement>()
 
 const statusIcon = computed(() => {
   switch (props.status) {
-    case 'loading': return '⏳'
-    case 'success': return '✅'
-    case 'error': return '❌'
+    case 'loading': return '…'
+    case 'success': return '✓'
+    case 'error': return '✗'
     default: return ''
   }
 })

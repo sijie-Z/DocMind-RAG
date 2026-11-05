@@ -11,6 +11,7 @@
     "preview": "vite preview",
     "lint": "eslint . --fix",
     "type-check": "vue-tsc --noEmit",
+    "check:no-purple": "node scripts/check-no-purple.mjs",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",

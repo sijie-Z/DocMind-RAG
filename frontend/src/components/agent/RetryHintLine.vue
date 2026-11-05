@@ -1,7 +1,7 @@
 <template>
   <!-- retry_hint 轻量提示行（issue #250 第 6 条收尾的展示形态；issue #289
        抽为共享组件，Agent 页与聊天页 Agent 模式共用） -->
-  <div class="retry-hint">♻ {{ text }}</div>
+  <div class="retry-hint">↻ {{ text }}</div>
 </template>
 
 <script setup lang="ts">

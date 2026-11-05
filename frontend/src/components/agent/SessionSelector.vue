@@ -18,7 +18,7 @@
       :title="t('agent.deleteSessionConfirmTitle')"
       @click="$emit('delete', modelValue)"
     >
-      🗑
+      <TrashOutline class="w-4 h-4" />
     </button>
   </div>
 </template>
@@ -26,6 +26,7 @@
 <script setup lang="ts">
 import { useI18n } from 'vue-i18n'
 import type { AgentSession } from '@/types/agent'
+import { TrashOutline } from '@vicons/ionicons5'
 
 const { t } = useI18n()
 

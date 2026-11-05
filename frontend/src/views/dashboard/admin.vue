@@ -324,7 +324,7 @@
             :style="{ animationDelay: `${idx * 50}ms` }"
           >
             <div class="flex items-center gap-3">
-              <div class="w-10 h-10 rounded-xl flex items-center justify-center text-white font-bold text-sm" :style="{ backgroundColor: `hsl(${idx * 45 + 220}, 70%, 55%)` }">
+              <div class="w-10 h-10 rounded-xl flex items-center justify-center text-white font-bold text-sm" :style="{ backgroundColor: ORG_AVATAR_COLORS[idx % ORG_AVATAR_COLORS.length] }">
                 {{ (org.org_name || ' Org').charAt(0).toUpperCase() }}
               </div>
               <div class="flex-1 min-w-0">
@@ -505,6 +505,7 @@ const ragStats = ref({
   trend: [] as number[]
 })
 
+const ORG_AVATAR_COLORS = ['#1d4ed8', '#0369a1', '#0f766e', '#15803d', '#b45309', '#475569']
 const orgList = ref<OrgSummary[]>([])
 const recentLogs = ref<AuditLogEntry[]>([])
 
@@ -611,7 +612,7 @@ const initLlmChart = () => {
       itemStyle: { color: CHART_COLORS.sky },
       areaStyle: { opacity: 0.15, color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
         { offset: 0, color: CHART_COLORS.sky },
-        { offset: 1, color: 'rgba(168,85,247,0.0)' }
+        { offset: 1, color: 'rgba(37,99,235,0.0)' }
       ]) },
       symbol: 'circle',
       symbolSize: 5,

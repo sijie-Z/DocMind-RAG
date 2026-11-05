@@ -13,7 +13,7 @@
         v-if="debugData.note"
         class="px-1.5 py-0.5 rounded text-xs bg-orange-50 dark:bg-orange-900/20 border border-orange-200 dark:border-orange-800/40 text-orange-600 dark:text-orange-400"
       >
-        ⚠️ {{ debugData.note }}
+        {{ debugData.note }}
       </span>
     </div>
 
@@ -38,7 +38,7 @@
         @click="openFinal = !openFinal"
       >
         <div class="flex items-center gap-2">
-          <span>📄 最终 LLM 上下文</span>
+          <span>最终 LLM 上下文</span>
           <span class="text-gray-400 font-normal">({{ debugData.final_context.length }})</span>
         </div>
         <span class="text-gray-400">{{ openFinal ? '▲' : '▼' }}</span>
@@ -71,15 +71,15 @@
     </div>
 
     <!-- Keyword Top -->
-    <DebugSection v-if="debugData.keyword_top?.length" title="🔤 BM25 关键词检索" :hits="debugData.keyword_top" :score-label="'score'" />
+    <DebugSection v-if="debugData.keyword_top?.length" title="BM25 关键词检索" :hits="debugData.keyword_top" :score-label="'score'" />
 
     <!-- Vector Top -->
-    <DebugSection v-if="debugData.vector_top?.length" title="🧠 向量相似度检索" :hits="debugData.vector_top" :score-label="'score'" />
+    <DebugSection v-if="debugData.vector_top?.length" title="向量相似度检索" :hits="debugData.vector_top" :score-label="'score'" />
 
     <!-- RRF Result：分值域 ≈ 2/(k+1) ≤ 0.033，按名次着色（issue #198 ②） -->
     <DebugSection
       v-if="debugData.rrf_result?.length"
-      title="🔀 RRF 融合结果"
+      title="RRF 融合结果"
       :hits="debugData.rrf_result"
       :score-label="'score'"
       score-mode="rrf"

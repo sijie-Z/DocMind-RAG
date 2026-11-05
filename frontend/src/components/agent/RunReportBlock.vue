@@ -15,7 +15,7 @@
       data-testid="run-report-export"
       @click="handleExport"
     >
-      ⬇ {{ t('artifacts.exportMarkdown') }}
+      {{ t('artifacts.exportMarkdown') }}
     </button>
   </details>
 </template>

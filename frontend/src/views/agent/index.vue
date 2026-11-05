@@ -10,10 +10,10 @@
           data-testid="agent-back-to-chat"
           @click="backToChat"
         >
-          <span aria-hidden="true">←</span> {{ t('agent.backToChat') }}
+          <n-icon size="16" class="mr-1" aria-hidden="true"><ArrowBackOutline /></n-icon>{{ t('agent.backToChat') }}
         </button>
-        <h1 class="header-title">{{ t('menu.agent') }}</h1>
-        <span class="header-badge">PER 架构</span>
+        <h1 class="header-title hidden lg:block">{{ t('menu.agent') }}</h1>
+        <span class="header-badge hidden lg:inline-flex">{{ t('agent.headerBadge') }}</span>
       </div>
       <div class="header-center">
         <SessionSelector
@@ -32,7 +32,7 @@
           :title="lineageBadgeTitle"
           :aria-label="lineageBadgeTitle"
         >
-          ⑂ {{ t('agentFork.badge') }}
+          <n-icon size="14" class="mr-1" aria-hidden="true"><GitBranchOutline /></n-icon>{{ t('agentFork.badge') }}
           <span v-if="currentParentTitle" class="lineage-parent">← {{ currentParentTitle }}</span>
         </span>
         <!-- issue #476：「查看分叉」= 列表 parent_session_id 过滤入口 -->
@@ -46,7 +46,7 @@
               data-testid="fork-children-btn"
               @click="loadChildren"
             >
-              ↪ {{ t('agentFork.children') }}
+              <n-icon size="14" class="mr-1" aria-hidden="true"><GitBranchOutline /></n-icon>{{ t('agentFork.children') }}
             </button>
           </template>
           <div class="fork-children-panel" data-testid="fork-children-panel">
@@ -90,7 +90,7 @@
         <n-popover v-model:show="showTasks" trigger="click" placement="bottom-end">
           <template #trigger>
             <button class="header-btn" :class="{ active: showTasks }">
-              🕘 {{ t('agentTasks.title') }}
+              <n-icon size="14" class="mr-1" aria-hidden="true"><TimeOutline /></n-icon>{{ t('agentTasks.title') }}
             </button>
           </template>
           <RecentTaskList
@@ -100,7 +100,7 @@
           />
         </n-popover>
         <button class="header-btn" @click="showConfig = !showConfig" :class="{ active: showConfig }">
-          ⚙ 配置
+          <n-icon size="14" class="mr-1" aria-hidden="true"><SettingsOutline /></n-icon>{{ t('agent.config') }}
         </button>
         <button
           class="header-btn"
@@ -108,10 +108,10 @@
           data-testid="agent-terminal-toggle"
           @click="showTerminal = !showTerminal"
         >
-          <span aria-hidden="true">&gt;_</span> {{ t('agent.terminal.open') }}
+          <n-icon size="14" class="mr-1" aria-hidden="true"><TerminalOutline /></n-icon>{{ t('agent.terminal.open') }}
         </button>
-        <button class="header-btn" @click="handleNewSession">+ 新建</button>
-        <button class="header-btn" @click="handleClearMessages">清空</button>
+        <button class="header-btn" @click="handleNewSession"><n-icon size="14" class="mr-1" aria-hidden="true"><AddOutline /></n-icon>{{ t('agent.newSession') }}</button>
+        <button class="header-btn" @click="handleClearMessages"><n-icon size="14" class="mr-1" aria-hidden="true"><TrashOutline /></n-icon>{{ t('agent.clearMessages') }}</button>
       </div>
     </div>
 
@@ -120,17 +120,17 @@
       <!-- Loading state -->
       <div v-if="initLoading" class="loading-overlay">
         <n-spin size="large" />
-        <p class="loading-text">加载 Agent 数据...</p>
+        <p class="loading-text">{{ t('agent.loadingInit') }}</p>
       </div>
       <!-- Error state -->
       <div v-else-if="initError" class="error-overlay">
-        <p class="error-icon">⚠️</p>
-        <p class="error-text">加载失败，请检查后端服务是否运行</p>
-        <n-button type="primary" size="small" @click="reloadInit">重试</n-button>
+        <n-icon class="error-icon" size="30" aria-hidden="true"><AlertCircleOutline /></n-icon>
+        <p class="error-text">{{ t('agent.loadFailed') }}</p>
+        <n-button type="primary" size="small" @click="reloadInit">{{ t('common.retry') }}</n-button>
       </div>
       <template v-else>
       <!-- Left: Plan Tree -->
-      <div class="left-panel" :class="{ collapsed: !showPlan }">
+      <div class="left-panel" :class="{ collapsed: !showPlan, empty: currentPlanSteps.length === 0 }">
         <div class="panel-toggle" @click="showPlan = !showPlan">
           {{ showPlan ? '◀' : '▶' }}
         </div>
@@ -148,8 +148,8 @@
       <div class="center-panel" ref="centerPanel">
         <!-- Empty state -->
         <div v-if="agentStore.messages.length === 0" class="empty-state">
-          <h2>DocMind 智能助手</h2>
-          <p class="empty-subtitle">Planning → Execution → Reflection</p>
+          <h2>{{ t('agent.emptyTitle') }}</h2>
+          <p class="empty-subtitle">{{ t('agent.emptySubtitle') }}</p>
           <div class="suggestion-grid">
             <button
               v-for="s in suggestions"
@@ -161,10 +161,10 @@
             </button>
           </div>
           <div class="feature-list">
-            <div class="feature-item">📋 自动规划：复杂任务自动拆分</div>
-            <div class="feature-item">🔧 33 个内置工具：搜索、分析、代码、翻译</div>
-            <div class="feature-item">🧠 记忆系统：记住你的偏好和历史</div>
-            <div class="feature-item">🔍 自我反思：执行后自动评估纠正</div>
+            <div class="feature-item"><n-icon size="14" class="mr-1" aria-hidden="true"><ListOutline /></n-icon>{{ t('agent.emptyFeaturePlan') }}</div>
+            <div class="feature-item"><n-icon size="14" class="mr-1" aria-hidden="true"><ConstructOutline /></n-icon>{{ toolsFeatureText }}</div>
+            <div class="feature-item"><n-icon size="14" class="mr-1" aria-hidden="true"><CubeOutline /></n-icon>{{ t('agent.emptyFeatureMemory') }}</div>
+            <div class="feature-item"><n-icon size="14" class="mr-1" aria-hidden="true"><SearchOutline /></n-icon>{{ t('agent.emptyFeatureReview') }}</div>
           </div>
         </div>
 
@@ -201,7 +201,7 @@
                   v-for="r in msg.references"
                   :key="r.id"
                   class="user-ref-chip"
-                >📄 {{ r.title }}</span>
+                ><n-icon size="12" class="mr-1" aria-hidden="true"><DocumentTextOutline /></n-icon>{{ r.title }}</span>
               </div>
               <!-- issue #476：消息级分叉入口（USER 边界 = 在该消息之前分叉） -->
               <div v-if="showForkAction(msg)" class="fork-here-line">
@@ -247,7 +247,7 @@
                   v-else-if="evt.type === 'tool_error'"
                   class="tool-error-standalone"
                 >
-                  ❌ {{ evt.content }}
+                  <n-icon size="13" class="mr-1" aria-hidden="true"><CloseCircleOutline /></n-icon>{{ evt.content }}
                 </div>
                 <!-- 阶段 1：局部综合是诊断时间线条目，不是 Final answer。 -->
                 <div
@@ -323,7 +323,7 @@
                   class="command-error-standalone"
                   data-testid="command-error-standalone"
                 >
-                  ❌ {{ evt.content }}
+                  <n-icon size="13" class="mr-1" aria-hidden="true"><CloseCircleOutline /></n-icon>{{ evt.content }}
                 </div>
               </template>
             </div>
@@ -399,7 +399,7 @@
                  如实标记；无数据不亮入口，深链/任务列表可达诚实空态） -->
             <div v-if="showReplayEntry(idx, msg)" class="replay-entry-line">
               <button class="replay-entry-btn" @click="openReplay(agentStore.taskId!)">
-                🕘 {{ t('agentReplay.entry') }}
+                <n-icon size="14" class="mr-1" aria-hidden="true"><TimeOutline /></n-icon>{{ t('agentReplay.entry') }}
               </button>
             </div>
 
@@ -478,7 +478,7 @@
 
     <!-- Input -->
     <AgentInput
-      :placeholder="'输入复杂任务，Agent 自动规划执行...'"
+      :placeholder="t('agent.inputPlaceholder')"
       :disabled="planApprovalPending"
       :loading="agentStore.isLoading"
       :stopping="stopping"
@@ -520,7 +520,12 @@ import type {
   ReferencedDoc,
   ReplayTimeline as ReplayTimelineData,
 } from '@/types/agent'
-import { ThumbsUpOutline, ThumbsDownOutline } from '@vicons/ionicons5'
+import {
+  ThumbsUpOutline, ThumbsDownOutline, ArrowBackOutline, TimeOutline,
+  SettingsOutline, AddOutline, AlertCircleOutline, ListOutline,
+  ConstructOutline, CubeOutline, SearchOutline, DocumentTextOutline,
+  CloseCircleOutline, GitBranchOutline, TerminalOutline, TrashOutline,
+} from '@vicons/ionicons5'
 
 import PlanTree from '@/components/agent/PlanTree.vue'
 import ThinkingStream from '@/components/agent/ThinkingStream.vue'
@@ -621,9 +626,15 @@ const lineageBadgeTitle = computed(() => {
   return parts.join(' · ')
 })
 
-const showConfig = ref(false)
+// 宽屏默认展开右侧配置（≥1280 时中央区仍有 ≥740px）；窄屏与测试环境保持收起。
+const showConfig = ref(typeof window !== 'undefined' && window.innerWidth >= 1280)
 const showTerminal = ref(false)
-const showPlan = ref(true)
+// 窄屏时收起右侧配置栏（用户手动打开的宽屏状态不跨断点保留）。
+const handleViewportResize = () => {
+  if (window.innerWidth < 1024) showConfig.value = false
+}
+// 空计划时不占左栏宽度；计划到来时自动展开（见下方 watch）。
+const showPlan = ref(false)
 const centerPanel = ref<HTMLElement>()
 const initLoading = ref(true)
 const initError = ref(false)
@@ -640,18 +651,35 @@ const showTasks = ref(false)
 const recentTasks = ref<AgentTaskListItem[]>([])
 const tasksLoading = ref(false)
 
-const suggestions = [
-  '知识库中有哪些文档？请帮我总结关键主题',
-  '搜索公司相关的所有政策文档，提取合规要求',
-  '分析最近上传的文档，找出共同点和差异',
-  '帮我翻译这段中文到英文，并检测语言',
-]
+const suggestions = computed(() => [
+  t('agent.emptySuggestion1'),
+  t('agent.emptySuggestion2'),
+  t('agent.emptySuggestion3'),
+  t('agent.emptySuggestion4'),
+])
+
+// 工具数以初始化信封（store）为准；未加载/为 0 时不宣称具体数量。
+const toolsFeatureText = computed(() => (
+  agentStore.toolCount > 0
+    ? t('agent.emptyFeatureToolsCount', { count: agentStore.toolCount })
+    : t('agent.emptyFeatureTools')
+))
 
 const currentPlanSteps = computed<PlanStep[]>(() => {
   // Get plan steps from the last assistant message
   const last = [...agentStore.messages].reverse().find((m) => m.role === 'assistant')
   return last?.planSteps || agentStore.planSteps
 })
+
+watch(
+  () => currentPlanSteps.value.length,
+  (length, previous) => {
+    // 清空/切换无计划会话时收起，避免残留空面板；计划首次出现时自动展开。
+    if (length === 0) showPlan.value = false
+    else if (previous === 0) showPlan.value = true
+  },
+  { immediate: true },
+)
 
 function getLastThinkingType(msg: AgentChatMessage): ThinkingType {
   const thinkEvents = msg.events.filter((e) => e.type === 'thinking')
@@ -1183,7 +1211,7 @@ async function handleSend(query: string, refs?: ReferencedDoc[]) {
     } else {
       const errMsg = e instanceof Error ? e.message : String(e)
       agentStore.updateLastAssistant((msg) => {
-        msg.content = `❌ 错误: ${errMsg || 'Agent 连接失败'}`
+        msg.content = `错误: ${errMsg || 'Agent 连接失败'}`
         msg.loading = false
         msg.endedAt = Date.now()  // 计时：连接失败也是终态
       })
@@ -1473,6 +1501,7 @@ watch(
 
 // 组件卸载时中止进行中的 Agent SSE 流，防止请求悬挂
 onUnmounted(() => {
+  window.removeEventListener('resize', handleViewportResize)
   currentChatController?.abort()
   currentChatController = null
   if (stopFallbackTimer) {
@@ -1687,6 +1716,7 @@ function handleConfigApply(config: typeof agentStore.config) {
 // Load initial data — wrap in try/catch to prevent errors from
 // propagating through Suspense and triggering the ErrorBoundary.
 onMounted(async () => {
+  window.addEventListener('resize', handleViewportResize)
   try {
     await loadInit()
     // HITL：刷新/重连后回到审批现场（last task id 持久化 + 权威状态）
@@ -1815,7 +1845,7 @@ async function loadInit() {
 
 .header-badge {
   font-size: 10px;
-  background: linear-gradient(135deg, #3b82f6, #6366f1);
+  background: linear-gradient(135deg, #3b82f6, #2563eb);
   color: white;
   padding: 2px 8px;
   border-radius: 6px;
@@ -1832,17 +1862,17 @@ async function loadInit() {
   padding: 2px 8px;
   border-radius: 6px;
   font-size: 10px;
-  color: #6d28d9;
-  background: rgba(109, 40, 217, 0.1);
-  border: 1px solid rgba(109, 40, 217, 0.3);
+  color: #1d4ed8;
+  background: rgba(37, 99, 235, 0.1);
+  border: 1px solid rgba(37, 99, 235, 0.3);
   cursor: help;
   white-space: nowrap;
 }
 
 .dark .lineage-badge {
-  color: #c4b5fd;
-  background: rgba(109, 40, 217, 0.2);
-  border-color: rgba(139, 92, 246, 0.45);
+  color: #93c5fd;
+  background: rgba(37, 99, 235, 0.2);
+  border-color: rgba(37, 99, 235, 0.45);
 }
 
 .lineage-parent {
@@ -1919,15 +1949,15 @@ async function loadInit() {
 .fork-seed-note {
   margin: 0 0 12px;
   padding: 8px 12px;
-  border: 1px solid rgba(109, 40, 217, 0.3);
-  border-left: 3px solid #6d28d9;
+  border: 1px solid rgba(37, 99, 235, 0.3);
+  border-left: 3px solid #1d4ed8;
   border-radius: 8px;
-  background: rgba(109, 40, 217, 0.07);
-  color: #5b21b6;
+  background: rgba(37, 99, 235, 0.07);
+  color: #1e40af;
   font-size: 12px;
 }
 
-.dark .fork-seed-note { color: #c4b5fd; }
+.dark .fork-seed-note { color: #93c5fd; }
 
 /* issue #476：消息级「从此处分叉」入口 */
 .fork-here-line {
@@ -1939,16 +1969,16 @@ async function loadInit() {
 .user-bubble .fork-here-line { justify-content: flex-end; }
 
 .fork-here-btn {
-  border: 1px dashed rgba(109, 40, 217, 0.45);
-  color: #6d28d9;
-  background: rgba(109, 40, 217, 0.06);
+  border: 1px dashed rgba(37, 99, 235, 0.45);
+  color: #1d4ed8;
+  background: rgba(37, 99, 235, 0.06);
   border-radius: 6px;
   font-size: 11px;
   padding: 2px 8px;
   cursor: pointer;
 }
 
-.dark .fork-here-btn { color: #c4b5fd; border-color: rgba(139, 92, 246, 0.5); }
+.dark .fork-here-btn { color: #93c5fd; border-color: rgba(37, 99, 235, 0.5); }
 
 .fork-here-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 
@@ -2022,6 +2052,11 @@ async function loadInit() {
 .left-panel.collapsed {
   width: 28px;
   padding: 12px 4px;
+}
+
+/* 空计划且未展开：整块隐藏（桌面与移动端一致；计划到来时 watch 自动展开） */
+.left-panel.empty.collapsed {
+  display: none;
 }
 
 .panel-toggle {
@@ -2351,18 +2386,18 @@ async function loadInit() {
 }
 
 .steer-standalone.steer-applied {
-  background: rgba(99, 102, 241, 0.12);
-  border-color: rgba(99, 102, 241, 0.4);
-  border-left-color: #6366f1;
-  color: #4338ca;
+  background: rgba(37, 99, 235, 0.12);
+  border-color: rgba(37, 99, 235, 0.4);
+  border-left-color: #2563eb;
+  color: #1d4ed8;
 }
 
 .dark .steer-standalone.steer-applied {
-  background: rgba(99, 102, 241, 0.18);
-  color: #c7d2fe;
+  background: rgba(37, 99, 235, 0.18);
+  color: #bfdbfe;
 }
 
-.steer-badge-applied { background: #6366f1; }
+.steer-badge-applied { background: #2563eb; }
 
 .steer-text {
   word-break: break-word;
@@ -2376,24 +2411,24 @@ async function loadInit() {
   gap: 8px;
   margin: 4px 0;
   padding: 8px 12px;
-  background: rgba(99, 102, 241, 0.08);
-  border: 1px solid rgba(99, 102, 241, 0.3);
-  border-left: 3px solid #6366f1;
+  background: rgba(37, 99, 235, 0.08);
+  border: 1px solid rgba(37, 99, 235, 0.3);
+  border-left: 3px solid #2563eb;
   border-radius: 8px;
   font-size: 12px;
-  color: #4338ca;
+  color: #1d4ed8;
 }
 
 .dark .plan-standalone {
-  background: rgba(99, 102, 241, 0.14);
-  color: #c7d2fe;
+  background: rgba(37, 99, 235, 0.14);
+  color: #bfdbfe;
 }
 
 .plan-standalone-badge {
   flex-shrink: 0;
   padding: 0 6px;
   border-radius: 4px;
-  background: #6366f1;
+  background: #2563eb;
   color: #fff;
   font-size: 10px;
   font-weight: 600;
@@ -2498,19 +2533,20 @@ async function loadInit() {
   gap: 16px;
   padding: 4px 16px;
   border-top: 1px solid var(--border-color, #e5e7eb);
-  font-size: 10px;
-  color: var(--text-tertiary, #9ca3af);
+  font-size: 11px;
+  color: var(--text-tertiary, #6b7280);
   background: var(--bg-secondary, #f9fafb);
   flex-shrink: 0;
 }
 
 .dark .status-bar {
+  color: #9ca3af;
   background: var(--bg-secondary-dark, #111827);
   border-color: var(--border-color-dark, #1e293b);
 }
 
 /* === Responsive: collapse 3-column to single column === */
-@media (max-width: 767px) {
+@media (max-width: 1023.98px) {
   .agent-body {
     flex-direction: column;
   }
@@ -2523,6 +2559,10 @@ async function loadInit() {
     border-right: none;
     border-bottom: 1px solid var(--border-color, #e5e7eb);
     transition: max-height 0.3s ease, padding 0.3s ease;
+  }
+  /* 空计划且未手动展开：整块隐藏（移动端没有可见的展开按钮，空面板没有信息量）。 */
+  .left-panel.empty.collapsed {
+    display: none;
   }
   .dark .left-panel {
     border-bottom-color: var(--border-color-dark, #1e293b);
@@ -2583,7 +2623,8 @@ async function loadInit() {
   }
 
   .header-btn {
-    padding: 4px 8px;
+    min-height: 44px;
+    padding: 6px 10px;
     font-size: 11px;
   }
 

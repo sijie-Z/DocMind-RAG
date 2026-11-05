@@ -24,7 +24,7 @@ import { ChatbubblesOutline } from '@vicons/ionicons5'
 const props = defineProps<{
   data: Record<string, unknown>
   model: string
-  color?: 'green' | 'blue' | 'orange' | 'purple'
+  color?: 'green' | 'blue' | 'orange' | 'sky'
   selected?: boolean
   executing?: boolean
 }>()
@@ -33,7 +33,7 @@ const colorMap: Record<string, { border: string; bg: string; text: string; ring:
   green: { border: 'border-green-400 dark:border-green-500', bg: 'bg-green-100 dark:bg-green-900/30', text: 'text-green-500', ring: '#4ade80' },
   blue: { border: 'border-blue-400 dark:border-blue-500', bg: 'bg-blue-100 dark:bg-blue-900/30', text: 'text-blue-500', ring: '#60a5fa' },
   orange: { border: 'border-orange-400 dark:border-orange-500', bg: 'bg-orange-100 dark:bg-orange-900/30', text: 'text-orange-500', ring: '#fb923c' },
-  purple: { border: 'border-purple-400 dark:border-purple-500', bg: 'bg-purple-100 dark:bg-purple-900/30', text: 'text-purple-500', ring: '#c084fc' },
+  sky: { border: 'border-sky-400 dark:border-sky-500', bg: 'bg-sky-100 dark:bg-sky-900/30', text: 'text-sky-500', ring: '#7dd3fc' },
 }
 
 const borderColor = computed(() => colorMap[props.color || 'blue'].border)

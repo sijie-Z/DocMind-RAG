@@ -345,7 +345,7 @@ const getNodePreviewClass = (type: string) => {
     llm_deepseek: 'bg-blue-100 dark:bg-blue-900/30',
     llm_qwen: 'bg-orange-100 dark:bg-orange-900/30',
     tool_search: 'bg-amber-100 dark:bg-amber-900/30',
-    tool_tts: 'bg-pink-100 dark:bg-pink-900/30',
+    tool_tts: 'bg-slate-100 dark:bg-slate-800/40',
     condition: 'bg-cyan-100 dark:bg-cyan-900/30'
   }
   return classMap[type] || 'bg-gray-100 dark:bg-gray-700'

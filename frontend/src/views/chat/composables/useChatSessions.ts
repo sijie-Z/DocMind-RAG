@@ -4,7 +4,6 @@ import { useDedupedMessage } from '@/utils/message'
 import { useI18n } from 'vue-i18n'
 import { useDialog } from 'naive-ui'
 import { useChatStore } from '@/stores/chat'
-import { useAppStore } from '@/stores/app'
 import {
   getConversations,
   deleteConversation,
@@ -19,17 +18,16 @@ export function useChatSessions(getGeneration: () => string = () => '') {
   const dialog = useDialog()
   const { t } = useI18n()
   const chatStore = useChatStore()
-  const appStore = useAppStore()
 
   const conversations = ref<Conversation[]>([])
   const isListLoading = ref(false)
   const convLoadError = ref(false)
   const currentPage = ref(1)
   const hasMore = ref(true)
-  const sidebarOpen = computed({
-    get: () => !appStore.sidebarCollapsed,
-    set: (val) => appStore.setSidebarCollapsed(!val)
-  })
+  // 会话列表是 Chat 页自己的抽屉：不再与全局导航折叠状态共用（旧实现点聊天
+  // 侧栏开关会把整个主站导航一起收起）。初始收起，桌面宽度由页面 onMounted
+  // 的 checkScreenSize 展开。
+  const sidebarOpen = ref(false)
 
   const currentConversationId = computed(() => chatStore.currentConversation?.id)
   let listRequestSeq = 0

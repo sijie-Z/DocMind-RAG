@@ -125,6 +125,8 @@ export function useChatSend(
     scrollToBottom()
     isLoading.value = true
     isRetrieving.value = true
+    // SSE 是按请求建立的连接：发送即建连，终态后回到就绪（见 onMessage）。
+    sseStatus.value = 'connecting'
 
     const aiMsgId = 'sse-' + Date.now()
     let fullContent = ''
@@ -265,6 +267,8 @@ export function useChatSend(
       // 侧栏列表在流完成时刷新（chunk 路径不再触发，见 onChunk）
       fetchConversations()
       scrollToBottom()
+      // 请求结束即无连接；「已连接」只应出现在传输进行中。
+      sseStatus.value = 'idle'
     }
 
     const onError = (data: SSEMessage) => {
@@ -343,6 +347,7 @@ export function useChatSend(
       if (!sent) {
         message.error(t('chat.sendFailed'))
         isLoading.value = false
+        sseStatus.value = 'error'
         cleanupActiveRegenerate(aiMsgId)
         if (!isRegenerate) attachedFiles.value = currentFiles
       } else if (isRegenerate && !terminalReceived) {
@@ -351,12 +356,14 @@ export function useChatSend(
         cleanupActiveRegenerate(aiMsgId)
         isLoading.value = false
         isRetrieving.value = false
+        sseStatus.value = 'idle'
       }
     } catch {
       if (!ownsGeneration()) return
       if (!ownsActiveStream()) return
       message.error(t('chat.networkError'))
       isLoading.value = false
+      sseStatus.value = 'error'
       cleanupActiveRegenerate(aiMsgId)
       if (!isRegenerate) attachedFiles.value = currentFiles
     }
@@ -479,6 +486,8 @@ export function useChatSend(
     sseService.abort()
     isLoading.value = false
     isRetrieving.value = false
+    // 中止/换会话后不能把「连接中」留在徽标上，直到下一次发送才恢复。
+    sseStatus.value = 'idle'
     cleanupActiveRegenerate()
   }
 
@@ -498,6 +507,7 @@ export function useChatSend(
     }
     isLoading.value = false
     isRetrieving.value = false
+    if (useSSE.value) sseStatus.value = 'idle'
     // abort 会让 sseService.post 正常返回；必须在这里恢复被隐藏的旧答案，
     // 否则停止生成后旧气泡永久空白。
     cleanupActiveRegenerate()

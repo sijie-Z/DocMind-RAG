@@ -14,8 +14,8 @@
   <div class="flex h-full w-full bg-gray-50 dark:bg-gray-950 overflow-hidden transition-colors duration-300">
     <!-- Mobile overlay for sidebar -->
     <div
-      v-if="sidebarOpen && windowWidth < 768"
-      class="fixed inset-0 z-10 bg-black/40 md:hidden"
+      v-if="sidebarOpen && windowWidth < 1024"
+      class="fixed inset-0 z-10 bg-black/40 lg:hidden"
       @click="toggleSidebar"
     />
 
@@ -28,7 +28,9 @@
     />
 
     <ChatSidebar
+      ref="sidebarRef"
       :sidebarOpen="sidebarOpen"
+      :inert="sidebarInert"
       :conversations="conversations"
       :isListLoading="isListLoading"
       :convLoadError="convLoadError"
@@ -37,6 +39,7 @@
       @refresh="fetchConversations"
       @selectConversation="handleSelectConversation"
       @deleteConversation="handleDeleteConversation"
+      @close="closeSidebar"
     />
 
     <main
@@ -61,7 +64,7 @@
 
       <!-- Mobile back-to-conversations button -->
       <div
-        v-if="sidebarOpen && windowWidth < 768"
+        v-if="sidebarOpen && windowWidth < 1024"
         class="fixed left-72 top-20 z-20 md:hidden"
       >
         <n-button size="tiny" quaternary @click="toggleSidebar" class="bg-white/90 dark:bg-gray-800/90 shadow-sm rounded-lg">
@@ -145,7 +148,6 @@ import { useI18n } from 'vue-i18n'
 import { useChatStore } from '@/stores/chat'
 import { useUserStore } from '@/stores/user'
 import { useAgentStore } from '@/stores/agent'
-import { useAppStore } from '@/stores/app'
 import { useDedupedMessage } from '@/utils/message'
 import { useConfirmDangerousAction } from '@/utils/confirm'
 import { CloudUploadOutline, AlertCircleOutline, ArrowBackOutline } from '@vicons/ionicons5'
@@ -170,7 +172,6 @@ const router = useRouter()
 const chatStore = useChatStore()
 const userStore = useUserStore()
 const agentStore = useAgentStore()
-const appStore = useAppStore()
 
 // 复合异步 owner：页面 generation + #549 同步 identityEpoch；卸载另使旧页面永久失效。
 let conversationGeneration = 0
@@ -189,11 +190,15 @@ onBeforeUnmount(() => {
   conversationViewActive = false
   conversationGeneration += 1
   resetDownloadState()
+  window.removeEventListener('keydown', handleSidebarKeydown, true)
+  window.removeEventListener('resize', checkScreenSize)
+  window.removeEventListener('resize', handleWindowResize)
 })
 
 const chatMessagesRef = ref()
 const msgLoadError = ref(false)
 const windowWidth = ref(window.innerWidth)
+const handleWindowResize = () => { windowWidth.value = window.innerWidth }
 
 // W2-T7：提示词「应用」内容上限（与 prompts/index.vue 表单 maxlength 对齐；
 // 改一处必须同步另一处，chatPromptApply.test.ts 钉住边界）。
@@ -217,6 +222,53 @@ const {
   fetchConversations, handleDeleteConversation, convLoadError
 } = useChatSessions(getConversationOwner)
 
+const sidebarRef = ref<InstanceType<typeof ChatSidebar> | null>(null)
+// 收起时无论桌面/移动端都把会话列表移出 tab 序（视觉上已不可见）。
+const sidebarInert = computed(() => !sidebarOpen.value)
+const chatSidebarToggleSelector = '[data-testid="chat-sidebar-toggle"]'
+const sidebarRoot = () => (sidebarRef.value as unknown as { $el?: HTMLElement } | null)?.$el
+
+// 移动端会话抽屉：打开时把焦点送进去，关闭时还给顶栏开关（键盘用户不丢位置）。
+const focusSidebarFirstItem = () => {
+  sidebarRoot()?.querySelector<HTMLElement>('button:not([disabled])')?.focus()
+}
+const focusSidebarToggle = () => {
+  document.querySelector<HTMLElement>(chatSidebarToggleSelector)?.focus()
+}
+const closeSidebar = () => {
+  if (sidebarOpen.value) sidebarOpen.value = false
+}
+watch(sidebarOpen, (open) => {
+  if (windowWidth.value >= 1024) return
+  nextTick(open ? focusSidebarFirstItem : focusSidebarToggle)
+})
+// capture 阶段接管：抽屉内 Tab 循环、Escape 关闭；桌面端不干预。
+const handleSidebarKeydown = (event: KeyboardEvent) => {
+  if (!sidebarOpen.value || windowWidth.value >= 1024) return
+  if (event.key === 'Escape') {
+    event.preventDefault()
+    closeSidebar()
+    nextTick(focusSidebarToggle)
+    return
+  }
+  if (event.key !== 'Tab') return
+  const root = sidebarRoot()
+  if (!root) return
+  const focusables = Array.from(root.querySelectorAll<HTMLElement>(
+    'button:not([disabled]), [href], input:not([disabled]), [tabindex]:not([tabindex="-1"])',
+  )).filter((el) => el.getClientRects().length > 0)
+  if (focusables.length === 0) return
+  const first = focusables[0]
+  const last = focusables[focusables.length - 1]
+  if (event.shiftKey && document.activeElement === first) {
+    event.preventDefault()
+    last.focus()
+  } else if (!event.shiftKey && document.activeElement === last) {
+    event.preventDefault()
+    first.focus()
+  }
+}
+
 const advanceConversationGeneration = () => {
   conversationGeneration += 1
   // 过期下载结果不得写回，但本视图 loading/error 必须随 generation 一同收敛。
@@ -230,6 +282,8 @@ const {
   sseStatus, useSSE, useStream, isLoading, isRetrieving,
   effectiveConnectionStatus, connectWebSocket, disconnectWebSocket
 } = useChatConnection(messages, baseScrollToBottom, fetchConversations, getConversationOwner)
+
+// 传输切换的 watcher 放在 useChatSend 之后（需要 stopGeneration 收尾在途生成）。
 
 // E7：历史加载态与生成态分离 —— 切会话拉历史不再复用 isLoading（修前会误现
 // 「停止生成」按钮、生成 loading 与流式光标）。停止生成统一走 useChatSend 版本
@@ -275,6 +329,24 @@ const {
   isLoading, isRetrieving, sseStatus, useSSE, useStream, debugEnabled, debugData,
   getConversationOwner,
 )
+
+// 传输方式切换立即生效：切到 WS 立刻建连（修复旧实现切过去后仍无 socket，
+// 首条消息才暴露未连接）；切回 SSE 释放 WS 并把状态归位到「就绪」。
+// 挂载期的传输选择由 onMounted 末尾统一建连（此时 store/路由已对齐）；
+// 该开关只响应用户在页面就绪后的主动切换，避免拿到挂载前的陈旧会话 id。
+let transportSwitchReady = false
+watch(useSSE, (sse) => {
+  if (!transportSwitchReady) return
+  // 在途生成先按「停止」收尾：直接关 socket 会让 WS 流永远等不到终态，
+  // isLoading 挂起，UI 停不下来。
+  if (isLoading.value) stopGeneration()
+  if (sse) {
+    disconnectWebSocket()
+    sseStatus.value = 'idle'
+  } else {
+    void connectWebSocket()
+  }
+})
 
 // issue #508（方案 B）：深度分析（Agent/PER）只在 /agent 工作台提供（审批/计划
 // 审批/取消/回放 UI 完整）。Chat 的深度分析入口改为导航——不再以
@@ -396,10 +468,10 @@ const handleExportChat = () => {
 }
 
 const suggestions = computed(() => [
-  { title: t('chat.suggestions.quantum'), desc: t('chat.suggestions.quantumDesc') },
-  { title: t('chat.suggestions.code'), desc: t('chat.suggestions.codeDesc') },
-  { title: t('chat.suggestions.report'), desc: t('chat.suggestions.reportDesc') },
-  { title: t('chat.suggestions.travel'), desc: t('chat.suggestions.travelDesc') }
+  { title: t('chat.suggestions.summarize'), desc: t('chat.suggestions.summarizeDesc') },
+  { title: t('chat.suggestions.contract'), desc: t('chat.suggestions.contractDesc') },
+  { title: t('chat.suggestions.compare'), desc: t('chat.suggestions.compareDesc') },
+  { title: t('chat.suggestions.policy'), desc: t('chat.suggestions.policyDesc') }
 ])
 
 const useSuggestion = (s: { title: string; desc: string }) => { inputMessage.value = s.title + '，' + s.desc }
@@ -418,11 +490,12 @@ const handleUnbind = async () => {
 }
 
 const checkScreenSize = () => {
-  if (window.innerWidth < 768) appStore.setSidebarCollapsed(true)
-  else appStore.setSidebarCollapsed(false)
+  // <1024 收起会话列表，把宽度留给对话主区（768 下全局导航 + 会话列表
+  // 会同时展开，主区只剩 ~224px）。
+  sidebarOpen.value = window.innerWidth >= 1024
 }
 
-const toggleSidebar = () => appStore.toggleSidebar()
+const toggleSidebar = () => { sidebarOpen.value = !sidebarOpen.value }
 
 const resetConversationView = (reconnect = false) => {
   advanceConversationGeneration()
@@ -471,7 +544,7 @@ const newConversation = () => {
   if (!route.query.conversation_id) resetConversationView(true)
   attachedFiles.value = []
   router.push({ query: {} })
-  if (window.innerWidth < 768) sidebarOpen.value = false
+  if (window.innerWidth < 1024) sidebarOpen.value = false
 }
 
 const handleSelectConversation = async (conv: Conversation) => {
@@ -480,7 +553,7 @@ const handleSelectConversation = async (conv: Conversation) => {
   // route.name 后同页 query 变化不再整页重挂；此处不再直接调 loadConversation，
   // 避免一次切换双重拉取）
   await router.push({ query: { conversation_id: conv.id } })
-  if (window.innerWidth < 768) sidebarOpen.value = false
+  if (window.innerWidth < 1024) sidebarOpen.value = false
 }
 
 const loadConversation = async (id: string, ownerGeneration?: string) => {
@@ -648,6 +721,7 @@ const getConnectionStatusText = (status?: string) => {
   switch (s) {
     case 'connected': return t('chat.status.connected')
     case 'connecting': return t('chat.status.connecting')
+    case 'idle': return t('chat.status.idle')
     case 'disconnected': return t('chat.status.disconnected')
     case 'error': return t('chat.status.error')
     default: return t('chat.status.unknown')
@@ -705,73 +779,79 @@ const handleOpenSource = async (source: KnowledgeSource) => {
 }
 
 onMounted(async () => {
-  const token = userStore.token || getToken()
-  if (!token) { router.push({ name: 'Login' }); return }
-  const conversationId = routeConversationId()
-  // 初始 query 仅是候选；每个 await 后都要重新核对当前路由与 generation。
-  if (conversationId) advanceConversationGeneration()
-  else resetConversationView()
-  const generation = getConversationOwner()
-  checkScreenSize()
-  window.addEventListener('resize', checkScreenSize)
-  const handleResize = () => { windowWidth.value = window.innerWidth }
-  window.addEventListener('resize', handleResize)
-  void loadOrgPrivacyPolicy()
-  await fetchConversations()
-  if (!ownsConversationOwner(generation, conversationId)) return
-  if (conversationId) await loadConversation(conversationId, generation)
-  if (!ownsConversationOwner(generation, conversationId)) return
+  try {
+    const token = userStore.token || getToken()
+    if (!token) { router.push({ name: 'Login' }); return }
+    const conversationId = routeConversationId()
+    // 初始 query 仅是候选；每个 await 后都要重新核对当前路由与 generation。
+    if (conversationId) advanceConversationGeneration()
+    else resetConversationView()
+    const generation = getConversationOwner()
+    checkScreenSize()
+    window.addEventListener('resize', checkScreenSize)
+    window.addEventListener('resize', handleWindowResize)
+    window.addEventListener('keydown', handleSidebarKeydown, true)
+    void loadOrgPrivacyPolicy()
+    await fetchConversations()
+    if (!ownsConversationOwner(generation, conversationId)) return
+    if (conversationId) await loadConversation(conversationId, generation)
+    if (!ownsConversationOwner(generation, conversationId)) return
 
-  // URL 消费型参数一次性捕获 + 统一清理：prompt（提示词填入输入框）与
-  // q/context（搜索「问问 AI」跨页上下文）用后即清；promptName 为旧链接
-  // 兼容清理（E14/P2 起不再有消费方）。分开 replace 会因导航异步互相覆盖
-  // （后一次 spread 仍读到旧 query），故合并为一次。
-  const promptContent = route.query.prompt as string
-  const searchQuestion = route.query.q as string
-  const searchContext = route.query.context as string
-  if (promptContent || searchQuestion) {
-    router.replace({
-      query: {
-        ...route.query,
-        prompt: undefined,
-        promptName: undefined,
-        q: undefined,
-        context: undefined,
-      },
-    })
-  }
-
-  if (promptContent) {
-    // W2-T7：上限与提示词表单 maxlength（prompts/index.vue）对齐 5000——
-    // 修前这里只接受 <=2000 且无 else 分支：2001~5000 字的提示词点「应用」后
-    // 静默丢弃（第三轮终检 §2.4）。超限改为明确报错，不再无声失败。
-    // E14/P2：B3 后模板不再随消息发送——不写 activeSystemPrompt 死键、
-    // 不声称「已应用」；改为把提示词填入输入框，由用户确认后自行发送。
-    if (typeof promptContent === 'string' && promptContent.length <= MAX_PROMPT_LENGTH) {
-      inputMessage.value = promptContent
-      message.info(t('chat.promptFilled'))
-    } else {
-      message.error(t('chat.promptTooLong', { max: MAX_PROMPT_LENGTH }))
+    // URL 消费型参数一次性捕获 + 统一清理：prompt（提示词填入输入框）与
+    // q/context（搜索「问问 AI」跨页上下文）用后即清；promptName 为旧链接
+    // 兼容清理（E14/P2 起不再有消费方）。分开 replace 会因导航异步互相覆盖
+    // （后一次 spread 仍读到旧 query），故合并为一次。
+    const promptContent = route.query.prompt as string
+    const searchQuestion = route.query.q as string
+    const searchContext = route.query.context as string
+    if (promptContent || searchQuestion) {
+      router.replace({
+        query: {
+          ...route.query,
+          prompt: undefined,
+          promptName: undefined,
+          q: undefined,
+          context: undefined,
+        },
+      })
     }
-  }
 
-  // E11-①：搜索页「问问 AI」跨页带参——q 预填输入框，context（所点结果正文
-  // 片段）以 Markdown 引用块随行，保留跨页用户意图；参数用后即从 URL 清除，
-  // 刷新不重复预填。选择预填而非自动发送：用户可编辑/确认，避免未经确认
-  // 触发模型调用与计费。
-  if (typeof searchQuestion === 'string' && searchQuestion.trim()) {
-    inputMessage.value = typeof searchContext === 'string' && searchContext.trim()
-      ? `${searchQuestion}\n\n> ${searchContext}`
-      : searchQuestion
-  }
+    if (promptContent) {
+      // W2-T7：上限与提示词表单 maxlength（prompts/index.vue）对齐 5000——
+      // 修前这里只接受 <=2000 且无 else 分支：2001~5000 字的提示词点「应用」后
+      // 静默丢弃（第三轮终检 §2.4）。超限改为明确报错，不再无声失败。
+      // E14/P2：B3 后模板不再随消息发送——不写 activeSystemPrompt 死键、
+      // 不声称「已应用」；改为把提示词填入输入框，由用户确认后自行发送。
+      if (typeof promptContent === 'string' && promptContent.length <= MAX_PROMPT_LENGTH) {
+        inputMessage.value = promptContent
+        message.info(t('chat.promptFilled'))
+      } else {
+        message.error(t('chat.promptTooLong', { max: MAX_PROMPT_LENGTH }))
+      }
+    }
 
-  // 确保连接 WebSocket（不依赖 watcher 的时序问题）
-  if (!userStore.userInfo?.id) {
-    try { await userStore.getUserInfo() } catch { /* 已登录但获取失败，仍尝试连接 */ }
-  }
-  if (!ownsConversationOwner(generation, conversationId)) return
-  if (userStore.token || getToken()) {
-    connectWebSocket()
+    // E11-①：搜索页「问问 AI」跨页带参——q 预填输入框，context（所点结果正文
+    // 片段）以 Markdown 引用块随行，保留跨页用户意图；参数用后即从 URL 清除，
+    // 刷新不重复预填。选择预填而非自动发送：用户可编辑/确认，避免未经确认
+    // 触发模型调用与计费。
+    if (typeof searchQuestion === 'string' && searchQuestion.trim()) {
+      inputMessage.value = typeof searchContext === 'string' && searchContext.trim()
+        ? `${searchQuestion}\n\n> ${searchContext}`
+        : searchQuestion
+    }
+
+    // 确保连接 WebSocket（不依赖 watcher 的时序问题）
+    if (!userStore.userInfo?.id) {
+      try { await userStore.getUserInfo() } catch { /* 已登录但获取失败，仍尝试连接 */ }
+    }
+    if (!ownsConversationOwner(generation, conversationId)) return
+    if (userStore.token || getToken()) {
+      connectWebSocket()
+    }
+  } finally {
+    // 初次加载（含会话历史）落地后才响应用户的传输切换，避免用挂载前的
+    // 陈旧会话 id 建连；加载被并发导航打断时同样放行后续切换。
+    transportSwitchReady = true
   }
 })
 </script>
@@ -784,7 +864,8 @@ onMounted(async () => {
 .scrollbar-thin:hover::-webkit-scrollbar-thumb { background-color: rgba(156, 163, 175, 0.5); }
 
 /* Mobile: sidebar as fixed overlay */
-@media (max-width: 767px) {
+@media (max-width: 1023.98px) {
+  /* 平板/移动端：会话列表是浮层抽屉（不挤压主区，不覆盖全局导航的布局） */
   aside[class*="flex-shrink-0"] {
     position: fixed !important;
     inset: 0 !important;
@@ -794,17 +875,19 @@ onMounted(async () => {
     max-width: 320px !important;
     border-radius: 0 16px 16px 0;
   }
+}
+
+@media (max-width: 767.98px) {
   main {
     padding-bottom: env(safe-area-inset-bottom, 0px);
   }
-  /* Chat input footer: fixed at bottom on mobile */
+  /* 手机：输入条固定在视口底部；768–1023 仍有全局导航，保持流内定位 */
   footer[class*="absolute bottom-0"] {
     position: fixed !important;
     padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 12px) !important;
   }
-  /* Messages area: adjust bottom padding for fixed input */
   div[class*="pt-20 pb-40"] {
-    padding-bottom: 160px !important;
+    padding-bottom: 248px !important;
   }
 }
 </style>

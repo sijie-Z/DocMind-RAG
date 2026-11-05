@@ -4,7 +4,7 @@
     data-testid="not-found-page"
   >
     <div class="text-center max-w-md">
-      <div class="error-code text-[96px] md:text-[120px] font-extrabold leading-none bg-gradient-to-r from-blue-600 to-indigo-600 dark:from-blue-400 dark:to-indigo-400 bg-clip-text text-transparent select-none">
+      <div class="error-code text-[96px] md:text-[120px] font-extrabold leading-none bg-gradient-to-r from-blue-600 to-blue-800 dark:from-blue-400 dark:to-blue-600 bg-clip-text text-transparent select-none">
         404
       </div>
       <h1 class="mt-6 text-2xl font-bold text-slate-900 dark:text-white">

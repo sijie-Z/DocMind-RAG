@@ -1,7 +1,6 @@
 <template>
   <div class="replay-dock">
     <div class="replay-header">
-      <span class="replay-icon">🕘</span>
       <span class="replay-title">{{ t('agentReplay.title') }}</span>
       <code class="replay-task-id">{{ timeline?.task_id || taskId }}</code>
       <span v-if="timeline" class="replay-chips">
@@ -51,13 +50,13 @@
                 <span v-if="step.tokens_used" class="step-metric">{{ step.tokens_used }} {{ t('agentReplay.tokens') }}</span>
               </div>
               <div v-if="step.result_summary" class="step-result">{{ step.result_summary }}</div>
-              <div v-if="step.error" class="step-error">❌ {{ step.error }}</div>
+              <div v-if="step.error" class="step-error">{{ step.error }}</div>
             </div>
           </div>
         </div>
 
         <div v-if="timeline.findings.length > 0" class="replay-section">
-          <div class="section-title">🔎 {{ t('agentReplay.findings') }}</div>
+          <div class="section-title">{{ t('agentReplay.findings') }}</div>
           <ul class="section-list">
             <li v-for="(f, i) in timeline.findings" :key="'f' + i">
               {{ f.content }}
@@ -67,7 +66,7 @@
         </div>
 
         <div v-if="timeline.decisions.length > 0" class="replay-section">
-          <div class="section-title">🧭 {{ t('agentReplay.decisions') }}</div>
+          <div class="section-title">{{ t('agentReplay.decisions') }}</div>
           <ul class="section-list">
             <li v-for="(d, i) in timeline.decisions" :key="'d' + i">
               <span class="item-src">{{ d.phase }} · {{ d.action }}</span>
@@ -106,8 +105,8 @@ function fmtMs(ms: number): string {
 
 function statusIcon(status: string): string {
   return (
-    { completed: '✅', failed: '❌', skipped: '⏭️', pending: '⏳', running: '⏳' } as Record<string, string>
-  )[status] || '❓'
+    { completed: '✓', failed: '✗', skipped: '–', pending: '…', running: '…' } as Record<string, string>
+  )[status] || '•'
 }
 
 function statusLabel(status: string): string {
@@ -286,8 +285,8 @@ function statusLabel(status: string): string {
 
 .step-tool {
   font-size: 11px;
-  color: #7c3aed;
-  background: rgba(124, 58, 237, 0.08);
+  color: #2563eb;
+  background: rgba(37, 99, 235, 0.08);
   border-radius: 4px;
   padding: 0 6px;
 }
@@ -396,8 +395,8 @@ function statusLabel(status: string): string {
 }
 
 .dark .step-tool {
-  color: #c4b5fd;
-  background: rgba(124, 58, 237, 0.2);
+  color: #93c5fd;
+  background: rgba(37, 99, 235, 0.2);
 }
 
 .dark .step-meta,

@@ -1,7 +1,7 @@
 <template>
   <header class="absolute top-0 left-0 right-0 z-10 px-4 py-3 flex items-center justify-between bg-white/80 dark:bg-gray-900/80 backdrop-blur-md border-b border-gray-100 dark:border-gray-800 transition-colors duration-300">
     <div class="flex items-center gap-3">
-      <n-button quaternary circle size="small" @click="$emit('toggleSidebar')" class="mr-1">
+      <n-button quaternary circle size="small" data-testid="chat-sidebar-toggle" :aria-label="sidebarOpen ? t('chat.closeSidebar') : t('chat.openSidebar')" @click="$emit('toggleSidebar')" class="mr-1">
         <template #icon>
           <n-icon size="20" class="text-gray-600 dark:text-gray-300">
             <MenuOutline v-if="!sidebarOpen" />
@@ -11,8 +11,8 @@
       </n-button>
 
       <div class="flex items-center space-x-2">
-        <div class="bg-slate-100 dark:bg-slate-900/30 p-1.5 rounded-lg text-slate-600 dark:text-slate-400">
-          <n-icon size="18"><SparklesOutline /></n-icon>
+        <div class="inline-flex items-center justify-center bg-blue-700 p-1.5 rounded-lg text-white shadow-sm">
+          <DocMindMark :size="18" />
         </div>
         <div class="hidden sm:block">
           <h1 class="text-sm font-bold text-gray-800 dark:text-white leading-tight">
@@ -38,6 +38,7 @@
         <template #trigger>
           <n-button
             quaternary circle size="small"
+            :aria-label="debugEnabled ? t('chat.closeDebug') : t('chat.openDebug')"
             :type="debugEnabled ? 'warning' : 'default'"
             @click="$emit('toggleDebug')"
             class="text-gray-500 dark:text-gray-400"
@@ -45,11 +46,11 @@
             <template #icon><n-icon><BugOutline /></n-icon></template>
           </n-button>
         </template>
-        {{ debugEnabled ? '关闭调试' : '检索调试' }}
+        {{ debugEnabled ? t('chat.closeDebug') : t('chat.openDebug') }}
       </n-tooltip>
       <n-tooltip trigger="hover">
         <template #trigger>
-          <n-button quaternary circle size="small" @click="$emit('exportChat')" class="text-gray-500 dark:text-gray-400" :disabled="!hasConversation">
+          <n-button quaternary circle size="small" :aria-label="t('chat.exportChat')" @click="$emit('exportChat')" class="text-gray-500 dark:text-gray-400" :disabled="!hasConversation">
             <template #icon><n-icon><DownloadOutline /></n-icon></template>
           </n-button>
         </template>
@@ -57,7 +58,7 @@
       </n-tooltip>
       <n-tooltip trigger="hover">
         <template #trigger>
-          <n-button quaternary circle size="small" @click="$emit('clearChat')" class="text-gray-500 dark:text-gray-400" :disabled="!hasConversation">
+          <n-button quaternary circle size="small" :aria-label="t('chat.clearChat')" @click="$emit('clearChat')" class="text-gray-500 dark:text-gray-400" :disabled="!hasConversation">
             <template #icon><n-icon><TrashOutline /></n-icon></template>
           </n-button>
         </template>
@@ -69,7 +70,8 @@
 
 <script setup lang="ts">
 import { useI18n } from 'vue-i18n'
-import { MenuOutline, CloseOutline, SparklesOutline, TrashOutline, AttachOutline, DownloadOutline, BugOutline } from '@vicons/ionicons5'
+import { MenuOutline, CloseOutline, TrashOutline, AttachOutline, DownloadOutline, BugOutline } from '@vicons/ionicons5'
+import DocMindMark from '@/components/brand/DocMindMark.vue'
 
 const { t } = useI18n()
 

@@ -1,8 +1,11 @@
 <template>
   <aside
     class="flex-shrink-0 bg-white/80 dark:bg-gray-900/80 backdrop-blur-xl border-r border-gray-200/50 dark:border-gray-800/50 transition-all duration-300 flex flex-col z-20"
+    data-testid="chat-sidebar"
+    :inert="inert"
+    :aria-hidden="inert ? 'true' : undefined"
     :class="[
-      sidebarOpen ? 'w-72 translate-x-0' : 'w-0 -translate-x-full overflow-hidden opacity-0 md:opacity-100 md:w-0 md:translate-x-0'
+      sidebarOpen ? 'w-72 translate-x-0' : 'w-0 -translate-x-full overflow-hidden opacity-0 lg:opacity-100 lg:w-0 lg:translate-x-0'
     ]"
   >
     <!-- Header -->
@@ -18,12 +21,23 @@
       </n-button>
       <n-tooltip trigger="hover">
         <template #trigger>
-          <n-button quaternary circle size="small" @click="$emit('refresh')" :loading="isListLoading" class="hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors">
+          <n-button quaternary circle size="small" :aria-label="t('common.refresh')" @click="$emit('refresh')" :loading="isListLoading" class="hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors">
             <template #icon><n-icon><RefreshOutline /></n-icon></template>
           </n-button>
         </template>
         {{ t('common.refresh') }}
       </n-tooltip>
+      <n-button
+        quaternary
+        circle
+        size="small"
+        class="chat-sidebar-close ml-1 lg:hidden"
+        data-testid="chat-sidebar-close"
+        :aria-label="t('chat.closeSidebar')"
+        @click="$emit('close')"
+      >
+        <template #icon><n-icon><CloseOutline /></n-icon></template>
+      </n-button>
     </div>
 
     <!-- Conversation list -->
@@ -67,7 +81,7 @@
       >
         <div
           v-if="currentConversationId === conv.id"
-          class="absolute left-0 top-1/2 -translate-y-1/2 w-1 h-6 bg-slate-500 rounded-r-full animate-pulse shadow-[0_0_10px_rgba(99,102,241,0.5)]"
+          class="absolute left-0 top-1/2 -translate-y-1/2 w-1 h-6 bg-slate-500 rounded-r-full animate-pulse shadow-[0_0_10px_rgba(37,99,235,0.5)]"
         ></div>
 
         <div class="flex-shrink-0 mr-3 text-lg opacity-80 transition-transform duration-300 group-hover:scale-110">
@@ -90,7 +104,7 @@
         >
           <n-popconfirm @positive-click.stop="$emit('deleteConversation', conv.id)">
             <template #trigger>
-              <n-button size="tiny" quaternary circle class="text-gray-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors">
+              <n-button size="tiny" quaternary circle :aria-label="t('chat.confirmDelete')" class="text-gray-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors">
                 <template #icon><n-icon><TrashOutline /></n-icon></template>
               </n-button>
             </template>
@@ -112,7 +126,7 @@ import type { Conversation } from '@/api/conversation'
 import { format } from 'date-fns'
 import { useAppVersion } from '@/composables/useAppVersion'
 import {
-  AddOutline, RefreshOutline, ChatboxOutline, ChatboxEllipsesOutline, TrashOutline
+  AddOutline, RefreshOutline, ChatboxOutline, ChatboxEllipsesOutline, TrashOutline, CloseOutline
 } from '@vicons/ionicons5'
 
 const { t } = useI18n()
@@ -126,6 +140,8 @@ defineProps<{
   isListLoading: boolean
   convLoadError: boolean
   currentConversationId: string | number | undefined
+  /** 关闭（或移动端抽屉未打开）时整体移出 tab 序与可访问性树 */
+  inert?: boolean
 }>()
 
 defineEmits<{
@@ -133,6 +149,7 @@ defineEmits<{
   refresh: []
   selectConversation: [conv: Conversation]
   deleteConversation: [id: string]
+  close: []
 }>()
 
 const formatDate = (dateStr: string) => {
@@ -162,6 +179,13 @@ const formatDate = (dateStr: string) => {
 @media (hover: none) {
   .sidebar-conv-actions {
     opacity: 1;
+  }
+}
+
+@media (max-width: 1023.98px) {
+  .chat-sidebar-close.n-button {
+    height: 44px !important;
+    width: 44px !important;
   }
 }
 </style>
