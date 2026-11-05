@@ -266,8 +266,8 @@
                         </div>
                         </div>
                         <div 
-                          v-if="item.status === 'failed' && item.parse_error" 
-                          class="mt-2 text-xs leading-4 text-red-600 dark:text-red-400 bg-red-50/70 dark:bg-red-900/20 border border-red-100 dark:border-red-800/50 rounded-md px-2 py-1.5 break-all line-clamp-2 cursor-pointer hover:bg-red-100 dark:hover:bg-red-900/30 transition-colors shadow-sm" 
+                          v-if="item.status === 'failed' && item.parse_error"
+                          class="mt-2 text-xs leading-4 text-red-600 dark:text-red-400 bg-red-50/70 dark:bg-red-900/20 border border-red-100 dark:border-red-800/50 rounded-md px-2 py-1.5 break-all line-clamp-2 cursor-pointer hover:bg-red-100 dark:hover:bg-red-900/30 transition-colors shadow-sm"
                           :title="item.parse_error"
                           @click.stop="showErrorDetail(item.parse_error)"
                         >
@@ -332,8 +332,8 @@
                               {{ getStatusLabel(item) }}
                             </n-tag>
                             <div 
-                              v-if="item.status === 'failed' && item.parse_error" 
-                              class="text-xs text-red-600 dark:text-red-400 max-w-[220px] truncate cursor-pointer hover:underline decoration-dotted" 
+                              v-if="item.status === 'failed' && item.parse_error"
+                              class="text-xs text-red-600 dark:text-red-400 max-w-[220px] truncate cursor-pointer hover:underline decoration-dotted"
                               :title="item.parse_error"
                               @click.stop="showErrorDetail(item.parse_error)"
                             >
