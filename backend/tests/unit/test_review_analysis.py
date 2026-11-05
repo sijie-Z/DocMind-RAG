@@ -3105,6 +3105,24 @@ def test_penalty_colon_fee_duration_is_not_payment():
     )
 
 
+def test_penalty_colon_mixed_label_fee_is_not_payment():
+    """混合标签「逾期付款违约金：…费用缴纳」不得放行付款/起算（评审 B R4）。"""
+    for text in (
+        "第三条 付款期限：逾期付款违约金：相关费用应在合同生效后10天内缴纳。",
+        "第三条 付款期限：逾期付款违约金：甲方应在验收合格后30天内缴纳验收费用。",
+        "第三条 付款期限：逾期付款违约金：甲方应在验收合格后30天内缴纳社保费用。",
+    ):
+        clauses = [_clause(text)]
+        assert analysis.extract_payment_term(clauses)["status"] == "not_found", text
+        assert analysis.extract_start_condition(clauses)["status"] == "not_found", text
+
+    # 混合标签 + 强付款宾语仍是付款定义（起算保留）。
+    nested = [_clause("第三条 付款期限：逾期付款违约金：甲方应在验收合格后30天内支付货款。")]
+    facts = analysis.extract_payment_term(nested)
+    assert (facts["status"], facts["value"], facts["unit"]) == ("identified", 30, "day")
+    assert analysis.extract_start_condition(nested)["events"] == ["验收合格"]
+
+
 def test_liability_suffix_with_nonpayment_object_is_masked():
     """责任句后缀「付款动词+税费/社保类宾语」仍属罚则，不得泄漏起算（评审 B N2）。"""
     for suffix in (
@@ -3199,3 +3217,16 @@ def test_liability_article_body_payment_is_intentionally_excluded():
     ]
     assert analysis.extract_payment_term(clauses)["status"] == "not_found"
     assert analysis.extract_start_condition(clauses)["status"] == "not_found"
+
+
+def test_repeated_payment_verb_conjunct_is_not_vetoed():
+    """同一付款动词重复时，任一次「动词+付款宾语」都算并列义务（评审 A R4）。"""
+    for body in (
+        "甲方应在验收合格后30天内支付货款并支付相关税费。",
+        "甲方应在验收合格后30天内支付货款并支付印花税。",
+        "甲方应在验收合格后30天内支付货款并支付增值税。",
+        "甲方应在验收合格后30天内结清尾款并结清往来账目。",
+    ):
+        facts = analysis.extract_payment_term([_clause(f"第三条 付款期限：{body}")])
+        assert facts["status"] == "identified", body
+        assert (facts["value"], facts["unit"]) == (30, "day"), body

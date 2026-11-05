@@ -85,6 +85,19 @@ def _permissive_colon_replacement(piece: str) -> str | None:
     return analysis._MASK + colon.group(0) + suffix
 
 
+def _last_occurrence_payment_precedes(fragment: str, start: int) -> bool:
+    """并列中性化只检查每个动词最后一次出现的旧行为。"""
+    head = fragment[:start]
+    for verb in analysis._PAYMENT_VERBS:
+        index = head.rfind(verb)
+        if index == -1:
+            continue
+        object_tail = head[index + len(verb) : index + len(verb) + analysis._WEAK_OBJECT_WINDOW]
+        if any(noun in object_tail for noun in analysis._PAYMENT_NOUNS):
+            return True
+    return False
+
+
 def _hint_only_heading_end(text: str, heading_hint: str | None = None) -> int:
     """hint 失配时不按当前文本回退的旧行为（期限屏蔽后标题无法剥离）。"""
     if not heading_hint:
@@ -258,6 +271,16 @@ def _mutation_specs() -> list[tuple[str, str, Any]]:
             "conjunct_payment_neutralization_disabled",
             "关闭并列义务中性化（支付货款并承担税费 丢失付款期限）",
             lambda: _patched(analysis, "_payment_precedes", lambda fragment, start: False),
+        ),
+        (
+            "penalty_colon_mixed_label_released",
+            "混合标签罚则费用放行（相关费用/社保费用被当付款定义）",
+            lambda: _patched(analysis, "_COLON_STRONG_PAYMENT_NOUNS", analysis._PAYMENT_NOUNS),
+        ),
+        (
+            "payment_precedes_last_occurrence_only",
+            "并列中性化只查动词最后一次出现（支付货款并支付相关税费 丢失）",
+            lambda: _patched(analysis, "_payment_precedes", _last_occurrence_payment_precedes),
         ),
     ]
 

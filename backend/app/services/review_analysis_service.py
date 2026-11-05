@@ -565,6 +565,26 @@ _PAYMENT_NOUNS = (
     "债务",
     "欠款",
 )
+# 罚则冒号/混合标签的付款定义必须含强付款宾语：单凭「费用/金额」不构成
+# 付款子句（验收费用/差旅费用/社保费用 是费用用途，评审 B D15 R4）。
+_COLON_STRONG_PAYMENT_NOUNS = (
+    "付款",
+    "货款",
+    "价款",
+    "账期",
+    "结算",
+    "款项",
+    "尾款",
+    "进度款",
+    "预付款",
+    "首付款",
+    "余款",
+    "合同总价",
+    "总价",
+    "全款",
+    "债务",
+    "欠款",
+)
 _SUFFIX_LIABILITY_TERMS = (
     "违约",
     "赔偿",
@@ -709,8 +729,9 @@ def _liability_colon_replacement(piece: str) -> str | None:
     ):
         return None
     # 必须同时有强付款名词与付款动词：仅起算事件/期限不构成付款子句
-    # （罚则支付起算不得污染四项，评审 B D14 R6）。
-    has_payment_context = any(noun in suffix for noun in _PAYMENT_NOUNS) and any(
+    # （罚则支付起算不得污染四项，评审 B D14 R6）；「费用/金额」等宽泛名词
+    # 也不构成付款定义（验收费用/差旅费用/社保费用，评审 B D15 R4）。
+    has_payment_context = any(noun in suffix for noun in _COLON_STRONG_PAYMENT_NOUNS) and any(
         verb in suffix for verb in _PAYMENT_VERBS
     )
     if not has_payment_context:
@@ -1068,17 +1089,18 @@ def _payment_precedes(fragment: str, start: int) -> bool:
     """排除词前同片段是否已有付款谓语+宾语（「结清尾款并缴纳增值税」）。
 
     弱动词（结清/付清/清偿/缴纳）与强动词（支付/付款/结算）一视同仁：
-    任一「付款动词+12 字内付款名词」序列都说明排除词只是并列义务
-    （评审 A D15 B1）。
+    任一「付款动词+12 字内付款名词」序列都说明排除词只是并列义务；同一
+    动词的每一次出现都要检查（「支付货款并支付相关税费」里最后一次支付的
+    宾语为空，第一次的宾语是货款，评审 A D15 B1/R4）。
     """
     head = fragment[:start]
     for verb in _PAYMENT_VERBS:
-        index = head.rfind(verb)
-        if index == -1:
-            continue
-        object_tail = head[index + len(verb) : index + len(verb) + _WEAK_OBJECT_WINDOW]
-        if any(noun in object_tail for noun in _PAYMENT_NOUNS):
-            return True
+        index = head.find(verb)
+        while index != -1:
+            object_tail = head[index + len(verb) : index + len(verb) + _WEAK_OBJECT_WINDOW]
+            if any(noun in object_tail for noun in _PAYMENT_NOUNS):
+                return True
+            index = head.find(verb, index + 1)
     return False
 
 
@@ -1125,9 +1147,10 @@ _COLON_PAYMENT_DEFINITION_TERMS = ("付款期限", "付款时间", "付款方式
 def _penalty_colon_scope(fragment: str) -> bool:
     """责任头冒号后的期限归责任（「违约金：相关费用应在…缴纳」）。
 
-    冒号前的标签段含责任/罚则词、且不含严格付款关键词、冒号后也未定义
-    付款期限的，整片段期限不归付款；混合标题「逾期付款违约金：…」含付款
-    关键词，不受此限（D14 回归教训；评审 A D15 R2）。
+    冒号前的标签段含责任/罚则词、且冒号后未定义强付款宾语/付款期限的，整
+    片段期限不归付款；混合标题「逾期付款违约金：…」只有在冒号后含强付款
+    宾语（货款/价款/合同总价…）时才不受此限（D14 回归教训；评审 A D15 R2、
+    评审 B D15 R4）。
     """
     previous = 0
     for match in re.finditer(r"[:：]", fragment):
@@ -1135,9 +1158,14 @@ def _penalty_colon_scope(fragment: str) -> bool:
         previous = match.end()
         if not any(term in label for term in _PENALTY_TERMS):
             continue
-        if any(keyword in label for keyword in PAYMENT_KEYWORDS):
+        tail = fragment[match.end() :]
+        # 混合标签（逾期付款违约金）只有在冒号后含强付款宾语时才是付款定义；
+        # 仅「相关费用/验收费用…缴纳」仍按罚则处理（评审 B D15 R4）。
+        if any(keyword in label for keyword in PAYMENT_KEYWORDS) and any(
+            noun in tail for noun in _COLON_STRONG_PAYMENT_NOUNS
+        ):
             continue
-        if any(term in fragment[match.end() :] for term in _COLON_PAYMENT_DEFINITION_TERMS):
+        if any(term in tail for term in _COLON_PAYMENT_DEFINITION_TERMS):
             continue
         return True
     return False
