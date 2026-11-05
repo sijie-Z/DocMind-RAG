@@ -11,9 +11,9 @@
 
       <div class="relative z-10 flex flex-col items-center text-center">
         <div class="login-halo relative mb-10 flex h-44 w-44 items-center justify-center">
-          <span class="login-halo-ring absolute inset-0 rounded-full border border-white/15"></span>
-          <span class="login-halo-ring absolute inset-5 rounded-full border border-white/20" style="animation-delay: 0.9s"></span>
-          <span class="login-halo-ring absolute inset-10 rounded-full border border-white/25" style="animation-delay: 1.8s"></span>
+          <span class="login-halo-ring absolute inset-0 rounded-full border border-white/25"></span>
+          <span class="login-halo-ring absolute inset-5 rounded-full border border-white/30" style="animation-delay: 0.9s"></span>
+          <span class="login-halo-ring absolute inset-10 rounded-full border border-white/35" style="animation-delay: 1.8s"></span>
           <div class="absolute h-28 w-28 rounded-full bg-sky-500/10 blur-2xl"></div>
           <div class="relative flex h-20 w-20 items-center justify-center rounded-2xl border border-white/20 bg-white/5 backdrop-blur">
             <svg viewBox="0 0 48 48" fill="none" class="h-10 w-10 text-sky-300" aria-hidden="true">
@@ -64,6 +64,7 @@
             DM
           </div>
           <h1 class="text-2xl font-bold text-slate-900 dark:text-white">DocMind</h1>
+          <p class="mt-2 text-xs text-slate-500 dark:text-slate-400">{{ t('login.brandHeadline') }}</p>
         </div>
 
         <div class="mb-8 text-center md:text-left">
@@ -272,18 +273,18 @@ const rules = computed(() => ({
     { required: true, message: t('login.usernamePlaceholder'), trigger: 'input' },
     // 长度规则只属于注册：登录是"验证已有凭据"，不能用注册策略把老用户挡在门外。
     ...(isRegister.value
-      ? [{ min: 3, message: t('validation.usernameLength'), trigger: 'input' }]
+      ? [{ min: 3, message: t('validation.usernameLength'), trigger: 'blur' }]
       : [])
   ],
   password: [
     { required: true, message: t('login.passwordPlaceholder'), trigger: 'input' },
     ...(isRegister.value
-      ? [{ min: 8, message: t('validation.passwordLength'), trigger: 'input' }]
+      ? [{ min: 8, message: t('validation.passwordLength'), trigger: 'blur' }]
       : [])
   ],
   email: isRegister.value ? [
     { required: true, message: t('login.emailPlaceholder'), trigger: 'input' },
-    { type: 'email', message: t('validation.emailInvalid'), trigger: 'input' }
+    { type: 'email', message: t('validation.emailInvalid'), trigger: 'blur' }
   ] : []
 }))
 
@@ -364,11 +365,11 @@ const quickLogin = async (account: DemoAccount) => {
 @keyframes halo-pulse {
   0%,
   100% {
-    opacity: 0.25;
+    opacity: 0.35;
     transform: scale(1);
   }
   50% {
-    opacity: 0.55;
+    opacity: 0.7;
     transform: scale(1.04);
   }
 }
@@ -378,7 +379,8 @@ const quickLogin = async (account: DemoAccount) => {
 }
 
 .login-input {
-  --n-height: 44px;
+  /* Naive 在根节点内联写入 --n-height:40px（size=large），需 !important 覆盖。 */
+  --n-height: 44px !important;
 }
 
 @media (prefers-reduced-motion: reduce) {
