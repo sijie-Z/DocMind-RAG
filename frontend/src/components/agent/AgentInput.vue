@@ -52,7 +52,6 @@
         data-testid="ref-option"
         @mousedown.prevent="selectDoc(doc)"
       >
-        <span class="ref-option-icon"></span>
         <span class="ref-option-title">{{ doc.title || doc.file_name || doc.id }}</span>
       </button>
     </div>
@@ -107,7 +106,7 @@
           :disabled="stopping"
           @click="$emit('stop')"
         >
-          {{ stopping ? '⏳ 停止中…' : '⏹ 停止' }}
+          {{ stopping ? '停止中…' : '停止' }}
         </button>
       </template>
       <button
@@ -124,7 +123,7 @@
         :disabled="stopping"
         @click="$emit('stop')"
       >
-        {{ stopping ? '⏳ 停止中…' : '⏹ 停止' }}
+        {{ stopping ? '停止中…' : '停止' }}
       </button>
     </div>
     <div class="input-hint">

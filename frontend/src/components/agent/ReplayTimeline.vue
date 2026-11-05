@@ -395,7 +395,7 @@ function statusLabel(status: string): string {
 }
 
 .dark .step-tool {
-  color: #c4b5fd;
+  color: #93c5fd;
   background: rgba(124, 58, 237, 0.2);
 }
 

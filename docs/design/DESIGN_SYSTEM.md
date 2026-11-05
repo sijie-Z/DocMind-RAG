@@ -9,7 +9,15 @@
 - **模式**：Preserve（保留现有信息架构、路由、表单与品牌资产，逐批收敛视觉与可访问性）。
 - **明确拒绝**：紫色系（purple/violet/indigo/fuchsia/pink）、装饰性渐变、玻璃拟态、超大圆角、emoji 当图标、彩虹 KPI、只用颜色表达状态。
 
-参考来源（只取规则，不复制代码）：Dammyjay93/interface-design（MIT）、Ant Design DESIGN.md（MIT）、IBM Carbon（Apache-2.0）、Vercel Web Interface Guidelines（MIT）、garden-skills web-design-engineer（MIT）。调研快照见 `_scratch/vendor/interface-design` 与 `_scratch/wt-ui5/.scratch/ui-research/`。
+参考来源（只取规则，不复制代码）：
+
+- [Dammyjay93/interface-design](https://github.com/Dammyjay93/interface-design)（MIT）：信息密度、深度策略、状态与工艺检查；本地 vendor 于 `_scratch/vendor/interface-design`。
+- [Ant Design DESIGN.md](https://github.com/ant-design/ant-design/blob/master/DESIGN.md)（MIT）：14px 基准、4px 网格、32px 控件、6/8px 圆角、400/600 字重。
+- [IBM Carbon](https://carbondesignsystem.com/)（Apache-2.0）：空态/错误态、数据表格、筛选模式、数据可视化色板。
+- [Vercel Web Interface Guidelines](https://github.com/vercel-labs/web-interface-guidelines)（MIT）：URL 状态、焦点可见、图标按钮可访问名、状态不只靠颜色、移动端 44px。
+- [garden-skills web-design-engineer](https://github.com/ConardLi/garden-skills)（MIT）：Design Read、redesign 协议、反 AI 陈词滥调；本地 vendor 于 `_scratch/vendor/garden-skills`。
+
+调研快照：`_scratch/wt-ui5/.scratch/ui-research/`（同类产品界面与截图索引）、`_scratch/vendor/interface-design`。
 
 ## Tokens
 
@@ -74,7 +82,7 @@
 
 ## 验收（提交前自检）
 
-1. `grep -riE "purple|violet|indigo|fuchsia" src` 为 0；无动态 HSL 彩虹色。
+1. `grep -riE "purple|violet|indigo|fuchsia|pink|rgba\(\s*(99|139)\s*,\s*(102|92)\s*,\s*(241|246)" src` 为 0；无动态 HSL 彩虹色（如 `hsl(idx*45+220)`）。
 2. 新增文字对比度：白底 ≥4.5:1（可用 #2563eb / #047857 / #b45309 / #dc2626 / #64748b）。
 3. 键盘可完成主流程；焦点环可见且不被遮挡；图标按钮有 `aria-label`。
 4. 375 / 768 / 1440 无意外横向滚动；触控目标 ≥44px。
@@ -83,7 +91,7 @@
 
 ## 与现状的差距（按批收口）
 
-- `theme/index.ts` 的 `primaryColor` 仍是 slate `#64748b`，与动作色 token 漂移；语义色仍为 500 级（对比度不足）。
-- 工作台页面仍混用 `rounded-3xl`、`backdrop-blur`、彩色阴影；需在 Reviews/Dashboard 批次按 borders-first 收敛。
-- 全站仍有 ~169 处 `text-gray-400/slate-400` 信息文字需按背景逐一提升对比度。
-- Agent 组件内仍有硬编码中文与少量符号图标待清理。
+- 工作台页面仍混用 `rounded-3xl`、`backdrop-blur`、彩色阴影（Chat 侧栏/头部、登录卡、Dashboard 横幅与 KPI）；Reviews/Dashboard 批次按 borders-first 收敛。
+- Dashboard 6 张 KPI 卡仍是彩虹渐变（org 头像与图表分类色已去紫）。
+- 全站仍有约 169 处 `text-gray-400/slate-400` 信息文字需按背景逐一提升对比度。
+- Agent 组件内仍有硬编码中文待接 i18n。

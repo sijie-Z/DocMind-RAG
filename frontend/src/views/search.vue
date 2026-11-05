@@ -461,7 +461,7 @@ onMounted(async () => {
 
 <style scoped>
 .custom-scrollbar::-webkit-scrollbar { width: 6px; }
-.custom-scrollbar::-webkit-scrollbar-thumb { background: rgba(99, 102, 241, 0.1); border-radius: 10px; }
+.custom-scrollbar::-webkit-scrollbar-thumb { background: rgba(37, 99, 235, 0.1); border-radius: 10px; }
 .line-clamp-2 {
   display: -webkit-box;
   -webkit-line-clamp: 2;

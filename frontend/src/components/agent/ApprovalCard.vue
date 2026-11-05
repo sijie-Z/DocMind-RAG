@@ -1,7 +1,6 @@
 <template>
   <div class="approval-card" :class="{ expired }">
     <div class="approval-header">
-      <span class="approval-shield"></span>
       <span class="approval-title">工具执行前需人工审批</span>
       <span class="risk-badge" :class="`risk-${riskLevel}`">{{ riskLabel }}</span>
       <span v-if="expired" class="expired-badge">已超时</span>

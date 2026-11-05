@@ -12,8 +12,8 @@
         >
           <n-icon size="16" class="mr-1" aria-hidden="true"><ArrowBackOutline /></n-icon>{{ t('agent.backToChat') }}
         </button>
-        <h1 class="header-title">{{ t('menu.agent') }}</h1>
-        <span class="header-badge">{{ t('agent.headerBadge') }}</span>
+        <h1 class="header-title hidden md:block">{{ t('menu.agent') }}</h1>
+        <span class="header-badge hidden md:inline-flex">{{ t('agent.headerBadge') }}</span>
       </div>
       <div class="header-center">
         <SessionSelector
@@ -108,10 +108,10 @@
           data-testid="agent-terminal-toggle"
           @click="showTerminal = !showTerminal"
         >
-          <span aria-hidden="true">&gt;_</span> {{ t('agent.terminal.open') }}
+          <n-icon size="14" class="mr-1" aria-hidden="true"><TerminalOutline /></n-icon>{{ t('agent.terminal.open') }}
         </button>
         <button class="header-btn" @click="handleNewSession"><n-icon size="14" class="mr-1" aria-hidden="true"><AddOutline /></n-icon>{{ t('agent.newSession') }}</button>
-        <button class="header-btn" @click="handleClearMessages">{{ t('agent.clearMessages') }}</button>
+        <button class="header-btn" @click="handleClearMessages"><n-icon size="14" class="mr-1" aria-hidden="true"><TrashOutline /></n-icon>{{ t('agent.clearMessages') }}</button>
       </div>
     </div>
 
@@ -524,7 +524,7 @@ import {
   ThumbsUpOutline, ThumbsDownOutline, ArrowBackOutline, TimeOutline,
   SettingsOutline, AddOutline, AlertCircleOutline, ListOutline,
   ConstructOutline, CubeOutline, SearchOutline, DocumentTextOutline,
-  CloseCircleOutline, GitBranchOutline,
+  CloseCircleOutline, GitBranchOutline, TerminalOutline, TrashOutline,
 } from '@vicons/ionicons5'
 
 import PlanTree from '@/components/agent/PlanTree.vue'
@@ -1861,9 +1861,9 @@ async function loadInit() {
 }
 
 .dark .lineage-badge {
-  color: #c4b5fd;
+  color: #93c5fd;
   background: rgba(109, 40, 217, 0.2);
-  border-color: rgba(139, 92, 246, 0.45);
+  border-color: rgba(37, 99, 235, 0.45);
 }
 
 .lineage-parent {
@@ -1948,7 +1948,7 @@ async function loadInit() {
   font-size: 12px;
 }
 
-.dark .fork-seed-note { color: #c4b5fd; }
+.dark .fork-seed-note { color: #93c5fd; }
 
 /* issue #476：消息级「从此处分叉」入口 */
 .fork-here-line {
@@ -1969,7 +1969,7 @@ async function loadInit() {
   cursor: pointer;
 }
 
-.dark .fork-here-btn { color: #c4b5fd; border-color: rgba(139, 92, 246, 0.5); }
+.dark .fork-here-btn { color: #93c5fd; border-color: rgba(37, 99, 235, 0.5); }
 
 .fork-here-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 
@@ -2043,6 +2043,11 @@ async function loadInit() {
 .left-panel.collapsed {
   width: 28px;
   padding: 12px 4px;
+}
+
+/* 空计划且未展开：整块隐藏（桌面与移动端一致；计划到来时 watch 自动展开） */
+.left-panel.empty.collapsed {
+  display: none;
 }
 
 .panel-toggle {
@@ -2372,15 +2377,15 @@ async function loadInit() {
 }
 
 .steer-standalone.steer-applied {
-  background: rgba(99, 102, 241, 0.12);
-  border-color: rgba(99, 102, 241, 0.4);
+  background: rgba(37, 99, 235, 0.12);
+  border-color: rgba(37, 99, 235, 0.4);
   border-left-color: #2563eb;
   color: #1d4ed8;
 }
 
 .dark .steer-standalone.steer-applied {
-  background: rgba(99, 102, 241, 0.18);
-  color: #c7d2fe;
+  background: rgba(37, 99, 235, 0.18);
+  color: #bfdbfe;
 }
 
 .steer-badge-applied { background: #2563eb; }
@@ -2397,8 +2402,8 @@ async function loadInit() {
   gap: 8px;
   margin: 4px 0;
   padding: 8px 12px;
-  background: rgba(99, 102, 241, 0.08);
-  border: 1px solid rgba(99, 102, 241, 0.3);
+  background: rgba(37, 99, 235, 0.08);
+  border: 1px solid rgba(37, 99, 235, 0.3);
   border-left: 3px solid #2563eb;
   border-radius: 8px;
   font-size: 12px;
@@ -2406,8 +2411,8 @@ async function loadInit() {
 }
 
 .dark .plan-standalone {
-  background: rgba(99, 102, 241, 0.14);
-  color: #c7d2fe;
+  background: rgba(37, 99, 235, 0.14);
+  color: #bfdbfe;
 }
 
 .plan-standalone-badge {
@@ -2519,13 +2524,14 @@ async function loadInit() {
   gap: 16px;
   padding: 4px 16px;
   border-top: 1px solid var(--border-color, #e5e7eb);
-  font-size: 10px;
-  color: var(--text-tertiary, #9ca3af);
+  font-size: 11px;
+  color: var(--text-tertiary, #6b7280);
   background: var(--bg-secondary, #f9fafb);
   flex-shrink: 0;
 }
 
 .dark .status-bar {
+  color: #9ca3af;
   background: var(--bg-secondary-dark, #111827);
   border-color: var(--border-color-dark, #1e293b);
 }
@@ -2608,7 +2614,8 @@ async function loadInit() {
   }
 
   .header-btn {
-    padding: 4px 8px;
+    min-height: 44px;
+    padding: 6px 10px;
     font-size: 11px;
   }
 

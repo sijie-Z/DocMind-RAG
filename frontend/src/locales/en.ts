@@ -455,6 +455,7 @@ export default {
     deleteConfirm: 'Are you sure you want to delete this document? It will be removed from the knowledge base and cannot be recovered.',
     batchDeleteConfirm: 'Are you sure you want to delete the selected {count} documents? This action cannot be undone.',
     graph: {
+      subtitle: 'Entities and relations extracted from indexed documents',
       emptyTitle: 'No graph data yet',
       emptyDesc: 'Upload documents and complete indexing, and the knowledge graph will be built automatically',
       loadFailed: 'Failed to load graph data, please try again later',

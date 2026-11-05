@@ -5,36 +5,38 @@
     @scroll="$emit('scroll')"
   >
     <div class="max-w-3xl mx-auto space-y-6">
-      <!-- Welcome screen（E7：历史加载中不显示空态欢迎屏，避免「加载中」与「新会话」混淆） -->
-      <div v-if="messages.length === 0 && !isLoadingHistory" class="flex flex-col items-center justify-center mt-16 md:mt-24 text-center animate-fade-in">
-        <div class="relative mb-10">
-          <div class="w-28 h-28 bg-blue-700 rounded-3xl shadow-xl shadow-blue-900/20 flex items-center justify-center transform hover:scale-105 transition-transform duration-300 text-white">
-            <DocMindMark :size="64" />
+      <!-- Welcome screen（E7：历史加载中不显示空态欢迎屏，避免「加载中」与「新会话」混淆）
+           纸面式首屏：小字品牌眉题 + 标题 + 任务卡，不再用大色块/彩色阴影抢占输入区焦点。 -->
+      <div v-if="messages.length === 0 && !isLoadingHistory" class="mt-10 md:mt-16 animate-fade-in">
+        <div class="max-w-2xl">
+          <div class="mb-4 text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500 dark:text-slate-400">
+            DocMind
           </div>
-          <div class="absolute -inset-2 bg-slate-400/20 rounded-[1.5rem] blur-xl -z-10"></div>
+          <h2 class="mb-3 text-2xl font-semibold tracking-tight text-slate-900 dark:text-white md:text-3xl" style="text-wrap: balance">
+            {{ t('chat.welcome') }}
+          </h2>
+          <p class="mb-8 max-w-xl text-base leading-relaxed text-slate-600 dark:text-slate-400">
+            {{ t('chat.welcomeDesc') }}
+          </p>
         </div>
-        <h2 class="text-3xl md:text-4xl font-extrabold tracking-tight text-slate-900 dark:text-white mb-3">
-          {{ t('chat.welcome') }}
-        </h2>
-        <p class="text-base md:text-lg text-slate-500 dark:text-slate-400 max-w-md mb-10 font-light leading-relaxed">
-          {{ t('chat.welcomeDesc') }}
-        </p>
-        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 w-full max-w-2xl">
+        <div class="grid max-w-2xl grid-cols-1 gap-3 sm:grid-cols-2">
           <button
             v-for="(suggestion, index) in suggestions"
             :key="index"
-            class="p-4 md:p-5 bg-white/80 dark:bg-gray-800/80 backdrop-blur border border-slate-200/60 dark:border-gray-700/60 rounded-2xl text-left hover:border-slate-400/60 hover:shadow-lg hover:shadow-slate-500/10 transition-all duration-300 group relative overflow-hidden"
+            class="group flex items-start gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3.5 text-left transition-colors duration-200 hover:border-slate-300 hover:bg-slate-50/70 dark:border-slate-700/70 dark:bg-slate-900 dark:hover:border-slate-600 dark:hover:bg-slate-800/60"
             @click="$emit('useSuggestion', suggestion)"
           >
-            <div class="absolute top-0 right-0 p-3 opacity-0 group-hover:opacity-100 transition-all duration-300 transform translate-x-2 group-hover:translate-x-0">
-              <n-icon class="text-slate-500" size="18"><ArrowForwardOutline /></n-icon>
-            </div>
-            <h3 class="font-semibold text-sm md:text-base text-slate-800 dark:text-slate-200 group-hover:text-slate-600 dark:group-hover:text-slate-400 mb-1.5 tracking-wide">
-              {{ suggestion.title }}
-            </h3>
-            <p class="text-xs md:text-sm text-slate-500 dark:text-slate-400 line-clamp-2 leading-relaxed font-light">
-              {{ suggestion.desc }}
-            </p>
+            <n-icon class="mt-0.5 shrink-0 text-slate-400 transition-colors group-hover:text-blue-600 dark:group-hover:text-blue-400" size="18">
+              <ArrowForwardOutline />
+            </n-icon>
+            <span class="min-w-0">
+              <span class="mb-1 block text-sm font-medium text-slate-800 dark:text-slate-200">
+                {{ suggestion.title }}
+              </span>
+              <span class="block text-xs leading-relaxed text-slate-500 dark:text-slate-400">
+                {{ suggestion.desc }}
+              </span>
+            </span>
           </button>
         </div>
       </div>

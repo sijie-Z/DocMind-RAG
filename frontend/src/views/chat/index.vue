@@ -148,7 +148,6 @@ import { useI18n } from 'vue-i18n'
 import { useChatStore } from '@/stores/chat'
 import { useUserStore } from '@/stores/user'
 import { useAgentStore } from '@/stores/agent'
-import { useAppStore } from '@/stores/app'
 import { useDedupedMessage } from '@/utils/message'
 import { useConfirmDangerousAction } from '@/utils/confirm'
 import { CloudUploadOutline, AlertCircleOutline, ArrowBackOutline } from '@vicons/ionicons5'
@@ -173,7 +172,6 @@ const router = useRouter()
 const chatStore = useChatStore()
 const userStore = useUserStore()
 const agentStore = useAgentStore()
-const appStore = useAppStore()
 
 // 复合异步 owner：页面 generation + #549 同步 identityEpoch；卸载另使旧页面永久失效。
 let conversationGeneration = 0
@@ -487,11 +485,12 @@ const handleUnbind = async () => {
 }
 
 const checkScreenSize = () => {
-  if (window.innerWidth < 768) appStore.setSidebarCollapsed(true)
-  else appStore.setSidebarCollapsed(false)
+  // <1024 收起会话列表，把宽度留给对话主区（768 下全局导航 + 会话列表
+  // 会同时展开，主区只剩 ~224px）。
+  sidebarOpen.value = window.innerWidth >= 1024
 }
 
-const toggleSidebar = () => appStore.toggleSidebar()
+const toggleSidebar = () => { sidebarOpen.value = !sidebarOpen.value }
 
 const resetConversationView = (reconnect = false) => {
   advanceConversationGeneration()
@@ -878,9 +877,9 @@ onMounted(async () => {
     position: fixed !important;
     padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 12px) !important;
   }
-  /* Messages area: adjust bottom padding for fixed input */
+  /* Messages area: adjust bottom padding for fixed input (44px 工具条 + 两行控制) */
   div[class*="pt-20 pb-40"] {
-    padding-bottom: 160px !important;
+    padding-bottom: 248px !important;
   }
 }
 </style>

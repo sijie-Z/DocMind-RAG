@@ -370,6 +370,7 @@ export default {
       other: 'Autre'
     },
     graph: {
+      subtitle: 'Entités et relations extraites des documents indexés',
       zoomIn: 'Zoom avant',
       zoomOut: 'Zoom arrière',
       fitView: 'Réinitialiser la vue'

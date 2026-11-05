@@ -31,7 +31,7 @@
         quaternary
         circle
         size="small"
-        class="ml-1 md:hidden"
+        class="chat-sidebar-close ml-1 md:hidden"
         data-testid="chat-sidebar-close"
         :aria-label="t('chat.closeSidebar')"
         @click="$emit('close')"
@@ -81,7 +81,7 @@
       >
         <div
           v-if="currentConversationId === conv.id"
-          class="absolute left-0 top-1/2 -translate-y-1/2 w-1 h-6 bg-slate-500 rounded-r-full animate-pulse shadow-[0_0_10px_rgba(99,102,241,0.5)]"
+          class="absolute left-0 top-1/2 -translate-y-1/2 w-1 h-6 bg-slate-500 rounded-r-full animate-pulse shadow-[0_0_10px_rgba(37,99,235,0.5)]"
         ></div>
 
         <div class="flex-shrink-0 mr-3 text-lg opacity-80 transition-transform duration-300 group-hover:scale-110">
@@ -179,6 +179,13 @@ const formatDate = (dateStr: string) => {
 @media (hover: none) {
   .sidebar-conv-actions {
     opacity: 1;
+  }
+}
+
+@media (max-width: 767.98px) {
+  .chat-sidebar-close.n-button {
+    height: 44px !important;
+    width: 44px !important;
   }
 }
 </style>

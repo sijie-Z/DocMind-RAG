@@ -8,11 +8,13 @@ export const CHART_COLORS = {
   info: '#3b82f6',
   sky: '#0ea5e9',
   cyan: '#06b6d4',
-  pink: '#ec4899',
 }
 
+// 分类序列：无紫/品红，状态色不混入分类色
+export const CHART_CATEGORICAL = ['#2563eb', '#0891b2', '#0f766e', '#15803d', '#b45309', '#475569']
+
 export const CHART_THEME = {
-  color: [CHART_COLORS.primary, CHART_COLORS.secondary, CHART_COLORS.sky, CHART_COLORS.cyan, CHART_COLORS.warning],
+  color: CHART_CATEGORICAL,
   backgroundColor: 'transparent',
   textStyle: {
     color: '#6b7280',
@@ -114,7 +116,7 @@ export const CHART_THEME = {
 }
 
 export const DARK_CHART_THEME = {
-  color: [CHART_COLORS.primary, CHART_COLORS.secondary, CHART_COLORS.sky, CHART_COLORS.cyan, CHART_COLORS.warning],
+  color: CHART_CATEGORICAL,
   backgroundColor: 'transparent',
   textStyle: {
     color: '#9ca3af',

@@ -99,13 +99,13 @@ function signOf(type: DiffLineType): string {
 .dark .diff-del .diff-text, .dark .diff-del .diff-sign { color: #fca5a5; }
 
 .diff-hunk {
-  background: rgba(99, 102, 241, 0.08);
+  background: rgba(37, 99, 235, 0.08);
 }
 .diff-hunk .diff-text {
   color: #2563eb;
 }
-.dark .diff-hunk { background: rgba(99, 102, 241, 0.16); }
-.dark .diff-hunk .diff-text { color: #a5b4fc; }
+.dark .diff-hunk { background: rgba(37, 99, 235, 0.16); }
+.dark .diff-hunk .diff-text { color: #93c5fd; }
 
 .diff-meta .diff-text {
   color: var(--text-tertiary, #9ca3af);

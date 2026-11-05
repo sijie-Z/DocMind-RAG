@@ -11,7 +11,7 @@
       </n-button>
 
       <div class="flex items-center space-x-2">
-        <div class="bg-blue-700 p-1.5 rounded-lg text-white shadow-sm">
+        <div class="inline-flex items-center justify-center bg-blue-700 p-1.5 rounded-lg text-white shadow-sm">
           <DocMindMark :size="18" />
         </div>
         <div class="hidden sm:block">

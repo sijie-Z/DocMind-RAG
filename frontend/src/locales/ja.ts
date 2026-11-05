@@ -369,6 +369,7 @@ export default {
       other: 'その他'
     },
     graph: {
+      subtitle: 'インデックス済みドキュメントから抽出したエンティティと関係',
       zoomIn: '拡大',
       zoomOut: '縮小',
       fitView: '表示をリセット'

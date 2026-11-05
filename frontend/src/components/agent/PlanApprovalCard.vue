@@ -180,16 +180,16 @@ function emitSaveApprove() {
 
 <style scoped>
 .plan-approval-card {
-  border: 1px solid rgba(99, 102, 241, 0.35);
+  border: 1px solid rgba(37, 99, 235, 0.35);
   border-left: 4px solid #2563eb;
   border-radius: 10px;
-  background: rgba(99, 102, 241, 0.06);
+  background: rgba(37, 99, 235, 0.06);
   padding: 12px 14px;
   font-size: 12px;
 }
 
 .dark .plan-approval-card {
-  background: rgba(99, 102, 241, 0.12);
+  background: rgba(37, 99, 235, 0.12);
   border-color: rgba(129, 140, 248, 0.4);
 }
 
@@ -246,7 +246,7 @@ function emitSaveApprove() {
   width: 18px;
   height: 18px;
   border-radius: 50%;
-  background: rgba(99, 102, 241, 0.18);
+  background: rgba(37, 99, 235, 0.18);
   color: #1d4ed8;
   font-size: 10px;
   font-weight: 600;
@@ -254,7 +254,7 @@ function emitSaveApprove() {
   text-align: center;
 }
 
-.dark .step-index { color: #c7d2fe; }
+.dark .step-index { color: #bfdbfe; }
 
 .step-body { flex: 1; min-width: 0; }
 
