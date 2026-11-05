@@ -2985,3 +2985,43 @@ def test_word_internal_ji_in_boji_chuji_is_not_conjunction():
     for word in ("波及付款违约金", "触及付款违约金", "提及付款违约金", "普及付款违约金"):
         assert analysis._LIABILITY_CONJUNCTION_RE.search(word) is None, word
     assert analysis._LIABILITY_CONJUNCTION_RE.search("付款及违约金") is not None
+
+
+def test_anchor_words_do_not_absorb_liability_tax_or_settlement():
+    """缴纳/结清 不得把责任条款、税费社保、往来账目吸成付款（D15 R1）。"""
+    liability = [
+        _clause(
+            "第九条 违约金的缴纳：乙方应在验收合格后10天内缴纳；逾期每日按0.05%支付违约金。",
+            clause_no=[9],
+        )
+    ]
+    assert analysis.extract_payment_term(liability)["status"] == "not_found"
+    assert analysis.extract_start_condition(liability)["status"] == "not_found"
+
+    expense = [
+        _clause(
+            "第四条 付款期限：甲方应支付违约金并在验收合格后30天内承担验收费用。",
+            clause_no=[4],
+        )
+    ]
+    assert analysis.extract_payment_term(expense)["status"] == "not_found"
+    assert analysis.extract_start_condition(expense)["status"] == "not_found"
+
+    mixed = [
+        _clause(
+            "第五条 付款与税费：甲方应在验收合格后10天内支付货款。"
+            "乙方应在验收合格后30天内缴纳增值税及社会保险费。",
+            clause_no=[5],
+        )
+    ]
+    facts = analysis.extract_payment_term(mixed)
+    assert facts["status"] == "identified"
+    assert (facts["value"], facts["unit"]) == (10, "day")
+
+    settlement = [
+        _clause(
+            "第六条 付款期限：甲方应支付货款；合同解除后30天内双方结清往来账目。",
+            clause_no=[6],
+        )
+    ]
+    assert analysis.extract_payment_term(settlement)["status"] == "not_found"

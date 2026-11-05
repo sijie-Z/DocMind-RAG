@@ -64,6 +64,15 @@ PAYMENT_KEYWORDS = ("付款", "支付", "账期", "价款", "货款", "结算")
 PAYMENT_ANCHOR_KEYWORDS = PAYMENT_KEYWORDS + ("结清", "付清", "清偿", "缴纳")
 # 期限匹配必须离付款锚点比这些「非付款期限」语境更近（保修期/日期签署等）。
 NON_PAYMENT_CONTEXT = (
+    "税费",
+    "增值税",
+    "社会保险",
+    "社保",
+    "公积金",
+    "往来账目",
+    "报销",
+    "差旅",
+    "诉讼费",
     "保修",
     "质保",
     "审核",
@@ -637,7 +646,7 @@ def _is_liability_article(clause: Clause) -> bool:
     """
     raw = clause.raw_text or clause.text
     heading = _full_title(raw) or _heading_segment(raw)
-    if any(keyword in heading for keyword in PAYMENT_ANCHOR_KEYWORDS):
+    if any(keyword in heading for keyword in PAYMENT_KEYWORDS):
         return False
     return any(term in heading for term in _LIABILITY_HEADING_TERMS)
 
@@ -726,11 +735,14 @@ def _mask_liability_sentences(
             conjunction = _PAYMENT_CONJUNCTION_RE.search(piece)
         prefix = piece[: conjunction.start()] if conjunction else ""
         suffix = piece[conjunction.end() :] if conjunction else ""
-        prefix_is_payment = any(
-            keyword in prefix for keyword in PAYMENT_ANCHOR_KEYWORDS
-        ) and not any(term in prefix for term in _PENALTY_TERMS)
+        prefix_is_payment = (
+            any(noun in prefix for noun in _PAYMENT_NOUNS)
+            and any(verb in prefix for verb in _PAYMENT_VERBS)
+            and not any(term in prefix for term in _PENALTY_TERMS)
+        )
         suffix_is_payment = (
             any(noun in suffix for noun in _PAYMENT_NOUNS)
+            and any(verb in suffix for verb in _PAYMENT_VERBS)
             and not any(term in suffix for term in _PENALTY_TERMS)
             and not any(term in suffix for term in _SUFFIX_LIABILITY_TERMS)
         )
@@ -1089,7 +1101,9 @@ def extract_payment_term(clauses: list[Clause]) -> dict[str, Any]:
     payment_clauses = [
         c
         for c in clauses
-        if any(k in c.text for k in PAYMENT_KEYWORDS) and not _is_exception_article(c)
+        if any(k in c.text for k in PAYMENT_KEYWORDS)
+        and not _is_exception_article(c)
+        and not _is_liability_article(c)
     ]
     referenced_clauses, unresolved_reference = _payment_reference_clauses(clauses, payment_clauses)
     referenced_ids = {clause.chunk_id for clause in referenced_clauses}

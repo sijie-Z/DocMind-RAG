@@ -33,6 +33,13 @@ def _patched(target: Any, name: str, value: Any) -> Iterator[None]:
 
 
 @contextmanager
+def _anchor_lexicon_reverted() -> Iterator[None]:
+    """回退付款锚点词表（结清/付清/清偿/缴纳），模拟 D15 新词缺失。"""
+    with _patched(analysis, "PAYMENT_ANCHOR_KEYWORDS", analysis.PAYMENT_KEYWORDS):
+        yield
+
+
+@contextmanager
 def _payment_lexicon_reverted() -> Iterator[None]:
     """回退 D15 新增的付款动词/名词，模拟词表缺口。"""
     with _patched(
@@ -207,6 +214,11 @@ def _mutation_specs() -> list[tuple[str, str, Any]]:
             "payment_lexicon_reverted",
             "回退新增付款动词/名词（结清/付清/合同总价等）",
             lambda: _payment_lexicon_reverted(),
+        ),
+        (
+            "payment_anchor_lexicon_reverted",
+            "回退付款锚点词表（结清/付清/清偿/缴纳）",
+            lambda: _anchor_lexicon_reverted(),
         ),
     ]
 

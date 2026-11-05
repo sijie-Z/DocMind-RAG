@@ -1,4 +1,4 @@
-"""核验 golden set（D5）：51 组人工编写的中文采购合同 V1/V2 与期望值。
+"""核验 golden set（D5）：53 组人工编写的中文采购合同 V1/V2 与期望值。
 
 gold 只依据合同文本人工判定，不从引擎输出反推；change_type 用产品语义：
 - 付款天数 30天→60天 = payment_term modified；
@@ -1736,6 +1736,74 @@ CASES = [
             "start_condition": _item(
                 "unchanged", {"status": "identified", "events": ["验收合格"]}, ("revised", 3)
             ),
+            "acceptance_invoice": _item("unchanged", _ACCEPT_OK, ("revised", 4)),
+            "exception": _item("unidentified", _ABSENT),
+        },
+    },
+    {
+        "id": "payment_excludes_tax_social_insurance",
+        "note": "税费/社保缴纳期限不得与付款期限并列成 ambiguous（D15 R1）",
+        "base": _doc(
+            _A1,
+            _A2,
+            "第三条 付款期限：甲方应在验收合格后10天内支付货款。",
+            _acc("四", "乙方交付后10个工作日内完成验收，验收标准以本合同附件二为准。"),
+            "第五条 付款与税费：甲方应在验收合格后10天内支付货款。"
+            "乙方应在验收合格后30天内缴纳增值税及社会保险费。",
+            _A6,
+            _A7,
+            _A8,
+            _A9_EXTRA,
+        ),
+        "revised": _doc(
+            _A1,
+            _A2,
+            "第三条 付款期限：甲方应在验收合格后10天内支付货款。",
+            _acc("四", "乙方交付后10个工作日内完成验收，验收标准以本合同附件二为准。"),
+            "第五条 付款与税费：甲方应在验收合格后10天内支付货款。"
+            "乙方应在验收合格后30天内缴纳增值税及社会保险费。",
+            _A6,
+            _A7,
+            _A8,
+            _A9_EXTRA,
+        ),
+        "items": {
+            "payment_term": _item(
+                "unchanged", {"status": "identified", "value": 10, "unit": "day"}, ("revised", 3)
+            ),
+            "start_condition": _item(
+                "unchanged", {"status": "identified", "events": ["验收合格"]}, ("revised", 3)
+            ),
+            "acceptance_invoice": _item("unchanged", _ACCEPT_OK, ("revised", 4)),
+            "exception": _item("unidentified", _ABSENT),
+        },
+    },
+    {
+        "id": "payment_excludes_liability_anchor_title",
+        "note": "违约金的缴纳/承担验收费用：付款与起算均不得识别（D15 R1）",
+        "base": _doc(
+            _A1,
+            _A2,
+            "第四条 付款期限：甲方应支付违约金并在验收合格后30天内承担验收费用。",
+            _A5,
+            _A6,
+            _A7,
+            _A8,
+            "第九条 违约金的缴纳：乙方应在验收合格后10天内缴纳；逾期每日按0.05%支付违约金。",
+        ),
+        "revised": _doc(
+            _A1,
+            _A2,
+            "第四条 付款期限：甲方应支付违约金并在验收合格后30天内承担验收费用。",
+            _A5,
+            _A6,
+            _A7,
+            _A8,
+            "第九条 违约金的缴纳：乙方应在验收合格后10天内缴纳；逾期每日按0.05%支付违约金。",
+        ),
+        "items": {
+            "payment_term": _item("unidentified", _ABSENT),
+            "start_condition": _item("unidentified", _ABSENT),
             "acceptance_invoice": _item("unchanged", _ACCEPT_OK, ("revised", 4)),
             "exception": _item("unidentified", _ABSENT),
         },
