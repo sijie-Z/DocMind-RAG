@@ -352,10 +352,11 @@
                         <div class="font-medium text-gray-800 dark:text-white">{{ t('profile.language') }}</div>
                         <div class="text-sm text-gray-500 mt-1">{{ t('profile.languageSettingDesc') || '选择界面显示语言' }}</div>
                       </div>
-                      <n-select 
-                        v-model:value="settingsForm.language" 
-                        :options="languageOptions" 
-                        class="w-40" 
+                      <n-select
+                        v-model:value="settingsForm.language"
+                        :options="languageOptions"
+                        class="w-40"
+                        @update:value="handleLanguageChange"
                       />
                     </div>
 

@@ -1,4 +1,15 @@
 export default {
+  app: {
+    documentTitle: 'DocMind - Document Q&A and Contract Review',
+    metaDescription: 'Document Q&A and contract review: answers cite their source, contract differences come with evidence.',
+  },
+  layout: {
+    userMenu: 'User menu',
+    openMenu: 'Open menu',
+    closeMenu: 'Close menu',
+    collapseSidebar: 'Collapse sidebar',
+    expandSidebar: 'Expand sidebar',
+  },
   common: {
     save: 'Save',
     cancel: 'Cancel',

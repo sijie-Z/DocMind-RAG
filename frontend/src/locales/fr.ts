@@ -1,4 +1,15 @@
 export default {
+  app: {
+    documentTitle: 'DocMind - Q&R documentaire et revue de contrats',
+    metaDescription: 'Q&R documentaire et revue de contrats : réponses sourcées, différences clause par clause avec preuves.',
+  },
+  layout: {
+    userMenu: 'Menu utilisateur',
+    openMenu: 'Ouvrir le menu',
+    closeMenu: 'Fermer le menu',
+    collapseSidebar: 'Réduire la barre latérale',
+    expandSidebar: 'Développer la barre latérale',
+  },
   common: {
     save: 'Enregistrer',
     cancel: 'Annuler',

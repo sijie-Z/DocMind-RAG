@@ -9,7 +9,9 @@
 
     <!-- 侧边栏 -->
     <div
-      class="bg-white dark:bg-gray-900 border-r border-gray-200 dark:border-gray-800 flex flex-col transition-all duration-300"
+      class="bg-white dark:bg-gray-900 border-r border-gray-200 dark:border-gray-800 flex flex-col shrink-0 transition-all duration-300"
+      :inert="sidebarInert"
+      :aria-hidden="sidebarInert ? 'true' : undefined"
       :class="[
         appStore.sidebarCollapsed ? 'w-20' : 'w-64',
         'max-md:fixed max-md:inset-y-0 max-md:left-0 max-md:z-50',
@@ -18,7 +20,7 @@
     >
       <!-- Logo：DocMind 图标 + 名称（T9 起可点回仪表盘/首页） -->
       <div
-        class="h-16 flex items-center px-4 border-b border-gray-100 dark:border-gray-800/50 bg-white/50 dark:bg-gray-900/50 backdrop-blur-sm overflow-hidden whitespace-nowrap cursor-pointer transition-opacity hover:opacity-80"
+        class="h-16 flex shrink-0 items-center px-4 border-b border-gray-100 dark:border-gray-800/50 bg-white/50 dark:bg-gray-900/50 backdrop-blur-sm overflow-hidden whitespace-nowrap cursor-pointer transition-opacity hover:opacity-80"
         role="link"
         tabindex="0"
         @click="router.push({ name: 'Dashboard' })"
@@ -32,10 +34,18 @@
             DocMind
           </span>
         </div>
+        <button
+          type="button"
+          class="ml-auto flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-gray-500 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-800 md:hidden"
+          :aria-label="t('layout.closeMenu')"
+          @click.stop="mobileMenuOpen = false"
+        >
+          <n-icon size="20"><CloseOutline /></n-icon>
+        </button>
       </div>
       
       <!-- 导航菜单 -->
-      <nav class="flex-1 py-4">
+      <nav class="min-h-0 flex-1 overflow-y-auto py-4" aria-label="Main navigation">
         <n-menu
           :collapsed="appStore.sidebarCollapsed"
           :collapsed-width="80"
@@ -48,8 +58,13 @@
       </nav>
       
       <!-- 底部折叠按钮（桌面端） -->
-      <div class="p-4 border-t border-gray-100 dark:border-gray-800 justify-center hidden md:flex">
-        <n-button quaternary circle @click="appStore.toggleSidebar">
+      <div class="shrink-0 p-4 border-t border-gray-100 dark:border-gray-800 justify-center hidden md:flex">
+        <n-button
+          quaternary
+          circle
+          :aria-label="appStore.sidebarCollapsed ? t('layout.expandSidebar') : t('layout.collapseSidebar')"
+          @click="appStore.toggleSidebar"
+        >
           <template #icon>
             <n-icon size="20">
               <ChevronBackOutline v-if="!appStore.sidebarCollapsed" />
@@ -60,10 +75,10 @@
       </div>
 
       <!-- 语言和主题切换 -->
-      <div class="px-4 py-2 border-t border-gray-100 dark:border-gray-800 flex items-center justify-center gap-2">
+      <div class="shrink-0 px-4 py-2 border-t border-gray-100 dark:border-gray-800 flex items-center justify-center gap-2">
         <n-tooltip :trigger="'hover'">
           <template #trigger>
-            <n-button quaternary circle size="small" @click="toggleTheme">
+            <n-button quaternary circle size="small" :aria-label="t('profile.theme')" @click="toggleTheme">
               <template #icon>
                 <n-icon size="18">
                   <MoonOutline v-if="!isDark" />
@@ -78,7 +93,7 @@
           <template #trigger>
             <n-popover trigger="click" placement="right">
               <template #trigger>
-                <n-button quaternary circle size="small">
+                <n-button quaternary circle size="small" :aria-label="t('profile.language')">
                   <template #icon>
                     <n-icon size="18"><GlobeOutline /></n-icon>
                   </template>
@@ -109,7 +124,7 @@
       </div>
 
       <!-- 用户信息（点击弹出用户菜单：个人设置 / 系统帮助 / 关于 / 退出登录） -->
-      <div class="p-4 border-t border-gray-200 dark:border-gray-800 overflow-hidden">
+      <div class="shrink-0 p-4 border-t border-gray-200 dark:border-gray-800 overflow-hidden">
         <n-dropdown
           trigger="click"
           placement="top-start"
@@ -140,14 +155,21 @@
       <header class="h-14 md:h-16 bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-800 flex items-center justify-between px-4 md:px-6 sticky top-0 z-20">
         <div class="flex items-center gap-3 min-w-0">
           <!-- 移动端汉堡菜单 -->
-          <n-button text size="small" class="md:hidden" @click="mobileMenuOpen = !mobileMenuOpen">
+          <n-button
+            text
+            size="small"
+            class="md:hidden !h-11 !w-11"
+            :aria-label="mobileMenuOpen ? t('layout.closeMenu') : t('layout.openMenu')"
+            :aria-expanded="mobileMenuOpen"
+            @click="mobileMenuOpen = !mobileMenuOpen"
+          >
             <template #icon>
               <n-icon size="20"><MenuOutline /></n-icon>
             </template>
           </n-button>
           <span class="text-xs font-medium text-gray-400 dark:text-gray-500 hidden sm:inline">DocMind</span>
           <span class="text-gray-300 dark:text-gray-600 hidden sm:inline">/</span>
-          <h1 class="text-lg font-semibold text-gray-900 dark:text-gray-100 truncate">
+          <h1 class="min-w-0 flex-1 truncate text-lg font-semibold text-gray-900 dark:text-gray-100">
             {{ currentRouteTitle }}
           </h1>
           <!-- B1：组织切换器（顶栏品牌区）。切换后当前页面按新组织重挂载。
@@ -158,24 +180,32 @@
         </div>
         
         <div class="flex items-center gap-2 md:gap-4 shrink-0">
-          <n-input
-            ref="searchInputRef"
-            v-model:value="searchValue"
-            :placeholder="t('menu.search')"
-            class="w-40 md:w-56 lg:w-64"
-            size="small"
-            round
-            @keyup.enter="handleGlobalSearch"
-          >
+          <div class="hidden w-40 shrink-0 sm:block md:w-56 lg:w-64">
+            <n-input
+              ref="searchInputRef"
+              v-model:value="searchValue"
+              :placeholder="t('menu.search')"
+              class="w-full"
+              size="small"
+              round
+              @keyup.enter="handleGlobalSearch"
+            >
             <template #prefix>
               <n-icon class="text-gray-400"><SearchOutline /></n-icon>
             </template>
-            <template #suffix>
-              <span class="text-[10px] text-gray-400 pointer-events-none">Ctrl+K</span>
-            </template>
-          </n-input>
+              <template #suffix>
+                <span class="text-[10px] text-gray-400 pointer-events-none">Ctrl+K</span>
+              </template>
+            </n-input>
+          </div>
           
-          <n-button text size="small" @click="toggleTheme" class="text-gray-500">
+          <n-button
+            text
+            size="small"
+            class="!h-11 !w-11 text-gray-500"
+            :aria-label="t('profile.theme')"
+            @click="toggleTheme"
+          >
             <n-icon size="18">
               <MoonOutline v-if="!isDark" />
               <SunnyOutline v-else />
@@ -189,7 +219,7 @@
                 :dot="!!notificationStore.lastError"
                 :show="!!notificationStore.lastError || unreadCount > 0"
               >
-                <n-button text>
+                <n-button text class="!h-11 !w-11" :aria-label="t('menu.notifications')">
                   <n-icon size="18">
                     <NotificationsOutline />
                   </n-icon>
@@ -242,7 +272,7 @@
             :options="userMenuOptions"
             @select="handleUserMenuSelect"
           >
-            <n-button text>
+            <n-button text class="!h-11 !w-11" :aria-label="t('layout.userMenu')">
               <n-icon size="18">
                 <PersonCircleOutline />
               </n-icon>
@@ -252,7 +282,7 @@
       </header>
       
       <!-- 页面内容 -->
-      <main class="flex-1 overflow-auto bg-gray-50 dark:bg-gray-950 transition-colors duration-300">
+      <main class="min-w-0 flex-1 overflow-auto bg-gray-50 dark:bg-gray-950 transition-colors duration-300">
         <router-view v-slot="{ Component, route }">
           <Transition name="page-slide" mode="out-in">
             <!-- E11-③：key 用 route.name（而非 fullPath）——同一路由仅 query
@@ -324,6 +354,7 @@ import {
   HardwareChipOutline,
   MenuOutline,
   GlobeOutline,
+  CloseOutline,
 } from '@vicons/ionicons5'
 
 const route = useRoute()
@@ -338,6 +369,15 @@ const mobileMenuOpen = ref(false)
 // T7：移动端断点与样式口径一致（sm = 640px）。用户菜单的组织切换分组只在
 // <640px 注入——桌面端仍由顶栏 OrgSwitcher 承担，避免重复入口。
 const isMobileViewport = useMediaQuery('(max-width: 639.98px)')
+// 抽屉（max-md）关闭时对辅助技术隐藏并移出焦点顺序；桌面侧栏不受影响。
+const isDrawerViewport = useMediaQuery('(max-width: 767.98px)')
+const sidebarInert = computed(() => isDrawerViewport.value && !mobileMenuOpen.value)
+
+function handleGlobalKeydown(event: KeyboardEvent) {
+  if (event.key === 'Escape' && mobileMenuOpen.value) mobileMenuOpen.value = false
+}
+onMounted(() => window.addEventListener('keydown', handleGlobalKeydown))
+onUnmounted(() => window.removeEventListener('keydown', handleGlobalKeydown))
 
 // Language options：单一事实源 utils/languages.ts（beta 字段驱动徽标展示）
 const languageOptions = LANGUAGES
@@ -544,6 +584,12 @@ const renderGroupLabel = (label: string) => () => {
 const menuNodeProps = (option: MenuOption): Record<string, string> => {
   if ((option as MenuGroupOption).type === 'group' && appStore.sidebarCollapsed) {
     return { class: 'sidebar-group-title--collapsed', 'aria-hidden': 'true' }
+  }
+  // Naive Menu 默认不把菜单项放进 Tab 顺序；当前项 tabindex=0 作为入口，
+  // 进入后用方向键在菜单内移动，解决「主导航无法用键盘到达」（a11y G1）。
+  const key = String((option as MenuOption).key ?? '')
+  if (key && key === String(activeKey.value)) {
+    return { tabindex: '0', 'aria-current': 'page' }
   }
   return {}
 }
