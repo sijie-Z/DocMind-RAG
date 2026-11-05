@@ -62,14 +62,14 @@ const PassthroughStub = defineComponent({
   },
 })
 
-function mountInput() {
+function mountInput(status = 'connected', statusText = '已连接') {
   const wrapper = mount(ChatInput, {
     props: {
       isLoading: false,
       attachedFiles: [],
       attachedFileIds: [],
-      connectionStatus: 'connected',
-      connectionStatusText: '已连接',
+      connectionStatus: status,
+      connectionStatusText: statusText,
       inputMessage: '请分析这份财报',
       strictMode: false,
       privacyMode: true,
@@ -167,5 +167,19 @@ describe('issue #508 · Chat 发送链路不再有 Agent 分支', () => {
 
     expect(wsSend).toHaveBeenCalledTimes(1)
     expect(ssePost).not.toHaveBeenCalled()
+  })
+})
+
+describe('连接状态徽标语义', () => {
+  it('未连接用中性灰，不把初始闲置态渲染成红色告警', () => {
+    const chip = mountInput('disconnected', '未连接').find('[data-testid="connection-status"]')
+    expect(chip.exists()).toBe(true)
+    expect(chip.classes().join(' ')).toContain('text-gray-500')
+    expect(chip.classes().join(' ')).not.toContain('text-red-600')
+  })
+
+  it('真正的错误态才用红色告警', () => {
+    const chip = mountInput('error', '连接失败').find('[data-testid="connection-status"]')
+    expect(chip.classes().join(' ')).toContain('text-red-600')
   })
 })

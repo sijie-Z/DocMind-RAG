@@ -1356,6 +1356,8 @@ export default {
   reviews: {
     subtitle: 'Policy/template + contract V1/V2: evidence snapshots, deterministic alignment and review reports',
     empty: 'No review cases yet',
+    emptyHint: 'Pick the policy/template and contract V1/V2 from the knowledge base, then create a review to compare payment terms, start conditions, acceptance/invoice prerequisites and exceptions clause by clause.',
+    emptyArchivedHint: 'Archived cases are kept here. Switch the archive filter above to view all cases.',
     loadFailed: 'Failed to load review cases',
     retry: 'Retry',
     open: 'Open',

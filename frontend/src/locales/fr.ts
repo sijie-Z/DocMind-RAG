@@ -1284,6 +1284,8 @@ export default {
   reviews: {
     subtitle: 'Politique/modèle + contrat V1/V2 : instantanés de preuve, alignement déterministe et rapport de revue',
     empty: 'Aucun dossier de revue',
+    emptyHint: "Choisissez la politique/le modèle et les contrats V1/V2 dans la base de connaissances, puis créez une revue pour comparer clause par clause les conditions de paiement, les conditions de départ, les prérequis de réception/facturation et les exceptions.",
+    emptyArchivedHint: "Les dossiers archivés sont conservés ici. Changez le filtre d'archivage ci-dessus pour voir tous les dossiers.",
     loadFailed: 'Échec du chargement des dossiers de revue',
     retry: 'Réessayer',
     open: 'Ouvrir',

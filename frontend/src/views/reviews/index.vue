@@ -4,7 +4,8 @@
       <div class="mb-6 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 class="text-3xl font-bold text-gray-800 dark:text-white">{{ t('menu.reviews') }}</h1>
-          <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">{{ t('reviews.subtitle') }}</p>
+          <span class="mt-2 block h-0.5 w-6 rounded-full bg-blue-500"></span>
+          <p class="mt-2 text-sm text-gray-500 dark:text-gray-400">{{ t('reviews.subtitle') }}</p>
         </div>
         <div class="flex flex-wrap items-center gap-3">
           <n-select
@@ -37,13 +38,50 @@
       </n-alert>
 
       <n-spin :show="loading">
-        <n-empty
+        <div
           v-if="!loading && rows.length === 0"
-          :description="
-            archivedFilter === 'archived' ? t('reviews.emptyArchived') : t('reviews.empty')
-          "
-          class="py-20"
-        />
+          class="mt-2 rounded-2xl border border-dashed border-slate-200/80 bg-white/70 px-6 py-16 text-center dark:border-slate-700 dark:bg-slate-900/40"
+          data-testid="reviews-empty-state"
+        >
+          <div
+            class="mx-auto flex h-16 w-16 items-center justify-center rounded-2xl bg-blue-50 text-blue-500 dark:bg-blue-500/10 dark:text-blue-300"
+          >
+            <svg
+              class="h-8 w-8"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.6"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              aria-hidden="true"
+            >
+              <path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z" />
+              <path d="M14 3v5h5" />
+              <path d="M9 13h6M9 17h4" />
+            </svg>
+          </div>
+          <h2 class="mt-5 text-lg font-semibold text-slate-800 dark:text-slate-100">
+            {{ archivedFilter === 'archived' ? t('reviews.emptyArchived') : t('reviews.empty') }}
+          </h2>
+          <p class="mx-auto mt-2 max-w-lg text-sm leading-6 text-slate-500 dark:text-slate-400">
+            {{
+              archivedFilter === 'archived'
+                ? t('reviews.emptyArchivedHint')
+                : t('reviews.emptyHint')
+            }}
+          </p>
+          <n-button
+            v-if="archivedFilter !== 'archived'"
+            type="primary"
+            size="large"
+            class="mt-6"
+            data-testid="create-case-empty"
+            @click="createVisible = true"
+          >
+            {{ t('reviews.createCase') }}
+          </n-button>
+        </div>
         <div v-else>
           <n-data-table
             :columns="columns"

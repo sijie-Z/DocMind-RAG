@@ -80,6 +80,9 @@ describe('合同核验列表页', () => {
     const wrapper = mountList()
     await flushPromises()
     expect(wrapper.text()).toContain('还没有核验案件')
+    expect(wrapper.text()).toContain('从知识库选择制度/模板与合同 V1/V2')
+    expect(wrapper.find('[data-testid="reviews-empty-state"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="create-case-empty"]').exists()).toBe(true)
   })
 
   it('筛选状态回到第一页并带 status 参数', async () => {
@@ -171,6 +174,8 @@ describe('归档过滤与标记（Batch 7）', () => {
     vm.applyFilter()
     await flushPromises()
     expect(wrapper.text()).toContain('还没有已归档案件')
+    expect(wrapper.text()).toContain('已归档案件会保留在这里')
+    expect(wrapper.find('[data-testid="create-case-empty"]').exists()).toBe(false)
   })
 })
 

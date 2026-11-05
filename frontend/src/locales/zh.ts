@@ -1363,7 +1363,8 @@ export default {
   reviews: {
     subtitle: '制度/模板 + 合同 V1/V2：证据快照、确定性抽取与核验单',
     empty: '还没有核验案件',
-    loadFailed: '加载核验案件失败',
+    emptyHint: '从知识库选择制度/模板与合同 V1/V2，创建核验后即可逐条比对付款期限、起算条件、验收/发票前提与例外条款。',
+    emptyArchivedHint: '已归档案件会保留在这里；可在上方切换归档筛选查看全部案件。',
     retry: '重试',
     open: '打开',
     createdAt: '创建时间',
