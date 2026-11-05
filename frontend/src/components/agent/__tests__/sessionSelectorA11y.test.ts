@@ -35,12 +35,12 @@ function mountSelector(
   })
 }
 
-describe('SessionSelector · 删除按钮可访问名（先红）', () => {
-  it('emoji 删除按钮带 aria-label（zh 词条）', () => {
+describe('SessionSelector · 删除按钮可访问名', () => {
+  it('图标删除按钮带 aria-label（zh 词条）', () => {
     const wrapper = mountSelector('zh')
     const btn = wrapper.find('.delete-session-btn')
     expect(btn.exists()).toBe(true)
-    expect(btn.text()).toContain('🗑')
+    expect(btn.find('svg').exists()).toBe(true)
     expect(btn.attributes('aria-label')).toBe('删除当前会话')
   })
 
