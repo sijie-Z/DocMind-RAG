@@ -61,6 +61,12 @@ cp deploy/demo/.env.demo.example backend/.env.docker
 
 ./deploy/demo/build.sh   # 构建前端镜像（4G 机器先 sudo swapon 2G swap）
 
+# 可选：登录页「体验账号」一键登录（构建时注入，未传则隐藏）。
+# 口令会进入前端产物——只放低权限演示账号，并保持下方 Cloudflare Access 门。
+VITE_DEMO_MODE=true \
+VITE_DEMO_ACCOUNTS='[{"label":"核验演示","username":"docmind_demo","password":"你的演示密码"}]' \
+./deploy/demo/build.sh
+
 docker compose --env-file backend/.env.docker \
   -f backend/docker-compose.yml -f deploy/demo/docker-compose.demo.yml up -d --build
 ```

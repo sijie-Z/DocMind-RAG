@@ -8,7 +8,11 @@ COPY frontend/package.json frontend/package-lock.json ./
 RUN npm ci
 
 COPY frontend/ .
-RUN npm run build
+# 演示构建参数（可选）：登录页「体验账号」一键登录由构建时注入，未传则隐藏。
+# 仅用于演示部署，账号口令会进入前端产物——只放低权限演示账号，且保持 Access 门。
+ARG VITE_DEMO_MODE=""
+ARG VITE_DEMO_ACCOUNTS=""
+RUN VITE_DEMO_MODE="$VITE_DEMO_MODE" VITE_DEMO_ACCOUNTS="$VITE_DEMO_ACCOUNTS" npm run build
 
 # ---- Runtime ----
 FROM nginx:1.25-alpine

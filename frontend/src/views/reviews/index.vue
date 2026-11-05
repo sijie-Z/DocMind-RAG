@@ -3,8 +3,13 @@
     <div class="max-w-7xl mx-auto">
       <div class="mb-6 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h1 class="text-3xl font-bold text-gray-800 dark:text-white">{{ t('menu.reviews') }}</h1>
-          <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">{{ t('reviews.subtitle') }}</p>
+          <h1 class="text-2xl md:text-3xl font-bold tracking-tight text-slate-800 dark:text-slate-100">
+            {{ t('menu.reviews') }}
+          </h1>
+          <p class="text-slate-500 dark:text-slate-400 mt-1 text-sm flex items-center gap-2">
+            <span class="w-6 h-0.5 bg-blue-500 rounded-full"></span>
+            {{ t('reviews.subtitle') }}
+          </p>
         </div>
         <div class="flex flex-wrap items-center gap-3">
           <n-select
@@ -25,7 +30,7 @@
             data-testid="archived-filter"
             @update:value="applyFilter"
           />
-          <n-button type="primary" data-testid="create-case-open" @click="createVisible = true">
+          <n-button type="primary" round data-testid="create-case-open" @click="createVisible = true">
             {{ t('reviews.createCase') }}
           </n-button>
         </div>
@@ -37,14 +42,39 @@
       </n-alert>
 
       <n-spin :show="loading">
-        <n-empty
-          v-if="!loading && rows.length === 0"
-          :description="
-            archivedFilter === 'archived' ? t('reviews.emptyArchived') : t('reviews.empty')
-          "
-          class="py-20"
-        />
-        <div v-else>
+        <div
+          v-if="!loading && !loadError && rows.length === 0"
+          class="flex flex-col items-center justify-center py-24 px-6 bg-white/80 dark:bg-gray-800/50 backdrop-blur-md rounded-3xl border border-dashed border-slate-200 dark:border-gray-600/50 shadow-inner"
+          data-testid="reviews-empty-state"
+        >
+          <div
+            class="w-24 h-24 rounded-2xl bg-gradient-to-br from-blue-100 to-slate-100 dark:from-blue-900/30 dark:to-slate-900/30 flex items-center justify-center mb-6 ring-4 ring-blue-100/50 dark:ring-blue-900/30"
+          >
+            <n-icon size="48" class="text-blue-500 dark:text-blue-400"><DocumentTextOutline /></n-icon>
+          </div>
+          <h2 class="text-xl font-bold text-slate-800 dark:text-slate-100 mb-2">
+            {{ archivedFilter === 'archived' ? t('reviews.emptyArchived') : t('reviews.empty') }}
+          </h2>
+          <p class="text-slate-500 dark:text-slate-400 mb-8 max-w-sm text-center text-sm leading-relaxed">
+            {{
+              archivedFilter === 'archived'
+                ? t('reviews.emptyArchivedHint')
+                : t('reviews.emptyHint')
+            }}
+          </p>
+          <n-button
+            v-if="archivedFilter !== 'archived'"
+            type="primary"
+            round
+            size="large"
+            class="px-8 shadow-lg shadow-blue-500/20"
+            data-testid="create-case-empty"
+            @click="createVisible = true"
+          >
+            {{ t('reviews.createCase') }}
+          </n-button>
+        </div>
+        <div v-else-if="rows.length > 0">
           <n-data-table
             :columns="columns"
             :data="rows"
@@ -73,6 +103,7 @@ import { computed, h, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { NButton, NPagination, NTag } from 'naive-ui'
+import { DocumentTextOutline } from '@vicons/ionicons5'
 import { reviewsApi, type ReviewCaseStatus, type ReviewCaseSummary } from '@/api/reviews'
 import { apiUnwrap } from '@/utils/apiUnwrap'
 import { reasonsLabel } from './reviewReasons'

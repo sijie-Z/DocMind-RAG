@@ -535,6 +535,9 @@ export default {
     goToLogin: 'Go to Login',
     goToRegister: 'Go to Register',
     demoDesc: 'Demo access is enabled by the deployer; ask them for the credentials (the initial password is randomly generated, not a fixed default)',
+    demoAccountsTitle: 'Demo accounts',
+    demoAccountsHint: 'Click an account to sign in directly (demo environment only).',
+    quickLogin: 'Quick sign-in',
     loginFailed: 'Login failed',
     registerFailed: 'Registration failed',
     privacy: 'Privacy',
@@ -1356,6 +1359,8 @@ export default {
   reviews: {
     subtitle: 'Policy/template + contract V1/V2: evidence snapshots, deterministic alignment and review reports',
     empty: 'No review cases yet',
+    emptyHint: 'Pick the policy/template and contract V1/V2 from the knowledge base, then create a review to compare payment terms, start conditions, acceptance/invoice prerequisites and exceptions clause by clause.',
+    emptyArchivedHint: 'Archived cases are kept here. Switch the archive filter above to view all cases.',
     loadFailed: 'Failed to load review cases',
     retry: 'Retry',
     open: 'Open',
