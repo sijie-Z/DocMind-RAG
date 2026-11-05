@@ -3035,6 +3035,8 @@ def test_tax_object_modifiers_do_not_veto_payment_duration():
         "甲方应在验收合格后30天内支付增值税专用发票所列货款。",
         "甲方应在验收合格后30天内支付含税费的合同价款。",
         "甲方应在验收合格后30天内结清往来账目并支付货款。",
+        "甲方应在验收合格后30天内支付货款并承担税费。",
+        "甲方应在验收合格后30天内支付货款并缴纳增值税。",
     ):
         facts = analysis.extract_payment_term([_clause(f"第三条 付款期限：{body}")])
         assert facts["status"] == "identified", body

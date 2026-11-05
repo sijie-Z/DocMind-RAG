@@ -1039,6 +1039,16 @@ def _object_exclusion_is_modifier(fragment: str, term: str, start: int, end: int
     """领域排除词只是付款宾语的定语/括号注释，而非期限的真正归属。"""
     if _inside_parentheses(fragment, start, end):
         return True
+    # 同片段前文已有强付款宾语（「支付货款并承担税费」）：排除词只是并列的
+    # 另一项义务，期限仍归前文的付款谓语。
+    head = fragment[:start]
+    for verb in ("支付", "付款", "结算"):
+        index = head.rfind(verb)
+        if index == -1:
+            continue
+        object_tail = head[index + len(verb) : index + len(verb) + _WEAK_OBJECT_WINDOW]
+        if any(noun in object_tail for noun in _PAYMENT_NOUNS):
+            return True
     tail = fragment[end : end + _EXCLUSION_HEAD_WINDOW]
     for noun in _PAYMENT_NOUNS:
         index = tail.find(noun)
