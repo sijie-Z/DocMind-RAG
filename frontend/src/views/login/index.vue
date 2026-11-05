@@ -123,8 +123,33 @@
 
           <div v-if="!isRegister && demoMode === 'true'" class="pt-6 border-t border-slate-200 dark:border-slate-800">
             <div class="rounded-xl bg-slate-100 dark:bg-slate-800/50 p-4 text-sm text-slate-600 dark:text-slate-400">
-              <p class="font-medium text-slate-700 dark:text-slate-300 mb-1">演示账号</p>
-              <p>{{ t('login.demoDesc') }}</p>
+              <p class="font-medium text-slate-700 dark:text-slate-300 mb-1">
+                {{ t('login.demoAccountsTitle') }}
+              </p>
+              <p>{{ demoAccounts.length ? t('login.demoAccountsHint') : t('login.demoDesc') }}</p>
+              <div v-if="demoAccounts.length" class="mt-3 flex flex-col gap-2">
+                <button
+                  v-for="account in demoAccounts"
+                  :key="account.username"
+                  type="button"
+                  class="group flex w-full items-center justify-between gap-3 rounded-lg border border-slate-200 bg-white px-3 py-2 text-left transition-colors hover:border-blue-300 hover:bg-blue-50/60 disabled:cursor-not-allowed disabled:opacity-60 dark:border-slate-700 dark:bg-slate-900/60 dark:hover:border-blue-500/50 dark:hover:bg-blue-500/10"
+                  :disabled="loading"
+                  :data-testid="`demo-login-${account.username}`"
+                  @click="quickLogin(account)"
+                >
+                  <span class="min-w-0">
+                    <span class="block truncate text-sm font-medium text-slate-800 dark:text-slate-100">
+                      {{ account.label }}
+                    </span>
+                    <span class="block truncate text-xs text-slate-400">
+                      {{ account.username }}
+                    </span>
+                  </span>
+                  <span class="shrink-0 text-xs font-medium text-blue-600 dark:text-blue-400">
+                    {{ t('login.quickLogin') }} →
+                  </span>
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -140,6 +165,7 @@ import { useDedupedMessage } from '@/utils/message'
 import { useI18n } from 'vue-i18n'
 import { useUserStore } from '@/stores/user'
 import { resolvePostAuthTarget } from '@/utils/postAuthRedirect'
+import { parseDemoAccounts, type DemoAccount } from '@/utils/demoAccounts'
 import {
   PersonOutline as UserOutline,
   LockClosedOutline,
@@ -152,6 +178,7 @@ const message = useDedupedMessage()
 const userStore = useUserStore()
 const { t } = useI18n()
 const demoMode = import.meta.env.VITE_DEMO_MODE
+const demoAccounts = parseDemoAccounts(import.meta.env.VITE_DEMO_ACCOUNTS)
 
 // T13：法务页面真链接 —— 占位路由；正式法务页上线后仅需在此替换为实际站内路径或外链常量
 const PRIVACY_URL = '/privacy'
@@ -263,5 +290,14 @@ const handleSubmit = async () => {
   } finally {
     loading.value = false
   }
+}
+
+// 演示账号一键登录：填入配置的凭据并复用正式登录流程（含校验、错误提示与
+// 登录后落点规则），不绕过任何认证逻辑。
+const quickLogin = async (account: DemoAccount) => {
+  if (loading.value || isRegister.value) return
+  form.username = account.username
+  form.password = account.password
+  await handleSubmit()
 }
 </script>
