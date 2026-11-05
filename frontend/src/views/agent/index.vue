@@ -1831,7 +1831,7 @@ async function loadInit() {
 
 .header-badge {
   font-size: 10px;
-  background: linear-gradient(135deg, #3b82f6, #6366f1);
+  background: linear-gradient(135deg, #3b82f6, #2563eb);
   color: white;
   padding: 2px 8px;
   border-radius: 6px;
@@ -2369,8 +2369,8 @@ async function loadInit() {
 .steer-standalone.steer-applied {
   background: rgba(99, 102, 241, 0.12);
   border-color: rgba(99, 102, 241, 0.4);
-  border-left-color: #6366f1;
-  color: #4338ca;
+  border-left-color: #2563eb;
+  color: #1d4ed8;
 }
 
 .dark .steer-standalone.steer-applied {
@@ -2378,7 +2378,7 @@ async function loadInit() {
   color: #c7d2fe;
 }
 
-.steer-badge-applied { background: #6366f1; }
+.steer-badge-applied { background: #2563eb; }
 
 .steer-text {
   word-break: break-word;
@@ -2394,10 +2394,10 @@ async function loadInit() {
   padding: 8px 12px;
   background: rgba(99, 102, 241, 0.08);
   border: 1px solid rgba(99, 102, 241, 0.3);
-  border-left: 3px solid #6366f1;
+  border-left: 3px solid #2563eb;
   border-radius: 8px;
   font-size: 12px;
-  color: #4338ca;
+  color: #1d4ed8;
 }
 
 .dark .plan-standalone {
@@ -2409,7 +2409,7 @@ async function loadInit() {
   flex-shrink: 0;
   padding: 0 6px;
   border-radius: 4px;
-  background: #6366f1;
+  background: #2563eb;
   color: #fff;
   font-size: 10px;
   font-weight: 600;

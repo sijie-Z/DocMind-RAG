@@ -325,7 +325,7 @@
 
           <!-- LLM 节点 -->
           <template #node-llm="nodeProps">
-            <LLMNode :data="nodeProps.data" :selected="selectedNodeId === nodeProps.id" :executing="executingNodeId === nodeProps.id" :model="(nodeProps.data?.provider as string) || 'LLM'" color="purple" />
+            <LLMNode :data="nodeProps.data" :selected="selectedNodeId === nodeProps.id" :executing="executingNodeId === nodeProps.id" :model="(nodeProps.data?.provider as string) || 'LLM'" color="sky" />
           </template>
           <template #node-llm_openai="nodeProps">
             <LLMNode :data="nodeProps.data" :selected="selectedNodeId === nodeProps.id" :executing="executingNodeId === nodeProps.id" model="OpenAI GPT" color="green" />

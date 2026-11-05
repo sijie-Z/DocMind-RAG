@@ -8,10 +8,8 @@
       <!-- Welcome screen（E7：历史加载中不显示空态欢迎屏，避免「加载中」与「新会话」混淆） -->
       <div v-if="messages.length === 0 && !isLoadingHistory" class="flex flex-col items-center justify-center mt-16 md:mt-24 text-center animate-fade-in">
         <div class="relative mb-10">
-          <div class="w-28 h-28 bg-gradient-to-br from-slate-500 via-blue-500 to-blue-600 rounded-3xl shadow-2xl shadow-slate-500/30 flex items-center justify-center transform hover:scale-105 transition-transform duration-300">
-            <n-icon size="52" class="text-white drop-shadow">
-              <SparklesOutline />
-            </n-icon>
+          <div class="w-28 h-28 bg-gradient-to-br from-blue-600 via-blue-600 to-blue-800 rounded-3xl shadow-2xl shadow-blue-600/30 flex items-center justify-center transform hover:scale-105 transition-transform duration-300 text-white">
+            <DocMindMark :size="64" />
           </div>
           <div class="absolute -inset-2 bg-slate-400/20 rounded-[1.5rem] blur-xl -z-10"></div>
         </div>
@@ -79,7 +77,7 @@
                 size="small"
                 class="bg-transparent"
               />
-              <n-icon v-else size="20" class="text-slate-600 dark:text-slate-400"><SparklesOutline /></n-icon>
+              <DocMindMark v-else :size="20" class="text-slate-600 dark:text-slate-400" />
             </div>
 
             <div class="max-w-[85%] relative group/bubble">
@@ -304,6 +302,7 @@
 import { ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { SparklesOutline, ArrowForwardOutline, ArrowDownOutline, ThumbsUpOutline, ThumbsDownOutline, CopyOutline, DocumentTextOutline, RefreshOutline, ChevronDownOutline, ChevronForwardOutline, StopCircleOutline } from '@vicons/ionicons5'
+import DocMindMark from '@/components/brand/DocMindMark.vue'
 import { NPopover } from 'naive-ui'
 // 首屏瘦身（E5）：虚拟滚动只在聊天页使用——从全局注册（main.ts）改为本组件局部引入，
 // 模块与样式随 Chat 路由 chunk 按需加载，不再计入首屏。

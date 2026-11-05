@@ -88,7 +88,7 @@ const dateLocaleConfig = computed(() => NAIVE_LOCALES[activeLanguage.value].date
 .route-progress-inner {
   height: 100%;
   width: 40%;
-  background: linear-gradient(90deg, #3b82f6, #6366f1);
+  background: linear-gradient(90deg, #3b82f6, #2563eb);
   animation: route-progress-move 1.2s ease-in-out infinite;
 }
 @keyframes route-progress-move {

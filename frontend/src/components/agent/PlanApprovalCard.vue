@@ -181,7 +181,7 @@ function emitSaveApprove() {
 <style scoped>
 .plan-approval-card {
   border: 1px solid rgba(99, 102, 241, 0.35);
-  border-left: 4px solid #6366f1;
+  border-left: 4px solid #2563eb;
   border-radius: 10px;
   background: rgba(99, 102, 241, 0.06);
   padding: 12px 14px;
@@ -204,7 +204,7 @@ function emitSaveApprove() {
   flex-shrink: 0;
   padding: 0 8px;
   border-radius: 4px;
-  background: #6366f1;
+  background: #2563eb;
   color: #fff;
   font-size: 11px;
   font-weight: 600;
@@ -247,7 +247,7 @@ function emitSaveApprove() {
   height: 18px;
   border-radius: 50%;
   background: rgba(99, 102, 241, 0.18);
-  color: #4f46e5;
+  color: #1d4ed8;
   font-size: 10px;
   font-weight: 600;
   line-height: 18px;
@@ -310,7 +310,7 @@ function emitSaveApprove() {
   color: var(--text-primary-dark, #f9fafb);
 }
 
-.step-input:focus, .step-tool:focus, .note-input:focus { border-color: #6366f1; }
+.step-input:focus, .step-tool:focus, .note-input:focus { border-color: #2563eb; }
 
 .edit-row {
   display: flex;
@@ -346,7 +346,7 @@ function emitSaveApprove() {
   cursor: pointer;
 }
 
-.step-remove:hover, .add-step-btn:hover { border-color: #6366f1; color: #6366f1; }
+.step-remove:hover, .add-step-btn:hover { border-color: #2563eb; color: #2563eb; }
 
 .add-step-btn { align-self: flex-start; }
 
@@ -390,8 +390,8 @@ function emitSaveApprove() {
 .approve-btn { background: #16a34a; color: #fff; }
 .approve-btn:hover:not(:disabled) { background: #15803d; }
 
-.edit-btn { background: #6366f1; color: #fff; }
-.edit-btn:hover:not(:disabled) { background: #4f46e5; }
+.edit-btn { background: #2563eb; color: #fff; }
+.edit-btn:hover:not(:disabled) { background: #1d4ed8; }
 
 .reject-btn { background: #ef4444; color: #fff; }
 .reject-btn:hover:not(:disabled) { background: #dc2626; }
@@ -402,7 +402,7 @@ function emitSaveApprove() {
   border: 1px solid var(--border-color, #d1d5db);
 }
 
-.cancel-edit-btn:hover:not(:disabled) { border-color: #6366f1; color: #6366f1; }
+.cancel-edit-btn:hover:not(:disabled) { border-color: #2563eb; color: #2563eb; }
 
 .approve-btn:disabled, .reject-btn:disabled, .edit-btn:disabled,
 .cancel-edit-btn:disabled, .add-step-btn:disabled, .step-remove:disabled {

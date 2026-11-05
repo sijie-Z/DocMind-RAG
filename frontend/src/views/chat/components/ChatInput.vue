@@ -205,7 +205,7 @@
             <n-button
               size="tiny"
               quaternary
-              class="shrink-0 text-purple-600 dark:text-purple-400"
+              class="shrink-0 text-blue-600 dark:text-blue-400"
               data-testid="agent-workbench-entry"
               :aria-label="t('chat.openAgentWorkbench')"
               @click="openAgentWorkbench"

@@ -29,10 +29,10 @@
         @keydown.enter="router.push({ name: 'Dashboard' })"
       >
         <div class="flex items-center space-x-3 min-w-0">
-          <div class="flex-shrink-0 w-9 h-9 bg-gradient-to-br from-slate-600 to-blue-600 rounded-xl flex items-center justify-center text-white font-bold text-sm tracking-tight shadow-lg shadow-slate-500/20">
-            DM
+          <div class="flex-shrink-0 w-9 h-9 rounded-xl bg-gradient-to-br from-blue-600 to-blue-800 text-white ring-1 ring-white/15 shadow-lg shadow-blue-600/25 flex items-center justify-center">
+            <DocMindMark :size="26" />
           </div>
-          <span v-if="!appStore.sidebarCollapsed" class="text-lg font-extrabold tracking-tight bg-gradient-to-r from-slate-700 to-blue-700 dark:from-slate-400 dark:to-blue-400 bg-clip-text text-transparent">
+          <span v-if="!appStore.sidebarCollapsed" class="text-lg font-extrabold tracking-tight text-slate-900 dark:text-white">
             DocMind
           </span>
         </div>
@@ -334,6 +334,7 @@ import { NMenu, NIcon, NInput, NButton, NBadge, NPopover, NList, NListItem, NDro
 import { useDedupedMessage } from '@/utils/message'
 import { SIDEBAR_MENU_GROUPS, USER_MENU_ITEMS, type MenuItemDef } from '@/config/menu'
 import OrgSwitcher from '@/components/layout/OrgSwitcher.vue'
+import DocMindMark from '@/components/brand/DocMindMark.vue'
 import { setLanguage } from '@/locales'
 import { LANGUAGES, isLanguageCode, type LanguageCode } from '@/utils/languages'
 import {

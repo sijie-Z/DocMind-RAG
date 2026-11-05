@@ -11,8 +11,8 @@
       </n-button>
 
       <div class="flex items-center space-x-2">
-        <div class="bg-slate-100 dark:bg-slate-900/30 p-1.5 rounded-lg text-slate-600 dark:text-slate-400">
-          <n-icon size="18"><SparklesOutline /></n-icon>
+        <div class="bg-gradient-to-br from-blue-600 to-blue-800 p-1.5 rounded-lg text-white shadow-sm shadow-blue-600/20">
+          <DocMindMark :size="18" />
         </div>
         <div class="hidden sm:block">
           <h1 class="text-sm font-bold text-gray-800 dark:text-white leading-tight">
@@ -70,7 +70,8 @@
 
 <script setup lang="ts">
 import { useI18n } from 'vue-i18n'
-import { MenuOutline, CloseOutline, SparklesOutline, TrashOutline, AttachOutline, DownloadOutline, BugOutline } from '@vicons/ionicons5'
+import { MenuOutline, CloseOutline, TrashOutline, AttachOutline, DownloadOutline, BugOutline } from '@vicons/ionicons5'
+import DocMindMark from '@/components/brand/DocMindMark.vue'
 
 const { t } = useI18n()
 

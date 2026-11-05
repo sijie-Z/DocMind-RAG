@@ -3,8 +3,8 @@
     <!-- 左侧：品牌区（取苏式园林项目的分屏品牌区构图：中央图形 + 品牌叙事 + 能力点） -->
     <div class="login-brand-panel hidden md:flex md:w-[46%] p-12 flex-col justify-between relative overflow-hidden login-animate-in">
       <div class="relative z-10 flex items-center gap-3">
-        <div class="w-10 h-10 rounded-xl bg-white/10 ring-1 ring-white/15 flex items-center justify-center text-white font-bold text-sm">
-          DM
+        <div class="w-10 h-10 rounded-xl bg-white/10 ring-1 ring-white/15 flex items-center justify-center text-white">
+          <DocMindMark :size="26" />
         </div>
         <span class="text-white text-xl font-bold tracking-tight">DocMind</span>
       </div>
@@ -15,14 +15,8 @@
           <span class="login-halo-ring absolute inset-5 rounded-full border border-white/30" style="animation-delay: 0.9s"></span>
           <span class="login-halo-ring absolute inset-10 rounded-full border border-white/35" style="animation-delay: 1.8s"></span>
           <div class="absolute h-28 w-28 rounded-full bg-sky-500/10 blur-2xl"></div>
-          <div class="relative flex h-20 w-20 items-center justify-center rounded-2xl border border-white/20 bg-white/5 backdrop-blur">
-            <svg viewBox="0 0 48 48" fill="none" class="h-10 w-10 text-sky-300" aria-hidden="true">
-              <path d="M14 6h14l8 8v24a4 4 0 0 1-4 4H14a4 4 0 0 1-4-4V10a4 4 0 0 1 4-4Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" />
-              <path d="M28 6v8h8" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" />
-              <path d="M16 24h10M16 31h7" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" />
-              <circle cx="34" cy="34" r="7" fill="currentColor" fill-opacity="0.12" stroke="currentColor" stroke-width="1.8" />
-              <path d="m31 34 2.2 2.2L37 32.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" />
-            </svg>
+          <div class="relative flex h-20 w-20 items-center justify-center rounded-2xl border border-white/20 bg-white/5 backdrop-blur text-sky-300">
+            <DocMindMark :size="58" />
           </div>
         </div>
 
@@ -60,8 +54,8 @@
         <div class="login-form-card relative overflow-hidden rounded-3xl border border-slate-200/70 bg-white/95 p-7 shadow-xl backdrop-blur-xl dark:border-slate-800 dark:bg-slate-900/90 md:p-10 login-card-animate">
           <div class="absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-sky-500 via-blue-500 to-sky-400"></div>
           <div class="md:hidden text-center mb-8">
-          <div class="w-14 h-14 rounded-2xl bg-slate-800 dark:bg-slate-700 text-white font-bold text-lg flex items-center justify-center mx-auto mb-4">
-            DM
+          <div class="w-14 h-14 rounded-2xl bg-gradient-to-br from-blue-600 to-blue-800 text-white ring-1 ring-white/15 flex items-center justify-center mx-auto mb-4">
+            <DocMindMark :size="31" />
           </div>
           <h1 class="text-2xl font-bold text-slate-900 dark:text-white">DocMind</h1>
           <p class="mt-2 text-xs text-slate-500 dark:text-slate-400">{{ t('login.brandHeadline') }}</p>
@@ -211,6 +205,7 @@ import { useI18n } from 'vue-i18n'
 import { useUserStore } from '@/stores/user'
 import { resolvePostAuthTarget } from '@/utils/postAuthRedirect'
 import { parseDemoAccounts, type DemoAccount } from '@/utils/demoAccounts'
+import DocMindMark from '@/components/brand/DocMindMark.vue'
 import {
   PersonOutline as UserOutline,
   LockClosedOutline,

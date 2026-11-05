@@ -102,7 +102,7 @@ function signOf(type: DiffLineType): string {
   background: rgba(99, 102, 241, 0.08);
 }
 .diff-hunk .diff-text {
-  color: #6366f1;
+  color: #2563eb;
 }
 .dark .diff-hunk { background: rgba(99, 102, 241, 0.16); }
 .dark .diff-hunk .diff-text { color: #a5b4fc; }

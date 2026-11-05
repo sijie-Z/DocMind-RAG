@@ -286,7 +286,7 @@ function statusLabel(status: string): string {
 
 .step-tool {
   font-size: 11px;
-  color: #7c3aed;
+  color: #2563eb;
   background: rgba(124, 58, 237, 0.08);
   border-radius: 4px;
   padding: 0 6px;

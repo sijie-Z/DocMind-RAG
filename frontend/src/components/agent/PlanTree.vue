@@ -134,7 +134,7 @@ function retryStrategyLabel(strategy: string): string {
 
 .progress-fill {
   height: 100%;
-  background: linear-gradient(90deg, #3b82f6, #6366f1);
+  background: linear-gradient(90deg, #3b82f6, #2563eb);
   border-radius: 2px;
   transition: width 0.3s ease;
 }
@@ -213,7 +213,7 @@ function retryStrategyLabel(strategy: string): string {
 /* 计划语义徽标（issue #289 G7） */
 .step-parallel {
   font-size: 10px;
-  color: #6366f1;
+  color: #2563eb;
 }
 
 .step-risk {
