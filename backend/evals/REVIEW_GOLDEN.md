@@ -12,7 +12,7 @@ make review-eval-baseline  # 显式更新基线（评审可见的 PR 行为）
 
 ## 数据集
 
-`evals/review_golden_cases.py`：**69 组**人工编写的合成中文采购合同 V1/V2。gold
+`evals/review_golden_cases.py`：**70 组**人工编写的合成中文采购合同 V1/V2。gold
 **只依据合同文本人工判定**，不从引擎输出反推。用例保持「每条 <5 句、整篇 >500 字」：
 生产分块器走条款切分且不触发 embedding；评测器统计 embedding 调用，一旦触发
 （分块器会吞异常回退单 chunk）立即硬失败。
@@ -30,7 +30,7 @@ make review-eval-baseline  # 显式更新基线（评审可见的 PR 行为）
 税款/印花税/结清关系（同义改写负例）、违约金冒号缴纳、反向语序主体变化、
 违约责任标题整条排除（有意取舍）、责任后缀缴纳社保费用。
 
-## 指标（当前基线，69 组 × 4 项 = 276 项）
+## 指标（当前基线，70 组 × 4 项 = 280 项）
 
 | 指标 | 付款期限 | 起算条件 | 验收/发票 | 例外 | 总体 |
 |---|---|---|---|---|---|
@@ -142,9 +142,11 @@ make review-eval-baseline  # 显式更新基线（评审可见的 PR 行为）
     （结清尾款并缴纳增值税）、反向责任句起算事件变化、反向付款宾语变化、
     嵌套标签「付款期限：逾期付款违约金：…」（评审 B N4 / 评审 A B1-B3）。
   - **R4/R5**：混合标签「逾期付款违约金：…费用…缴纳」不得放行付款/起算
-    （罚则冒号分支必须含强付款宾语，费用/金额不算）；同一付款动词重复时
-    逐一检查所有出现（支付货款并支付相关税费）；新增 golden
-    `payment_penalty_colon_mixed_label_fee`、`payment_repeated_verb_conjunct_tax`。
+    （罚则冒号分支必须含强付款宾语；强宾语从 `_PAYMENT_NOUNS` 派生，仅排除
+    费用/金额，服务费/工程款/劳务费保留）；同一付款动词重复时逐一检查所有
+    出现（支付货款并支付相关税费）；新增 golden
+    `payment_penalty_colon_mixed_label_fee`、`payment_repeated_verb_conjunct_tax`、
+    `payment_penalty_colon_service_fee`。
   - golden 53→69 组；变异 15→24（片段否决/中性化/弱锚宾语/责任冒号/
     主体保留/责任后缀宾语守卫/并列义务中性化/混合标签放行/最后一次出现）。
   - 有意取舍：违约责任标题下的付款期限整条不抽取（`payment_liability_

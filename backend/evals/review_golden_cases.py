@@ -1,4 +1,4 @@
-"""核验 golden set（D5）：69 组人工编写的中文采购合同 V1/V2 与期望值。
+"""核验 golden set（D5）：70 组人工编写的中文采购合同 V1/V2 与期望值。
 
 gold 只依据合同文本人工判定，不从引擎输出反推；change_type 用产品语义：
 - 付款天数 30天→60天 = payment_term modified；
@@ -2326,6 +2326,36 @@ CASES = [
             _A1,
             _A2,
             _pay("三", "甲方应在验收合格后60天内支付货款并支付相关税费。"),
+            _acc("四", "乙方交付后10个工作日内完成验收，验收标准以本合同附件二为准。"),
+            _A5,
+            _A6,
+            _A7,
+            _A8,
+        ),
+        "items": {
+            "payment_term": _item("modified", _PAY_60, ("revised", 3)),
+            "start_condition": _item("unchanged", _START_ACCEPTED, ("revised", 3)),
+            "acceptance_invoice": _item("unchanged", _ACCEPT_OK, ("revised", 4)),
+            "exception": _item("unidentified", _ABSENT),
+        },
+    },
+    {
+        "id": "payment_penalty_colon_service_fee",
+        "note": "混合标签下服务费是强付款宾语：30→60 必须 modified（评审 B R4）",
+        "base": _doc(
+            _A1,
+            _A2,
+            "第三条 付款期限：逾期付款违约金：甲方应在验收合格后30天内支付服务费。",
+            _acc("四", "乙方交付后10个工作日内完成验收，验收标准以本合同附件二为准。"),
+            _A5,
+            _A6,
+            _A7,
+            _A8,
+        ),
+        "revised": _doc(
+            _A1,
+            _A2,
+            "第三条 付款期限：逾期付款违约金：甲方应在验收合格后60天内支付服务费。",
             _acc("四", "乙方交付后10个工作日内完成验收，验收标准以本合同附件二为准。"),
             _A5,
             _A6,

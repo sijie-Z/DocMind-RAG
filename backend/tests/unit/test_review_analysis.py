@@ -3230,3 +3230,19 @@ def test_repeated_payment_verb_conjunct_is_not_vetoed():
         facts = analysis.extract_payment_term([_clause(f"第三条 付款期限：{body}")])
         assert facts["status"] == "identified", body
         assert (facts["value"], facts["unit"]) == (30, "day"), body
+
+
+def test_penalty_colon_mixed_label_service_fee_is_payment():
+    """混合标签下服务费/工程款/劳务费是强付款宾语，付款与起算保留（评审 B R4）。"""
+    assert "服务费" in analysis._COLON_STRONG_PAYMENT_NOUNS
+    assert "费用" not in analysis._COLON_STRONG_PAYMENT_NOUNS
+    for body in (
+        "甲方应在验收合格后30天内支付服务费。",
+        "甲方应在验收合格后30天内支付工程款。",
+        "甲方应在验收合格后30天内支付劳务费。",
+    ):
+        clauses = [_clause(f"第三条 付款期限：逾期付款违约金：{body}")]
+        facts = analysis.extract_payment_term(clauses)
+        assert facts["status"] == "identified", body
+        assert (facts["value"], facts["unit"]) == (30, "day"), body
+        assert analysis.extract_start_condition(clauses)["events"] == ["验收合格"], body
