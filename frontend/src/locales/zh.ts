@@ -10,6 +10,7 @@ export default {
     collapseSidebar: '收起侧栏',
     expandSidebar: '展开侧栏',
     mainNavigation: '主导航',
+    skipToContent: '跳到主要内容',
   },
   common: {
     save: '保存',

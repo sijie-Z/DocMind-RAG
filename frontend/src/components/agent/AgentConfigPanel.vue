@@ -1,7 +1,7 @@
 <template>
   <div class="config-panel">
     <div class="config-header" @click="collapsed = !collapsed">
-      <span class="config-title">⚙ Agent 配置</span>
+      <span class="config-title">Agent 配置</span>
       <span class="config-toggle">{{ collapsed ? '◀' : '▼' }}</span>
     </div>
 
@@ -33,28 +33,28 @@
       <!-- Toggles -->
       <div class="config-toggles">
         <div class="toggle-row">
-          <span class="toggle-label">📋 规划</span>
+          <span class="toggle-label">规划</span>
           <label class="switch">
             <input type="checkbox" v-model="localConfig.enable_planning" />
             <span class="switch-slider"></span>
           </label>
         </div>
         <div class="toggle-row">
-          <span class="toggle-label">🔍 反思</span>
+          <span class="toggle-label">反思</span>
           <label class="switch">
             <input type="checkbox" v-model="localConfig.enable_reflection" />
             <span class="switch-slider"></span>
           </label>
         </div>
         <div class="toggle-row">
-          <span class="toggle-label">🧠 记忆</span>
+          <span class="toggle-label">记忆</span>
           <label class="switch">
             <input type="checkbox" v-model="localConfig.enable_memory" />
             <span class="switch-slider"></span>
           </label>
         </div>
         <div class="toggle-row">
-          <span class="toggle-label">💭 思考流</span>
+          <span class="toggle-label">思考流</span>
           <label class="switch">
             <input type="checkbox" v-model="localConfig.enable_thinking" />
             <span class="switch-slider"></span>

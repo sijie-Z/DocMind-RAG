@@ -1,7 +1,7 @@
 <template>
   <div class="plan-tree" v-if="steps.length > 0">
     <div class="plan-header">
-      <span class="plan-title">📋 执行计划</span>
+      <span class="plan-title">执行计划</span>
       <span class="plan-stats">{{ completedCount }}/{{ steps.length }} 步</span>
     </div>
 
@@ -20,19 +20,19 @@
       >
         <div class="step-indicator">
           <span v-if="step.status === 'completed'" class="step-icon done">✓</span>
-          <span v-else-if="step.status === 'running'" class="step-icon running">⏳</span>
+          <span v-else-if="step.status === 'running'" class="step-icon running">●</span>
           <span v-else-if="step.status === 'failed'" class="step-icon failed">✗</span>
-          <span v-else-if="step.status === 'skipped'" class="step-icon skipped">⬜</span>
+          <span v-else-if="step.status === 'skipped'" class="step-icon skipped">–</span>
           <span v-else class="step-icon pending">○</span>
         </div>
         <div class="step-content">
           <span class="step-description">{{ step.description }}</span>
-          <span v-if="step.tool_hint" class="step-tool-hint">🔧 {{ step.tool_hint }}</span>
+          <span v-if="step.tool_hint" class="step-tool-hint">{{ step.tool_hint }}</span>
           <!-- 计划语义徽标（issue #289 G7）：plan_step 事件真实携带这些字段
                （planner 发射、默认值不随载荷带出），此前前端未声明未读。 -->
           <span v-if="step.parallel_group != null" class="step-parallel">∥ 并行组 {{ step.parallel_group }}</span>
           <span v-if="step.risk_level === 'high' || step.risk_level === 'medium'" class="step-risk">
-            ⚠ {{ step.risk_level === 'high' ? '高风险' : '中风险' }}
+            {{ step.risk_level === 'high' ? '高风险' : '中风险' }}
           </span>
           <span
             v-if="step.retry_strategy && step.retry_strategy !== 'auto_retry'"

@@ -52,7 +52,7 @@
         data-testid="ref-option"
         @mousedown.prevent="selectDoc(doc)"
       >
-        <span class="ref-option-icon">📄</span>
+        <span class="ref-option-icon"></span>
         <span class="ref-option-title">{{ doc.title || doc.file_name || doc.id }}</span>
       </button>
     </div>
@@ -65,7 +65,7 @@
         class="ref-chip"
         data-testid="ref-chip"
       >
-        📄 {{ doc.title }}
+        {{ doc.title }}
         <button
           class="ref-chip-remove"
           :title="t('refPicker.remove')"

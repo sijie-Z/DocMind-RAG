@@ -11,7 +11,7 @@
       </n-button>
 
       <div class="flex items-center space-x-2">
-        <div class="bg-gradient-to-br from-blue-600 to-blue-800 p-1.5 rounded-lg text-white shadow-sm shadow-blue-600/20">
+        <div class="bg-blue-700 p-1.5 rounded-lg text-white shadow-sm">
           <DocMindMark :size="18" />
         </div>
         <div class="hidden sm:block">

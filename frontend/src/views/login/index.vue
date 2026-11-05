@@ -54,7 +54,7 @@
         <div class="login-form-card relative overflow-hidden rounded-3xl border border-slate-200/70 bg-white/95 p-7 shadow-xl backdrop-blur-xl dark:border-slate-800 dark:bg-slate-900/90 md:p-10 login-card-animate">
           <div class="absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-sky-500 via-blue-500 to-sky-400"></div>
           <div class="md:hidden text-center mb-8">
-          <div class="w-14 h-14 rounded-2xl bg-gradient-to-br from-blue-600 to-blue-800 text-white ring-1 ring-white/15 flex items-center justify-center mx-auto mb-4">
+          <div class="w-14 h-14 rounded-2xl bg-blue-700 text-white ring-1 ring-blue-800/20 shadow-sm flex items-center justify-center mx-auto mb-4">
             <DocMindMark :size="31" />
           </div>
           <h1 class="text-2xl font-bold text-slate-900 dark:text-white">DocMind</h1>

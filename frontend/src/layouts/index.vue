@@ -1,5 +1,6 @@
 <template>
   <div class="h-screen flex bg-gray-50 dark:bg-gray-950">
+    <a href="#main-content" class="skip-link">{{ t('layout.skipToContent') }}</a>
     <!-- 移动端遮罩层 -->
     <div
       v-if="mobileMenuOpen"
@@ -29,7 +30,7 @@
         @keydown.enter="router.push({ name: 'Dashboard' })"
       >
         <div class="flex items-center space-x-3 min-w-0">
-          <div class="flex-shrink-0 w-9 h-9 rounded-xl bg-gradient-to-br from-blue-600 to-blue-800 text-white ring-1 ring-white/15 shadow-lg shadow-blue-600/25 flex items-center justify-center">
+          <div class="flex-shrink-0 w-9 h-9 rounded-xl bg-blue-700 text-white ring-1 ring-blue-800/20 shadow-sm flex items-center justify-center">
             <DocMindMark :size="26" />
           </div>
           <span v-if="!appStore.sidebarCollapsed" class="text-lg font-extrabold tracking-tight text-slate-900 dark:text-white">
@@ -292,7 +293,7 @@
       </header>
       
       <!-- 页面内容 -->
-      <main class="min-w-0 flex-1 overflow-auto bg-gray-50 dark:bg-gray-950 transition-colors duration-300">
+      <main id="main-content" tabindex="-1" class="min-w-0 flex-1 overflow-auto bg-gray-50 dark:bg-gray-950 transition-colors duration-300">
         <router-view v-slot="{ Component, route }">
           <Transition name="page-slide" mode="out-in">
             <!-- E11-③：key 用 route.name（而非 fullPath）——同一路由仅 query

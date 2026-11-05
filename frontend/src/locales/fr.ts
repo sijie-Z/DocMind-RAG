@@ -10,6 +10,7 @@ export default {
     collapseSidebar: 'Réduire la barre latérale',
     expandSidebar: 'Développer la barre latérale',
     mainNavigation: 'Navigation principale',
+    skipToContent: 'Aller au contenu principal',
   },
   common: {
     save: 'Enregistrer',

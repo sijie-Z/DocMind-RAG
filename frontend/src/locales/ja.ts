@@ -10,6 +10,7 @@ export default {
     collapseSidebar: 'サイドバーを折りたたむ',
     expandSidebar: 'サイドバーを展開',
     mainNavigation: 'メインナビゲーション',
+    skipToContent: 'メインコンテンツへスキップ',
   },
   common: {
     save: '保存',

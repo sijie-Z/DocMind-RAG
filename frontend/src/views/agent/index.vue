@@ -10,7 +10,7 @@
           data-testid="agent-back-to-chat"
           @click="backToChat"
         >
-          <span aria-hidden="true">←</span> {{ t('agent.backToChat') }}
+          <n-icon size="16" class="mr-1" aria-hidden="true"><ArrowBackOutline /></n-icon>{{ t('agent.backToChat') }}
         </button>
         <h1 class="header-title">{{ t('menu.agent') }}</h1>
         <span class="header-badge">{{ t('agent.headerBadge') }}</span>
@@ -32,7 +32,7 @@
           :title="lineageBadgeTitle"
           :aria-label="lineageBadgeTitle"
         >
-          ⑂ {{ t('agentFork.badge') }}
+          <n-icon size="14" class="mr-1" aria-hidden="true"><GitBranchOutline /></n-icon>{{ t('agentFork.badge') }}
           <span v-if="currentParentTitle" class="lineage-parent">← {{ currentParentTitle }}</span>
         </span>
         <!-- issue #476：「查看分叉」= 列表 parent_session_id 过滤入口 -->
@@ -46,7 +46,7 @@
               data-testid="fork-children-btn"
               @click="loadChildren"
             >
-              ↪ {{ t('agentFork.children') }}
+              <n-icon size="14" class="mr-1" aria-hidden="true"><GitBranchOutline /></n-icon>{{ t('agentFork.children') }}
             </button>
           </template>
           <div class="fork-children-panel" data-testid="fork-children-panel">
@@ -90,7 +90,7 @@
         <n-popover v-model:show="showTasks" trigger="click" placement="bottom-end">
           <template #trigger>
             <button class="header-btn" :class="{ active: showTasks }">
-              🕘 {{ t('agentTasks.title') }}
+              <n-icon size="14" class="mr-1" aria-hidden="true"><TimeOutline /></n-icon>{{ t('agentTasks.title') }}
             </button>
           </template>
           <RecentTaskList
@@ -100,7 +100,7 @@
           />
         </n-popover>
         <button class="header-btn" @click="showConfig = !showConfig" :class="{ active: showConfig }">
-          ⚙ {{ t('agent.config') }}
+          <n-icon size="14" class="mr-1" aria-hidden="true"><SettingsOutline /></n-icon>{{ t('agent.config') }}
         </button>
         <button
           class="header-btn"
@@ -110,7 +110,7 @@
         >
           <span aria-hidden="true">&gt;_</span> {{ t('agent.terminal.open') }}
         </button>
-        <button class="header-btn" @click="handleNewSession">+ {{ t('agent.newSession') }}</button>
+        <button class="header-btn" @click="handleNewSession"><n-icon size="14" class="mr-1" aria-hidden="true"><AddOutline /></n-icon>{{ t('agent.newSession') }}</button>
         <button class="header-btn" @click="handleClearMessages">{{ t('agent.clearMessages') }}</button>
       </div>
     </div>
@@ -124,7 +124,7 @@
       </div>
       <!-- Error state -->
       <div v-else-if="initError" class="error-overlay">
-        <p class="error-icon">⚠️</p>
+        <n-icon class="error-icon" size="30" aria-hidden="true"><AlertCircleOutline /></n-icon>
         <p class="error-text">{{ t('agent.loadFailed') }}</p>
         <n-button type="primary" size="small" @click="reloadInit">{{ t('common.retry') }}</n-button>
       </div>
@@ -161,10 +161,10 @@
             </button>
           </div>
           <div class="feature-list">
-            <div class="feature-item">📋 {{ t('agent.emptyFeaturePlan') }}</div>
-            <div class="feature-item">🔧 {{ toolsFeatureText }}</div>
-            <div class="feature-item">🧠 {{ t('agent.emptyFeatureMemory') }}</div>
-            <div class="feature-item">🔍 {{ t('agent.emptyFeatureReview') }}</div>
+            <div class="feature-item"><n-icon size="14" class="mr-1" aria-hidden="true"><ListOutline /></n-icon>{{ t('agent.emptyFeaturePlan') }}</div>
+            <div class="feature-item"><n-icon size="14" class="mr-1" aria-hidden="true"><ConstructOutline /></n-icon>{{ toolsFeatureText }}</div>
+            <div class="feature-item"><n-icon size="14" class="mr-1" aria-hidden="true"><CubeOutline /></n-icon>{{ t('agent.emptyFeatureMemory') }}</div>
+            <div class="feature-item"><n-icon size="14" class="mr-1" aria-hidden="true"><SearchOutline /></n-icon>{{ t('agent.emptyFeatureReview') }}</div>
           </div>
         </div>
 
@@ -201,7 +201,7 @@
                   v-for="r in msg.references"
                   :key="r.id"
                   class="user-ref-chip"
-                >📄 {{ r.title }}</span>
+                ><n-icon size="12" class="mr-1" aria-hidden="true"><DocumentTextOutline /></n-icon>{{ r.title }}</span>
               </div>
               <!-- issue #476：消息级分叉入口（USER 边界 = 在该消息之前分叉） -->
               <div v-if="showForkAction(msg)" class="fork-here-line">
@@ -247,7 +247,7 @@
                   v-else-if="evt.type === 'tool_error'"
                   class="tool-error-standalone"
                 >
-                  ❌ {{ evt.content }}
+                  <n-icon size="13" class="mr-1" aria-hidden="true"><CloseCircleOutline /></n-icon>{{ evt.content }}
                 </div>
                 <!-- 阶段 1：局部综合是诊断时间线条目，不是 Final answer。 -->
                 <div
@@ -323,7 +323,7 @@
                   class="command-error-standalone"
                   data-testid="command-error-standalone"
                 >
-                  ❌ {{ evt.content }}
+                  <n-icon size="13" class="mr-1" aria-hidden="true"><CloseCircleOutline /></n-icon>{{ evt.content }}
                 </div>
               </template>
             </div>
@@ -399,7 +399,7 @@
                  如实标记；无数据不亮入口，深链/任务列表可达诚实空态） -->
             <div v-if="showReplayEntry(idx, msg)" class="replay-entry-line">
               <button class="replay-entry-btn" @click="openReplay(agentStore.taskId!)">
-                🕘 {{ t('agentReplay.entry') }}
+                <n-icon size="14" class="mr-1" aria-hidden="true"><TimeOutline /></n-icon>{{ t('agentReplay.entry') }}
               </button>
             </div>
 
@@ -520,7 +520,12 @@ import type {
   ReferencedDoc,
   ReplayTimeline as ReplayTimelineData,
 } from '@/types/agent'
-import { ThumbsUpOutline, ThumbsDownOutline } from '@vicons/ionicons5'
+import {
+  ThumbsUpOutline, ThumbsDownOutline, ArrowBackOutline, TimeOutline,
+  SettingsOutline, AddOutline, AlertCircleOutline, ListOutline,
+  ConstructOutline, CubeOutline, SearchOutline, DocumentTextOutline,
+  CloseCircleOutline, GitBranchOutline,
+} from '@vicons/ionicons5'
 
 import PlanTree from '@/components/agent/PlanTree.vue'
 import ThinkingStream from '@/components/agent/ThinkingStream.vue'
@@ -1199,7 +1204,7 @@ async function handleSend(query: string, refs?: ReferencedDoc[]) {
     } else {
       const errMsg = e instanceof Error ? e.message : String(e)
       agentStore.updateLastAssistant((msg) => {
-        msg.content = `❌ 错误: ${errMsg || 'Agent 连接失败'}`
+        msg.content = `错误: ${errMsg || 'Agent 连接失败'}`
         msg.loading = false
         msg.endedAt = Date.now()  // 计时：连接失败也是终态
       })

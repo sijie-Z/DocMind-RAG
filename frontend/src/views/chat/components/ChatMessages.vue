@@ -8,7 +8,7 @@
       <!-- Welcome screen（E7：历史加载中不显示空态欢迎屏，避免「加载中」与「新会话」混淆） -->
       <div v-if="messages.length === 0 && !isLoadingHistory" class="flex flex-col items-center justify-center mt-16 md:mt-24 text-center animate-fade-in">
         <div class="relative mb-10">
-          <div class="w-28 h-28 bg-gradient-to-br from-blue-600 via-blue-600 to-blue-800 rounded-3xl shadow-2xl shadow-blue-600/30 flex items-center justify-center transform hover:scale-105 transition-transform duration-300 text-white">
+          <div class="w-28 h-28 bg-blue-700 rounded-3xl shadow-xl shadow-blue-900/20 flex items-center justify-center transform hover:scale-105 transition-transform duration-300 text-white">
             <DocMindMark :size="64" />
           </div>
           <div class="absolute -inset-2 bg-slate-400/20 rounded-[1.5rem] blur-xl -z-10"></div>

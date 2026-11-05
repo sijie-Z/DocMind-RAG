@@ -10,6 +10,7 @@ export default {
     collapseSidebar: 'Collapse sidebar',
     expandSidebar: 'Expand sidebar',
     mainNavigation: 'Main navigation',
+    skipToContent: 'Skip to main content',
   },
   common: {
     save: 'Save',
