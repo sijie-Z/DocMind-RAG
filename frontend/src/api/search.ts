@@ -17,6 +17,9 @@ export interface SearchRequest {
   // 后端 KnowledgeSearchRequest 目前不消费 file_types（预存在漂移，已记录）；
   // 保持既有发送行为，空数组时不发送。
   file_types?: string[]
+  // 检索自测：限定文档范围与返回诊断。
+  document_ids?: string[]
+  debug?: boolean
 }
 
 export interface SearchPayloadInput {
@@ -29,6 +32,10 @@ export interface SearchPayloadInput {
   searchMode?: 'auto' | 'hybrid' | 'vector' | 'keyword'
   /** 已选文件类型；空数组 = 不发送 */
   fileTypes?: string[]
+  /** 限定文档范围；空数组 = 全组织 */
+  documentIds?: string[]
+  /** 返回检索诊断（每臂候选/RRF/rerank/MMR） */
+  debug?: boolean
 }
 
 /**
@@ -49,6 +56,8 @@ export function buildSearchPayload(input: SearchPayloadInput): SearchRequest {
       ? { search_mode: input.searchMode }
       : {}),
     ...(input.fileTypes && input.fileTypes.length ? { file_types: input.fileTypes } : {}),
+    ...(input.documentIds && input.documentIds.length ? { document_ids: input.documentIds } : {}),
+    ...(input.debug ? { debug: true } : {}),
   }
 }
 
@@ -90,6 +99,39 @@ export interface SearchResult {
   has_vector?: boolean | null
   rewrite_hits?: number | null
   fresh_factor?: number | null
+  /** 1-based 检索序位 */
+  rank?: number | null
+  /** 命中的分块 id（旧索引可能为 null） */
+  chunk_id?: string | null
+  chunk_index?: number | null
+  section_title?: string | null
+  clause_no?: number[]
+  section_no?: string[]
+  /** PDF 来源页码（非 PDF/旧索引为 null） */
+  page_number?: number | null
+}
+
+export interface SearchScopeItem {
+  document_id: string
+  found: boolean
+  title?: string | null
+  status?: string | null
+  chunk_count?: number | null
+}
+
+/** 检索自测的完整响应（诊断字段只在结果为空/开启 debug 时有值）。 */
+export interface KnowledgeSearchResponse {
+  query: string
+  results: SearchResult[]
+  total_count: number
+  search_mode: string
+  search_time?: number | null
+  index_status: 'ok' | 'empty_index' | 'index_error' | 'unknown'
+  index_doc_count?: number | null
+  effective_top_k?: number | null
+  document_ids?: string[] | null
+  document_scope?: SearchScopeItem[] | null
+  debug?: Record<string, unknown> | null
 }
 
 export interface SearchStats {
@@ -98,14 +140,22 @@ export interface SearchStats {
   recent_searches: string[]
 }
 
-// 搜索知识库
+// 搜索知识库（完整响应：结果 + 索引诊断 + 可选 debug）。
 // E14/D2：失败由搜索页的内联错误态（含重试）呈现 —— 带 X-Silent-Error
 // 关闭响应拦截器的全局 toast，避免同一失败出现两个提示表面。
-export const searchKnowledge = async (params: SearchRequest): Promise<SearchResult[]> => {
+export const searchKnowledgeResponse = async (
+  params: SearchRequest
+): Promise<KnowledgeSearchResponse> => {
   const response = await request.post('/knowledge/search', params, {
     headers: { 'X-Silent-Error': '1' }
   })
-  return response.data.results || []
+  return response.data
+}
+
+// 兼容入口：只需要结果列表的调用方沿用旧签名。
+export const searchKnowledge = async (params: SearchRequest): Promise<SearchResult[]> => {
+  const data = await searchKnowledgeResponse(params)
+  return data.results || []
 }
 
 // 获取搜索建议

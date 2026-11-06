@@ -51,4 +51,23 @@ describe('buildSearchPayload · 与后端 schema 对齐（P1 搜索 422 修复�
     expect(payload).not.toHaveProperty('limit')
     expect('file_types' in payload).toBe(false)
   })
+
+  it('检索自测：document_ids/debug 透传；空数组不发送', () => {
+    const payload = buildSearchPayload({
+      query: '付款条款',
+      organizationId: 7,
+      documentIds: ['doc-1', 'doc-2'],
+      debug: true,
+    })
+    expect(payload).toEqual({
+      query: '付款条款',
+      organization_id: 7,
+      document_ids: ['doc-1', 'doc-2'],
+      debug: true,
+    })
+
+    const empty = buildSearchPayload({ query: 'q', organizationId: 7, documentIds: [] })
+    expect('document_ids' in empty).toBe(false)
+    expect('debug' in empty).toBe(false)
+  })
 })

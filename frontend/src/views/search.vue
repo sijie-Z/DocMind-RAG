@@ -1,55 +1,65 @@
 <template>
-  <div class="search-page h-full flex flex-col p-6 space-y-6 overflow-hidden bg-transparent">
+  <div class="search-page h-full flex flex-col p-4 md:p-6 space-y-5 overflow-hidden bg-transparent">
     <!-- 顶部标题区域 -->
-    <div class="search-header flex items-center justify-between">
+    <div class="search-header flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
       <div>
-        <h1
-          class="text-3xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-blue-500 to-blue-700 dark:from-blue-400 dark:to-blue-600">
+        <h1 class="text-2xl font-semibold tracking-tight text-slate-900 dark:text-slate-100 md:text-[28px]">
           {{ t('menu.search') }}
         </h1>
-        <p class="text-gray-500 dark:text-gray-400 mt-1">
+        <p class="mt-1 flex items-center gap-2 text-sm text-slate-500 dark:text-slate-400">
+          <span class="h-0.5 w-6 rounded-full bg-blue-600"></span>
           {{ t('search.subtitle') }}
         </p>
       </div>
-      <!-- 搜索统计 (极简展示) -->
-      <div v-if="searchStats" class="search-stats flex space-x-4">
-        <div
-          class="px-4 py-2 rounded-2xl bg-white/50 dark:bg-gray-800/50 backdrop-blur-md border border-white/20 dark:border-gray-700/30 shadow-sm">
-          <span class="text-xs text-gray-400 block uppercase tracking-wider">{{ t('search.totalFiles') }}</span>
-          <span class="text-xl font-bold text-blue-600 dark:text-blue-400">{{ searchStats.total_files }}</span>
-        </div>
+      <div v-if="searchStats" class="search-stats flex items-center gap-2 text-sm text-slate-500 dark:text-slate-400">
+        <span>{{ t('search.totalFiles') }}</span>
+        <span class="font-semibold tabular-nums text-slate-900 dark:text-slate-100">{{ searchStats.total_files }}</span>
       </div>
     </div>
 
-    <!-- 核心搜索区 (玻璃拟态大搜索框) -->
-    <div class="relative group max-w-4xl mx-auto w-full">
+    <!-- 核心搜索框 -->
+    <div class="relative max-w-4xl mx-auto w-full">
       <div
-        class="absolute -inset-1 bg-gradient-to-r from-blue-500 to-blue-600 rounded-[2rem] blur opacity-25 group-hover:opacity-40 transition duration-1000 group-hover:duration-200">
-      </div>
-      <div
-        class="relative flex items-center bg-white/80 dark:bg-gray-900/80 backdrop-blur-2xl rounded-[1.8rem] shadow-xl border border-white/40 dark:border-gray-800/50 p-2 transition-all duration-300">
-        <div class="pl-5 pr-3 text-gray-400">
-          <n-icon size="24"><search-outline /></n-icon>
-        </div>
-        <input v-model="searchQuery" type="text" :placeholder="t('search.placeholder')"
-          class="flex-1 bg-transparent border-none focus:ring-2 focus:ring-blue-500/30 focus:border-blue-500 rounded-lg text-lg py-3 px-2 text-gray-700 dark:text-gray-200 outline-none"
-          @keyup.enter="handleSearch" @input="handleInputChange">
-
-        <!-- 搜索按钮 -->
+        class="flex items-stretch gap-2 rounded-xl border border-slate-200 bg-white p-2 transition-colors focus-within:border-blue-600 focus-within:ring-2 focus-within:ring-blue-600/20 dark:border-slate-700 dark:bg-slate-900"
+      >
+        <n-icon size="22" class="ml-2 self-center text-slate-400"><search-outline /></n-icon>
+        <input
+          v-model="searchQuery"
+          type="text"
+          :placeholder="t('search.placeholder')"
+          :aria-label="t('search.placeholder')"
+          class="min-w-0 flex-1 border-none bg-transparent px-1 text-base text-slate-800 outline-none placeholder:text-slate-500 dark:text-slate-100 dark:placeholder:text-slate-400"
+          @keyup.enter="handleSearch"
+          @input="handleInputChange"
+          @blur="hideSuggestions"
+          @keydown.esc="suggestions = []"
+        />
         <button
-          class="search-submit ml-2 px-8 py-3 bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 text-white font-bold rounded-2xl shadow-lg shadow-blue-500/30 transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed flex items-center space-x-2"
-          :disabled="!searchQuery.trim() || loading" @click="handleSearch">
+          class="search-submit inline-flex min-h-11 items-center gap-2 rounded-lg bg-blue-600 px-5 text-sm font-semibold text-white transition-colors hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+          :disabled="!searchQuery.trim() || loading"
+          @click="handleSearch"
+        >
           <n-spin v-if="loading" size="small" stroke="white" />
           <span>{{ t('search.button') }}</span>
         </button>
 
         <!-- 搜索建议浮窗 -->
-        <div v-if="suggestions.length > 0"
-          class="absolute top-full left-0 right-0 mt-3 bg-white/90 dark:bg-gray-900/90 backdrop-blur-xl rounded-2xl border border-white/20 dark:border-gray-800/50 shadow-2xl z-50 overflow-hidden">
-          <div v-for="suggestion in suggestions" :key="suggestion"
-            class="px-6 py-3 hover:bg-gray-50 dark:hover:bg-gray-900/30 cursor-pointer transition-colors text-gray-600 dark:text-gray-300 flex items-center space-x-3"
-            @click="selectSuggestion(suggestion)">
-            <n-icon class="text-gray-400"><time-outline /></n-icon>
+        <div
+          v-if="suggestions.length > 0"
+          class="absolute left-0 right-0 top-full z-50 mt-2 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-lg dark:border-slate-700 dark:bg-slate-900"
+        >
+          <div
+            v-for="suggestion in suggestions"
+            :key="suggestion"
+            role="button"
+            tabindex="0"
+            class="suggestion-item flex cursor-pointer items-center gap-3 px-4 py-2.5 text-sm text-slate-600 transition-colors hover:bg-slate-50 dark:text-slate-300 dark:hover:bg-slate-800"
+            @mousedown.prevent
+            @click="selectSuggestion(suggestion)"
+            @keydown.enter.prevent="selectSuggestion(suggestion)"
+            @keydown.space.prevent="selectSuggestion(suggestion)"
+          >
+            <n-icon class="text-slate-400"><time-outline /></n-icon>
             <span>{{ suggestion }}</span>
           </div>
         </div>
@@ -57,14 +67,13 @@
     </div>
 
     <!-- 筛选与结果主区域 -->
-    <div class="search-layout flex-1 flex space-x-6 overflow-hidden">
-      <!-- 左侧极简筛选栏 -->
-      <div class="search-filter w-72 flex flex-col space-y-4 overflow-y-auto pr-2 custom-scrollbar">
-        <div
-          class="bg-white/60 dark:bg-gray-900/60 backdrop-blur-xl rounded-3xl border border-white/20 dark:border-gray-800/30 p-5 space-y-6">
+    <div class="search-layout flex flex-1 flex-col gap-5 overflow-hidden lg:flex-row">
+      <!-- 左侧筛选栏 -->
+      <aside class="search-filter w-full flex flex-col gap-4 overflow-y-auto pr-1 custom-scrollbar lg:w-72">
+        <div class="space-y-5 rounded-lg border border-slate-200 bg-white p-4 dark:border-slate-700 dark:bg-slate-900">
           <!-- 搜索模式 -->
-          <div class="space-y-3">
-            <h3 class="text-sm font-bold text-gray-400 uppercase tracking-widest">{{ t('search.type') }}</h3>
+          <div class="space-y-2">
+            <h3 class="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">{{ t('search.type') }}</h3>
             <n-radio-group v-model:value="searchType" name="searchType" class="w-full">
               <n-space vertical>
                 <n-radio value="auto">{{ t('search.auto') }}</n-radio>
@@ -75,165 +84,243 @@
             </n-radio-group>
           </div>
 
-          <!-- T10 空窗补丁（问题清单第二轮 §三.16）：文件类型筛选后端未消费——
-               勾选后前端虽会发送 file_types，但后端 KnowledgeSearchRequest 静默
-               丢弃该字段（api/search.ts 自认「预存在漂移」）→ 筛选静默空转，
-               勾了没反应，误导用户。完整修复（后端 ES filter + 值域映射
-               docx/xlsx→word/excel）待 #225（search_mode 归一）合入后落地。
-               恢复点=本区块：后端落地后删掉下面的 v-if="false" 即恢复渲染；
-               状态（selectedFileTypes / fileTypes）与传参逻辑原样保留、未删改。 -->
-          <div v-if="false" class="space-y-3">
-            <h3 class="text-sm font-bold text-gray-400 uppercase tracking-widest">{{ t('search.fileType') }}</h3>
-            <n-checkbox-group v-model:value="selectedFileTypes">
-              <div class="grid grid-cols-2 gap-2">
-                <n-checkbox v-for="type in fileTypes" :key="type.value" :value="type.value">
-                  {{ type.label }}
-                </n-checkbox>
-              </div>
-            </n-checkbox-group>
+          <!-- 文档范围（检索自测） -->
+          <div class="space-y-2">
+            <h3 class="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+              {{ t('search.documentScope') }}
+            </h3>
+            <n-select
+              v-model:value="selectedDocumentIds"
+              multiple
+              filterable
+              remote
+              clearable
+              :options="documentOptions"
+              :loading="documentLoading"
+              :placeholder="t('search.documentScopeHint')"
+              :max-tag-count="2"
+              data-testid="search-document-scope"
+              @search="loadDocumentOptions"
+            />
+          </div>
+
+          <!-- 返回条数 -->
+          <div class="space-y-2">
+            <h3 class="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">{{ t('search.topK') }}</h3>
+            <n-select
+              v-model:value="topK"
+              :options="topKOptions"
+              clearable
+              :placeholder="t('search.topKDefault')"
+            />
           </div>
 
           <!-- 排序方式 -->
-          <div class="space-y-3">
-            <h3 class="text-sm font-bold text-gray-400 uppercase tracking-widest">排序</h3>
-            <n-select v-model:value="sortBy" :options="sortOptions" size="small" />
+          <div class="space-y-2">
+            <h3 class="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">{{ t('search.sort') }}</h3>
+            <n-select v-model:value="sortBy" :options="sortOptions" />
+          </div>
+
+          <!-- 诊断开关 -->
+          <div class="flex items-center justify-between gap-3">
+            <div>
+              <h3 class="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">{{ t('search.debug') }}</h3>
+              <p class="mt-1 text-xs text-slate-500 dark:text-slate-400">{{ t('search.debugHint') }}</p>
+            </div>
+            <n-switch v-model:value="debugEnabled" data-testid="search-debug-switch" />
           </div>
 
           <!-- 重置按钮 -->
-          <n-button block quaternary round @click="clearFilters">
+          <n-button block quaternary @click="clearFilters">
             {{ t('search.clear') }}
           </n-button>
         </div>
-      </div>
+      </aside>
 
       <!-- 右侧结果列表 -->
-      <div class="search-results flex-1 flex flex-col overflow-hidden">
+      <section class="search-results flex flex-1 flex-col overflow-hidden">
         <!-- 结果状态栏 -->
-        <div v-if="searchResults.length > 0" class="mb-4 flex items-center justify-between text-sm text-gray-500">
-          <span>{{ t('search.results') }}: <span class="font-bold text-blue-600">{{ searchResults.length
-          }}</span></span>
+        <div v-if="searchResults.length > 0" class="mb-3 flex flex-wrap items-center gap-3 text-sm text-slate-500 dark:text-slate-400">
+          <span>{{ t('search.results') }}: <span class="font-semibold tabular-nums text-blue-700 dark:text-blue-400">{{ searchResults.length }}</span></span>
+          <span v-if="lastResponse?.search_mode" data-testid="search-effective-mode">{{ searchModeLabel }}</span>
+          <span v-if="lastResponse?.search_time != null">· {{ lastResponse.search_time }}s</span>
         </div>
 
-        <div class="flex-1 overflow-y-auto pr-2 custom-scrollbar">
+        <div class="search-results-scroll flex-1 space-y-4 overflow-y-auto pr-2 custom-scrollbar">
           <!-- 结果列表 -->
-          <div v-if="searchResults.length > 0" class="space-y-4">
-            <div v-for="result in sortedResults" :key="result.id"
-              class="group bg-white/60 dark:bg-gray-900/60 backdrop-blur-xl rounded-3xl border border-white/20 dark:border-gray-800/30 p-5 hover:shadow-xl hover:shadow-blue-500/10 hover:border-blue-500/30 transition-all duration-300 cursor-pointer"
-              @click="showResultDetail(result)">
-              <div class="flex justify-between items-start mb-3">
-                <div class="flex items-center space-x-3">
-                  <div
-                    class="w-10 h-10 rounded-xl bg-gray-50 dark:bg-gray-900/30 flex items-center justify-center">
-                    <n-icon size="22" class="text-gray-500 dark:text-gray-400">
+          <div v-if="searchResults.length > 0" class="space-y-3">
+            <div
+              v-for="(result, index) in sortedResults"
+              :key="result.chunk_id || `${result.id}-${index}`"
+              role="button"
+              tabindex="0"
+              :aria-label="filenameOf(result)"
+              class="group cursor-pointer rounded-lg border border-slate-200 bg-white p-4 transition-colors hover:border-blue-300 dark:border-slate-700 dark:bg-slate-900 dark:hover:border-blue-500/50"
+              :data-testid="`search-result-${index}`"
+              @click="showResultDetail(result)"
+              @keydown.enter.prevent="showResultDetail(result)"
+              @keydown.space.prevent="showResultDetail(result)"
+            >
+              <div class="mb-2 flex items-start justify-between gap-3">
+                <div class="flex min-w-0 items-start gap-3">
+                  <div class="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-slate-50 dark:bg-slate-800">
+                    <n-icon size="22" class="text-slate-500 dark:text-slate-400">
                       <component :is="getFileTypeIcon(fileTypeOf(result))" />
                     </n-icon>
                   </div>
-                  <div>
-                    <h3
-                      class="font-bold text-gray-800 dark:text-gray-100 group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors">
-                      {{ filenameOf(result) }}
+                  <span
+                    class="mt-0.5 inline-flex h-6 min-w-6 items-center justify-center rounded-md bg-slate-100 px-1 text-xs font-semibold tabular-nums text-slate-600 dark:bg-slate-800 dark:text-slate-300"
+                    :title="t('search.rankLabel')"
+                  >#{{ result.rank ?? index + 1 }}</span>
+                  <div class="min-w-0">
+                    <h3 class="truncate font-semibold text-slate-800 transition-colors group-hover:text-blue-700 dark:text-slate-100 dark:group-hover:text-blue-400">
+                      {{ filenameOf(result) || t('search.unknownFile', '未知文件') }}
                     </h3>
-                    <!-- P1-3：大小/日期不可推导（真实响应无对应字段）→ 不渲染；
-                         原先 formatFileSize(undefined)→"NaN undefined" /
-                         formatDate(undefined)→"Invalid Date" 畸形显示随之消除 -->
+                    <div class="mt-1 flex flex-wrap items-center gap-1.5 text-xs text-slate-500 dark:text-slate-400">
+                      <n-tag v-if="rerankScoreOf(result)" :bordered="false" size="small" round type="success">
+                        {{ t('search.rerankScore', { score: rerankScoreOf(result) }) }}
+                      </n-tag>
+                      <n-tag v-if="result.page_number" :bordered="false" size="small" round>
+                        {{ t('search.pageLabel') }} {{ result.page_number }}
+                      </n-tag>
+                      <n-tag v-if="sectionLabelOf(result)" :bordered="false" size="small" round class="max-w-[12rem] truncate" :title="sectionLabelOf(result)">
+                        {{ sectionLabelOf(result) }}
+                      </n-tag>
+                      <n-tag v-if="result.has_keyword" :bordered="false" size="small" round>
+                        {{ t('search.hitKeyword') }}
+                      </n-tag>
+                      <n-tag v-if="result.has_vector" :bordered="false" size="small" round>
+                        {{ t('search.hitVector') }}
+                      </n-tag>
+                    </div>
                   </div>
                 </div>
-                <div class="flex items-center space-x-2">
-                  <!-- issue #185：只展示重排绝对分；无重排分时不展示任何分数，
-                       列表顺序即排序序位——不再把 min-max 排序分 ×100 当「相关度 %」 -->
-                  <n-tag v-if="rerankScoreOf(result)" :bordered="false" type="success" size="small" round
-                    class="bg-emerald-50 dark:bg-emerald-900/20 text-emerald-600">
-                    {{ t('search.rerankScore', { score: rerankScoreOf(result) }) }}
-                  </n-tag>
-                </div>
               </div>
 
-              <div class="mb-3">
-                <div class="text-sm text-gray-600 dark:text-gray-400 line-clamp-2 leading-relaxed">
-                  {{ contentOf(result) }}
-                </div>
-                <div
-                  v-if="isUnverifiedText(result)"
-                  data-testid="search-provenance-warning"
-                  class="mt-1 text-xs text-amber-700 dark:text-amber-400"
-                >
-                  {{ t('search.legacyTextWarning') }}
-                </div>
+              <div class="text-sm leading-relaxed text-slate-600 line-clamp-2 dark:text-slate-300">
+                {{ contentOf(result) }}
+              </div>
+              <div
+                v-if="isUnverifiedText(result)"
+                data-testid="search-provenance-warning"
+                class="mt-1 text-xs text-amber-700 dark:text-amber-400"
+              >
+                {{ t('search.legacyTextWarning') }}
               </div>
 
-              <div class="flex items-center justify-between mt-4 pt-4 border-t border-gray-100 dark:border-gray-800/50">
-                <div class="flex items-center space-x-2">
-                  <n-button size="tiny" secondary round type="primary" @click.stop="askAI(result)">
+              <div class="mt-3 flex items-center justify-between border-t border-slate-100 pt-3 dark:border-slate-800">
+                <div class="flex items-center gap-2">
+                  <n-button size="tiny" secondary round type="primary" class="result-action" @click.stop="askAI(result)">
                     <template #icon><n-icon><ChatbubblesOutline /></n-icon></template>
                     {{ t('search.askAI', '问问 AI') }}
                   </n-button>
                 </div>
-                <n-button size="tiny" quaternary circle @click.stop="copyResultContent(result)">
+                <n-button
+                  size="tiny"
+                  quaternary
+                  circle
+                  class="result-action"
+                  :aria-label="t('common.copy', '复制内容')"
+                  :title="t('common.copy', '复制内容')"
+                  @click.stop="copyResultContent(result)"
+                >
                   <template #icon><n-icon><CopyOutline /></n-icon></template>
                 </n-button>
               </div>
             </div>
           </div>
 
-          <!-- 失败态（E14/D2）：独立于「无结果」，含重试；失败时旧结果已清空，
-               不把上一次的结果冒充本次结果，也不把失败伪装成空结果 -->
-          <div v-else-if="searchError && !loading"
-            class="search-error h-full flex flex-col items-center justify-center text-center p-12">
-            <div
-              class="w-24 h-24 bg-red-50 dark:bg-red-900/20 rounded-[2.5rem] flex items-center justify-center mb-6">
-              <n-icon size="48" class="text-red-400"><AlertCircleOutline /></n-icon>
+          <!-- 失败态（E14/D2） -->
+          <div v-else-if="searchError && !loading" class="search-error flex h-full flex-col items-center justify-center p-12 text-center">
+            <div class="mb-5 flex h-16 w-16 items-center justify-center rounded-2xl border border-red-200 bg-red-50 dark:border-red-800 dark:bg-red-900/20">
+              <n-icon size="30" class="text-red-600"><AlertCircleOutline /></n-icon>
             </div>
-            <h3 class="text-xl font-bold text-gray-700 dark:text-gray-200 mb-2">{{ t('search.searchFailed') }}</h3>
-            <p class="search-error-msg text-gray-500 max-w-md mb-6">{{ searchError }}</p>
+            <h3 class="mb-2 text-lg font-semibold text-slate-800 dark:text-slate-100">{{ t('search.searchFailed') }}</h3>
+            <p class="search-error-msg mb-6 max-w-md text-sm text-slate-500 dark:text-slate-400">{{ searchError }}</p>
             <n-button v-if="currentOrgId" class="search-retry" type="primary" round @click="handleSearch">
               <template #icon><n-icon><RefreshOutline /></n-icon></template>
               {{ t('common.retry') }}
             </n-button>
           </div>
 
-          <!-- 无结果/初始状态 -->
-          <div v-else-if="hasSearched && !loading"
-            class="h-full flex flex-col items-center justify-center text-center p-12">
-            <div
-              class="w-24 h-24 bg-gray-100 dark:bg-gray-800 rounded-[2.5rem] flex items-center justify-center mb-6 grayscale opacity-50">
-              <n-icon size="48" class="text-gray-400"><SearchOutline /></n-icon>
+          <!-- 无结果诊断 -->
+          <div v-else-if="hasSearched && !loading" class="flex h-full flex-col items-center justify-center p-8 text-center" data-testid="search-empty-state">
+            <div class="mb-5 flex h-16 w-16 items-center justify-center rounded-2xl border border-slate-200 bg-slate-50 dark:border-slate-700 dark:bg-slate-800">
+              <n-icon size="30" class="text-slate-400"><SearchOutline /></n-icon>
             </div>
-            <h3 class="text-xl font-bold text-gray-700 dark:text-gray-200 mb-2">{{ t('search.noResults') }}</h3>
-            <p class="text-gray-500 max-w-xs">{{ t('search.noResultsDesc') }}</p>
+            <h3 class="mb-2 text-lg font-semibold text-slate-800 dark:text-slate-100">{{ emptyState.title }}</h3>
+            <p class="max-w-md text-sm text-slate-500 dark:text-slate-400">{{ emptyState.desc }}</p>
+            <ul v-if="emptyState.scope?.length" class="mt-4 w-full max-w-md space-y-1 text-left text-xs">
+              <li
+                v-for="item in emptyState.scope"
+                :key="item.document_id"
+                class="flex items-center justify-between gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 dark:border-slate-700 dark:bg-slate-900"
+              >
+                <span class="truncate text-slate-600 dark:text-slate-300">{{ item.title || item.document_id.slice(0, 8) }}</span>
+                <span :class="item.found && item.status === 'indexed' ? 'text-emerald-700 dark:text-emerald-400' : 'text-amber-700 dark:text-amber-400'">
+                  {{ scopeStatusLabel(item) }}
+                </span>
+              </li>
+            </ul>
           </div>
 
-          <div v-else-if="!hasSearched && !loading"
-            class="h-full flex flex-col items-center justify-center text-center p-12 opacity-30">
-            <div class="mb-6">
-              <n-icon size="64" class="text-gray-300 dark:text-gray-600"><SparklesOutline /></n-icon>
+          <!-- 初始状态 -->
+          <div v-else-if="!hasSearched && !loading" class="flex h-full flex-col items-center justify-center p-12 text-center">
+            <div class="mb-5 flex h-16 w-16 items-center justify-center rounded-2xl border border-slate-200 bg-slate-50 dark:border-slate-700 dark:bg-slate-800">
+              <n-icon size="30" class="text-slate-400"><SparklesOutline /></n-icon>
             </div>
-            <p class="text-xl font-medium text-gray-400">开始探索您的知识库</p>
+            <p class="text-sm text-slate-500 dark:text-slate-400">{{ t('search.startHint') }}</p>
           </div>
         </div>
-      </div>
+
+        <!-- 检索诊断（复用聊天调试面板：每臂候选/RRF/rerank/MMR） -->
+        <DebugPanel
+          v-if="debugEnabled && lastResponse?.debug"
+          :debug-data="lastResponse.debug as unknown as RetrievalDebugData"
+          :default-expanded="false"
+          @close="debugEnabled = false"
+        />
+      </section>
     </div>
 
-    <!-- 结果详情模态框 (现代风格) -->
-    <n-modal v-model:show="showDetailModal" preset="card" style="width: min(800px, 90vw); border-radius: 2rem;"
-      class="backdrop-blur-2xl bg-white/80 dark:bg-gray-900/80" :title="selectedResult ? filenameOf(selectedResult) : ''">
-      <div v-if="selectedResult" class="space-y-6 p-2">
-        <!-- P1-3/issue #185：仅保留可推导的两个信息格（类型←文件名、
-             重排分←relevance_score）；大小/日期真实响应无对应字段（不可推导）→ 不渲染 -->
-        <div class="grid grid-cols-2 gap-4">
-          <div class="p-3 rounded-2xl bg-gray-50 dark:bg-gray-800/50">
-            <span class="text-xs text-gray-400 block mb-1">{{ t('search.fileType') }}</span>
-            <span class="font-bold text-gray-700 dark:text-gray-200">{{ fileTypeOf(selectedResult).toUpperCase() || '—' }}</span>
+    <!-- 结果详情模态框 -->
+    <n-modal
+      v-model:show="showDetailModal"
+      preset="card"
+      style="width: min(800px, 90vw)"
+      :title="selectedResult ? filenameOf(selectedResult) : ''"
+    >
+      <div v-if="selectedResult" class="space-y-5 p-1">
+        <div class="grid grid-cols-2 gap-3 md:grid-cols-3">
+          <div class="min-w-0 rounded-md border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-800/50">
+            <span class="mb-1 block text-xs text-slate-500 dark:text-slate-400">{{ t('search.fileType') }}</span>
+            <span class="font-semibold text-slate-800 dark:text-slate-100">{{ fileTypeOf(selectedResult).toUpperCase() || '—' }}</span>
           </div>
-          <div class="p-3 rounded-2xl bg-gray-50 dark:bg-gray-800/50">
-            <span class="text-xs text-gray-400 block mb-1">{{ t('search.rerankScoreLabel') }}</span>
-            <span class="font-bold text-emerald-600">{{ rerankScoreOf(selectedResult) ?? '—' }}</span>
+          <div class="min-w-0 rounded-md border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-800/50">
+            <span class="mb-1 block text-xs text-slate-500 dark:text-slate-400">{{ t('search.rerankScoreLabel') }}</span>
+            <span class="font-semibold text-emerald-700 dark:text-emerald-400">{{ rerankScoreOf(selectedResult) ?? '—' }}</span>
+          </div>
+          <div class="min-w-0 rounded-md border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-800/50">
+            <span class="mb-1 block text-xs text-slate-500 dark:text-slate-400">{{ t('search.rankLabel') }}</span>
+            <span class="font-semibold tabular-nums text-slate-800 dark:text-slate-100">#{{ selectedResult.rank ?? '—' }}</span>
+          </div>
+          <div class="min-w-0 rounded-md border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-800/50">
+            <span class="mb-1 block text-xs text-slate-500 dark:text-slate-400">{{ t('search.pageLabel') }}</span>
+            <span class="font-semibold text-slate-800 dark:text-slate-100">{{ selectedResult.page_number ?? '—' }}</span>
+          </div>
+          <div class="min-w-0 rounded-md border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-800/50">
+            <span class="mb-1 block text-xs text-slate-500 dark:text-slate-400">{{ t('search.chunkLabel') }}</span>
+            <span class="block truncate font-semibold text-slate-800 dark:text-slate-100" :title="selectedResult.chunk_id ?? ''">{{ selectedResult.chunk_id ?? '—' }}</span>
+          </div>
+          <div class="min-w-0 rounded-md border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-800/50">
+            <span class="mb-1 block text-xs text-slate-500 dark:text-slate-400">{{ t('search.sectionLabel') }}</span>
+            <span class="block truncate font-semibold text-slate-800 dark:text-slate-100" :title="sectionLabelOf(selectedResult)">{{ sectionLabelOf(selectedResult) || '—' }}</span>
           </div>
         </div>
 
         <div class="space-y-2">
-          <h4 class="text-sm font-bold text-gray-400 uppercase tracking-widest">{{ t('search.fileContent') }}</h4>
-          <div
-            class="p-6 rounded-3xl bg-gray-50 dark:bg-gray-800/50 text-gray-700 dark:text-gray-300 leading-loose whitespace-pre-wrap max-h-96 overflow-y-auto custom-scrollbar border border-gray-100 dark:border-gray-700/30">
+          <h4 class="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">{{ t('search.fileContent') }}</h4>
+          <div class="max-h-96 overflow-y-auto whitespace-pre-wrap rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm leading-relaxed text-slate-700 custom-scrollbar dark:border-slate-700 dark:bg-slate-800/50 dark:text-slate-300">
             {{ contentOf(selectedResult) }}
           </div>
           <div
@@ -245,12 +332,12 @@
           </div>
         </div>
 
-        <div class="flex justify-end gap-3 pt-4 border-t border-gray-100 dark:border-gray-800/50">
+        <div class="flex justify-end gap-3 border-t border-slate-100 pt-4 dark:border-slate-800">
           <n-button round secondary @click="copyResultContent(selectedResult)">
             <template #icon><n-icon><CopyOutline /></n-icon></template>
             {{ t('common.copy', '复制内容') }}
           </n-button>
-          <n-button type="primary" round class="px-8 shadow-lg shadow-blue-500/20" @click="askAI(selectedResult)">
+          <n-button type="primary" round @click="askAI(selectedResult)">
             <template #icon><n-icon><ChatbubblesOutline /></n-icon></template>
             {{ t('search.askAI', '问问 AI') }}
           </n-button>
@@ -264,14 +351,21 @@
 import { ref, computed, onMounted, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useDedupedMessage } from '@/utils/message'
-import { NIcon, NSpin, NRadioGroup, NRadio, NSpace, NCheckboxGroup, NCheckbox, NSelect, NTag, NButton, NModal } from 'naive-ui'
-import { SearchOutline, TimeOutline, ChatbubblesOutline, CopyOutline, SparklesOutline, DocumentTextOutline, DocumentOutline, GridOutline, NewspaperOutline, AlertCircleOutline, RefreshOutline } from '@vicons/ionicons5'
-import { searchKnowledge, getSearchSuggestions, getSearchStats, buildSearchPayload } from '@/api/search'
-import type { SearchResult, SearchStats } from '@/api/search'
+import { NIcon, NSpin, NRadioGroup, NRadio, NSpace, NSelect, NTag, NButton, NModal, NSwitch } from 'naive-ui'
+import {
+  SearchOutline, TimeOutline, ChatbubblesOutline, CopyOutline, SparklesOutline,
+  DocumentTextOutline, DocumentOutline, GridOutline, NewspaperOutline, AlertCircleOutline, RefreshOutline
+} from '@vicons/ionicons5'
+import { searchKnowledgeResponse, getSearchSuggestions, getSearchStats, buildSearchPayload } from '@/api/search'
+import type { KnowledgeSearchResponse, SearchResult, SearchScopeItem, SearchStats } from '@/api/search'
+import { getKnowledgeBases } from '@/api/knowledge'
+import type { KnowledgeBase } from '@/api/knowledge'
 import { getErrorMessage } from '@/utils/apiError'
 import { debounce } from 'lodash-es'
 import { useI18n } from 'vue-i18n'
 import { useUserStore } from '@/stores/user'
+import { DebugPanel } from '@/views/chat/components'
+import type { RetrievalDebugData } from '@/types/chat'
 
 const { t } = useI18n()
 const userStore = useUserStore()
@@ -280,61 +374,59 @@ const route = useRoute()
 const message = useDedupedMessage()
 
 // 搜索状态
-// issue #225：searchType 取值与后端 search_mode 同语义（vector 即后端"语义搜索"），
-// 'auto' = 不发送该字段（走后端自动路由，缺省行为与修复前一致）。
 const searchQuery = ref('')
 const searchType = ref<'auto' | 'vector' | 'keyword' | 'hybrid'>('auto')
 const selectedFileTypes = ref<string[]>([])
+const selectedDocumentIds = ref<string[]>([])
+const topK = ref<number | null>(null)
+const debugEnabled = ref(false)
 const sortBy = ref<'relevance' | 'name'>('relevance')
 
 // 结果状态
 const searchResults = ref<SearchResult[]>([])
+const lastResponse = ref<KnowledgeSearchResponse | null>(null)
 const searchStats = ref<SearchStats | null>(null)
 const suggestions = ref<string[]>([])
 const selectedResult = ref<SearchResult | null>(null)
 const showDetailModal = ref(false)
 const loading = ref(false)
 const hasSearched = ref(false)
-// E14/D2：失败态独立于「无结果」——null = 无失败；非空 = 展示错误文案与重试入口
 const searchError = ref<string | null>(null)
 
-// P1 修复：原取值 organizations[0].id 是成员列表首项，多组织用户下未必是
-// 「当前组织」。统一改用 user store 的 currentOrgId 口径（当前组织
-// currentOrganizationId → user.organization_id 兜底）。
+// 文档范围选择（检索自测）
+const documentOptions = ref<Array<{ label: string; value: string }>>([])
+const documentLoading = ref(false)
+let documentSeq = 0
+
 const currentOrgId = computed(() => userStore.currentOrgId)
 
-const sortOptions = [
+const sortOptions = computed(() => [
   { label: t('search.relevance'), value: 'relevance' },
   { label: t('search.name'), value: 'name' }
+])
+const topKOptions = [
+  { label: '5', value: 5 },
+  { label: '10', value: 10 },
+  { label: '20', value: 20 },
+  { label: '50', value: 50 }
 ]
 
-const fileTypes = [
-  { value: 'pdf', label: 'PDF' },
-  { value: 'docx', label: 'Word' },
-  { value: 'xlsx', label: 'Excel' },
-  { value: 'txt', label: '文本' },
-  { value: 'md', label: 'Markdown' }
-]
+const modeLabels = computed<Record<string, string>>(() => ({
+  auto: t('search.auto'),
+  hybrid: t('search.hybrid'),
+  vector: t('search.semantic'),
+  keyword: t('search.keyword')
+}))
+const searchModeLabel = computed(() => {
+  const mode = lastResponse.value?.search_mode
+  return mode ? (modeLabels.value[mode] ?? mode) : ''
+})
 
-// ── P1-3 修复（UI 复验 round2）：真实响应字段访问器 ─────────────────────
-// 后端 results 项真实 shape = {id, text, score, metadata, source, ...}（见
-// api/search.ts SearchResult）；旧模板读的 file_type/filename/content/
-// file_size/upload_time/relevance_score 平铺字段不存在——首个渲染即崩
-// （getFileTypeIcon 对 undefined 调 toLowerCase），即便不崩也会显示
-// "NaN undefined" / "Invalid Date"。展示层读值一律收敛到以下访问器：能
-// 推导的推导（类型←文件名扩展名、得分←score、正文←text、文件名←source/
-// metadata），推导不出的（大小/日期）不渲染；兜底不允许 undefined 进入
-// toLowerCase / 数值格式化 / Date。
+// ── 结果字段访问器（真实响应形状见 api/search.ts）────────────────────────
 const filenameOf = (r: SearchResult): string => r.source?.filename ?? r.metadata?.filename ?? ''
-// PR4：优先展示 O 派生正文；缺省才回退检索文本（并显示未验证提示）。
 const contentOf = (r: SearchResult): string => r.content || r.metadata?.snippet || r.text || ''
-// 只有“实际展示的 content 字段”本身带 parser_original 标记才算可信；
-// content 为空而回退到 text（增强检索文本）时，即使 provenance=parser_original
-// 也必须提示——展示的不是已认证的 O。
 const isUnverifiedText = (r: SearchResult): boolean =>
   !!contentOf(r) && !(!!r.content && r.text_provenance === 'parser_original')
-// issue #185：诚实分数口径——score 是相对排序分（只用于排序），界面只展示
-// 重排绝对分（后端 relevance_score）；无重排分时返回 null，不伪造百分比相关度。
 const rerankScoreOf = (r: SearchResult): string | null =>
   typeof r.relevance_score === 'number' ? r.relevance_score.toFixed(2) : null
 const fileTypeOf = (r: SearchResult): string => {
@@ -342,11 +434,19 @@ const fileTypeOf = (r: SearchResult): string => {
   const dot = name.lastIndexOf('.')
   return dot > -1 ? name.slice(dot + 1).toLowerCase() : ''
 }
+const sectionLabelOf = (r: SearchResult): string => {
+  if (r.section_title) return r.section_title
+  if (r.clause_no?.length) {
+    const nos = r.clause_no
+    const label = nos.length > 1 ? `${nos[0]}–${nos[nos.length - 1]}` : String(nos[0])
+    return t('search.clauseLabel', { no: label })
+  }
+  if (r.section_no?.length) return r.section_no.join('、')
+  return ''
+}
 
 const sortedResults = computed(() => {
   const results = [...searchResults.value]
-  // issue #185：relevance 档不在前端重排——后端已按重排绝对分（或融合序）
-  // 返回；再用相对排序分 score 重排会打乱 rerank 结果，且两套分数尺度混用。
   if (sortBy.value === 'relevance') return results
   if (sortBy.value === 'name') return results.sort((a, b) => filenameOf(a).localeCompare(filenameOf(b)))
   return results
@@ -354,71 +454,141 @@ const sortedResults = computed(() => {
 
 const getFileTypeIcon = (type?: string) => {
   const map: Record<string, unknown> = { pdf: DocumentOutline, docx: DocumentTextOutline, xlsx: GridOutline, txt: DocumentTextOutline, md: NewspaperOutline }
-  // P1-3：空/未知一律 DocumentOutline 兜底，永不 toLowerCase undefined
   return map[(type ?? '').toLowerCase()] || DocumentOutline
 }
 
-// 请求序号：并发搜索只认最后一次 —— 先发的慢响应迟到返回时不得覆盖后发的
-// 结果/失败态（E14/D2：旧结果不得冒充本次结果）。
+// 空结果诊断：先看所选文档状态，再看组织索引状态，最后才说「没匹配到」。
+// 'completed' 是状态词表收敛前的列表旧词（api/knowledge.ts），按已索引处理。
+const isIndexedStatus = (status?: string | null): boolean =>
+  status === 'indexed' || status === 'completed'
+
+const emptyState = computed<{ title: string; desc: string; scope?: SearchScopeItem[] }>(() => {
+  const response = lastResponse.value
+  if (!response) return { title: t('search.noResults'), desc: t('search.noResultsDesc') }
+  const scope = response.document_scope ?? []
+  const notReady = scope.filter((item) => !item.found || !isIndexedStatus(item.status))
+  if (notReady.length) {
+    return { title: t('search.docScopeTitle'), desc: t('search.docNotIndexed'), scope }
+  }
+  switch (response.index_status) {
+    case 'empty_index':
+      return { title: t('search.indexEmpty'), desc: t('search.indexEmptyDesc') }
+    case 'index_error':
+      return { title: t('search.indexError'), desc: t('search.indexErrorDesc') }
+    case 'unknown':
+      return { title: t('search.indexUnknown'), desc: t('search.indexUnknownDesc') }
+    default:
+      if (response.index_doc_count != null) {
+        return { title: t('search.noResults'), desc: t('search.indexHasData', { count: response.index_doc_count }) }
+      }
+      return { title: t('search.noResults'), desc: t('search.noResultsDesc') }
+  }
+})
+
+const scopeStatusLabel = (item: SearchScopeItem): string => {
+  if (!item.found) return t('search.docNotFound')
+  if (isIndexedStatus(item.status)) return t('search.docStatusIndexed')
+  if (item.status === 'failed') return t('search.docStatusFailed')
+  return t('search.docStatusProcessing')
+}
+
+// 请求序号：并发搜索只认最后一次。
 let searchSeq = 0
 
 const handleSearch = async () => {
   if (!searchQuery.value.trim()) return
+  // 提交后立即收起建议浮层：否则它会盖住结果区并拦截点击。
+  suggestionSeq += 1
+  handleInputChange.cancel()
+  suggestions.value = []
   const seq = ++searchSeq
   const orgId = currentOrgId.value
   searchError.value = null
   hasSearched.value = true
   if (!orgId) {
-    // organization_id 为后端 schema 必填；无当前组织时请求必 422 ——
-    // 明确失败态（不把校验失败伪装成「未找到相关结果」，也不保留旧结果）。
-    // 文案必须如实：这是组织上下文缺失，不是网络故障（重试前请先切换/加入组织）。
     searchResults.value = []
+    lastResponse.value = null
     searchError.value = t('search.noOrganization')
     loading.value = false
     return
   }
   loading.value = true
   try {
-    const results = await searchKnowledge(buildSearchPayload({
+    const response = await searchKnowledgeResponse(buildSearchPayload({
       query: searchQuery.value,
       organizationId: orgId,
-      // 'auto'（自动路由）时 buildSearchPayload 不发送 search_mode ——
-      // 与后端"缺省=自动"同语义（issue #225）
+      topK: topK.value ?? undefined,
       searchMode: searchType.value,
-      fileTypes: selectedFileTypes.value
+      fileTypes: selectedFileTypes.value,
+      documentIds: selectedDocumentIds.value,
+      debug: debugEnabled.value
     }))
     if (seq !== searchSeq) return
-    searchResults.value = results
+    lastResponse.value = response
+    searchResults.value = response.results || []
   } catch (err) {
     if (seq !== searchSeq) return
-    // E14/D2：失败 ≠ 空结果。清空上一次结果（不冒充本次结果），置独立错误态；
-    // 文案统一走 getErrorMessage（5xx/传输层回退 i18n，axios 黑话不上屏）。
     searchResults.value = []
+    lastResponse.value = null
     searchError.value = getErrorMessage(err, t('search.searchErrorDesc'))
   } finally {
     if (seq === searchSeq) loading.value = false
   }
 }
 
+// 建议词：输入防抖 + 请求序号（提交搜索会使在途建议失效，避免浮层盖住结果）。
+let suggestionSeq = 0
 const handleInputChange = debounce(async () => {
+  const seq = ++suggestionSeq
   if (!searchQuery.value.trim() || !currentOrgId.value) { suggestions.value = []; return }
-  suggestions.value = await getSearchSuggestions(searchQuery.value, currentOrgId.value)
+  const list = await getSearchSuggestions(searchQuery.value, currentOrgId.value)
+  if (seq !== suggestionSeq) return
+  suggestions.value = list
 }, 300)
 
+// 失焦后稍等再收起，避免点击建议项时先被 blur 清掉（建议项另有 mousedown.prevent）。
+const hideSuggestions = () => {
+  if (!suggestions.value.length) return
+  window.setTimeout(() => {
+    suggestions.value = []
+  }, 150)
+}
+
 const selectSuggestion = (s: string) => { searchQuery.value = s; suggestions.value = []; handleSearch() }
+
+const loadDocumentOptions = async (query = '') => {
+  if (!currentOrgId.value) return
+  const seq = ++documentSeq
+  documentLoading.value = true
+  try {
+    const response = await getKnowledgeBases(
+      { page: 1, page_size: 20, search: query || undefined },
+      { silent: true }
+    )
+    if (seq !== documentSeq) return
+    const payload = (response.data as unknown as { data?: { data?: KnowledgeBase[] } })?.data
+    documentOptions.value = (payload?.data ?? []).map((doc) => ({
+      value: doc.id,
+      label: `${doc.title || doc.file_name}${isIndexedStatus(doc.status) ? '' : ` · ${scopeStatusLabel({ document_id: doc.id, found: true, status: doc.status })}`}`
+    }))
+  } catch {
+    // 文档选择器是增强能力：失败不影响检索本身。
+  } finally {
+    if (seq === documentSeq) documentLoading.value = false
+  }
+}
 
 const clearFilters = () => {
   searchType.value = 'auto'
   selectedFileTypes.value = []
   sortBy.value = 'relevance'
+  selectedDocumentIds.value = []
+  topK.value = null
+  debugEnabled.value = false
 }
 
 const showResultDetail = (r: SearchResult) => { selectedResult.value = r; showDetailModal.value = true }
 
-// E11-① 跨页上下文：q = 文件名 + 用户当前搜索词组句（i18n 四语），context =
-// 所点结果正文片段（截断）。聊天页读取后预填输入框（见 chat/index.vue）——
-// 修前只传占位串 `关于文件 "x"...` + context_id（ES 内部 id，聊天页无法消费），
-// 跨页后「问哪个文件、问什么」全部丢失。
 const askAI = (r: SearchResult) => {
   const filename = filenameOf(r)
   const question = searchQuery.value.trim()
@@ -440,9 +610,6 @@ const copyResultContent = async (r: SearchResult | null) => {
   message.success(t('common.copySuccess'))
 }
 
-// W2-T7 项 3：顶栏搜索/Ctrl+K/深链 `?q=` 回填并自动发起搜索（第三轮终检 §2.4：
-// 布局 handleGlobalSearch 确实 push 了 { name:'Search', query:{ q } }，但本页此前
-// 不读 route.query —— 搜索词直接丢）。同页再次提交（q 变化）经 watch 重跑。
 const applyQueryFromRoute = () => {
   const q = route.query.q
   if (typeof q !== 'string' || !q.trim()) return
@@ -454,7 +621,10 @@ const applyQueryFromRoute = () => {
 watch(() => route.query.q, applyQueryFromRoute)
 
 onMounted(async () => {
-  if (currentOrgId.value) searchStats.value = await getSearchStats(currentOrgId.value)
+  if (currentOrgId.value) {
+    searchStats.value = await getSearchStats(currentOrgId.value)
+    void loadDocumentOptions()
+  }
   applyQueryFromRoute()
 })
 </script>
@@ -470,26 +640,29 @@ onMounted(async () => {
   overflow: hidden;
 }
 
-/* H1：常见宽度断点。旧实现零 @media，w-72 筛选栏在窄屏吃掉大半屏。 */
 @media (max-width: 1023px) {
-  .search-filter { width: 15rem; }
+  /* 窄屏：页面整体滚动，筛选/结果不再是固定高度内的两个滚动区
+     （此前筛选卡 514px 高会把结果区压成 2px）。结果排在筛选之前，
+     搜索后不必先滚过整张筛选卡。 */
+  .search-page { display: block; height: auto; min-height: 100%; overflow-y: auto; }
+  .search-layout { flex: none; overflow: visible; }
+  .search-results { order: 1; overflow: visible; }
+  .search-filter { order: 2; }
+  .search-results-scroll { overflow: visible; }
 }
 
 @media (max-width: 767px) {
   .search-page { padding: 1rem; }
-  .search-header { flex-direction: column; align-items: flex-start; gap: 0.75rem; }
   .search-stats { flex-wrap: wrap; }
-  .search-submit { padding-left: 1rem; padding-right: 1rem; }
-  .search-layout {
-    flex-direction: column;
-    gap: 1rem;
-  }
-  .search-filter {
-    width: 100%;
-    flex: none;
-    overflow: visible;
-    padding-right: 0;
-  }
+  .search-submit { min-height: 44px; padding-left: 1rem; padding-right: 1rem; }
+  .search-layout { flex-direction: column; gap: 1rem; }
+  .search-filter { width: 100%; flex: none; overflow: visible; padding-right: 0; }
   .search-results { min-height: 0; }
+  .search-filter :deep(.n-base-selection) { --n-height: 44px !important; }
+  .search-filter :deep(.n-radio) { min-height: 44px; align-items: center; }
+  .search-filter :deep(.n-switch) { padding: 11px 0; }
+  .search-filter :deep(.n-button) { min-height: 44px; }
+  .suggestion-item { min-height: 44px; }
+  .result-action.n-button { min-height: 44px; }
 }
 </style>

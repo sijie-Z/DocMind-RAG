@@ -397,7 +397,7 @@ def test_search_endpoint_diagnose_receives_caller_org(client: TestClient):
                 new=AsyncMock(return_value=None),
             ),
         ):
-            mock_ks.search_knowledge = AsyncMock(return_value=[])
+            mock_ks.search_knowledge_with_meta = AsyncMock(return_value=([], None))
             r = client.post(
                 "/api/v1/knowledge/search",
                 # 非超管：请求体里的 organization_id 不作数，effective_org_id

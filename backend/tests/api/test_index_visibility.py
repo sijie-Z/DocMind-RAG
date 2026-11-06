@@ -400,7 +400,7 @@ def _post_search(client: TestClient, results: list, diagnose):
             new=AsyncMock(return_value=None),
         ),
     ):
-        mock_ks.search_knowledge = AsyncMock(return_value=results)
+        mock_ks.search_knowledge_with_meta = AsyncMock(return_value=(results, None))
         try:
             r = client.post(
                 "/api/v1/knowledge/search",

@@ -361,22 +361,25 @@ class TestKnowledgeSearch:
         app.dependency_overrides[get_current_user] = _override_user
 
         with patch("app.api.v1.endpoints.knowledge.knowledge_service") as mock_ks:
-            mock_ks.search_knowledge = AsyncMock(
-                return_value=[
-                    {
-                        "id": "chunk-1",
-                        "text": "【文档背景：生成摘要】 Annual report content about revenue",
-                        "content": "Annual report content about revenue",
-                        "text_provenance": "parser_original",
-                        "score": 0.95,
-                        "source": {"filename": "report.pdf"},
-                        "metadata": {"document_id": "doc-1"},
-                        "has_keyword": True,
-                        "has_vector": True,
-                        "rewrite_hits": 2,
-                        "fresh_factor": 1.0,
-                    }
-                ]
+            mock_ks.search_knowledge_with_meta = AsyncMock(
+                return_value=(
+                    [
+                        {
+                            "id": "chunk-1",
+                            "text": "【文档背景：生成摘要】 Annual report content about revenue",
+                            "content": "Annual report content about revenue",
+                            "text_provenance": "parser_original",
+                            "score": 0.95,
+                            "source": {"filename": "report.pdf"},
+                            "metadata": {"document_id": "doc-1"},
+                            "has_keyword": True,
+                            "has_vector": True,
+                            "rewrite_hits": 2,
+                            "fresh_factor": 1.0,
+                        }
+                    ],
+                    None,
+                )
             )
             try:
                 r = client.post(
@@ -410,7 +413,7 @@ class TestKnowledgeSearch:
         app.dependency_overrides[get_current_user] = _override_user
 
         with patch("app.api.v1.endpoints.knowledge.knowledge_service") as mock_ks:
-            mock_ks.search_knowledge = AsyncMock(return_value=[])
+            mock_ks.search_knowledge_with_meta = AsyncMock(return_value=([], None))
             try:
                 r = client.post(
                     "/api/v1/knowledge/search",
@@ -449,6 +452,136 @@ class TestKnowledgeSearch:
             app.dependency_overrides.pop(get_current_user, None)
 
 
+class TestKnowledgeSearchSelfTest:
+    """检索自测：document_ids/debug 透传、分块字段、空结果文档诊断。"""
+
+    @staticmethod
+    def _post(client: TestClient, payload: dict, *, results=None, debug=None, scope=None):
+        from app.main import app
+
+        mock_user = _make_mock_user(is_superuser=True)
+        override_func, _mock_db = _override_get_db()
+
+        async def _override_user():
+            return mock_user
+
+        app.dependency_overrides[get_db] = override_func
+        app.dependency_overrides[get_current_user] = _override_user
+        try:
+            with (
+                patch("app.api.v1.endpoints.knowledge.knowledge_service") as mock_ks,
+                patch(
+                    "app.api.v1.endpoints.knowledge._diagnose_empty_results",
+                    new=AsyncMock(return_value=("ok", 12)),
+                ),
+                patch(
+                    "app.api.v1.endpoints.knowledge._diagnose_document_scope",
+                    new=AsyncMock(return_value=scope or []),
+                ) as mock_scope,
+            ):
+                mock_ks.search_knowledge_with_meta = AsyncMock(return_value=(results or [], debug))
+                r = client.post(
+                    "/api/v1/knowledge/search",
+                    json=payload,
+                    headers={"Authorization": "Bearer test_token"},
+                )
+                return r, mock_ks, mock_scope
+        finally:
+            app.dependency_overrides.pop(get_db, None)
+            app.dependency_overrides.pop(get_current_user, None)
+
+    def test_document_scope_and_debug_roundtrip(self, client: TestClient):
+        result = {
+            "id": "doc-1",
+            "text": "付款条款正文",
+            "content": "付款条款正文",
+            "text_provenance": "parser_original",
+            "score": 0.9,
+            "source": {"filename": "合同.txt"},
+            "metadata": {},
+            "chunk_id": "doc-1_chunk-1",
+            "chunk_index": 2,
+            "section_title": "付款条款",
+            "clause_no": [3],
+            "section_no": ["1.2"],
+            "page_number": 4,
+            "has_keyword": True,
+            "has_vector": False,
+        }
+        r, mock_ks, _ = self._post(
+            client,
+            {"query": "付款", "organization_id": 1, "document_ids": ["doc-1"], "debug": True},
+            results=[result],
+            debug={"total_results": 1, "elapsed_ms": 12.3},
+        )
+
+        assert r.status_code == 200
+        assert mock_ks.search_knowledge_with_meta.await_args.kwargs["document_ids"] == ["doc-1"]
+        assert mock_ks.search_knowledge_with_meta.await_args.kwargs["debug"] is True
+        body = r.json()
+        assert body["document_ids"] == ["doc-1"]
+        assert body["effective_top_k"] is not None
+        assert body["debug"] == {"total_results": 1, "elapsed_ms": 12.3}
+        first = body["results"][0]
+        assert first["rank"] == 1
+        assert first["chunk_id"] == "doc-1_chunk-1"
+        assert first["chunk_index"] == 2
+        assert first["section_title"] == "付款条款"
+        assert first["clause_no"] == [3]
+        assert first["section_no"] == ["1.2"]
+        assert first["page_number"] == 4
+        assert first["has_keyword"] is True
+        assert first["has_vector"] is False
+
+    def test_empty_with_document_scope_returns_status(self, client: TestClient):
+        scope = [
+            {
+                "document_id": "doc-1",
+                "found": True,
+                "title": "合同.txt",
+                "status": "indexed",
+                "chunk_count": 5,
+            }
+        ]
+        r, _, mock_scope = self._post(
+            client,
+            {"query": "不存在的词", "organization_id": 1, "document_ids": ["doc-1"]},
+            results=[],
+            scope=scope,
+        )
+
+        assert r.status_code == 200
+        body = r.json()
+        assert body["index_status"] == "ok"
+        assert body["index_doc_count"] == 12
+        assert body["document_scope"] == scope
+        mock_scope.assert_awaited_once()
+        # 诊断必须使用生效组织（普通用户不能借请求体 organization_id 越权）。
+        assert mock_scope.await_args.args[1] == 1
+
+    def test_empty_document_id_is_422(self, client: TestClient):
+        """空字符串会关闭检索 terms filter；必须在入口拒绝而不是静默全库检索。"""
+        r, mock_ks, _ = self._post(
+            client,
+            {"query": "x", "organization_id": 1, "document_ids": ["doc-1", "  "]},
+        )
+
+        assert r.status_code == 422
+        assert not mock_ks.search_knowledge_with_meta.called
+
+    def test_too_many_document_ids_is_422(self, client: TestClient):
+        r, _, _ = self._post(
+            client,
+            {
+                "query": "x",
+                "organization_id": 1,
+                "document_ids": [f"doc-{i}" for i in range(51)],
+            },
+        )
+
+        assert r.status_code == 422
+
+
 class TestKnowledgeSearchModeContract:
     """issue #225：search_mode 真正生效（送达 service）+ 回显一致 + 非法值 422。"""
 
@@ -466,7 +599,7 @@ class TestKnowledgeSearchModeContract:
         app.dependency_overrides[get_current_user] = _override_user
         try:
             with patch("app.api.v1.endpoints.knowledge.knowledge_service") as mock_ks:
-                mock_ks.search_knowledge = AsyncMock(return_value=[])
+                mock_ks.search_knowledge_with_meta = AsyncMock(return_value=([], None))
                 r = client.post(
                     "/api/v1/knowledge/search",
                     json=payload,
@@ -483,21 +616,21 @@ class TestKnowledgeSearchModeContract:
             client, {"query": "annual report", "organization_id": 1, "search_mode": "keyword"}
         )
         assert r.status_code == 200
-        assert mock_ks.search_knowledge.await_args.kwargs["search_mode"] == "keyword"
+        assert mock_ks.search_knowledge_with_meta.await_args.kwargs["search_mode"] == "keyword"
         assert r.json()["search_mode"] == "keyword"
 
     def test_omitted_mode_runs_auto_and_echoes_effective_mode(self, client: TestClient):
         """缺省 → 自动路由（service 收到 None）；回显 = 实际生效档位，不再恒为 'hybrid'。"""
         r, mock_ks = self._post_search(client, {"query": "报销流程", "organization_id": 1})
         assert r.status_code == 200
-        assert mock_ks.search_knowledge.await_args.kwargs["search_mode"] is None
+        assert mock_ks.search_knowledge_with_meta.await_args.kwargs["search_mode"] is None
         # simple → keyword_only：回显公开模式名 keyword（修前恒回显 hybrid，与生效语义不符）
         assert r.json()["search_mode"] == "keyword"
 
         r2, mock_ks2 = self._post_search(
             client, {"query": "如何提交报销申请？", "organization_id": 1}
         )
-        assert mock_ks2.search_knowledge.await_args.kwargs["search_mode"] is None
+        assert mock_ks2.search_knowledge_with_meta.await_args.kwargs["search_mode"] is None
         assert r2.json()["search_mode"] == "hybrid"  # medium → hybrid
 
     def test_invalid_mode_value_is_422(self, client: TestClient):
@@ -725,7 +858,7 @@ class TestSearchSourceProvenance:
         app.dependency_overrides[get_current_user] = _override_user
 
         with patch("app.api.v1.endpoints.knowledge.knowledge_service") as mock_ks:
-            mock_ks.search_knowledge = AsyncMock(
+            mock_ks.search_knowledge_with_meta = AsyncMock(
                 side_effect=SourceProvenanceUnavailableError(["doc-1"], unverified_count=2)
             )
             try:

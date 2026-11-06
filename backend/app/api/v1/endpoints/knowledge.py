@@ -94,6 +94,57 @@ async def _diagnose_empty_results(organization_id: int) -> tuple[str, int | None
         return "unknown", None
 
 
+async def _diagnose_document_scope(
+    db: AsyncSession, organization_id: int, document_ids: list[str]
+) -> list[dict[str, Any]]:
+    """所选文档自身的索引状态（空结果诊断用）。
+
+    只返回本组织文档；跨组织/不存在的 id 标记 found=False（不回显标题），
+    避免把别的租户的文档状态当成可诊断信息。
+    """
+    ids = [doc_id for doc_id in document_ids if isinstance(doc_id, str) and doc_id][:50]
+    if not ids:
+        return []
+    try:
+        rows = (
+            await db.execute(
+                select(Document.id, Document.title, Document.status, Document.chunk_count).where(
+                    Document.id.in_(ids),
+                    Document.organization_id == organization_id,
+                )
+            )
+        ).all()
+    except Exception as e:  # noqa: BLE001 — 诊断失败不得把一次正常空结果变成 500
+        logger.warning("诊断所选文档状态失败: %s", e)
+        return []
+    by_id = {row[0]: row for row in rows}
+    scope: list[dict[str, Any]] = []
+    for doc_id in ids:
+        row = by_id.get(doc_id)
+        if row is None:
+            scope.append(
+                {
+                    "document_id": doc_id,
+                    "found": False,
+                    "title": None,
+                    "status": None,
+                    "chunk_count": None,
+                }
+            )
+            continue
+        status = row[2].value if hasattr(row[2], "value") else str(row[2])
+        scope.append(
+            {
+                "document_id": row[0],
+                "found": True,
+                "title": row[1],
+                "status": status,
+                "chunk_count": row[3],
+            }
+        )
+    return scope
+
+
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
@@ -237,17 +288,19 @@ async def search_knowledge(
             effective_top_k = await organization_settings_service.resolve_retrieval_top_k(
                 db, effective_org_id, fallback=settings.TOP_K_RESULTS
             )
-        results = await knowledge_service.search_knowledge(
+        results, debug_info = await knowledge_service.search_knowledge_with_meta(
             query=request.query,
             organization_id=effective_org_id,
             top_k=effective_top_k,
             search_mode=requested_mode,
+            document_ids=request.document_ids or None,
+            debug=request.debug,
         )
         elapsed = time.perf_counter() - _t0
 
         # 转换为前端期待的格式
         formatted_results = []
-        for r in results:
+        for rank, r in enumerate(results, start=1):
             # Safety check for empty results
             if not r:
                 continue
@@ -274,6 +327,13 @@ async def search_knowledge(
                     "fresh_factor": r.get("fresh_factor", 1.0),
                     # issue #197：PDF 来源页码透传（非 PDF / 旧索引为 null）
                     "page_number": r.get("page_number"),
+                    # 分块身份与条号：检索自测/引用定位用。
+                    "rank": rank,
+                    "chunk_id": r.get("chunk_id"),
+                    "chunk_index": r.get("chunk_index"),
+                    "section_title": r.get("section_title"),
+                    "clause_no": r.get("clause_no") or [],
+                    "section_no": r.get("section_no") or [],
                 }
             )
 
@@ -283,8 +343,13 @@ async def search_knowledge(
         # issue #257：诊断按调用者组织过滤（effective_org_id 已由 require_organization 解析）。
         index_status = "ok"
         index_doc_count: int | None = None
+        document_scope: list[dict[str, Any]] | None = None
         if not formatted_results:
             index_status, index_doc_count = await _diagnose_empty_results(effective_org_id)
+            if request.document_ids:
+                document_scope = await _diagnose_document_scope(
+                    db, effective_org_id, request.document_ids
+                )
 
         return {
             "query": request.query,
@@ -297,6 +362,10 @@ async def search_knowledge(
             "search_time": round(elapsed, 4),
             "index_status": index_status,
             "index_doc_count": index_doc_count,
+            "effective_top_k": effective_top_k,
+            "document_ids": request.document_ids or None,
+            "document_scope": document_scope,
+            "debug": debug_info,
         }
 
     except RetrievalUnavailableError as e:

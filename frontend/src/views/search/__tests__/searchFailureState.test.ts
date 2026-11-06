@@ -19,7 +19,7 @@ import { createRouter, createMemoryHistory } from 'vue-router'
 import { createI18n } from 'vue-i18n'
 
 import SearchView from '../../search.vue'
-import { searchKnowledge } from '@/api/search'
+import { searchKnowledgeResponse } from '@/api/search'
 import { useUserStore } from '@/stores/user'
 import zh from '@/locales/zh'
 
@@ -37,13 +37,26 @@ vi.mock('@/api/search', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/api/search')>()
   return {
     ...actual,
-    searchKnowledge: vi.fn(),
+    searchKnowledgeResponse: vi.fn(),
     getSearchSuggestions: vi.fn().mockResolvedValue([]),
     getSearchStats: vi.fn().mockResolvedValue({ total_files: 0, file_types: {}, recent_searches: [] }),
   }
 })
 
-const mockedSearch = vi.mocked(searchKnowledge)
+vi.mock('@/api/knowledge', () => ({
+  getKnowledgeBases: vi.fn().mockResolvedValue({ data: { success: true, data: { data: [], total: 0 } } })
+}))
+
+const mockedSearch = vi.mocked(searchKnowledgeResponse)
+
+const searchResponse = <T,>(results: T[]) => ({
+  query: '',
+  results,
+  total_count: results.length,
+  search_mode: 'hybrid',
+  index_status: 'ok' as const
+})
+
 
 /** axios 传输层错误（真实上屏黑话的来源） */
 function axiosError(status?: number, detail?: string) {
@@ -96,7 +109,7 @@ beforeEach(() => {
 
 describe('SearchView · 失败态（E14/D2）', () => {
   it('第二次搜索失败：清空上一次旧结果，显示独立错误态 + 重试按钮，不伪装成「无结果」', async () => {
-    mockedSearch.mockResolvedValueOnce([result('1', '旧结果.pdf')] as never)
+    mockedSearch.mockResolvedValueOnce(searchResponse([result('1', '旧结果.pdf')] as never))
     const wrapper = await mountSearch()
 
     await searchFor(wrapper, 'alpha')
@@ -138,7 +151,7 @@ describe('SearchView · 失败态（E14/D2）', () => {
     await searchFor(wrapper, 'alpha')
     expect(wrapper.text()).toContain('搜索失败')
 
-    mockedSearch.mockResolvedValueOnce([result('2', '新结果.pdf')] as never)
+    mockedSearch.mockResolvedValueOnce(searchResponse([result('2', '新结果.pdf')] as never))
     await wrapper.find('.search-retry').trigger('click')
     await flushPromises()
 
@@ -181,7 +194,7 @@ describe('SearchView · 失败态（E14/D2）', () => {
     await searchFor(wrapper, 'alpha')
     expect(wrapper.text()).toContain('搜索失败')
 
-    mockedSearch.mockResolvedValueOnce([] as never)
+    mockedSearch.mockResolvedValueOnce(searchResponse([] as never))
     await wrapper.find('.search-retry').trigger('click')
     await flushPromises()
 

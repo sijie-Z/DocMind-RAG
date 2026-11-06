@@ -22,18 +22,23 @@ vi.mock('@/api/search', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/api/search')>()
   return {
     ...actual,
-    searchKnowledge: vi.fn().mockResolvedValue([]),
+    searchKnowledgeResponse: vi.fn().mockResolvedValue({ query: '', results: [], total_count: 0, search_mode: 'hybrid', index_status: 'ok' }),
     getSearchSuggestions: vi.fn().mockResolvedValue([]),
     getSearchStats: vi.fn().mockResolvedValue({ total_files: 2, file_types: {}, recent_searches: [] }),
   }
 })
 
 import SearchView from '../search.vue'
-import { searchKnowledge } from '@/api/search'
+import { searchKnowledgeResponse } from '@/api/search'
 import { useUserStore } from '@/stores/user'
 import zh from '@/locales/zh'
 
-const mockedSearch = vi.mocked(searchKnowledge)
+vi.mock('@/api/knowledge', () => ({
+  getKnowledgeBases: vi.fn().mockResolvedValue({ data: { success: true, data: { data: [], total: 0 } } })
+}))
+
+const mockedSearch = vi.mocked(searchKnowledgeResponse)
+
 
 // ── Mount（先例照 searchResultsRender.test.ts；本文件用真实 router 提供 route.query）──
 const i18n = createI18n({ legacy: false, locale: 'zh', messages: { zh } })

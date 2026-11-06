@@ -25,7 +25,7 @@ vi.mock('@/api/search', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/api/search')>()
   return {
     ...actual,
-    searchKnowledge: vi.fn().mockResolvedValue([]),
+    searchKnowledgeResponse: vi.fn().mockResolvedValue({ query: '', results: [], total_count: 0, search_mode: 'hybrid', index_status: 'ok' }),
     getSearchSuggestions: vi.fn().mockResolvedValue([]),
     getSearchStats: vi.fn().mockResolvedValue({ total_files: 2, file_types: {}, recent_searches: [] }),
   }
@@ -36,12 +36,25 @@ vi.mock('vue-router', () => ({
 }))
 
 import SearchView from '../search.vue'
-import { searchKnowledge } from '@/api/search'
+import { searchKnowledgeResponse } from '@/api/search'
 import { useUserStore } from '@/stores/user'
 import type { UserInfo } from '@/types/user'
 import zh from '@/locales/zh'
 
-const mockedSearch = vi.mocked(searchKnowledge)
+vi.mock('@/api/knowledge', () => ({
+  getKnowledgeBases: vi.fn().mockResolvedValue({ data: { success: true, data: { data: [], total: 0 } } })
+}))
+
+const mockedSearch = vi.mocked(searchKnowledgeResponse)
+
+const searchResponse = <T,>(results: T[]) => ({
+  query: '',
+  results,
+  total_count: results.length,
+  search_mode: 'hybrid',
+  index_status: 'ok' as const
+})
+
 
 // ── Mount（先例照 searchResultsRender.test.ts）────────────────────────────
 const i18n = createI18n({ legacy: false, locale: 'zh', messages: { zh } })
@@ -83,7 +96,7 @@ function mountView() {
 
 beforeEach(() => {
   mockedSearch.mockReset()
-  mockedSearch.mockResolvedValue([])
+  mockedSearch.mockResolvedValue(searchResponse([]))
 })
 
 describe('T10 · 搜索页文件类型筛选空窗补丁', () => {
