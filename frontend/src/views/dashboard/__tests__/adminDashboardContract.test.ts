@@ -291,7 +291,7 @@ describe('AdminDashboard · J4 状态词走词条 + RAG 卡填充', () => {
     }
   })
 
-  it('RAG 卡纵向填充：卡片与主体为 flex 列、图区 flex-1（消除等高栅格下的空白块）', async () => {
+  it('RAG 卡：flex 列 + 图区固定高度（百分比高度可解析，避免 self-start 下画布 0 高）', async () => {
     const wrapper = mountView()
     await flushPromises()
     await nextTick()
@@ -301,8 +301,8 @@ describe('AdminDashboard · J4 状态词走词条 + RAG 卡填充', () => {
     expect(card.classes()).toContain('flex-col')
 
     const chart = wrapper.get('[data-testid="rag-chart"]')
-    expect(chart.classes()).toContain('flex-1')
-    expect(chart.classes()).not.toContain('h-28')
+    expect(chart.classes()).toContain('h-44')
+    expect(chart.classes()).not.toContain('flex-1')
   })
 })
 

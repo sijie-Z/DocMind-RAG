@@ -65,7 +65,7 @@
         <button
           type="button"
           data-testid="home-action-docs"
-          class="rounded-md border border-slate-200 px-3 py-2 text-xs font-medium text-blue-700 hover:bg-blue-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:border-slate-700 dark:text-blue-400 dark:hover:bg-slate-800"
+          class="inline-flex min-h-11 items-center justify-center rounded-md border border-solid border-slate-200 bg-white px-3 text-xs font-medium text-blue-700 hover:bg-blue-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:border-slate-700 dark:bg-slate-900 dark:text-blue-400 dark:hover:bg-slate-800"
           @click="$router.push('/system-help')"
         >
           {{ t('help.center.title') }}

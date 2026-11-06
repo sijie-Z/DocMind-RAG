@@ -334,7 +334,7 @@
             </div>
           </div>
           <!-- 趋势图（flex-1：与左卡等高时填充剩余空间，消除卡底空白） -->
-          <div v-if="ragHasData" class="flex-1 min-h-28 rounded-xl bg-gray-50 dark:bg-gray-700/30 p-3" data-testid="rag-chart">
+          <div v-if="ragHasData" class="h-44 rounded-xl bg-gray-50 dark:bg-gray-700/30 p-3" data-testid="rag-chart">
             <div ref="ragChartRef" class="w-full h-full"></div>
           </div>
 
@@ -445,6 +445,7 @@
         </div>
         <n-data-table
           v-else
+          :scroll-x="720"
           :columns="auditColumns"
           :data="recentLogs"
           :bordered="false"
