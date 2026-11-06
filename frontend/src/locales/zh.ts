@@ -1465,6 +1465,7 @@ export default {
     progressColumn: '核验进度',
     progressValue: '{decided}/{total} 已决策',
     diffSummary: '差异',
+    diffSummaryLabel: '差异概览',
     diffCount: '{n} 处差异',
     unidentifiedCount: '{n} 项未识别',
     notAnalyzed: '未分析',

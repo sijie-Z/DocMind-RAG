@@ -57,6 +57,8 @@ function mountList() {
 beforeEach(() => {
   vi.clearAllMocks()
   routerState.query = {}
+  // 列表在 <1200 时渲染卡片；jsdom 默认 1024，会让表格用例找不到 tbody。
+  Object.defineProperty(window, 'innerWidth', { configurable: true, writable: true, value: 1440 })
   api.list.mockResolvedValue({ data: { data: { items: [ROW], total: 1 } } } as never)
 })
 
@@ -353,5 +355,58 @@ describe('服务端搜索与进度列（功能批次）', () => {
     expect(wrapper.text()).toContain('0/4 已决策')
     expect(wrapper.text()).toContain('未分析')
     expect(wrapper.text()).not.toContain('0 处差异')
+  })
+
+  it('输入经过防抖窗口后才发起搜索', async () => {
+    const wrapper = mountList()
+    await flushPromises()
+    const callsAfterMount = api.list.mock.calls.length
+    const vm = wrapper.vm as unknown as {
+      searchInput: string
+      scheduleSearch: () => void
+    }
+    vm.searchInput = '采购'
+    vm.scheduleSearch()
+    expect(api.list.mock.calls.length).toBe(callsAfterMount)
+    await new Promise((resolve) => setTimeout(resolve, 350))
+    await flushPromises()
+    expect(api.list).toHaveBeenLastCalledWith(
+      expect.objectContaining({ q: '采购', page: 1 })
+    )
+  })
+
+  it('乱序响应只允许最新请求写入列表', async () => {
+    let resolveFirst!: (value: unknown) => void
+    let resolveSecond!: (value: unknown) => void
+    const first = new Promise((resolve) => {
+      resolveFirst = resolve
+    })
+    const second = new Promise((resolve) => {
+      resolveSecond = resolve
+    })
+    api.list.mockImplementationOnce(() => first as never)
+    api.list.mockImplementationOnce(() => second as never)
+
+    const wrapper = mountList()
+    await flushPromises()
+    const vm = wrapper.vm as unknown as {
+      searchInput: string
+      runSearchNow: () => void
+    }
+    vm.searchInput = '新版'
+    vm.runSearchNow()
+    await flushPromises()
+
+    resolveSecond({
+      data: { data: { items: [{ ...ROW, id: 'case-new', title: '新版结果' }], total: 1 } }
+    })
+    await flushPromises()
+    resolveFirst({
+      data: { data: { items: [{ ...ROW, id: 'case-old', title: '旧版结果' }], total: 1 } }
+    })
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('新版结果')
+    expect(wrapper.text()).not.toContain('旧版结果')
   })
 })

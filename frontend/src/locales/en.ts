@@ -1458,6 +1458,7 @@ export default {
     progressColumn: 'Progress',
     progressValue: '{decided}/{total} decided',
     diffSummary: 'Changes',
+    diffSummaryLabel: 'Changes',
     diffCount: '{n} changes',
     unidentifiedCount: '{n} unidentified',
     notAnalyzed: 'Not analyzed',

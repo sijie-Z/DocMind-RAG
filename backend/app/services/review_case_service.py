@@ -618,7 +618,8 @@ async def archive_case(session: AsyncSession, case: ReviewCase, *, user_id: int)
 
 
 _DECIDED_STATUSES = ("verified", "needs_human", "not_applicable")
-_CHANGED_TYPES = ("modified", "added", "removed")
+# 与详情页「有变更」筛选同口径：仅条号变化（renumbered）也是差异。
+_CHANGED_TYPES = ("modified", "added", "removed", "renumbered")
 
 
 def _escape_like(value: str) -> str:

@@ -80,7 +80,7 @@ async def list_review_cases(
     archived: Literal["active", "archived", "all"] = Query(
         "active", description="归档过滤：默认只看活跃案件"
     ),
-    q: str | None = Query(None, max_length=200, description="按标题或案件 ID 前缀搜索"),
+    q: str | None = Query(None, max_length=200, description="标题包含匹配或案件 ID 前缀搜索"),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     db: AsyncSession = Depends(get_db),

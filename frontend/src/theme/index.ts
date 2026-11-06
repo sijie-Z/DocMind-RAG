@@ -34,10 +34,16 @@ export const lightThemeOverrides: GlobalThemeOverrides = {
     borderRadius: '8px',
     border: '1px solid #e2e8f0',
     borderHover: '1px solid #cbd5e1',
-    borderFocus: '1px solid #64748b',
-    boxShadowFocus: '0 0 0 3px rgba(100, 116, 139, 0.12)',
+    borderFocus: '1px solid #2563eb',
+    boxShadowFocus: '0 0 0 2px rgba(37, 99, 235, 0.2)',
     placeholderColor: '#64748b',
     paddingMedium: '8px 12px',
+  },
+  Select: {
+    placeholderColor: '#64748b',
+  },
+  InternalSelection: {
+    placeholderColor: '#64748b',
   },
   Popover: {
     borderRadius: '10px',
@@ -102,11 +108,17 @@ export const darkThemeOverrides: GlobalThemeOverrides = {
     color: 'rgba(255, 255, 255, 0.04)',
     border: '1px solid rgba(255, 255, 255, 0.08)',
     borderHover: '1px solid rgba(255, 255, 255, 0.14)',
-    borderFocus: '1px solid rgba(148, 163, 184, 0.5)',
+    borderFocus: '1px solid #60a5fa',
     textColor: '#f1f5f9',
     placeholderColor: 'rgba(203, 213, 225, 0.85)',
     borderRadius: '8px',
-    boxShadowFocus: '0 0 0 3px rgba(148, 163, 184, 0.2)',
+    boxShadowFocus: '0 0 0 2px rgba(96, 165, 250, 0.25)',
+  },
+  Select: {
+    placeholderColor: 'rgba(203, 213, 225, 0.85)',
+  },
+  InternalSelection: {
+    placeholderColor: 'rgba(203, 213, 225, 0.85)',
   },
   Popover: {
     boxShadow: '0 4px 24px rgba(0, 0, 0, 0.4)',

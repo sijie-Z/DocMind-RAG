@@ -677,7 +677,7 @@ async def test_list_cases_search_and_progress_aggregates(factory):
         values = [
             {"status": "verified", "change_type": "modified"},
             {"status": "verified", "change_type": "modified"},
-            {"status": "needs_human", "change_type": "unchanged"},
+            {"status": "needs_human", "change_type": "renumbered"},
             {"status": "pending", "change_type": "unidentified"},
         ]
         for item, value in zip(items, values, strict=True):
@@ -697,6 +697,18 @@ async def test_list_cases_search_and_progress_aggregates(factory):
                 created_by=USER_ID,
             )
         )
+        # 未分析案件：有核验项但 change_type 全为 NULL。
+        for ordinal, key in enumerate(("payment_term", "start_condition"), start=1):
+            db.add(
+                ReviewItem(
+                    id=f"item-unanalyzed-{ordinal}",
+                    case_id="case-percent-001",
+                    item_key=key,
+                    ordinal=ordinal,
+                    change_type=None,
+                    status="pending",
+                )
+            )
         await db.commit()
 
     async with factory() as db:
@@ -705,13 +717,14 @@ async def test_list_cases_search_and_progress_aggregates(factory):
         row_a = next(row for row in page["items"] if row["id"] == case_a.id)
         assert row_a["item_count"] == 4
         assert row_a["decided_count"] == 3
-        assert row_a["changed_count"] == 2
+        assert row_a["changed_count"] == 3
         assert row_a["unidentified_count"] == 1
         assert row_a["needs_human_count"] == 1
         assert row_a["analysis_pending_count"] == 0
         assert row_a["all_analyzed"] is True
         row_b = next(row for row in page["items"] if row["id"] == "case-percent-001")
-        assert row_b["item_count"] == 0
+        assert row_b["item_count"] == 2
+        assert row_b["analysis_pending_count"] == 2
         assert row_b["all_analyzed"] is False
         assert page["status_counts"] == {
             "blocked": 0,
@@ -724,9 +737,13 @@ async def test_list_cases_search_and_progress_aggregates(factory):
         assert [row["id"] for row in only_a["items"]] == [case_a.id]
         assert only_a["status_counts"]["ready"] == 1
 
-        # % 必须按字面匹配；未转义时 LIKE '%%%' 会命中全部案件。
-        percent = await svc.list_cases(db, organization_id=ORG, q="100%")
+        # % 必须按字面匹配：测试数据里只有 B 标题含字面 %。
+        # 未转义时 LIKE '%%%' 会命中全部案件。
+        percent = await svc.list_cases(db, organization_id=ORG, q="%")
         assert [row["id"] for row in percent["items"]] == ["case-percent-001"]
+
+        percent_prefix = await svc.list_cases(db, organization_id=ORG, q="100%")
+        assert [row["id"] for row in percent_prefix["items"]] == ["case-percent-001"]
 
         # _ 必须按字面匹配；未转义时 '合同_V1' 会命中「合同 V1→V2」。
         literal = await svc.list_cases(db, organization_id=ORG, q="合同_V1")
