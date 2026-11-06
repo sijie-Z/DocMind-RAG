@@ -65,7 +65,7 @@
         <button
           type="button"
           data-testid="home-action-docs"
-          class="rounded text-xs font-medium text-blue-600 hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:text-blue-400"
+          class="rounded-md border border-slate-200 px-3 py-2 text-xs font-medium text-blue-700 hover:bg-blue-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:border-slate-700 dark:text-blue-400 dark:hover:bg-slate-800"
           @click="$router.push('/system-help')"
         >
           {{ t('help.center.title') }}
@@ -136,7 +136,11 @@
               v-for="conv in recentConversations"
               :key="conv.id"
               class="flex items-center justify-between p-3 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-700/50 cursor-pointer transition-all duration-150 group"
+              role="link"
+              tabindex="0"
               @click="$router.push(`/chat?conversation_id=${conv.id}`)"
+              @keydown.enter.prevent="$router.push(`/chat?conversation_id=${conv.id}`)"
+              @keydown.space.prevent="$router.push(`/chat?conversation_id=${conv.id}`)"
             >
               <div class="flex-1 min-w-0 flex items-center gap-3">
                 <div class="w-8 h-8 bg-slate-100 dark:bg-slate-900/30 rounded-lg flex items-center justify-center flex-shrink-0 group-hover:bg-slate-200 dark:group-hover:bg-slate-800 transition-colors">
@@ -268,7 +272,7 @@
             />
           </div>
           <div class="min-w-[80px] text-right">
-            <p class="text-3xl font-semibold tabular-nums text-emerald-700 dark:text-emerald-400">{{ ragStats.hitRate }}<span class="text-lg">%</span></p>
+            <p class="text-3xl font-semibold tabular-nums" :class="hitRateClass">{{ ragStats.hitRate }}<span class="text-lg">%</span></p>
           </div>
         </div>
         <div v-else class="mb-4 rounded-xl border border-dashed border-slate-200 px-4 py-8 text-center dark:border-slate-700">
@@ -285,7 +289,7 @@
           </div>
           <div class="text-center p-3 bg-gray-50 dark:bg-gray-700/50 rounded-xl">
             <p class="text-xs text-gray-500 dark:text-gray-400 mb-1">{{ t('dashboard.avgDocs') }}</p>
-            <p class="text-lg font-bold text-gray-900 dark:text-white">{{ '—' }}</p>
+            <p class="text-lg font-bold text-gray-900 dark:text-white" :title="t('dashboard.metricNotAvailable')">{{ '—' }}</p>
           </div>
         </div>
         </template>
@@ -426,6 +430,15 @@ const activityDayLabels = computed(() => {
   )
 })
 const ragHasData = computed(() => ragStats.value.totalQueries > 0)
+const hitRateClass = computed(() => {
+  if (!ragHasData.value) return 'text-slate-900 dark:text-white'
+  const rate = ragStats.value.hitRate
+  return rate > 60
+    ? 'text-emerald-700 dark:text-emerald-400'
+    : rate > 30
+      ? 'text-amber-700 dark:text-amber-400'
+      : 'text-red-600 dark:text-red-400'
+})
 const ragQualityLabel = computed(() =>
   ragStats.value.hitRate > 60
     ? t('dashboard.ragQualityGood')
@@ -516,6 +529,10 @@ watch(
   },
   { deep: true }
 )
+watch(locale, () => {
+  if (chart) updateChart()
+})
+
 watch(isDark, () => {
   if (chart) updateChart()
 })

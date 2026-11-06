@@ -1,5 +1,14 @@
 <template>
   <div class="admin-dashboard p-4 md:p-6 space-y-5">
+    <div class="mb-1">
+      <h1 class="text-2xl font-semibold tracking-tight text-slate-900 dark:text-white md:text-[28px]">
+        {{ t('dashboard.adminTitle') }}
+      </h1>
+      <p class="mt-1 flex items-center gap-2 text-sm text-slate-500 dark:text-slate-400">
+        <span class="h-0.5 w-6 rounded-full bg-blue-600"></span>
+        {{ t('dashboard.adminSubtitle') }}
+      </p>
+    </div>
     <!-- 分块加载：KPI 卡 / 图表 / 表格各自骨架；哪块数据先到就先替换哪块，互不阻塞 -->
     <!-- 顶部统计卡片 - 渐变背景（摘要数据未到 → 整排骨架） -->
     <div v-if="summaryState === 'loading'" class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3" data-testid="kpi-skeleton">
@@ -100,13 +109,13 @@
             <n-icon size="18" class="text-slate-600 dark:text-slate-300"><GitNetworkOutline /></n-icon>
           </div>
         </div>
-        <p class="text-2xl font-semibold tabular-nums text-slate-900 dark:text-white">
+        <p class="text-2xl font-semibold tabular-nums text-slate-900 dark:text-white" data-testid="kpi-llm-value">
           <n-skeleton v-if="llmState === 'loading'" text style="width: 64px" />
-          <template v-else>{{ llmStats.requestCountToday.toLocaleString() }}</template>
+          <template v-else>{{ llmCardValue }}</template>
         </p>
-        <div class="flex items-center gap-1 mt-1 text-xs text-slate-500 dark:text-slate-400">
+        <div class="flex items-center gap-1 mt-1 text-xs text-slate-500 dark:text-slate-400" data-testid="kpi-llm-sub">
           <n-skeleton v-if="llmState === 'loading'" text style="width: 80px" />
-          <span v-else>{{ t('dashboard.avgLatencyValue', { ms: llmStats.avgLatency || 0 }) }}</span>
+          <span v-else>{{ llmCardSub }}</span>
         </div>
       </div>
 
@@ -233,7 +242,7 @@
       </div>
 
       <!-- RAG 命中率 -->
-      <div class="bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700 shadow-sm overflow-hidden flex flex-col" data-testid="rag-card">
+      <div class="bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700 shadow-sm overflow-hidden flex flex-col lg:self-start" data-testid="rag-card">
         <div class="px-5 py-4 border-b border-gray-100 dark:border-gray-700 flex items-center justify-between">
           <div class="flex items-center gap-2">
             <div class="w-8 h-8 bg-emerald-100 dark:bg-emerald-900/30 rounded-lg flex items-center justify-center">
@@ -299,11 +308,11 @@
                 :border-radius="10"
                 :fill-border-radius="10"
                 :color="ragStats.hitRate > 60 ? CHART_COLORS.secondary : ragStats.hitRate > 30 ? CHART_COLORS.warning : CHART_COLORS.danger"
-                :rail-color="'#f3f4f6'"
+                :rail-color="isDark ? '#1f2937' : '#f3f4f6'"
               />
             </div>
             <div class="text-right">
-              <p class="text-4xl font-semibold tabular-nums text-emerald-700 dark:text-emerald-400">{{ ragStats.hitRate }}<span class="text-xl">%</span></p>
+              <p class="text-4xl font-semibold tabular-nums" :class="hitRateClass">{{ ragStats.hitRate }}<span class="text-xl">%</span></p>
             </div>
           </div>
           <div v-else class="mb-5 rounded-xl border border-dashed border-slate-200 px-4 py-8 text-center dark:border-slate-700">
@@ -321,7 +330,7 @@
             </div>
             <div class="text-center p-3 bg-gray-50 dark:bg-gray-700/50 rounded-xl">
               <p class="text-xs text-gray-500 dark:text-gray-400 mb-1">{{ t('dashboard.avgDocs') }}</p>
-              <p class="text-lg font-bold text-gray-900 dark:text-white">—</p>
+              <p class="text-lg font-bold text-gray-900 dark:text-white" :title="t('dashboard.metricNotAvailable')">—</p>
             </div>
           </div>
           <!-- 趋势图（flex-1：与左卡等高时填充剩余空间，消除卡底空白） -->
@@ -342,7 +351,7 @@
           </div>
           <div>
             <h3 class="font-semibold text-gray-900 dark:text-white">{{ t('org.title') }}</h3>
-            <p class="text-xs text-gray-500 dark:text-gray-400">{{ t('dashboard.totalOrgs') }}: {{ orgList.length }}</p>
+            <p class="text-xs text-gray-500 dark:text-gray-400">{{ t('dashboard.totalOrgs') }}: {{ orgState === 'ready' ? orgList.length : '—' }}</p>
           </div>
         </div>
         <n-button text type="primary" size="small" @click="$router.push('/organizations')">
@@ -363,7 +372,9 @@
           </div>
         </div>
         <div v-else-if="orgState === 'error'" class="flex flex-col items-center justify-center gap-3 py-10" data-testid="org-error">
-          <span class="text-sm text-gray-500 dark:text-gray-400">{{ t('dashboard.loadFailed') }}</span>
+          <span class="text-sm text-slate-600 dark:text-slate-300">
+            {{ orgDegraded ? t('dashboard.dataUnavailable') : t('dashboard.loadFailed') }}
+          </span>
           <n-button size="small" @click="loadOrg">{{ t('dashboard.retry') }}</n-button>
         </div>
         <template v-else>
@@ -371,8 +382,13 @@
           <div
             v-for="(org, idx) in orgList"
             :key="org.org_id"
-            class="group p-4 rounded-xl border-2 border-transparent hover:border-slate-200 dark:hover:border-blue-700 bg-gray-50 dark:bg-gray-700/30 hover:bg-slate-50/50 dark:hover:bg-slate-900/10 transition-all duration-200 cursor-pointer"
+            class="group p-4 rounded-xl border-2 border-transparent hover:border-slate-200 dark:hover:border-blue-700 bg-gray-50 dark:bg-gray-700/30 hover:bg-slate-50/50 dark:hover:bg-slate-900/10 transition-all duration-200 cursor-pointer focus-visible:ring-2 focus-visible:ring-blue-500"
             :style="{ animationDelay: `${idx * 50}ms` }"
+            role="link"
+            tabindex="0"
+            @click="$router.push('/organizations')"
+            @keydown.enter.prevent="$router.push('/organizations')"
+            @keydown.space.prevent="$router.push('/organizations')"
           >
             <div class="flex items-center gap-3">
               <div class="w-10 h-10 rounded-xl flex items-center justify-center text-white font-bold text-sm" :style="{ backgroundColor: ORG_AVATAR_COLORS[idx % ORG_AVATAR_COLORS.length] }">
@@ -404,7 +420,7 @@
 
     <!-- 最近操作日志 -->
     <div class="bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700 shadow-sm overflow-hidden">
-      <div class="px-5 py-4 border-b border-gray-100 dark:border-gray-700 flex items-center justify-between bg-gradient-to-r from-red-50 to-transparent dark:from-red-900/10">
+      <div class="px-5 py-4 border-b border-gray-100 dark:border-gray-700 flex items-center justify-between">
         <div class="flex items-center gap-2">
           <div class="w-8 h-8 bg-red-100 dark:bg-red-900/30 rounded-lg flex items-center justify-center">
             <n-icon class="text-red-600 dark:text-red-400"><ShieldCheckmarkOutline /></n-icon>
@@ -441,19 +457,19 @@
 
     <!-- 快捷入口 -->
     <div class="flex flex-wrap gap-3">
-      <n-button type="primary" size="large" @click="$router.push('/users')" class="shadow-md">
+      <n-button type="primary" size="large" @click="$router.push('/users')" >
         <template #icon><n-icon><PeopleOutline /></n-icon></template>
         {{ t('dashboard.manageUsers') }}
       </n-button>
-      <n-button type="info" size="large" @click="$router.push('/knowledge')" class="shadow-md">
+      <n-button secondary size="large" @click="$router.push('/knowledge')">
         <template #icon><n-icon><BookOutline /></n-icon></template>
         {{ t('dashboard.manageKB') }}
       </n-button>
-      <n-button type="warning" size="large" @click="$router.push('/monitoring')" class="shadow-md">
+      <n-button secondary size="large" @click="$router.push('/monitoring')">
         <template #icon><n-icon><PulseOutline /></n-icon></template>
         {{ t('dashboard.systemMonitor') }}
       </n-button>
-      <n-button type="error" size="large" @click="$router.push('/audit-logs')" class="shadow-md">
+      <n-button secondary size="large" @click="$router.push('/audit-logs')">
         <template #icon><n-icon><ShieldCheckmarkOutline /></n-icon></template>
         {{ t('menu.auditLogs') }}
       </n-button>
@@ -487,6 +503,23 @@ const isDark = useIsDark()
  * 每个区块只依赖自己那路请求 —— 慢接口不会把整屏锁在 spinner 上。
  */
 type BlockState = 'loading' | 'ready' | 'error'
+const llmCardValue = computed(() => {
+  if (llmState.value !== 'ready' || (llmDegraded.value && !llmEverReady.value)) return '—'
+  return llmStats.value.requestCountToday.toLocaleString()
+})
+const llmCardSub = computed(() => {
+  if (llmState.value !== 'ready' || (llmDegraded.value && !llmEverReady.value)) return '—'
+  return t('dashboard.avgLatencyValue', { ms: llmStats.value.avgLatency || 0 })
+})
+const hitRateClass = computed(() => {
+  if (!ragHasData.value) return 'text-slate-900 dark:text-white'
+  const rate = ragStats.value.hitRate
+  return rate > 60
+    ? 'text-emerald-700 dark:text-emerald-400'
+    : rate > 30
+      ? 'text-amber-700 dark:text-amber-400'
+      : 'text-red-600 dark:text-red-400'
+})
 const summaryState = ref<BlockState>('loading')
 const summaryDegraded = ref(false)
 const summaryEverReady = ref(false)
@@ -495,6 +528,7 @@ const llmEverReady = ref(false)
 const ragDegraded = ref(false)
 const ragEverReady = ref(false)
 const orgDegraded = ref(false)
+const orgEverReady = ref(false)
 const healthState = ref<BlockState>('loading')
 const llmState = ref<BlockState>('loading')
 const ragState = ref<BlockState>('loading')
@@ -857,12 +891,15 @@ const loadOrg = async () => {
     const orgRes = await getOrgSummary()
     if (orgRes.data?.degraded === true) {
       orgDegraded.value = true
-      orgState.value = 'error'
+      // 首次降级不渲染 0 个组织；曾成功过则保留旧列表并给 stale 提示。
+      orgState.value = orgEverReady.value ? 'ready' : 'error'
       return
     }
     if (orgRes.data?.organizations) {
       orgList.value = orgRes.data.organizations
+      orgEverReady.value = true
     }
+    orgDegraded.value = false
     orgState.value = 'ready'
   } catch {
     orgState.value = 'error'
@@ -902,6 +939,11 @@ const loadData = () => {
 onMounted(() => {
   loadData()
   window.addEventListener('resize', handleResize)
+})
+
+watch(locale, () => {
+  if (llmState.value === 'ready' && llmStats.value.trend.length) initLlmChart()
+  if (ragState.value === 'ready' && ragHasData.value) initRagChart()
 })
 
 watch(isDark, () => {

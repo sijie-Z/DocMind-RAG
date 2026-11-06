@@ -272,3 +272,50 @@ class TestDbIsTheOnlyIdentityAuthority:
                 )
 
         assert exc.value.status_code == 401
+
+class TestLoginTimestamp:
+    """登录成功写 last_login_at（管理端 24h 活跃用户的真值来源）。"""
+
+    @pytest.mark.asyncio
+    async def test_successful_authentication_records_last_login(self, auth_service: AuthService):
+        user = MagicMock()
+        user.username = "tester"
+        user.is_active = True
+        user.hashed_password = "hashed"
+        user.last_login_at = None
+        result = MagicMock()
+        result.scalar_one_or_none.return_value = user
+        db = MagicMock()
+        db.execute = AsyncMock(return_value=result)
+
+        with (
+            patch.object(auth_service, "_check_lockout", new=AsyncMock()),
+            patch.object(auth_service, "_clear_login_failures", new=AsyncMock()),
+            patch.object(auth_service, "verify_password", return_value=True),
+        ):
+            authed = await auth_service.authenticate_user(db, "tester", "pw")
+
+        assert authed is user
+        assert user.last_login_at is not None, "登录成功必须写入 last_login_at"
+
+    @pytest.mark.asyncio
+    async def test_failed_password_does_not_touch_last_login(self, auth_service: AuthService):
+        user = MagicMock()
+        user.username = "tester"
+        user.is_active = True
+        user.hashed_password = "hashed"
+        user.last_login_at = None
+        result = MagicMock()
+        result.scalar_one_or_none.return_value = user
+        db = MagicMock()
+        db.execute = AsyncMock(return_value=result)
+
+        with (
+            patch.object(auth_service, "_check_lockout", new=AsyncMock()),
+            patch.object(auth_service, "_record_login_failure", new=AsyncMock()),
+            patch.object(auth_service, "verify_password", return_value=False),
+        ):
+            authed = await auth_service.authenticate_user(db, "tester", "bad")
+
+        assert authed is None
+        assert user.last_login_at is None

@@ -239,6 +239,9 @@ describe('B5 · 注册后 4 步清单（真实数据推导 + 可恢复 + 跳过�
     vi.mocked(getLLMStatus).mockResolvedValue(llmStatusFixture(true) as never)
     const third = mountView(301)
     await flushPromises()
+    // 全部完成时清单默认收成一行摘要；展开后仍能逐项核对。
+    expect(third.wrapper.find('[data-testid="onboarding-collapsed"]').exists()).toBe(true)
+    await third.wrapper.find('[data-testid="onboarding-expand"]').trigger('click')
     for (const key of ['model', 'knowledge', 'upload', 'chat']) {
       expect(stepDone(third.wrapper, key), `步骤 ${key} 应完成`).toBe('true')
     }
@@ -248,6 +251,7 @@ describe('B5 · 注册后 4 步清单（真实数据推导 + 可恢复 + 跳过�
     // 重新挂载（刷新/重登）后完成态仍由服务端数据恢复
     const fourth = mountView(301)
     await flushPromises()
+    await fourth.wrapper.find('[data-testid="onboarding-expand"]').trigger('click')
     for (const key of ['model', 'knowledge', 'upload', 'chat']) {
       expect(stepDone(fourth.wrapper, key), `重新挂载后步骤 ${key} 应仍完成`).toBe('true')
     }
@@ -263,6 +267,11 @@ describe('B5 · 注册后 4 步清单（真实数据推导 + 可恢复 + 跳过�
     await flushPromises()
 
     expect(wrapper.find('[data-testid="onboarding-checklist"]').exists()).toBe(true)
+    // 文档/索引/问答/模型全部完成 → 默认折叠为一行摘要，而不是消失。
+    const collapsed = wrapper.find('[data-testid="onboarding-collapsed"]')
+    expect(collapsed.exists()).toBe(true)
+    expect(collapsed.text()).toContain('4/4')
+    await wrapper.find('[data-testid="onboarding-expand"]').trigger('click')
     expect(wrapper.find('[data-testid="onboarding-steps"]').exists()).toBe(true)
     expect(wrapper.find('[data-testid="onboarding-skip"]').exists()).toBe(true)
   })

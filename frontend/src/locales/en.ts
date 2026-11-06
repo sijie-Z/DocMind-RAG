@@ -674,6 +674,9 @@ export default {
     systemTitle: 'DocMind Knowledge Base'
   },
   dashboard: {
+    metricNotAvailable: 'Metric not connected',
+    adminSubtitle: 'Organization health and AI resource usage',
+    adminTitle: 'Admin overview',
     llmNoDailyTrend: 'No daily data',
     httpLatencyHint: 'HTTP-layer stats',
     httpP95Hint: 'HTTP layer p95',
@@ -683,13 +686,12 @@ export default {
     attention: 'Attention',
     noChartData: 'No data',
 
-    avgLatencyValue: 'Avg {ms}ms',
+    avgLatencyValue: 'HTTP avg {ms}ms',
     compareLastWeek: 'vs last week',
     active24h: 'Active in 24h',
     llmSubtitle: 'LLM resources and cost',
     inputOutput: 'Input + output',
     deepseekRate: 'DeepSeek rates',
-    p50Latency: 'p50 latency',
     ragSubtitle24h: 'Document retrieval over the last 24 hours (3-hour buckets)',
     auditSubtitle: 'Sensitive actions are highlighted in red',
     errorHint: 'Check service status or network, then retry.',
@@ -767,6 +769,7 @@ export default {
     overviewDesc: 'Your usage at a glance',
     demoData: 'Load Demo Data',
     onboarding: {
+    completedHint: 'All four steps are complete · expand to review',
       title: 'Getting Started',
       subtitle: 'Complete these 4 steps to get up and running with DocMind',
       progress: 'Completed {done}/{total}',

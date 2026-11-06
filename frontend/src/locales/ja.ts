@@ -621,6 +621,9 @@ export default {
     systemTitle: 'DocMind ナレッジベース'
   },
   dashboard: {
+    metricNotAvailable: '指標未接続',
+    adminSubtitle: '組織の稼働状況と AI リソース使用量',
+    adminTitle: '管理概要',
     llmNoDailyTrend: '日別データなし',
     httpLatencyHint: 'HTTP 層の統計',
     httpP95Hint: 'HTTP 層 p95',
@@ -630,13 +633,12 @@ export default {
     attention: '注意',
     noChartData: 'データなし',
 
-    avgLatencyValue: '平均 {ms}ms',
+    avgLatencyValue: 'HTTP 平均 {ms}ms',
     compareLastWeek: '先週比',
     active24h: '24時間アクティブ',
     llmSubtitle: 'LLM リソースとコスト',
     inputOutput: '入力 + 出力',
     deepseekRate: 'DeepSeek 料金',
-    p50Latency: 'p50 応答時間',
     ragSubtitle24h: '過去24時間のドキュメント検索効果（3時間バケット）',
     auditSubtitle: '機密操作は赤色で表示されます',
     errorHint: 'サービスの状態またはネットワークを確認して再試行してください。',
@@ -714,6 +716,7 @@ export default {
     overviewDesc: '利用状況をひと目で確認',
     demoData: 'サンプルデータを読み込む',
     onboarding: {
+    completedHint: '4ステップ完了 · 展開して確認できます',
       title: 'はじめに',
       subtitle: '次の 4 ステップで DocMind をすぐに使い始められます',
       progress: '完了 {done}/{total}',

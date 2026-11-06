@@ -193,7 +193,7 @@ describe('AdminDashboard · 今日请求真实口径（C1）', () => {
     await nextTick()
 
     // 卡序：totalUsers / totalSessions / totalDocs / activeUsers / todayRequests / systemStatus
-    const numbers = wrapper.findAll('.text-2xl')
+    const numbers = wrapper.findAll('p.text-2xl.tabular-nums')
     expect(numbers[1].text()).toBe('3') // 总会话数 = total_sessions
     expect(numbers[4].text()).toBe('777') // 今日请求 = request_count_today（旧实现 = 3 顶替）
   })
@@ -406,5 +406,41 @@ describe('AdminDashboard · 降级诚实性（D 轮）', () => {
     const wrapper = mountView()
     await flushPromises()
     expect(wrapper.find('[data-testid="audit-error"]').exists()).toBe(true)
+  })
+})
+
+describe('AdminDashboard · R1 收口', () => {
+  it('LLM 降级/失败时顶部「检索事件」卡显示 —，不再假 0', async () => {
+    vi.mocked(getLLMStats).mockResolvedValue({
+      data: {
+        total_tokens_today: 0, cost_today_usd: 0, avg_latency_ms: 0, p95_latency_ms: 0,
+        request_count_today: 0, cost_warning: false, token_trend_7d: [], degraded: true,
+      },
+    } as never)
+    const wrapper = mountView()
+    await flushPromises()
+    await nextTick()
+    expect(wrapper.find('[data-testid="kpi-llm-value"]').text()).toBe('—')
+    expect(wrapper.find('[data-testid="kpi-llm-sub"]').text()).toBe('—')
+  })
+
+  it('组织统计降级：header 显示 —，正文显示数据暂不可用', async () => {
+    vi.mocked(getOrgSummary).mockResolvedValue({ data: { organizations: [], degraded: true } } as never)
+    const wrapper = mountView()
+    await flushPromises()
+    expect(wrapper.text()).toContain('组织总数: —')
+    expect(wrapper.find('[data-testid="org-error"]').text()).toContain('数据暂不可用')
+  })
+
+  it('命中率 0（有查询）用红色而不是成功绿', async () => {
+    vi.mocked(getRAGStats).mockResolvedValue(
+      ragFixture({ hit_rate: 0, hits_with_documents: 0, total_queries_7d: 10 }) as never
+    )
+    const wrapper = mountView()
+    await flushPromises()
+    const zero = wrapper.findAll('p').find((node) => node.text().startsWith('0') && node.text().includes('%'))
+    expect(zero).toBeTruthy()
+    expect(zero!.classes()).toContain('text-red-600')
+    expect(zero!.classes()).not.toContain('text-emerald-700')
   })
 })

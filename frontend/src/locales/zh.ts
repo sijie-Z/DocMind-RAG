@@ -680,6 +680,9 @@ export default {
     systemTitle: 'DocMind 知识库'
   },
   dashboard: {
+    metricNotAvailable: '指标未接入',
+    adminSubtitle: '组织运行状况与 AI 资源用量',
+    adminTitle: '管理概览',
     llmNoDailyTrend: '暂无按日数据',
     httpLatencyHint: 'HTTP 层统计',
     httpP95Hint: 'HTTP 层 p95',
@@ -689,13 +692,12 @@ export default {
     attention: '注意',
     noChartData: '暂无数据',
 
-    avgLatencyValue: '平均 {ms}ms',
+    avgLatencyValue: 'HTTP 平均 {ms}ms',
     compareLastWeek: '对比上周',
     active24h: '24 小时活跃',
     llmSubtitle: 'LLM 资源与成本',
     inputOutput: '输入 + 输出',
     deepseekRate: 'DeepSeek 费率',
-    p50Latency: 'p50 响应时间',
     ragSubtitle24h: '近 24 小时文档检索效果（3 小时桶）',
     auditSubtitle: '敏感操作以红色标注',
     errorHint: '请检查服务状态或网络后重试。',
@@ -773,6 +775,7 @@ export default {
     overviewDesc: '你的使用情况一目了然',
     demoData: '加载示例数据',
     onboarding: {
+    completedHint: '四个步骤已完成 · 可展开查看',
       title: '新手引导',
       subtitle: '完成以下 4 步，快速上手 DocMind',
       progress: '已完成 {done}/{total}',
