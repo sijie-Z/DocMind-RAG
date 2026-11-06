@@ -38,6 +38,11 @@ const md = new MarkdownIt({
 // 插件只注册一次（模块级单例的全部实例共享）
 md.use(mdKatex)
 
+const SANITIZE_OPTIONS = {
+  ADD_TAGS: ['math', 'semantics', 'mrow', 'mi', 'mo', 'mn', 'msup', 'mfrac'],
+  ADD_ATTR: ['xmlns', 'mathvariant'],
+}
+
 /** 模块级单例（测试用于断言跨组件/跨调用同引用）。 */
 export function getMarkdownRenderer() {
   return md
@@ -46,27 +51,23 @@ export function getMarkdownRenderer() {
 /** 终态完整渲染：Markdown → DOMPurify 消毒。 */
 export function renderMarkdownFull(content: string): string {
   const raw = md.render(content)
-  return DOMPurify.sanitize(raw, {
-    ADD_TAGS: ['math', 'semantics', 'mrow', 'mi', 'mo', 'mn', 'msup', 'mfrac'],
-    ADD_ATTR: ['xmlns', 'mathvariant'],
-  })
+  return DOMPurify.sanitize(raw, SANITIZE_OPTIONS)
 }
 
-const CITATION_PATTERN = /\[(\d{1,3})\]/
+const CITATION_PATTERN = /\[([1-9]\d{0,2})\]/
 
 /**
  * 聊天回答专用：在完整 Markdown 渲染后把正文里的 `[n]` 变成可点击引用。
  *
- * - 只处理文本节点；代码块/行内代码/链接/公式内的 `[n]` 原样保留；
+ * - 只处理文本节点；代码块/行内代码/链接/公式（含 KaTeX 错误块）内的 `[n]` 原样保留；
  * - 先 DOMPurify 再走 DOM，避免把未消毒 HTML 放进临时容器；
  * - 输出再次消毒（role/tabindex/data-* 均为 DOMPurify 默认允许）。
  */
-export function renderMarkdownWithCitations(content: string): string {
-  const sanitizeOptions = {
-    ADD_TAGS: ['math', 'semantics', 'mrow', 'mi', 'mo', 'mn', 'msup', 'mfrac'],
-    ADD_ATTR: ['xmlns', 'mathvariant'],
-  }
-  const safe = DOMPurify.sanitize(md.render(content), sanitizeOptions)
+export function renderMarkdownWithCitations(
+  content: string,
+  citationLabel?: (index: number) => string
+): string {
+  const safe = DOMPurify.sanitize(md.render(content), SANITIZE_OPTIONS)
   if (typeof document === 'undefined') return safe
 
   const container = document.createElement('div')
@@ -75,7 +76,7 @@ export function renderMarkdownWithCitations(content: string): string {
     acceptNode(node) {
       const parent = (node as Text).parentElement
       if (!parent) return NodeFilter.FILTER_REJECT
-      if (parent.closest('pre, code, a, .katex, .katex-display, .copy-btn')) {
+      if (parent.closest('pre, code, a, .katex, .katex-display, .katex-error, .katex-block')) {
         return NodeFilter.FILTER_REJECT
       }
       return CITATION_PATTERN.test((node as Text).nodeValue || '')
@@ -87,11 +88,11 @@ export function renderMarkdownWithCitations(content: string): string {
   while (walker.nextNode()) textNodes.push(walker.currentNode as Text)
 
   for (const node of textNodes) {
-    const parts = (node.nodeValue || '').split(/(\[\d{1,3}\])/)
+    const parts = (node.nodeValue || '').split(/(\[[1-9]\d{0,2}\])/)
     if (parts.length < 2) continue
     const fragment = document.createDocumentFragment()
     for (const part of parts) {
-      const match = /^\[(\d{1,3})\]$/.exec(part)
+      const match = /^\[([1-9]\d{0,2})\]$/.exec(part)
       if (!match) {
         if (part) fragment.appendChild(document.createTextNode(part))
         continue
@@ -101,12 +102,13 @@ export function renderMarkdownWithCitations(content: string): string {
       citation.dataset.citationIndex = match[1]
       citation.setAttribute('role', 'button')
       citation.setAttribute('tabindex', '0')
+      if (citationLabel) citation.setAttribute('aria-label', citationLabel(Number(match[1])))
       citation.textContent = part
       fragment.appendChild(citation)
     }
     node.parentNode?.replaceChild(fragment, node)
   }
-  return DOMPurify.sanitize(container.innerHTML, sanitizeOptions)
+  return DOMPurify.sanitize(container.innerHTML, SANITIZE_OPTIONS)
 }
 
 /**

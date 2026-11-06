@@ -70,7 +70,9 @@ const renderedContent = computed(() => {
   if (cached) return cached
 
   const sanitized = props.citations
-    ? renderMarkdownWithCitations(props.content)
+    ? renderMarkdownWithCitations(props.content, (index) =>
+        i18n.global.t('chat.viewSource', { n: index })
+      )
     : renderMarkdownFull(props.content)
 
   if (contentCache.size >= MAX_CACHE_SIZE) {
@@ -118,8 +120,8 @@ onMounted(() => {
   addCopyButtons()
 })
 
-// 当内容更新时，重新添加复制按钮
-watch(() => props.content, () => {
+// 内容/渲染模式变化时重建复制按钮（v-html 重渲染会清掉动态按钮）
+watch(renderedContent, () => {
   nextTick(() => {
     addCopyButtons()
   })
@@ -174,14 +176,16 @@ watch(() => props.content, () => {
   color: #10b981;
 }
 
-/* 引用角标：聊天回答里的 [n]，点击/Enter 打开对应来源 */
+/* 引用角标：聊天回答里的 [n]，点击/Enter 打开对应来源。
+   垂直 padding 扩大命中区但不撑行高；相邻角标留 2px 间距。 */
 .markdown-body .chat-citation {
   color: #1d4ed8;
   cursor: pointer;
   font-size: 0.72em;
   font-weight: 600;
   line-height: 1;
-  padding: 0 1px;
+  padding: 0.35em 0.2em;
+  margin: 0 2px;
   vertical-align: super;
   border-radius: 2px;
 }
@@ -190,10 +194,18 @@ watch(() => props.content, () => {
 }
 .markdown-body .chat-citation:focus-visible {
   outline: 2px solid #2563eb;
-  outline-offset: 1px;
+  outline-offset: 2px;
 }
 .dark .markdown-body .chat-citation {
   color: #60a5fa;
+}
+.dark .markdown-body .chat-citation:focus-visible {
+  outline-color: #60a5fa;
+}
+@media (pointer: coarse) {
+  .markdown-body .chat-citation {
+    padding: 0.6em 0.3em;
+  }
 }
 
 /* KaTeX 修正 */

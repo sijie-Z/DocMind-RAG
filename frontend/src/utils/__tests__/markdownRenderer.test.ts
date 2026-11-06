@@ -52,19 +52,31 @@ describe('markdownRenderer · 聊天引用角标', () => {
 
   it('代码块/行内代码/链接内的 [n] 原样保留', () => {
     const out = renderMarkdownWithCitations(
-      '`[1]`\n\n```\n[2]\n```\n\n[链接](https://x.test/[3])\n\n正文[4]'
+      '`[1]`\n\n```\n[2]\n```\n\n[链接](https://x.test/[3])\n\n[别名[12]](https://x.test/a)\n\n正文[4]'
     )
 
     expect(out).toContain('data-citation-index="4"')
     expect(out).not.toContain('data-citation-index="1"')
     expect(out).not.toContain('data-citation-index="2"')
     expect(out).not.toContain('data-citation-index="3"')
+    // 链接文本里的 [12] 也不转换（只处理正文文本节点）
+    expect(out).not.toContain('data-citation-index="12"')
   })
 
-  it('非数字/超长方括号不转换', () => {
-    const out = renderMarkdownWithCitations('备注[a]、[1234] 与 [1]')
+  it('非法公式（KaTeX 错误块）里的 [n] 不转换', () => {
+    const out = renderMarkdownWithCitations('$$[3]$$\n\n正文[4]')
 
+    expect(out).toContain('data-citation-index="4"')
+    expect(out).not.toContain('data-citation-index="3"')
+  })
+
+  it('非数字/0 开头/超长方括号不转换，[10] 正常转换', () => {
+    const out = renderMarkdownWithCitations('备注[a]、[0]、[01]、[1234] 与 [10] 及 [1]')
+
+    expect(out).toContain('data-citation-index="10"')
     expect(out).toContain('data-citation-index="1"')
+    expect(out).not.toContain('data-citation-index="0"')
+    expect(out).not.toContain('data-citation-index="01"')
     expect(out).not.toContain('data-citation-index="1234"')
     expect(out).not.toContain('data-citation-index="a"')
   })

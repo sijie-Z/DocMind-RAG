@@ -292,6 +292,7 @@ export default {
     orgPrivacyDisabled: '組織ポリシーによりプライバシーモードは無効です',
     sseMode: 'SSEモード（企業ファイアウォール対応）',
     sourcesLabel: '出典：',
+    viewSource: '出典 {n} を表示',
     unknownDoc: '不明なドキュメント',
     noPreview: 'プレビューなし',
     // issue #185：相対順位スコアは順位で表示し、リランクの絶対スコアのみ

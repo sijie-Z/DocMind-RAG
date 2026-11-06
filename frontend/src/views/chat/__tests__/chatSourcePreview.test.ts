@@ -191,6 +191,38 @@ describe('W2-T7 · ChatMessages 来源卡冒泡 openSource', () => {
     await wrapper.find('.chat-citation').trigger('click')
     expect(wrapper.emitted('openSource')).toBeUndefined()
   })
+
+  it('终态 sources 只保留被引用项：按原始 rank 映射，而不是数组下标', async () => {
+    const msg: ChatMessage = {
+      id: 4,
+      content: '引用 [2] 与 [4]。',
+      messageType: 'assistant',
+      conversationId: 1,
+      sources: [
+        { filename: 'B.pdf', rank: 2, documentId: 'doc-b' },
+        { filename: 'D.pdf', rank: 4, documentId: 'doc-d' },
+      ],
+    }
+    const wrapper = mount(ChatMessages, {
+      props: { messages: [msg], isLoading: false, showBackToBottom: false, userAvatar: '', suggestions: [] },
+      global: {
+        plugins: [messagesI18n],
+        stubs: {
+          'n-icon': true, 'n-avatar': true, 'n-button': true,
+          'n-tooltip': true, 'n-tag': NTagStub, 'n-popover': NPopoverStub,
+        },
+      },
+    })
+
+    const citations = wrapper.findAll('.chat-citation')
+    expect(citations).toHaveLength(2)
+    await citations[0].trigger('click')
+    await citations[1].trigger('click')
+
+    const emitted = wrapper.emitted('openSource')
+    expect(emitted?.[0][0]).toMatchObject({ documentId: 'doc-b', filename: 'B.pdf' })
+    expect(emitted?.[1][0]).toMatchObject({ documentId: 'doc-d', filename: 'D.pdf' })
+  })
 })
 
 // ── Part B：chat 页收到 openSource → 打开预览弹窗并拉取全文 ──────────────

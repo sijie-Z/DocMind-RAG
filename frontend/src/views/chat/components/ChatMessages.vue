@@ -328,7 +328,7 @@ import RetryHintLine from '@/components/agent/RetryHintLine.vue'
 import RunReportBlock from '@/components/agent/RunReportBlock.vue'
 import type { ChatMessage, KnowledgeSource } from '@/types/chat'
 import type { AgentEvent } from '@/types/agent'
-import { citationRank } from '../utils/citations'
+import { citationRank, findSourceByCitation } from '../utils/citations'
 
 const { t } = useI18n()
 
@@ -394,9 +394,9 @@ const emit = defineEmits<{
   openSource: [source: KnowledgeSource]
 }>()
 
-/** 正文引用 [n] → message.sources[n-1]；越界/无来源时安静忽略。 */
+/** 正文引用 [n] → 按原始 rank 找来源（终态 sources 可能只保留被引用项）。 */
 const handleCitation = (message: ChatMessage, index: number) => {
-  const source = message.sources?.[index - 1]
+  const source = findSourceByCitation(message.sources ?? [], index)
   if (source) emit('openSource', source)
 }
 </script>

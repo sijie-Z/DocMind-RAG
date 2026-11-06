@@ -320,6 +320,7 @@ export default {
     sseMode: 'SSE模式 (企业防火墙兼容)',
     // Message sources
     sourcesLabel: '来源引用：',
+    viewSource: '查看来源 {n}',
     demoData: '演示数据',
     unknownDoc: '未知文档',
     noPreview: '无预览',

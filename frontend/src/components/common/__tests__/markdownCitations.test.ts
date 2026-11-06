@@ -19,6 +19,8 @@ describe('Markdown · 聊天引用角标', () => {
     expect(sups[0].attributes('data-citation-index')).toBe('1')
     expect(sups[0].attributes('role')).toBe('button')
     expect(sups[0].attributes('tabindex')).toBe('0')
+    // 可访问名带序号（读屏按按钮导航时不是只有「[1]」）
+    expect(sups[0].attributes('aria-label')).toContain('1')
 
     await sups[0].trigger('click')
     await sups[1].trigger('keydown', { key: 'Enter' })
@@ -41,5 +43,20 @@ describe('Markdown · 聊天引用角标', () => {
 
     expect(wrapper.find('.chat-citation').exists()).toBe(false)
     expect(wrapper.text()).toContain('正文[1]')
+  })
+
+  it('流式中间态：纯文本渲染，不生成角标（终态才可点）', () => {
+    const wrapper = mountMarkdown('正文[1]', { citations: true, streaming: true })
+
+    expect(wrapper.find('.chat-citation').exists()).toBe(false)
+    expect(wrapper.text()).toContain('正文[1]')
+  })
+
+  it('点击正文非角标区域：不 emit citation', async () => {
+    const wrapper = mountMarkdown('正文[1] 与普通文字', { citations: true })
+
+    await wrapper.trigger('click')
+
+    expect(wrapper.emitted('citation')).toBeUndefined()
   })
 })
