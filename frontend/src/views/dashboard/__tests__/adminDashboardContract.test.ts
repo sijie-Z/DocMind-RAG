@@ -158,7 +158,7 @@ describe('AdminDashboard · 趋势轴标签与诚实空态（B5）', () => {
     expect(llmOpt.xAxis.data).toEqual(['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'])
   })
 
-  it('趋势为空：不画伪造回退数据（旧 [1200,…] / [0,…,hitRate] 已删），画布写明「暂无数据」', async () => {
+  it('趋势为空：LLM 不画假坐标轴，RAG 空趋势画布写明「暂无数据」', async () => {
     vi.mocked(getLLMStats).mockResolvedValue(llmFixture({ token_trend_7d: [] }) as never)
     vi.mocked(getRAGStats).mockResolvedValue(ragFixture({ hit_rate: 0, hit_rate_trend_7d: [] }) as never)
 
@@ -166,15 +166,11 @@ describe('AdminDashboard · 趋势轴标签与诚实空态（B5）', () => {
     await flushPromises()
     await nextTick()
 
-    const llmOpt = chartInstances[0].setOption.mock.calls[0][0] as {
-      series: Array<{ data: number[] }>
-      title: { subtext: string }
-    }
-    expect(llmOpt.series[0].data).toEqual([])
-    expect(llmOpt.series[0].data).not.toContain(1200)
-    expect(llmOpt.title.subtext).toBe('暂无数据')
+    // LLM 没有按日真源：不初始化图表，显示「暂无按日数据」；不得出现伪造平线。
+    expect(wrapper.text()).toContain('暂无按日数据')
+    expect(chartInstances).toHaveLength(1) // 仅 RAG 图
 
-    const ragOpt = chartInstances[1].setOption.mock.calls[0][0] as {
+    const ragOpt = chartInstances[0].setOption.mock.calls[0][0] as {
       series: Array<{ data: number[] }>
       title: { subtext: string }
       xAxis: { data: string[] }
@@ -362,5 +358,53 @@ describe('AdminDashboard · 总会话环比真值 & 成本费率对齐（W2-T7�
 
     expect(wrapper.text()).toContain('DeepSeek 费率')
     expect(wrapper.text()).not.toContain('GPT-4o-mini')
+  })
+})
+
+describe('AdminDashboard · 降级诚实性（D 轮）', () => {
+  it('summary 降级首次加载：显示「数据暂不可用」，不渲染全零 KPI', async () => {
+    vi.mocked(getAdminSummary).mockResolvedValue({
+      data: { total_users: 0, total_sessions: 0, total_documents: 0, total_organizations: 0, active_users_24h: 0, degraded: true },
+    } as never)
+    const wrapper = mountView()
+    await flushPromises()
+    expect(wrapper.find('[data-testid="kpi-degraded"]').exists()).toBe(true)
+    expect(wrapper.text()).toContain('数据暂不可用')
+    expect(wrapper.text()).not.toContain('总用户数')
+  })
+
+  it('RAG 降级：显示暂不可用且不初始化 0% 趋势图', async () => {
+    vi.mocked(getRAGStats).mockResolvedValue({
+      data: {
+        hit_rate: 0, total_queries_7d: 0, hits_with_documents: 0,
+        avg_documents_retrieved: 0, hit_rate_trend_7d: [0, 0, 0, 0, 0, 0, 0, 0], degraded: true,
+      },
+    } as never)
+    const wrapper = mountView()
+    await flushPromises()
+    await nextTick()
+    expect(wrapper.find('[data-testid="rag-degraded"]').exists()).toBe(true)
+    expect(chartInstances).toHaveLength(1) // 仅 LLM 趋势图（RAG 不画）
+  })
+
+  it('LLM 降级：显示暂不可用，不把全零当真实用量', async () => {
+    vi.mocked(getLLMStats).mockResolvedValue({
+      data: {
+        total_tokens_today: 0, cost_today_usd: 0, avg_latency_ms: 0, p95_latency_ms: 0,
+        request_count_today: 0, cost_warning: false, token_trend_7d: [], degraded: true,
+      },
+    } as never)
+    const wrapper = mountView()
+    await flushPromises()
+    await nextTick()
+    expect(wrapper.find('[data-testid="llm-degraded"]').exists()).toBe(true)
+    expect(wrapper.text()).not.toContain('今日 Token')
+  })
+
+  it('审计日志 success:false：显示错误而不是空表', async () => {
+    vi.mocked(getAuditLogs).mockResolvedValue({ data: { success: false, message: 'db down' } } as never)
+    const wrapper = mountView()
+    await flushPromises()
+    expect(wrapper.find('[data-testid="audit-error"]').exists()).toBe(true)
   })
 })

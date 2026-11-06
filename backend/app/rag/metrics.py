@@ -45,12 +45,17 @@ class RAGMetrics:
 
     def get_snapshot(self, window_seconds: int = 0) -> dict[str, Any]:
         if window_seconds > 0:
-            rt = max(1, self.window_sum("retrieval", window_seconds))
+            # 计数返回真实值（零事件就是 0）；max(1) 只用于比率分母，避免
+            # 「零查询」被伪装成 1 次查询并触发前端红色告警（D 轮诚实性）。
+            rt_raw = self.window_sum("retrieval", window_seconds)
             rh = self.window_sum("retrieval_hit", window_seconds)
-            gt = max(1, self.window_sum("grounded", window_seconds))
+            gt_raw = self.window_sum("grounded", window_seconds)
             gh = self.window_sum("grounded_hit", window_seconds)
-            lc = max(1, self.window_count("latency", window_seconds))
+            lc_raw = self.window_count("latency", window_seconds)
             ls = self.window_sum("latency", window_seconds)
+            rt = max(1, rt_raw)
+            gt = max(1, gt_raw)
+            lc = max(1, lc_raw)
             ch = self.window_sum("cache_hit", window_seconds)
             sc = self.window_sum("semantic_cache_hit", window_seconds)
             rt_retry = self.window_sum("retry", window_seconds)
@@ -60,10 +65,10 @@ class RAGMetrics:
                 # 此前只有进程累计 _counters，从未暴露给 snapshot，/llm-stats 恒读 0。
                 "total_input_tokens": int(self.window_sum("tokens_in", window_seconds)),
                 "total_output_tokens": int(self.window_sum("tokens_out", window_seconds)),
-                "retrieval_total": int(rt),
+                "retrieval_total": int(rt_raw),
                 "retrieval_hit": int(rh),
                 "hit_rate": round(rh / rt, 4),
-                "grounded_total": int(gt),
+                "grounded_total": int(gt_raw),
                 "grounded_hit": int(gh),
                 "groundedness": round(gh / gt, 4),
                 "avg_latency_ms": round(ls / lc, 2),
@@ -76,18 +81,21 @@ class RAGMetrics:
                 "cache_hit_rate": round(ch / rt, 4) if rt > 0 else 0,
             }
 
-        rt = max(1, self._counters["retrieval_total"])
-        gt = max(1, self._counters["grounded_total"])
+        # 同样：计数原样返回，max(1) 仅作为比率分母。
+        rt_raw = self._counters["retrieval_total"]
+        gt_raw = self._counters["grounded_total"]
+        rt = max(1, rt_raw)
+        gt = max(1, gt_raw)
         lc = max(1, self._counters["latency_count"])
         return {
             "window_seconds": 0,
             # issue #286：进程累计口径与窗口口径同名对称（同 retrieval_total 惯例）。
             "total_input_tokens": self._counters["total_input_tokens"],
             "total_output_tokens": self._counters["total_output_tokens"],
-            "retrieval_total": self._counters["retrieval_total"],
+            "retrieval_total": rt_raw,
             "retrieval_hit": self._counters["retrieval_hit"],
             "hit_rate": round(self._counters["retrieval_hit"] / rt, 4),
-            "grounded_total": self._counters["grounded_total"],
+            "grounded_total": gt_raw,
             "grounded_hit": self._counters["grounded_hit"],
             "groundedness": round(self._counters["grounded_hit"] / gt, 4),
             "avg_latency_ms": round(self._counters["latency_sum_ms"] / lc, 2),

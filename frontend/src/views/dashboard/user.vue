@@ -1,12 +1,18 @@
 <template>
   <div class="user-dashboard p-4 md:p-6 space-y-5">
     <!-- 分块加载：KPI 卡 / RAG / 最近会话 / 趋势图各自骨架，哪块数据先到就先替换哪块 -->
-    <!-- 欢迎区域 - 渐变背景 -->
-    <div class="bg-gradient-to-r from-blue-600 via-blue-600 to-blue-700 rounded-2xl p-6 text-white shadow-xl shadow-blue-500/20 relative overflow-hidden">
-      <div class="absolute inset-0 bg-[url('data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNjAiIGhlaWdodD0iNjAiIHZpZXdCb3g9IjAgMCA2MCA2MCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48ZyBmaWxsPSJub25lIiBmaWxsLXJ1bGU9ImV2ZW5vZGQiPjxnIGZpbGw9IiNmZmYiIGZpbGwtb3BhY2l0eT0iMC4xIj48Y2lyY2xlIGN4PSIzMCIgY3k9IjMwIiByPSIyIi8+PC9nPjwvZz48L3N2Zz4=')] opacity-50"></div>
-      <div class="relative z-10">
-        <h1 class="text-2xl md:text-3xl font-bold">{{ t('dashboard.welcome') }}, {{ userInfo?.nickname || userInfo?.username }}!</h1>
-        <p class="text-slate-100 mt-1 text-sm md:text-base">{{ t('dashboard.welcomeDesc') }}</p>
+    <!-- 欢迎区域：纸面卡 + 单一品牌色，不使用页面级渐变/彩色阴影 -->
+    <div class="rounded-2xl border border-slate-200 bg-white p-6 dark:border-slate-700 dark:bg-slate-900">
+      <div class="flex flex-wrap items-center gap-4">
+        <div class="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-blue-700 text-white">
+          <DocMindMark :size="24" />
+        </div>
+        <div class="min-w-0">
+          <h1 class="text-2xl font-semibold tracking-tight text-slate-900 dark:text-white md:text-[28px]">
+            {{ t('dashboard.welcome') }}, {{ userInfo?.nickname || userInfo?.username }}
+          </h1>
+          <p class="mt-1 text-sm text-slate-600 dark:text-slate-400">{{ t('dashboard.welcomeDesc') }}</p>
+        </div>
       </div>
     </div>
 
@@ -118,7 +124,7 @@
         <template v-else>
           <div v-if="recentConversations.length === 0" class="text-center py-10">
             <div class="w-16 h-16 bg-gray-100 dark:bg-gray-700 rounded-full flex items-center justify-center mx-auto mb-3">
-              <n-icon size="32" class="text-gray-400"><ChatbubbleEllipsesOutline /></n-icon>
+              <n-icon size="32" class="text-gray-500 dark:text-gray-400"><ChatbubbleEllipsesOutline /></n-icon>
             </div>
             <p class="text-gray-400 dark:text-gray-500">{{ t('dashboard.noConversations') }}</p>
             <n-button type="primary" size="small" class="mt-3" @click="$router.push('/chat')">
@@ -141,7 +147,7 @@
                   <p class="text-sm text-gray-500 dark:text-gray-400 truncate">{{ conv.last_message || '' }}</p>
                 </div>
               </div>
-              <span class="text-xs text-gray-400 ml-2 flex-shrink-0">{{ formatDate(conv.updated_at) }}</span>
+              <span class="text-xs text-gray-500 dark:text-gray-400 ml-2 flex-shrink-0">{{ formatDate(conv.updated_at) }}</span>
             </div>
           </div>
         </template>
@@ -169,69 +175,51 @@
       <span class="text-sm text-gray-500 dark:text-gray-400">{{ t('dashboard.loadFailed') }}</span>
       <n-button size="small" @click="loadStats">{{ t('dashboard.retry') }}</n-button>
     </div>
-    <div v-else class="grid grid-cols-2 lg:grid-cols-4 gap-4">
-      <div class="bg-white dark:bg-gray-800 rounded-2xl p-5 border border-gray-100 dark:border-gray-700 shadow-sm">
-        <div class="flex items-center justify-between mb-3">
-          <div class="w-10 h-10 bg-slate-100 dark:bg-slate-900/40 rounded-xl flex items-center justify-center">
-            <n-icon size="22" class="text-blue-600 dark:text-blue-400"><ChatbubbleEllipsesOutline /></n-icon>
-          </div>
-          <span class="text-xs text-gray-400">{{ t('dashboard.conversations') }}</span>
-        </div>
-        <p class="text-3xl font-bold text-gray-900 dark:text-white">{{ stats.conversation_count.toLocaleString() }}</p>
-        <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">{{ t('dashboard.conversations') }}</p>
+    <div v-else-if="statsDegraded && !statsEverReady" class="flex flex-col items-center justify-center gap-3 rounded-xl border border-dashed border-amber-300 bg-amber-50/50 py-10 dark:border-amber-800/60 dark:bg-amber-900/10">
+      <span class="text-sm text-amber-800 dark:text-amber-200">{{ t('dashboard.statsUnavailable') }}</span>
+      <n-button size="small" @click="loadStats">{{ t('dashboard.retry') }}</n-button>
+    </div>
+    <div v-else class="grid grid-cols-2 gap-4 lg:grid-cols-4">
+      <div
+        v-if="statsDegraded"
+        class="col-span-full rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-800/60 dark:bg-amber-900/10 dark:text-amber-200"
+        data-testid="stats-degraded"
+      >
+        {{ t('dashboard.statsStale') }}
       </div>
-
-      <div class="bg-white dark:bg-gray-800 rounded-2xl p-5 border border-gray-100 dark:border-gray-700 shadow-sm">
-        <div class="flex items-center justify-between mb-3">
-          <div class="w-10 h-10 bg-emerald-100 dark:bg-emerald-900/40 rounded-xl flex items-center justify-center">
-            <n-icon size="22" class="text-emerald-600 dark:text-emerald-400"><TextOutline /></n-icon>
+      <div
+        v-for="card in statCards"
+        :key="card.key"
+        class="rounded-xl border border-slate-200 bg-white p-5 dark:border-slate-700 dark:bg-slate-900"
+      >
+        <div class="mb-3 flex items-center justify-between">
+          <div class="flex h-9 w-9 items-center justify-center rounded-lg bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300">
+            <n-icon size="18"><component :is="card.icon" /></n-icon>
           </div>
-          <span class="text-xs text-gray-400">{{ t('dashboard.messages') }}</span>
+          <span class="text-xs font-medium text-slate-500 dark:text-slate-400">{{ card.label }}</span>
         </div>
-        <p class="text-3xl font-bold text-gray-900 dark:text-white">{{ stats.message_count.toLocaleString() }}</p>
-        <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">{{ t('dashboard.messages') }}</p>
-      </div>
-
-      <div class="bg-white dark:bg-gray-800 rounded-2xl p-5 border border-gray-100 dark:border-gray-700 shadow-sm">
-        <div class="flex items-center justify-between mb-3">
-          <div class="w-10 h-10 bg-orange-100 dark:bg-orange-900/40 rounded-xl flex items-center justify-center">
-            <n-icon size="22" class="text-orange-600 dark:text-orange-400"><DocumentOutline /></n-icon>
-          </div>
-          <span class="text-xs text-gray-400">{{ t('dashboard.files') }}</span>
-        </div>
-        <p class="text-3xl font-bold text-gray-900 dark:text-white">{{ stats.file_count.toLocaleString() }}</p>
-        <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">{{ t('dashboard.files') }}</p>
-      </div>
-
-      <div class="bg-white dark:bg-gray-800 rounded-2xl p-5 border border-gray-100 dark:border-gray-700 shadow-sm">
-        <div class="flex items-center justify-between mb-3">
-          <div class="w-10 h-10 bg-rose-100 dark:bg-rose-900/40 rounded-xl flex items-center justify-center">
-            <n-icon size="22" class="text-rose-600 dark:text-rose-400"><ServerOutline /></n-icon>
-          </div>
-          <span class="text-xs text-gray-400">{{ t('dashboard.storage') }}</span>
-        </div>
-        <p class="text-3xl font-bold text-gray-900 dark:text-white">{{ formatSize(stats.storage_used) }}</p>
-        <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">{{ t('dashboard.storage') }}</p>
+        <p class="text-2xl font-semibold tabular-nums text-slate-900 dark:text-white">{{ card.value }}</p>
       </div>
     </div>
     </section>
 
     <!-- RAG 命中率模块 -->
     <div class="bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700 shadow-sm overflow-hidden">
-      <div class="px-5 py-4 border-b border-gray-100 dark:border-gray-700 flex items-center justify-between bg-gradient-to-r from-emerald-50 to-transparent dark:from-emerald-900/10">
+      <div class="px-5 py-4 border-b border-gray-100 dark:border-gray-700 flex items-center justify-between ">
         <div class="flex items-center gap-2">
           <div class="w-8 h-8 bg-emerald-100 dark:bg-emerald-900/30 rounded-lg flex items-center justify-center">
             <n-icon class="text-emerald-600 dark:text-emerald-400"><AnalyticsOutline /></n-icon>
           </div>
           <div>
             <h3 class="font-semibold text-gray-900 dark:text-white">{{ t('dashboard.ragStats') }}</h3>
-            <p class="text-xs text-gray-500 dark:text-gray-400">近 7 天知识检索质量</p>
+            <p class="text-xs text-slate-500 dark:text-slate-400">{{ t('dashboard.ragSubtitle7d') }}</p>
           </div>
         </div>
         <div class="flex items-center gap-2">
-          <n-tag :type="ragStats.hitRate > 60 ? 'success' : ragStats.hitRate > 30 ? 'warning' : 'error'" size="small" round>
-            {{ ragStats.hitRate > 60 ? '良好' : ragStats.hitRate > 30 ? '一般' : '需关注' }}
+          <n-tag v-if="ragHasData" :type="ragQualityTag" size="small" round>
+            {{ ragQualityLabel }}
           </n-tag>
+          <n-tag v-else type="default" size="small" round>{{ t('dashboard.ragNoData') }}</n-tag>
         </div>
       </div>
       <div class="p-5">
@@ -250,12 +238,22 @@
             </div>
           </div>
         </div>
-        <div v-else-if="ragState === 'error'" class="flex flex-col items-center justify-center gap-3 py-8" data-testid="rag-error">
-          <span class="text-sm text-gray-500 dark:text-gray-400">{{ t('dashboard.loadFailed') }}</span>
+        <div v-else-if="ragState === 'error' || (ragDegraded && !ragEverReady)" class="flex flex-col items-center justify-center gap-3 py-8" data-testid="rag-error">
+          <span class="text-sm text-slate-600 dark:text-slate-300">
+            {{ ragDegraded ? t('dashboard.dataUnavailable') : t('dashboard.loadFailed') }}
+          </span>
+          <span class="text-xs text-slate-500 dark:text-slate-400">{{ t('dashboard.errorHint') }}</span>
           <n-button size="small" @click="loadRag">{{ t('dashboard.retry') }}</n-button>
         </div>
         <template v-else>
-        <div class="flex items-center gap-5 mb-4">
+        <div
+          v-if="ragDegraded"
+          class="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-800/60 dark:bg-amber-900/10 dark:text-amber-200"
+          data-testid="rag-degraded"
+        >
+          {{ t('dashboard.statsStale') }}
+        </div>
+        <div v-if="ragHasData" class="flex items-center gap-5 mb-4">
           <div class="flex-1">
             <p class="text-sm text-gray-500 dark:text-gray-400 mb-2">{{ t('dashboard.hitRate') }}</p>
             <n-progress
@@ -266,25 +264,28 @@
               :border-radius="9"
               :fill-border-radius="9"
               :color="ragStats.hitRate > 60 ? CHART_COLORS.secondary : ragStats.hitRate > 30 ? CHART_COLORS.warning : CHART_COLORS.danger"
-              :rail-color="'#f3f4f6'"
+              :rail-color="isDark ? '#1f2937' : '#f3f4f6'"
             />
           </div>
-          <div class="text-right min-w-[80px]">
-            <p class="text-3xl font-bold text-emerald-600 dark:text-emerald-400">{{ ragStats.hitRate }}<span class="text-lg">%</span></p>
+          <div class="min-w-[80px] text-right">
+            <p class="text-3xl font-semibold tabular-nums text-emerald-700 dark:text-emerald-400">{{ ragStats.hitRate }}<span class="text-lg">%</span></p>
           </div>
+        </div>
+        <div v-else class="mb-4 rounded-xl border border-dashed border-slate-200 px-4 py-8 text-center dark:border-slate-700">
+          <p class="text-sm text-slate-600 dark:text-slate-300">{{ t('dashboard.ragNoDataHint') }}</p>
         </div>
         <div class="grid grid-cols-3 gap-3">
           <div class="text-center p-3 bg-gray-50 dark:bg-gray-700/50 rounded-xl">
             <p class="text-xs text-gray-500 dark:text-gray-400 mb-1">{{ t('dashboard.queries7d') }}</p>
             <p class="text-lg font-bold text-gray-900 dark:text-white">{{ ragStats.totalQueries.toLocaleString() }}</p>
           </div>
-          <div class="text-center p-3 bg-emerald-50 dark:bg-emerald-900/20 rounded-xl">
-            <p class="text-xs text-gray-500 dark:text-gray-400 mb-1">{{ t('dashboard.hits') }}</p>
-            <p class="text-lg font-bold text-emerald-600 dark:text-emerald-400">{{ ragStats.hits.toLocaleString() }}</p>
+          <div class="text-center p-3 rounded-xl" :class="ragStats.hits > 0 ? 'bg-emerald-50 dark:bg-emerald-900/20' : 'bg-gray-50 dark:bg-gray-700/50'">
+            <p class="text-xs text-slate-500 dark:text-slate-400 mb-1">{{ t('dashboard.hits') }}</p>
+            <p class="text-lg font-bold tabular-nums" :class="ragStats.hits > 0 ? 'text-emerald-700 dark:text-emerald-400' : 'text-slate-900 dark:text-white'">{{ ragStats.hits.toLocaleString() }}</p>
           </div>
           <div class="text-center p-3 bg-gray-50 dark:bg-gray-700/50 rounded-xl">
             <p class="text-xs text-gray-500 dark:text-gray-400 mb-1">{{ t('dashboard.avgDocs') }}</p>
-            <p class="text-lg font-bold text-gray-900 dark:text-white">{{ ragStats.avgDocs }}</p>
+            <p class="text-lg font-bold text-gray-900 dark:text-white">{{ '—' }}</p>
           </div>
         </div>
         </template>
@@ -302,7 +303,7 @@
             </div>
             <div>
               <h3 class="font-semibold text-gray-900 dark:text-white">{{ t('dashboard.activityTrend') }}</h3>
-              <p class="text-xs text-gray-500 dark:text-gray-400">7天活动趋势图</p>
+              <p class="text-xs text-slate-500 dark:text-slate-400">{{ t('dashboard.activitySubtitle') }}</p>
             </div>
           </div>
         </div>
@@ -313,6 +314,12 @@
           <div v-else-if="statsState === 'error'" class="h-full flex flex-col items-center justify-center gap-3" data-testid="chart-error">
             <span class="text-sm text-gray-500 dark:text-gray-400">{{ t('dashboard.loadFailed') }}</span>
             <n-button size="small" @click="loadStats">{{ t('dashboard.retry') }}</n-button>
+          </div>
+          <div v-else-if="statsDegraded && !statsEverReady" class="flex h-full items-center justify-center">
+            <span class="text-sm text-slate-600 dark:text-slate-300">{{ t('dashboard.dataUnavailable') }}</span>
+          </div>
+          <div v-else-if="!hasActivity" class="flex h-full items-center justify-center">
+            <span class="text-sm text-slate-600 dark:text-slate-300">{{ t('dashboard.activityNoData') }}</span>
           </div>
           <div v-else ref="chartRef" class="w-full h-full"></div>
         </div>
@@ -326,7 +333,7 @@
         {{ t('dashboard.quickActions') }}
       </h3>
       <div class="flex flex-wrap gap-3">
-        <n-button type="success" size="large" class="shadow-md hover:shadow-lg transition-shadow" @click="$router.push('/search')">
+        <n-button type="primary" size="large" @click="$router.push('/search')">
           <template #icon><n-icon><SearchOutline /></n-icon></template>
           {{ t('dashboard.searchKB') }}
         </n-button>
@@ -344,13 +351,15 @@ import { ref, onMounted, onUnmounted, computed, watch, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useMessage } from 'naive-ui'
 import { useUserStore } from '@/stores/user'
+import { useIsDark } from '@/composables/useIsDark'
+import DocMindMark from '@/components/brand/DocMindMark.vue'
 import { getUserStats } from '@/api/user'
 import { getConversations, type Conversation } from '@/api/conversation'
 import { getRAGStats } from '@/api/monitoring'
 import { FIRST_SCREEN_REQUEST_CONFIG } from '@/utils/request'
 import { seedDemoData } from '@/api/demo'
 import { formatFileSize, formatDate as formatDateUtil } from '@/utils/format'
-import { CHART_COLORS } from '@/utils/chartTheme'
+import { CHART_COLORS, CHART_THEME, DARK_CHART_THEME } from '@/utils/chartTheme'
 import {
   ChatbubbleEllipsesOutline, TextOutline, DocumentOutline,
   ServerOutline, CloudUploadOutline, SearchOutline, TimeOutline,
@@ -361,9 +370,10 @@ import OnboardingChecklist from './components/OnboardingChecklist.vue'
 import echarts from '@/utils/echarts'
 import type { EChartsType } from 'echarts/core'
 
-const { t } = useI18n()
+const { t, locale } = useI18n()
 const message = useMessage()
 const userStore = useUserStore()
+const isDark = useIsDark()
 const userInfo = computed(() => userStore.userInfo)
 
 const stats = ref({
@@ -398,6 +408,34 @@ const ragState = ref<BlockState>('loading')
  * 首次加载失败/降级（从未 ready）仍不显示清单。
  */
 const statsEverReady = ref(false)
+const statsDegraded = ref(false)
+const ragDegraded = ref(false)
+const ragEverReady = ref(false)
+
+const statCards = computed(() => [
+  { key: 'conversations', label: t('dashboard.conversations'), value: stats.value.conversation_count.toLocaleString(), icon: ChatbubbleEllipsesOutline },
+  { key: 'messages', label: t('dashboard.messages'), value: stats.value.message_count.toLocaleString(), icon: TextOutline },
+  { key: 'files', label: t('dashboard.files'), value: stats.value.file_count.toLocaleString(), icon: DocumentOutline },
+  { key: 'storage', label: t('dashboard.storage'), value: formatSize(stats.value.storage_used), icon: ServerOutline }
+])
+const hasActivity = computed(() => stats.value.activity_trend.some((value) => value > 0))
+const activityDayLabels = computed(() => {
+  const formatter = new Intl.DateTimeFormat(locale.value, { weekday: 'short' })
+  return Array.from({ length: 7 }, (_, index) =>
+    formatter.format(new Date(Date.now() - (6 - index) * 24 * 60 * 60 * 1000))
+  )
+})
+const ragHasData = computed(() => ragStats.value.totalQueries > 0)
+const ragQualityLabel = computed(() =>
+  ragStats.value.hitRate > 60
+    ? t('dashboard.ragQualityGood')
+    : ragStats.value.hitRate > 30
+      ? t('dashboard.ragQualityMedium')
+      : t('dashboard.ragQualityPoor')
+)
+const ragQualityTag = computed(() =>
+  ragStats.value.hitRate > 60 ? 'success' : ragStats.value.hitRate > 30 ? 'warning' : 'error'
+)
 
 const formatSize = (bytes: number) => formatFileSize(bytes)
 const formatDate = (date: string) => formatDateUtil(date)
@@ -430,29 +468,19 @@ const initChart = () => {
 
 const updateChart = () => {
   if (!chart) return
+  const theme = isDark.value ? DARK_CHART_THEME : CHART_THEME
   const option = {
-    tooltip: {
-      trigger: 'axis',
-      backgroundColor: 'rgba(255,255,255,0.95)',
-      borderColor: '#e5e7eb',
-      borderWidth: 1,
-      textStyle: { color: '#374151' }
-    },
-    grid: { left: '2%', right: '3%', bottom: '3%', top: '10%', containLabel: true },
+    tooltip: theme.tooltip,
+    grid: { ...theme.grid, left: '2%', right: '3%', bottom: '3%', top: '10%' },
     xAxis: {
+      ...theme.xAxis,
       type: 'category',
-      // 星期标签走 common.weekdays 词条（周一为首；0=周日 与 Date/cron 口径一致）
-      data: [1, 2, 3, 4, 5, 6, 0].map((d) => t(`common.weekdays.${d}`)),
-      axisLine: { lineStyle: { color: '#e5e7eb' } },
-      axisLabel: { color: '#6b7280', fontSize: 10 },
+      // 后端 activity_trend 是「今天往前 7 天」滚动序列；标签必须按真实日期生成，
+      // 固定「周一..周日」只有今天恰好周日时才对齐。
+      data: activityDayLabels.value,
       splitLine: { show: false }
     },
-    yAxis: {
-      type: 'value',
-      axisLine: { show: false },
-      axisLabel: { color: '#6b7280', fontSize: 10 },
-      splitLine: { lineStyle: { color: '#f3f4f6' } }
-    },
+    yAxis: { ...theme.yAxis, type: 'value' },
     series: [{
       data: stats.value.activity_trend,
       type: 'bar',
@@ -474,12 +502,23 @@ const updateChart = () => {
       }
     }]
   }
-  chart.setOption(option)
+  chart.setOption(option, { notMerge: true })
 }
 
 const handleResize = () => chart?.resize()
 
-watch(() => stats.value.activity_trend, updateChart, { deep: true })
+watch(
+  () => stats.value.activity_trend,
+  () => {
+    if (!chartRef.value) return
+    if (!chart) initChart()
+    else updateChart()
+  },
+  { deep: true }
+)
+watch(isDark, () => {
+  if (chart) updateChart()
+})
 
 // ---- 分块加载器：三路请求并行发起，各自落位、各自骨架/错误态 ----
 
@@ -494,6 +533,7 @@ const loadStats = async () => {
     if (seq !== statsSeq) return
     if (!statsRes.data) throw new Error('empty user-stats payload')
     const degraded = statsRes.data.degraded === true
+    statsDegraded.value = degraded
     // issue #301：降级响应（200 + 全零）不得覆盖已展示的真实数据，更不能驱动清单进度；
     // 只有真实（非降级）统计才点亮「曾就绪」，且此后不再回落
     if (!degraded) {
@@ -537,11 +577,17 @@ const loadRag = async () => {
   try {
     const ragRes = await getRAGStats()
     if (!ragRes.data) throw new Error('empty rag-stats payload')
-    ragStats.value = {
-      hitRate: ragRes.data.hit_rate || 0,
-      totalQueries: ragRes.data.total_queries_7d || 0,
-      hits: ragRes.data.hits_with_documents || 0,
-      avgDocs: ragRes.data.avg_documents_retrieved || 0
+    const degraded = ragRes.data.degraded === true
+    ragDegraded.value = degraded
+    // 降级响应不得覆盖上次真实数据；从未成功过则显示「暂不可用」而不是 0/暂无数据。
+    if (!degraded) {
+      ragStats.value = {
+        hitRate: ragRes.data.hit_rate || 0,
+        totalQueries: ragRes.data.total_queries_7d || 0,
+        hits: ragRes.data.hits_with_documents || 0,
+        avgDocs: ragRes.data.avg_documents_retrieved || 0
+      }
+      ragEverReady.value = true
     }
     ragState.value = 'ready'
   } catch {

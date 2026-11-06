@@ -31,7 +31,7 @@
 
     <!-- 展开态：4 步清单 -->
     <div v-else data-testid="onboarding-steps">
-      <div class="px-5 py-4 border-b border-gray-100 dark:border-gray-700 flex flex-wrap items-start justify-between gap-3 bg-gradient-to-r from-blue-50 to-transparent dark:from-blue-900/10">
+      <div class="px-5 py-4 border-b border-gray-100 dark:border-gray-700 flex flex-wrap items-start justify-between gap-3">
         <div class="flex items-center gap-3">
           <div class="w-9 h-9 rounded-xl bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center flex-shrink-0">
             <n-icon size="20" class="text-blue-600 dark:text-blue-400"><RocketOutline /></n-icon>

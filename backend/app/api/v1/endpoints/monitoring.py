@@ -838,11 +838,9 @@ async def get_llm_stats(db: AsyncSession = Depends(get_db)):
 
         cost_usd = round(_estimate_cost(settings.DEEPSEEK_MODEL, input_tokens, output_tokens), 4)
 
-        trend = [0] * 7
-        if total_tokens > 0:
-            base = max(50, total_tokens // 7)
-            for i in range(7):
-                trend[i] = base
+        # 没有按日持久化的 token 真源：不伪造 7 天平线（旧实现把总量均分 7 份），
+        # 返回空数组让前端如实显示「暂无数据」。
+        trend: list[int] = []
 
         return {
             "total_tokens_today": total_tokens,
@@ -874,7 +872,9 @@ async def get_llm_stats(db: AsyncSession = Depends(get_db)):
             "p95_latency_ms": 0,
             "request_count_today": 0,
             "cost_warning": False,
-            "token_trend_7d": [0] * 7,
+            "token_trend_7d": [],
+            "degraded": True,
+            "reason": "LLM 统计暂不可用",
         }
 
 
