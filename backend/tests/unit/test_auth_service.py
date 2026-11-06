@@ -273,6 +273,7 @@ class TestDbIsTheOnlyIdentityAuthority:
 
         assert exc.value.status_code == 401
 
+
 class TestLoginTimestamp:
     """登录成功写 last_login_at（管理端 24h 活跃用户的真值来源）。"""
 
