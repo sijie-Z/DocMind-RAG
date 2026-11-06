@@ -1,7 +1,7 @@
 <template>
   <div class="p-4 md:p-6">
     <div class="max-w-7xl mx-auto">
-      <div class="mb-6 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+      <div class="mb-6 flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
         <div>
           <h1 class="text-2xl font-semibold tracking-tight text-slate-900 dark:text-slate-100 md:text-[28px]">
             {{ t('menu.reviews') }}
@@ -12,13 +12,28 @@
           </p>
         </div>
         <div class="flex flex-wrap items-center gap-2">
+          <n-input
+            v-model:value="searchInput"
+            :placeholder="t('reviews.searchPlaceholder')"
+            :input-props="{ 'aria-label': t('reviews.searchLabel') }"
+            :maxlength="200"
+            clearable
+            class="reviews-search"
+            data-testid="reviews-search"
+            @update:value="scheduleSearch"
+            @keydown.enter="onSearchEnter"
+          >
+            <template #prefix>
+              <n-icon class="text-slate-400"><SearchOutline /></n-icon>
+            </template>
+          </n-input>
           <n-select
             v-model:value="statusFilter"
             :options="statusOptions"
             :placeholder="t('reviews.allStatuses')"
             :aria-label="t('reviews.statusColumn')"
             clearable
-            class="reviews-filter w-40"
+            class="reviews-filter w-44"
             @update:value="applyFilter"
           />
           <n-select
@@ -123,6 +138,14 @@
                   <dd class="text-slate-700 dark:text-slate-300">{{ row.revised_version_label || '—' }}</dd>
                 </div>
                 <div class="col-span-2 flex justify-between gap-2">
+                  <dt>{{ t('reviews.progressColumn') }}</dt>
+                  <dd class="text-slate-700 dark:text-slate-300">{{ progressText(row) }}</dd>
+                </div>
+                <div class="col-span-2 flex justify-between gap-2">
+                  <dt>{{ t('reviews.diffSummaryLabel') }}</dt>
+                  <dd class="text-slate-700 dark:text-slate-300">{{ diffSummary(row) }}</dd>
+                </div>
+                <div class="col-span-2 flex justify-between gap-2">
                   <dt>{{ t('reviews.createdAt') }}</dt>
                   <dd class="text-slate-700 dark:text-slate-300">{{ formatDateTime(row.created_at) }}</dd>
                 </div>
@@ -145,6 +168,7 @@
               :bordered="false"
               :single-line="false"
               :row-props="rowProps"
+              :scroll-x="1120"
             />
           </div>
 
@@ -169,8 +193,8 @@
 import { computed, h, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
-import { NButton, NPagination, NTag } from 'naive-ui'
-import { DocumentTextOutline } from '@vicons/ionicons5'
+import { NButton, NInput, NPagination, NTag } from 'naive-ui'
+import { DocumentTextOutline, SearchOutline } from '@vicons/ionicons5'
 import { reviewsApi, type ReviewCaseStatus, type ReviewCaseSummary } from '@/api/reviews'
 import { apiUnwrap } from '@/utils/apiUnwrap'
 import { reasonsLabel } from './reviewReasons'
@@ -185,20 +209,28 @@ const total = ref(0)
 const loading = ref(false)
 const loadError = ref(false)
 const statusFilter = ref<ReviewCaseStatus | null>(null)
+const q = ref('')
+const searchInput = ref('')
+const statusCounts = ref<Record<string, number> | null>(null)
+let searchTimer: ReturnType<typeof setTimeout> | null = null
+let loadSeq = 0
 const page = ref(1)
 const pageSize = 20
 const createVisible = ref(false)
 const archivedFilter = ref<'active' | 'archived' | 'all'>('active')
 
 const viewportWidth = ref(typeof window === 'undefined' ? 1280 : window.innerWidth)
-const isCompact = computed(() => viewportWidth.value < 1024)
+// 侧栏 256px 后内容区在 1200 以下放不下 8 列表格：改用卡片，避免关键列被裁切。
+const isCompact = computed(() => viewportWidth.value < 1200)
 const handleResize = () => { viewportWidth.value = window.innerWidth }
 
 const STATUS_VALUES: ReviewCaseStatus[] = ['blocked', 'ready', 'in_review', 'completed']
 const ARCHIVED_VALUES = ['active', 'archived', 'all'] as const
 
-// 归档视图本身有专属空态；只有状态筛选/翻页才显示「筛选无结果」。
-const hasActiveFilters = computed(() => statusFilter.value !== null || page.value > 1)
+// 归档视图本身有专属空态；状态筛选/搜索/翻页都要给「筛选无结果」出口。
+const hasActiveFilters = computed(
+  () => statusFilter.value !== null || q.value !== '' || page.value > 1
+)
 
 const statusLabel = computed<Record<ReviewCaseStatus, string>>(() => ({
   blocked: t('reviews.statusBlocked'),
@@ -218,10 +250,16 @@ const archivedOptions = computed(() => [
   { value: 'all', label: t('reviews.filterAll') }
 ])
 const statusOptions = computed(() =>
-  (Object.keys(statusLabel.value) as ReviewCaseStatus[]).map((value) => ({
-    value,
-    label: statusLabel.value[value]
-  }))
+  (Object.keys(statusLabel.value) as ReviewCaseStatus[]).map((value) => {
+    const count = statusCounts.value?.[value]
+    return {
+      value,
+      label:
+        typeof count === 'number'
+          ? `${statusLabel.value[value]} (${count})`
+          : statusLabel.value[value]
+    }
+  })
 )
 
 const dateFormatter = computed(
@@ -231,6 +269,23 @@ function formatDateTime(value?: string | null) {
   if (!value) return '—'
   const date = new Date(value)
   return Number.isNaN(date.getTime()) ? '—' : dateFormatter.value.format(date)
+}
+
+/** 已决策/总项数；没有核验项时显示 —，不伪装成 0/0 进度。 */
+function progressText(row: ReviewCaseSummary) {
+  if (!row.item_count) return '—'
+  return t('reviews.progressValue', { decided: row.decided_count ?? 0, total: row.item_count })
+}
+
+/** 分析前不报告差异数；分析后差异与未识别分开，未识别不并入差异。 */
+function diffSummary(row: ReviewCaseSummary) {
+  if (!row.item_count) return '—'
+  if (!row.all_analyzed) return t('reviews.notAnalyzed')
+  const parts = [t('reviews.diffCount', { n: row.changed_count ?? 0 })]
+  if (row.unidentified_count) {
+    parts.push(t('reviews.unidentifiedCount', { n: row.unidentified_count }))
+  }
+  return parts.join(' · ')
 }
 
 function readQueryState() {
@@ -243,7 +298,8 @@ function readQueryState() {
     : 'active'
   const parsedPage = Number.parseInt(String(query.page ?? '1'), 10)
   const pageValue = Number.isFinite(parsedPage) && parsedPage > 0 ? parsedPage : 1
-  return { status, archived, page: pageValue }
+  const qValue = typeof query.q === 'string' ? query.q.trim().slice(0, 200) : ''
+  return { status, archived, page: pageValue, q: qValue }
 }
 
 function applyQueryState() {
@@ -251,6 +307,8 @@ function applyQueryState() {
   statusFilter.value = state.status
   archivedFilter.value = state.archived
   page.value = state.page
+  q.value = state.q
+  searchInput.value = state.q
 }
 
 function syncQuery() {
@@ -261,6 +319,8 @@ function syncQuery() {
   else delete query.status
   if (archivedFilter.value !== 'active') query.archived = archivedFilter.value
   else delete query.archived
+  if (q.value) query.q = q.value
+  else delete query.q
   if (page.value > 1) query.page = String(page.value)
   else delete query.page
   // 测试/无路由替代实现下 replace 可能不存在；URL 同步失败不影响取数。
@@ -269,22 +329,32 @@ function syncQuery() {
 }
 
 async function load() {
+  const seq = ++loadSeq
   loading.value = true
   loadError.value = false
   try {
     const response = await reviewsApi.list({
       status: statusFilter.value ?? undefined,
       archived: archivedFilter.value,
+      ...(q.value ? { q: q.value } : {}),
       page: page.value,
       page_size: pageSize
     })
-    const data = apiUnwrap<{ items: ReviewCaseSummary[]; total?: number }>(response)
+    // 防抖搜索/快速切筛选会并发多个请求；只允许最新一次写状态，
+    // 否则先发后到的旧响应会覆盖新结果，URL 与列表不一致。
+    if (seq !== loadSeq) return
+    const data = apiUnwrap<{
+      items: ReviewCaseSummary[]
+      total?: number
+      status_counts?: Record<string, number>
+    }>(response)
     rows.value = data?.items ?? []
     total.value = data?.total ?? rows.value.length
+    statusCounts.value = data?.status_counts ?? null
   } catch {
-    loadError.value = true
+    if (seq === loadSeq) loadError.value = true
   } finally {
-    loading.value = false
+    if (seq === loadSeq) loading.value = false
   }
 }
 
@@ -296,6 +366,7 @@ const columns = computed(() => [
   {
     title: t('reviews.caseColumn'),
     key: 'title',
+    minWidth: 240,
     render: (row: ReviewCaseSummary) =>
       h('div', [
         h(
@@ -316,6 +387,7 @@ const columns = computed(() => [
   {
     title: t('reviews.statusColumn'),
     key: 'status',
+    minWidth: 90,
     render: (row: ReviewCaseSummary) =>
       h('div', { class: 'flex flex-wrap gap-1' }, [
         h(NTag, { type: statusTagType[row.status], size: 'small' }, {
@@ -331,24 +403,41 @@ const columns = computed(() => [
       ])
   },
   {
+    title: t('reviews.progressColumn'),
+    key: 'progress',
+    minWidth: 150,
+    render: (row: ReviewCaseSummary) =>
+      h('div', [
+        h(
+          'div',
+          { class: 'text-sm tabular-nums text-slate-700 dark:text-slate-300' },
+          progressText(row)
+        ),
+        h('div', { class: 'text-xs text-slate-500 dark:text-slate-400' }, diffSummary(row))
+      ])
+  },
+  {
     title: t('reviews.baseVersion'),
     key: 'base_version_label',
+    minWidth: 90,
     render: (row: ReviewCaseSummary) => row.base_version_label || '—'
   },
   {
     title: t('reviews.revisedVersion'),
     key: 'revised_version_label',
+    minWidth: 90,
     render: (row: ReviewCaseSummary) => row.revised_version_label || '—'
   },
   {
     title: t('reviews.blockedReasons'),
     key: 'blocking_reasons',
+    minWidth: 160,
     render: (row: ReviewCaseSummary) =>
       row.blocking_reasons.length
         ? h(
             'span',
             {
-              class: 'text-xs text-red-500 dark:text-red-400',
+              class: 'text-xs text-red-600 dark:text-red-400',
               title: row.blocking_reasons.join(' · ')
             },
             reasonsLabel(t, row.blocking_reasons)
@@ -359,12 +448,14 @@ const columns = computed(() => [
     title: t('reviews.createdAt'),
     key: 'created_at',
     align: 'right',
+    minWidth: 150,
     render: (row: ReviewCaseSummary) =>
       h('span', { class: 'tabular-nums' }, formatDateTime(row.created_at))
   },
   {
     title: '',
     key: 'actions',
+    minWidth: 64,
     render: (row: ReviewCaseSummary) =>
       h(NButton, { text: true, type: 'primary', onClick: () => open(row) }, {
         default: () => t('reviews.open')
@@ -387,9 +478,43 @@ function applyFilter() {
   load()
 }
 
+function commitSearch() {
+  if (searchTimer) {
+    clearTimeout(searchTimer)
+    searchTimer = null
+  }
+  const next = searchInput.value.trim().slice(0, 200)
+  if (searchInput.value !== next) searchInput.value = next
+  if (next === q.value) return
+  q.value = next
+  page.value = 1
+  syncQuery()
+  void load()
+}
+
+function scheduleSearch() {
+  if (searchTimer) clearTimeout(searchTimer)
+  searchTimer = setTimeout(() => {
+    searchTimer = null
+    commitSearch()
+  }, 300)
+}
+
+function runSearchNow() {
+  commitSearch()
+}
+
+function onSearchEnter(event: KeyboardEvent) {
+  // IME 组合中的 Enter 用于确认候选词（keyCode 229），不提交搜索。
+  if (event.isComposing || event.keyCode === 229) return
+  runSearchNow()
+}
+
 function clearFilters() {
   statusFilter.value = null
   archivedFilter.value = 'active'
+  q.value = ''
+  searchInput.value = ''
   page.value = 1
   syncQuery()
   load()
@@ -412,13 +537,22 @@ watch(
     if (
       state.status === statusFilter.value &&
       state.archived === archivedFilter.value &&
-      state.page === page.value
+      state.page === page.value &&
+      state.q === q.value
     ) {
       return
+    }
+    // 导航（前进/后退）以 URL 为准：丢弃尚未提交的输入，避免防抖计时器
+    // 在导航后把旧输入再提交一次。
+    if (searchTimer) {
+      clearTimeout(searchTimer)
+      searchTimer = null
     }
     statusFilter.value = state.status
     archivedFilter.value = state.archived
     page.value = state.page
+    q.value = state.q
+    searchInput.value = state.q
     void load()
   },
   { deep: true }
@@ -434,11 +568,40 @@ onMounted(() => {
 
 onUnmounted(() => {
   window.removeEventListener('resize', handleResize)
+  if (searchTimer) {
+    clearTimeout(searchTimer)
+    searchTimer = null
+  }
 })
 </script>
 
 <style scoped>
-@media (max-width: 1023.98px) {
+.reviews-search {
+  width: 15rem;
+  flex: none;
+}
+/* 非聚焦态边界需可辨识（WCAG 1.4.11 非文本对比 3:1）；仅本页搜索框加深。 */
+.reviews-search :deep(.n-input__border) {
+  border-color: #64748b;
+}
+.reviews-search :deep(.n-input__input-el) {
+  font-size: 14px;
+}
+@media (max-width: 1199.98px) {
+  .reviews-search {
+    width: 100%;
+  }
+  /* NInput 根节点自身就是 .n-input，--n-height 必须落在根上。 */
+  .reviews-search.n-input {
+    --n-height: 44px !important;
+  }
+  /* iOS 对 <16px 输入框聚焦会自动放大页面。 */
+  .reviews-search :deep(.n-input__input-el) {
+    font-size: 16px;
+  }
+  [data-testid="reviews-clear-filters"].n-button {
+    height: 44px !important;
+  }
   .review-card-open.n-button {
     height: 44px !important;
     min-width: 72px;

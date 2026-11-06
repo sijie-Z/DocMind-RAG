@@ -80,12 +80,17 @@ async def list_review_cases(
     archived: Literal["active", "archived", "all"] = Query(
         "active", description="归档过滤：默认只看活跃案件"
     ),
+    q: str | None = Query(None, max_length=200, description="标题包含匹配或案件 ID 前缀搜索"),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """列出本组织的核验案件（按创建时间倒序；默认不含已归档）。"""
+    """列出本组织的核验案件（按创建时间倒序；默认不含已归档）。
+
+    返回当前页的核验进度/差异计数，以及不含 status 自身筛选的状态计数，
+    供列表页做服务端搜索与筛选器计数。
+    """
     try:
         org_id = await require_organization(current_user, db)
         data = await case_service.list_cases(
@@ -93,6 +98,7 @@ async def list_review_cases(
             organization_id=org_id,
             status=status,
             archived=archived,
+            q=q,
             page=page,
             page_size=page_size,
         )

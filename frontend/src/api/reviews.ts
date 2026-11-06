@@ -160,6 +160,13 @@ export interface ReviewCaseSummary {
   base_version_label?: string | null
   revised_version_label?: string | null
   blocking_reasons: string[]
+  item_count?: number
+  decided_count?: number
+  changed_count?: number
+  unidentified_count?: number
+  needs_human_count?: number
+  analysis_pending_count?: number
+  all_analyzed?: boolean
   created_by: number
   assignee_id?: number | null
   created_at?: string | null
@@ -197,6 +204,7 @@ export const reviewsApi = {
   list(params?: {
     status?: string
     archived?: 'active' | 'archived' | 'all'
+    q?: string
     page?: number
     page_size?: number
   }) {

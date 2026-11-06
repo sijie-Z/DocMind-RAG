@@ -21,7 +21,7 @@ import uuid
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import func, select
+from sqlalchemy import case, func, or_, select
 from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -617,12 +617,65 @@ async def archive_case(session: AsyncSession, case: ReviewCase, *, user_id: int)
     return fresh
 
 
+_DECIDED_STATUSES = ("verified", "needs_human", "not_applicable")
+# 与详情页「有变更」筛选同口径：仅条号变化（renumbered）也是差异。
+_CHANGED_TYPES = ("modified", "added", "removed", "renumbered")
+
+
+def _escape_like(value: str) -> str:
+    """转义 LIKE 元字符，关键词里的 % / _ 只按字面匹配。"""
+    return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
+async def _item_stats_for_cases(
+    session: AsyncSession, case_ids: list[str]
+) -> dict[str, dict[str, Any]]:
+    """一次分组查询取回当前页各案件的核验项进度与差异计数。"""
+    if not case_ids:
+        return {}
+    rows = (
+        await session.execute(
+            select(
+                ReviewItem.case_id,
+                func.count(ReviewItem.id),
+                func.sum(case((ReviewItem.status.in_(_DECIDED_STATUSES), 1), else_=0)),
+                func.sum(case((ReviewItem.change_type.in_(_CHANGED_TYPES), 1), else_=0)),
+                func.sum(case((ReviewItem.change_type == "unidentified", 1), else_=0)),
+                func.sum(case((ReviewItem.status == "needs_human", 1), else_=0)),
+                func.sum(case((ReviewItem.change_type.is_(None), 1), else_=0)),
+            )
+            .where(ReviewItem.case_id.in_(case_ids))
+            .group_by(ReviewItem.case_id)
+        )
+    ).all()
+    stats: dict[str, dict[str, Any]] = {}
+    for (
+        case_id,
+        item_count,
+        decided_count,
+        changed_count,
+        unidentified_count,
+        needs_human_count,
+        analysis_pending_count,
+    ) in rows:
+        stats[str(case_id)] = {
+            "item_count": int(item_count or 0),
+            "decided_count": int(decided_count or 0),
+            "changed_count": int(changed_count or 0),
+            "unidentified_count": int(unidentified_count or 0),
+            "needs_human_count": int(needs_human_count or 0),
+            "analysis_pending_count": int(analysis_pending_count or 0),
+        }
+    return stats
+
+
 async def list_cases(
     session: AsyncSession,
     *,
     organization_id: int,
     status: str | None = None,
     archived: str = "active",
+    q: str | None = None,
     page: int = 1,
     page_size: int = 20,
 ) -> dict[str, Any]:
@@ -630,13 +683,39 @@ async def list_cases(
         raise ValidationError(f"未知案件状态: {status!r}", field="status")
     if archived not in ("active", "archived", "all"):
         raise ValidationError(f"未知归档过滤: {archived!r}", field="archived")
-    conditions = [ReviewCase.organization_id == organization_id]
+    query_text = (q or "").strip()
+    if len(query_text) > 200:
+        raise ValidationError("搜索关键词不能超过 200 个字符", field="q")
+
+    # 状态计数按「组织 + 归档 + 关键词」统计（不含状态本身），
+    # 这样下拉里的数字始终表示其它筛选下的可选案件数。
+    base_conditions = [ReviewCase.organization_id == organization_id]
+    if archived == "active":
+        base_conditions.append(ReviewCase.archived_at.is_(None))
+    elif archived == "archived":
+        base_conditions.append(ReviewCase.archived_at.is_not(None))
+    if query_text:
+        pattern = _escape_like(query_text)
+        base_conditions.append(
+            or_(
+                ReviewCase.title.like(f"%{pattern}%", escape="\\"),
+                ReviewCase.id.like(f"{pattern}%", escape="\\"),
+            )
+        )
+    status_counts = {value: 0 for value in REVIEW_CASE_STATUSES}
+    for row_status, row_count in (
+        await session.execute(
+            select(ReviewCase.status, func.count(ReviewCase.id))
+            .where(*base_conditions)
+            .group_by(ReviewCase.status)
+        )
+    ).all():
+        if row_status in status_counts:
+            status_counts[row_status] = int(row_count or 0)
+
+    conditions = list(base_conditions)
     if status is not None:
         conditions.append(ReviewCase.status == status)
-    if archived == "active":
-        conditions.append(ReviewCase.archived_at.is_(None))
-    elif archived == "archived":
-        conditions.append(ReviewCase.archived_at.is_not(None))
     total = int(
         (await session.execute(select(func.count(ReviewCase.id)).where(*conditions))).scalar() or 0
     )
@@ -653,16 +732,21 @@ async def list_cases(
         .scalars()
         .all()
     )
+    item_stats = await _item_stats_for_cases(session, [row.id for row in rows])
     return {
-        "items": [_case_summary(row) for row in rows],
+        "items": [_case_summary(row, item_stats.get(row.id)) for row in rows],
+        "status_counts": status_counts,
         "total": total,
         "page": page,
         "page_size": page_size,
     }
 
 
-def _case_summary(case: ReviewCase) -> dict[str, Any]:
+def _case_summary(case: ReviewCase, item_stats: dict[str, Any] | None = None) -> dict[str, Any]:
     snapshot = case.readiness_snapshot or {}
+    stats = item_stats or {}
+    item_count = int(stats.get("item_count", 0))
+    analysis_pending_count = int(stats.get("analysis_pending_count", 0))
     return {
         "id": case.id,
         "title": case.title,
@@ -674,6 +758,13 @@ def _case_summary(case: ReviewCase) -> dict[str, Any]:
         "base_version_label": (snapshot.get("base") or {}).get("version_label"),
         "revised_version_label": (snapshot.get("revised") or {}).get("version_label"),
         "blocking_reasons": case.blocking_reasons or [],
+        "item_count": item_count,
+        "decided_count": int(stats.get("decided_count", 0)),
+        "changed_count": int(stats.get("changed_count", 0)),
+        "unidentified_count": int(stats.get("unidentified_count", 0)),
+        "needs_human_count": int(stats.get("needs_human_count", 0)),
+        "analysis_pending_count": analysis_pending_count,
+        "all_analyzed": item_count > 0 and analysis_pending_count == 0,
         "created_by": case.created_by,
         "assignee_id": case.assignee_id,
         "created_at": _iso(case.created_at),

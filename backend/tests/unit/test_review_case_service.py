@@ -22,7 +22,7 @@ from app.core.database import Base
 from app.exceptions import ConflictError, NotFoundError, ValidationError
 from app.models.document import Document, DocumentChunk, DocumentStatus, DocumentType
 from app.models.organization import user_organization
-from app.models.review import ReviewEvidence, ReviewItem
+from app.models.review import ReviewCase, ReviewEvidence, ReviewItem
 from app.models.user import User
 from app.rag.source_provenance import SourceProvenanceUnavailableError
 from app.services import review_case_service as svc
@@ -653,6 +653,134 @@ async def test_list_cases_filters_by_org_status_and_pages(factory):
 
         with pytest.raises(ValidationError):
             await svc.list_cases(db, organization_id=ORG, status="unknown")
+
+
+@pytest.mark.asyncio
+async def test_list_cases_search_and_progress_aggregates(factory):
+    """服务端搜索需转义 LIKE 元字符，并返回当前页进度与状态计数。"""
+    await _seed_ready_case(factory)
+    case_a = await _create_case(factory)
+
+    async with factory() as db:
+        items = (
+            (
+                await db.execute(
+                    select(ReviewItem)
+                    .where(ReviewItem.case_id == case_a.id)
+                    .order_by(ReviewItem.ordinal)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert len(items) == 4
+        values = [
+            {"status": "verified", "change_type": "modified"},
+            {"status": "verified", "change_type": "modified"},
+            {"status": "needs_human", "change_type": "renumbered"},
+            {"status": "pending", "change_type": "unidentified"},
+        ]
+        for item, value in zip(items, values, strict=True):
+            await db.execute(update(ReviewItem).where(ReviewItem.id == item.id).values(**value))
+        db.add(
+            ReviewCase(
+                id="case-percent-001",
+                organization_id=ORG,
+                title="100% 合同_特价",
+                policy_document_id=POLICY,
+                base_document_id=BASE,
+                revised_document_id=REVISED,
+                checklist_version="v1",
+                status="ready",
+                blocking_reasons=[],
+                readiness_snapshot={},
+                created_by=USER_ID,
+            )
+        )
+        # 另一个状态（blocked）的案件：用于验证 status_counts 不受 status 自身过滤影响。
+        db.add(
+            ReviewCase(
+                id="case-blocked-001",
+                organization_id=ORG,
+                title="旧模板案件（阻断）",
+                policy_document_id=POLICY,
+                base_document_id=BASE,
+                revised_document_id=REVISED,
+                checklist_version="v1",
+                status="blocked",
+                blocking_reasons=["base:not_indexed"],
+                readiness_snapshot={},
+                created_by=USER_ID,
+            )
+        )
+        # 未分析案件：有核验项但 change_type 全为 NULL。
+        for ordinal, key in enumerate(("payment_term", "start_condition"), start=1):
+            db.add(
+                ReviewItem(
+                    id=f"item-unanalyzed-{ordinal}",
+                    case_id="case-percent-001",
+                    item_key=key,
+                    ordinal=ordinal,
+                    change_type=None,
+                    status="pending",
+                )
+            )
+        await db.commit()
+
+    async with factory() as db:
+        page = await svc.list_cases(db, organization_id=ORG)
+        assert page["total"] == 3
+        row_a = next(row for row in page["items"] if row["id"] == case_a.id)
+        assert row_a["item_count"] == 4
+        assert row_a["decided_count"] == 3
+        assert row_a["changed_count"] == 3
+        assert row_a["unidentified_count"] == 1
+        assert row_a["needs_human_count"] == 1
+        assert row_a["analysis_pending_count"] == 0
+        assert row_a["all_analyzed"] is True
+        row_b = next(row for row in page["items"] if row["id"] == "case-percent-001")
+        assert row_b["item_count"] == 2
+        assert row_b["analysis_pending_count"] == 2
+        assert row_b["all_analyzed"] is False
+        assert page["status_counts"] == {
+            "blocked": 1,
+            "ready": 2,
+            "in_review": 0,
+            "completed": 0,
+        }
+
+        only_a = await svc.list_cases(db, organization_id=ORG, q="采购")
+        assert [row["id"] for row in only_a["items"]] == [case_a.id]
+        assert only_a["status_counts"]["ready"] == 1
+        assert only_a["status_counts"]["blocked"] == 0
+
+        # % 必须按字面匹配：测试数据里只有 B 标题含字面 %。
+        # 未转义时 LIKE '%%%' 会命中全部案件。
+        percent = await svc.list_cases(db, organization_id=ORG, q="%")
+        assert [row["id"] for row in percent["items"]] == ["case-percent-001"]
+
+        percent_prefix = await svc.list_cases(db, organization_id=ORG, q="100%")
+        assert [row["id"] for row in percent_prefix["items"]] == ["case-percent-001"]
+
+        # _ 必须按字面匹配；未转义时 '合同_V1' 会命中「合同 V1→V2」。
+        literal = await svc.list_cases(db, organization_id=ORG, q="合同_V1")
+        assert literal["total"] == 0
+
+        by_id = await svc.list_cases(db, organization_id=ORG, q="case-perc")
+        assert [row["id"] for row in by_id["items"]] == ["case-percent-001"]
+
+        # 状态筛选不改变其它状态的可选计数（faceted counts）。
+        filtered = await svc.list_cases(db, organization_id=ORG, status="ready")
+        assert filtered["status_counts"] == {
+            "blocked": 1,
+            "ready": 2,
+            "in_review": 0,
+            "completed": 0,
+        }
+        assert filtered["total"] == 2
+
+        with pytest.raises(ValidationError):
+            await svc.list_cases(db, organization_id=ORG, q="x" * 201)
 
 
 @pytest.mark.asyncio
