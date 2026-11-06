@@ -637,7 +637,7 @@ export default {
     inputOutput: '入力 + 出力',
     deepseekRate: 'DeepSeek 料金',
     p50Latency: 'p50 応答時間',
-    ragSubtitle24h: '過去24時間の文書検索効果（3時間バケット）',
+    ragSubtitle24h: '過去24時間のドキュメント検索効果（3時間バケット）',
     auditSubtitle: '機密操作は赤色で表示されます',
     errorHint: 'サービスの状態またはネットワークを確認して再試行してください。',
 
