@@ -5,8 +5,8 @@ SQLite；仅替身 Redis token 黑名单、MinIO 预签名、Elasticsearch 检�
 （与 ``security_audit_document_read_20261027`` 同口径）。
 
 核心断言：有效权限不含 ``document:read`` 的同组织 JWT / API Key 对
-details、content、download-url、download 四个端点必须 403，且拒绝路径
-MinIO 签名调用为 0；有权限、默认种子、匿名、跨组织、scope 不足、超管
+details、content、chunk、download-url、download 五个端点必须 403，且拒绝
+路径 MinIO 签名调用为 0；有权限、默认种子、匿名、跨组织、scope 不足、超管
 旁路均保留既有语义。角色种子刻意最小化（授权用户只拿 document:read），
 避免「全权限角色」把缺失依赖再次掩盖。
 """
@@ -190,12 +190,22 @@ async def env(monkeypatch):
             [
                 _document(DOC_ID, ORG_ID, DENIED_USER_ID),
                 _document(OTHER_ORG_DOC_ID, OTHER_ORG_ID, OTHER_ORG_USER_ID),
+                _document("doc-rbac-sibling", ORG_ID, DENIED_USER_ID),
                 DocumentChunk(
                     id="chunk-rbac-1",
                     document_id=DOC_ID,
                     chunk_index=0,
                     chunk_text=CONTENT_TEXT,
                     chunk_length=len(CONTENT_TEXT),
+                    page_number=3,
+                    section_title="付款条款",
+                ),
+                DocumentChunk(
+                    id="chunk-sibling",
+                    document_id="doc-rbac-sibling",
+                    chunk_index=0,
+                    chunk_text="sibling body",
+                    chunk_length=len("sibling body"),
                 ),
             ]
         )
@@ -371,7 +381,7 @@ async def test_cross_org_still_denied_after_rbac_allows(env):
 # ── 正向对照：有权限 / 默认种子 / 超管 ─────────────────────────────────────
 
 
-async def _assert_all_four_readable(env, headers: dict[str, str]) -> None:
+async def _assert_all_five_readable(env, headers: dict[str, str]) -> None:
     detail = await env.client.get(DOC_PATH, headers=headers)
     assert detail.status_code == 200, detail.text
     assert detail.json()["data"]["id"] == DOC_ID
@@ -384,6 +394,16 @@ async def _assert_all_four_readable(env, headers: dict[str, str]) -> None:
     assert chunk.status_code == 200, chunk.text
     assert chunk.json()["data"]["chunk_id"] == "chunk-rbac-1"
     assert chunk.json()["data"]["text"] == CONTENT_TEXT
+    assert chunk.json()["data"]["page_number"] == 3
+    assert chunk.json()["data"]["section_title"] == "付款条款"
+
+    # 同一组织、另一文档的 chunk id 不得通过本文档路径读出。
+    cross_doc = await env.client.get(f"{DOC_PATH}/chunk?chunk_id=chunk-sibling", headers=headers)
+    assert cross_doc.status_code == 404, cross_doc.text
+
+    # 缺少 chunk_id 是客户端错误，不是「找不到」。
+    missing_param = await env.client.get(f"{DOC_PATH}/chunk", headers=headers)
+    assert missing_param.status_code == 422, missing_param.text
 
     url_response = await env.client.get(f"{DOC_PATH}/download-url", headers=headers)
     assert url_response.status_code == 200, url_response.text
@@ -402,19 +422,19 @@ async def _assert_all_four_readable(env, headers: dict[str, str]) -> None:
 
 @pytest.mark.asyncio
 async def test_jwt_role_with_document_read_can_read_all_four(env):
-    await _assert_all_four_readable(env, _auth(_jwt(ALLOWED_USER_ID)))
+    await _assert_all_five_readable(env, _auth(_jwt(ALLOWED_USER_ID)))
 
 
 @pytest.mark.asyncio
 async def test_default_seed_user_can_read_all_four(default_env):
     """原生种子（系统 User 含 document:read）下行为中性：仍全部可读。"""
-    await _assert_all_four_readable(default_env, _auth(_jwt(DEFAULT_USER_ID)))
+    await _assert_all_five_readable(default_env, _auth(_jwt(DEFAULT_USER_ID)))
 
 
 @pytest.mark.asyncio
 async def test_knowledge_read_api_key_with_document_role_can_read(env):
     raw = await _make_key(env, ALLOWED_USER_ID, ["knowledge:read"])
-    await _assert_all_four_readable(env, _auth(raw))
+    await _assert_all_five_readable(env, _auth(raw))
 
 
 @pytest.mark.asyncio

@@ -449,11 +449,15 @@ describe('W2-T7 · chat 页来源卡 → 原文预览接通', () => {
     mockedGetDocumentContent.mockResolvedValue({
       data: { success: true, data: { content: '新文档正文', text_provenance: 'parser_original' } },
     } as never)
-    mockedGetDocumentChunk
-      .mockImplementationOnce(() => slowChunk as never)
-      .mockResolvedValueOnce({
-        data: { success: true, data: { text: '新片段', text_provenance: 'parser_original' } },
-      } as never)
+    mockedGetDocumentChunk.mockImplementation((((
+      _docId: string,
+      chunkId: string
+    ) =>
+      chunkId === 'old-chunk'
+        ? slowChunk
+        : Promise.resolve({
+            data: { success: true, data: { text: '新片段', text_provenance: 'parser_original' } },
+          })) as never))
 
     const wrapper = await mountChat()
     const messages = wrapper.findComponent(MsgStub)

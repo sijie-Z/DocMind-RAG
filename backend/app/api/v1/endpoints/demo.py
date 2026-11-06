@@ -308,7 +308,11 @@ async def seed_demo_data(
                     },
                 }
                 try:
-                    await ElasticsearchTools.index_document(doc_id=f"{doc_id}_{i}", document=es_doc)
+                    # 与 worker 同口径：ES _id = {doc_id}_{chunk_id}（DB UUID），
+                    # 检索来源的 chunkId 才能被 /chunk 端点直接解析。
+                    await ElasticsearchTools.index_document(
+                        doc_id=f"{doc_id}_{chunk.id}", document=es_doc
+                    )
                 except Exception as e:
                     index_failures += 1
                     logger.warning(f"ES index failed for chunk {i}: {e}")

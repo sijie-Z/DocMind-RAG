@@ -106,4 +106,13 @@ describe('DocumentPreviewModal 引用分块定位', () => {
 
     expect(wrapper.find('[data-testid="chat-preview-focus"]').text()).toBe('命中')
   })
+
+  it('内容按纯文本渲染，不执行 HTML（锁定不得改用 v-html）', async () => {
+    const payload = '<img src=x onerror="window.__xss=1">命中片段'
+    const wrapper = await mountModal({ content: `前置 ${payload} 后置`, focusText: payload })
+
+    expect(wrapper.find('img').exists()).toBe(false)
+    expect(wrapper.text()).toContain(payload)
+    expect(wrapper.find('[data-testid="chat-preview-focus"]').text()).toBe(payload)
+  })
 })

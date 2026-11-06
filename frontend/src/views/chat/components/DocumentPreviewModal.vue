@@ -3,9 +3,10 @@
     v-model:show="show"
     preset="card"
     :title="doc?.filename || t('chat.documentPreview')"
-    class="max-w-4xl w-[90vw]"
+    class="docmind-preview-modal max-w-4xl w-[90vw]"
     style="height: 80vh"
     :segmented="{ content: true, footer: true }"
+    :aria-label="doc?.filename || t('chat.documentPreview')"
   >
     <div class="h-full flex flex-col overflow-hidden">
       <div class="bg-gray-50 dark:bg-gray-900/50 p-4 rounded-xl mb-4 border border-gray-100 dark:border-gray-800 flex flex-col gap-3">
@@ -145,6 +146,12 @@ const show = computed({
   set: (val) => emit('update:show', val)
 })
 
+/**
+ * Naive card 的内容区默认 `min-height: auto`，在固定 80vh 高度下会被正文撑开，
+ * 把页脚挤出卡片、并让滚动落到外层弹窗（滚走标题/关闭按钮）。把内容区限制为
+ * 唯一滚动容器，定位高亮时只滚正文。
+ */
+
 const contentEl = ref<HTMLElement | null>(null)
 
 interface ContentSegment {
@@ -171,10 +178,32 @@ watch(
   async () => {
     if (!props.show) return
     await nextTick()
+    const reduceMotion =
+      typeof window !== 'undefined' &&
+      typeof window.matchMedia === 'function' &&
+      window.matchMedia('(prefers-reduced-motion: reduce)').matches
     contentEl.value
       ?.querySelector<HTMLElement>('[data-testid="chat-preview-focus"]')
-      ?.scrollIntoView({ block: 'center', behavior: 'smooth' })
+      ?.scrollIntoView({ block: 'start', behavior: reduceMotion ? 'auto' : 'smooth' })
   },
   { flush: 'post' }
 )
 </script>
+
+<style>
+/* 弹窗内容区是 Naive 内部节点（teleport 后 scoped 选择器匹配不到），
+   用弹窗根类做约束：内容区必须是唯一滚动容器，页脚始终留在卡片内。 */
+.docmind-preview-modal .n-card-content {
+  min-height: 0;
+  overflow: hidden;
+}
+@media (max-width: 767.98px) {
+  .docmind-preview-modal .n-card-header__close {
+    width: 44px;
+    height: 44px;
+  }
+  .docmind-preview-modal .n-card__footer .n-button {
+    min-height: 44px;
+  }
+}
+</style>

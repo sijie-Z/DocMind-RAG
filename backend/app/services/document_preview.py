@@ -95,28 +95,45 @@ async def load_document_chunk(
 
     必须同时按 ``document_id`` 过滤：只按 chunk id 查会让跨文档/跨租户的
     chunk id 泄露原文（调用方已做文档归属校验，这里再收紧一层）。
+
+    兼容历史 demo/seed 数据：它们的 ES ``_id`` 是 ``{document_id}_{chunk_index}``
+    （序号而非 DB UUID）。当 id 查不到且剩余部分是纯数字时，按
+    ``document_id + chunk_index`` 再查一次；document_id 已锁定，不引入跨文档面。
     """
     normalized = normalize_chunk_id(document_id, chunk_id)
     if not normalized:
         return None
+    columns = (
+        DocumentChunk.id,
+        DocumentChunk.chunk_index,
+        DocumentChunk.original_text,
+        DocumentChunk.chunk_text,
+        DocumentChunk.meta_data,
+        DocumentChunk.page_number,
+        DocumentChunk.start_pos,
+        DocumentChunk.end_pos,
+        DocumentChunk.section_title,
+    )
     row = (
         await db.execute(
-            select(
-                DocumentChunk.id,
-                DocumentChunk.chunk_index,
-                DocumentChunk.original_text,
-                DocumentChunk.chunk_text,
-                DocumentChunk.meta_data,
-                DocumentChunk.page_number,
-                DocumentChunk.start_pos,
-                DocumentChunk.end_pos,
-                DocumentChunk.section_title,
-            ).where(
+            select(*columns).where(
                 DocumentChunk.document_id == document_id,
                 DocumentChunk.id == normalized,
             )
         )
     ).first()
+    if row is None and normalized.isdigit():
+        row = (
+            await db.execute(
+                select(*columns)
+                .where(
+                    DocumentChunk.document_id == document_id,
+                    DocumentChunk.chunk_index == int(normalized),
+                )
+                .order_by(DocumentChunk.id.asc())
+                .limit(1)
+            )
+        ).first()
     if row is None:
         return None
     (

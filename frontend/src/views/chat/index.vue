@@ -672,6 +672,8 @@ let downloadRequestSeq = 0
 // 来源卡可被连续点击：慢的旧请求不得覆盖新来源的标题/正文（证据必须对应
 // 用户最后点击的来源，而不是最后返回的请求）。
 let previewRequestSeq = 0
+// 打开预览的来源卡：关闭弹窗后把焦点还回去（键盘用户不丢失位置）。
+let previewTrigger: HTMLElement | null = null
 
 const resetDownloadState = () => {
   downloadRequestSeq += 1
@@ -684,6 +686,8 @@ watch(showPreviewModal, (open) => {
   if (!open) {
     resetDownloadState()
     previewRequestSeq += 1
+    if (previewTrigger?.isConnected) previewTrigger.focus()
+    previewTrigger = null
   }
 })
 
@@ -744,6 +748,10 @@ const handleOpenSource = async (source: KnowledgeSource) => {
   const chunkId = typeof source?.chunkId === 'string' ? source.chunkId : ''
   const requestSeq = ++previewRequestSeq
   const ownsRequest = () => requestSeq === previewRequestSeq
+  previewTrigger =
+    typeof document !== 'undefined' && document.activeElement instanceof HTMLElement
+      ? document.activeElement
+      : null
   resetDownloadState()
   showPreviewModal.value = true
   previewLoading.value = true
@@ -753,20 +761,15 @@ const handleOpenSource = async (source: KnowledgeSource) => {
   previewProvenance.value = undefined
   previewTruncated.value = false
   // chunk 定位是增强能力：失败（404/旧消息无 chunk/文档在 ES-only）只降级为
-  // 普通全文预览，不能让整个预览打不开。
-  const chunkRequest = chunkId
-    ? getDocumentChunk(id, chunkId, { silent: true }).catch(() => null)
-    : Promise.resolve(null)
+  // 普通全文预览，不能让整个预览打不开；且它排在正文之后，慢请求不阻塞阅读。
   try {
-    const [docRes, contentRes, chunkRes] = await Promise.all([
+    const [docRes, contentRes] = await Promise.all([
       getDocumentDetail(id),
       getDocumentContent(id),
-      chunkRequest,
     ])
     if (!ownsRequest()) return
     const doc = (docRes?.data as { data?: DocumentDetail } | undefined)?.data
     const contentData = (contentRes?.data as { data?: DocumentContent } | undefined)?.data
-    const chunkData = (chunkRes?.data as { data?: DocumentChunkPreview } | undefined)?.data
     previewDoc.value = {
       id,
       title: doc?.title,
@@ -781,11 +784,18 @@ const handleOpenSource = async (source: KnowledgeSource) => {
       suggested_tags: contentData?.suggested_tags,
     }
     previewContent.value = contentData?.content || ''
-    // 分块原文用于在全文里高亮定位；若正文是 legacy/mixed，弹窗会照常
-    // 显示原文缺失警告，不会把生成摘要伪装成原文。
-    previewFocusText.value = chunkData?.text || ''
     previewProvenance.value = contentData?.text_provenance
     previewTruncated.value = contentData?.truncated === true
+    // 正文已就绪：先让弹窗结束 loading，再单独取分块做高亮定位。
+    if (ownsRequest()) previewLoading.value = false
+    if (chunkId) {
+      const chunkRes = await getDocumentChunk(id, chunkId, { silent: true }).catch(() => null)
+      if (!ownsRequest()) return
+      const chunkData = (chunkRes?.data as { data?: DocumentChunkPreview } | undefined)?.data
+      // 分块原文用于在全文里高亮定位；若正文是 legacy/mixed，弹窗会照常
+      // 显示原文缺失警告，不会把生成摘要伪装成原文。
+      previewFocusText.value = chunkData?.text || ''
+    }
   } catch {
     if (ownsRequest()) message.error(t('chat.sourcePreviewFailed'))
   } finally {

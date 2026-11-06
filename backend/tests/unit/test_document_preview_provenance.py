@@ -416,3 +416,23 @@ def test_normalize_chunk_id_only_strips_matching_document_prefix():
     # 非本文档前缀不得去：否则会跨文档猜测 chunk 身份。
     assert normalize_chunk_id("doc-1", "doc-2_abc") == "doc-2_abc"
     assert normalize_chunk_id("doc-1", "  abc  ") == "abc"
+
+
+@pytest.mark.asyncio
+async def test_load_document_chunk_falls_back_to_chunk_index_for_legacy_demo_ids(session_factory):
+    """旧 demo/seed 的 ES _id 是 {doc_id}_{chunk_index}（序号非 UUID），需安全回退。"""
+    await _seed_chunks(
+        session_factory,
+        "doc-demo",
+        [(0, "块零", None), (1, "块一", None)],
+    )
+    async with session_factory() as session:
+        got = await load_document_chunk(session, "doc-demo", "doc-demo_1")
+        assert got is not None
+        assert got.chunk_index == 1
+        assert got.text == "块一"
+
+        # 纯数字但超出该文档的 chunk 范围：不得跨文档/猜测。
+        assert await load_document_chunk(session, "doc-demo", "99") is None
+        # 非本文档前缀的复合 id 不剥离，也不会按序号解析。
+        assert await load_document_chunk(session, "doc-demo", "other-doc_1") is None
