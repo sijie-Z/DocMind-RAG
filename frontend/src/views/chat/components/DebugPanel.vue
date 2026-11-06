@@ -46,13 +46,15 @@ import DebugStage from './DebugStage.vue'
 
 const props = defineProps<{
   debugData: RetrievalDebugData | null
+  /** 默认展开；搜索自测台传入 false，避免挤压结果区。 */
+  defaultExpanded?: boolean
 }>()
 
 defineEmits<{
   close: []
 }>()
 
-const expanded = ref(true)
+const expanded = ref(props.defaultExpanded !== false)
 
 // stages 条目（子查询 → stage），空对象时按无子查询渲染
 const stageEntries = computed(() => Object.entries(props.debugData?.stages ?? {}))

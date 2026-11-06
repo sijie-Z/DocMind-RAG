@@ -31,6 +31,8 @@
           class="min-w-0 flex-1 border-none bg-transparent px-1 text-base text-slate-800 outline-none placeholder:text-slate-500 dark:text-slate-100 dark:placeholder:text-slate-400"
           @keyup.enter="handleSearch"
           @input="handleInputChange"
+          @blur="hideSuggestions"
+          @keydown.esc="suggestions = []"
         />
         <button
           class="search-submit inline-flex min-h-11 items-center gap-2 rounded-lg bg-blue-600 px-5 text-sm font-semibold text-white transition-colors hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
@@ -49,8 +51,13 @@
           <div
             v-for="suggestion in suggestions"
             :key="suggestion"
-            class="flex cursor-pointer items-center gap-3 px-4 py-2.5 text-sm text-slate-600 transition-colors hover:bg-slate-50 dark:text-slate-300 dark:hover:bg-slate-800"
+            role="button"
+            tabindex="0"
+            class="suggestion-item flex cursor-pointer items-center gap-3 px-4 py-2.5 text-sm text-slate-600 transition-colors hover:bg-slate-50 dark:text-slate-300 dark:hover:bg-slate-800"
+            @mousedown.prevent
             @click="selectSuggestion(suggestion)"
+            @keydown.enter.prevent="selectSuggestion(suggestion)"
+            @keydown.space.prevent="selectSuggestion(suggestion)"
           >
             <n-icon class="text-slate-400"><time-outline /></n-icon>
             <span>{{ suggestion }}</span>
@@ -63,7 +70,7 @@
     <div class="search-layout flex flex-1 flex-col gap-5 overflow-hidden lg:flex-row">
       <!-- 左侧筛选栏 -->
       <aside class="search-filter w-full flex flex-col gap-4 overflow-y-auto pr-1 custom-scrollbar lg:w-72">
-        <div class="space-y-5 rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-700 dark:bg-slate-900">
+        <div class="space-y-5 rounded-lg border border-slate-200 bg-white p-4 dark:border-slate-700 dark:bg-slate-900">
           <!-- 搜索模式 -->
           <div class="space-y-2">
             <h3 class="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">{{ t('search.type') }}</h3>
@@ -139,15 +146,20 @@
           <span v-if="lastResponse?.search_time != null">· {{ lastResponse.search_time }}s</span>
         </div>
 
-        <div class="flex-1 space-y-4 overflow-y-auto pr-2 custom-scrollbar">
+        <div class="search-results-scroll flex-1 space-y-4 overflow-y-auto pr-2 custom-scrollbar">
           <!-- 结果列表 -->
           <div v-if="searchResults.length > 0" class="space-y-3">
             <div
               v-for="(result, index) in sortedResults"
               :key="result.chunk_id || `${result.id}-${index}`"
-              class="group cursor-pointer rounded-xl border border-slate-200 bg-white p-4 transition-colors hover:border-blue-300 dark:border-slate-700 dark:bg-slate-900 dark:hover:border-blue-500/50"
+              role="button"
+              tabindex="0"
+              :aria-label="filenameOf(result)"
+              class="group cursor-pointer rounded-lg border border-slate-200 bg-white p-4 transition-colors hover:border-blue-300 dark:border-slate-700 dark:bg-slate-900 dark:hover:border-blue-500/50"
               :data-testid="`search-result-${index}`"
               @click="showResultDetail(result)"
+              @keydown.enter.prevent="showResultDetail(result)"
+              @keydown.space.prevent="showResultDetail(result)"
             >
               <div class="mb-2 flex items-start justify-between gap-3">
                 <div class="flex min-w-0 items-start gap-3">
@@ -158,6 +170,7 @@
                   </div>
                   <span
                     class="mt-0.5 inline-flex h-6 min-w-6 items-center justify-center rounded-md bg-slate-100 px-1 text-xs font-semibold tabular-nums text-slate-600 dark:bg-slate-800 dark:text-slate-300"
+                    :title="t('search.rankLabel')"
                   >#{{ result.rank ?? index + 1 }}</span>
                   <div class="min-w-0">
                     <h3 class="truncate font-semibold text-slate-800 transition-colors group-hover:text-blue-700 dark:text-slate-100 dark:group-hover:text-blue-400">
@@ -170,7 +183,7 @@
                       <n-tag v-if="result.page_number" :bordered="false" size="small" round>
                         {{ t('search.pageLabel') }} {{ result.page_number }}
                       </n-tag>
-                      <n-tag v-if="sectionLabelOf(result)" :bordered="false" size="small" round>
+                      <n-tag v-if="sectionLabelOf(result)" :bordered="false" size="small" round class="max-w-[12rem] truncate" :title="sectionLabelOf(result)">
                         {{ sectionLabelOf(result) }}
                       </n-tag>
                       <n-tag v-if="result.has_keyword" :bordered="false" size="small" round>
@@ -197,12 +210,20 @@
 
               <div class="mt-3 flex items-center justify-between border-t border-slate-100 pt-3 dark:border-slate-800">
                 <div class="flex items-center gap-2">
-                  <n-button size="tiny" secondary round type="primary" @click.stop="askAI(result)">
+                  <n-button size="tiny" secondary round type="primary" class="result-action" @click.stop="askAI(result)">
                     <template #icon><n-icon><ChatbubblesOutline /></n-icon></template>
                     {{ t('search.askAI', '问问 AI') }}
                   </n-button>
                 </div>
-                <n-button size="tiny" quaternary circle @click.stop="copyResultContent(result)">
+                <n-button
+                  size="tiny"
+                  quaternary
+                  circle
+                  class="result-action"
+                  :aria-label="t('common.copy', '复制内容')"
+                  :title="t('common.copy', '复制内容')"
+                  @click.stop="copyResultContent(result)"
+                >
                   <template #icon><n-icon><CopyOutline /></n-icon></template>
                 </n-button>
               </div>
@@ -235,7 +256,7 @@
                 :key="item.document_id"
                 class="flex items-center justify-between gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 dark:border-slate-700 dark:bg-slate-900"
               >
-                <span class="truncate text-slate-600 dark:text-slate-300">{{ item.title || item.document_id }}</span>
+                <span class="truncate text-slate-600 dark:text-slate-300">{{ item.title || item.document_id.slice(0, 8) }}</span>
                 <span :class="item.found && item.status === 'indexed' ? 'text-emerald-700 dark:text-emerald-400' : 'text-amber-700 dark:text-amber-400'">
                   {{ scopeStatusLabel(item) }}
                 </span>
@@ -256,6 +277,7 @@
         <DebugPanel
           v-if="debugEnabled && lastResponse?.debug"
           :debug-data="lastResponse.debug as unknown as RetrievalDebugData"
+          :default-expanded="false"
           @close="debugEnabled = false"
         />
       </section>
@@ -270,29 +292,29 @@
     >
       <div v-if="selectedResult" class="space-y-5 p-1">
         <div class="grid grid-cols-2 gap-3 md:grid-cols-3">
-          <div class="rounded-lg border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-800/50">
+          <div class="min-w-0 rounded-md border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-800/50">
             <span class="mb-1 block text-xs text-slate-500 dark:text-slate-400">{{ t('search.fileType') }}</span>
             <span class="font-semibold text-slate-800 dark:text-slate-100">{{ fileTypeOf(selectedResult).toUpperCase() || '—' }}</span>
           </div>
-          <div class="rounded-lg border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-800/50">
+          <div class="min-w-0 rounded-md border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-800/50">
             <span class="mb-1 block text-xs text-slate-500 dark:text-slate-400">{{ t('search.rerankScoreLabel') }}</span>
             <span class="font-semibold text-emerald-700 dark:text-emerald-400">{{ rerankScoreOf(selectedResult) ?? '—' }}</span>
           </div>
-          <div class="rounded-lg border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-800/50">
+          <div class="min-w-0 rounded-md border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-800/50">
             <span class="mb-1 block text-xs text-slate-500 dark:text-slate-400">{{ t('search.rankLabel') }}</span>
             <span class="font-semibold tabular-nums text-slate-800 dark:text-slate-100">#{{ selectedResult.rank ?? '—' }}</span>
           </div>
-          <div class="rounded-lg border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-800/50">
+          <div class="min-w-0 rounded-md border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-800/50">
             <span class="mb-1 block text-xs text-slate-500 dark:text-slate-400">{{ t('search.pageLabel') }}</span>
             <span class="font-semibold text-slate-800 dark:text-slate-100">{{ selectedResult.page_number ?? '—' }}</span>
           </div>
-          <div class="rounded-lg border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-800/50">
+          <div class="min-w-0 rounded-md border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-800/50">
             <span class="mb-1 block text-xs text-slate-500 dark:text-slate-400">{{ t('search.chunkLabel') }}</span>
-            <span class="truncate font-semibold text-slate-800 dark:text-slate-100">{{ selectedResult.chunk_id ?? '—' }}</span>
+            <span class="block truncate font-semibold text-slate-800 dark:text-slate-100" :title="selectedResult.chunk_id ?? ''">{{ selectedResult.chunk_id ?? '—' }}</span>
           </div>
-          <div class="rounded-lg border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-800/50">
+          <div class="min-w-0 rounded-md border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-800/50">
             <span class="mb-1 block text-xs text-slate-500 dark:text-slate-400">{{ t('search.sectionLabel') }}</span>
-            <span class="truncate font-semibold text-slate-800 dark:text-slate-100">{{ sectionLabelOf(selectedResult) || '—' }}</span>
+            <span class="block truncate font-semibold text-slate-800 dark:text-slate-100" :title="sectionLabelOf(selectedResult)">{{ sectionLabelOf(selectedResult) || '—' }}</span>
           </div>
         </div>
 
@@ -519,6 +541,14 @@ const handleInputChange = debounce(async () => {
   suggestions.value = list
 }, 300)
 
+// 失焦后稍等再收起，避免点击建议项时先被 blur 清掉（建议项另有 mousedown.prevent）。
+const hideSuggestions = () => {
+  if (!suggestions.value.length) return
+  window.setTimeout(() => {
+    suggestions.value = []
+  }, 150)
+}
+
 const selectSuggestion = (s: string) => { searchQuery.value = s; suggestions.value = []; handleSearch() }
 
 const loadDocumentOptions = async (query = '') => {
@@ -603,12 +633,29 @@ onMounted(async () => {
   overflow: hidden;
 }
 
+@media (max-width: 1023px) {
+  /* 窄屏：页面整体滚动，筛选/结果不再是固定高度内的两个滚动区
+     （此前筛选卡 514px 高会把结果区压成 2px）。结果排在筛选之前，
+     搜索后不必先滚过整张筛选卡。 */
+  .search-page { display: block; height: auto; min-height: 100%; overflow-y: auto; }
+  .search-layout { flex: none; overflow: visible; }
+  .search-results { order: 1; overflow: visible; }
+  .search-filter { order: 2; }
+  .search-results-scroll { overflow: visible; }
+}
+
 @media (max-width: 767px) {
   .search-page { padding: 1rem; }
   .search-stats { flex-wrap: wrap; }
-  .search-submit { padding-left: 1rem; padding-right: 1rem; }
-  .search-layout { gap: 1rem; }
+  .search-submit { min-height: 44px; padding-left: 1rem; padding-right: 1rem; }
+  .search-layout { flex-direction: column; gap: 1rem; }
   .search-filter { width: 100%; flex: none; overflow: visible; padding-right: 0; }
   .search-results { min-height: 0; }
+  .search-filter :deep(.n-base-selection) { --n-height: 44px !important; }
+  .search-filter :deep(.n-radio) { min-height: 44px; align-items: center; }
+  .search-filter :deep(.n-switch) { padding: 11px 0; }
+  .search-filter :deep(.n-button) { min-height: 44px; }
+  .suggestion-item { min-height: 44px; }
+  .result-action.n-button { min-height: 44px; }
 }
 </style>
