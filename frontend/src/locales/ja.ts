@@ -1458,6 +1458,7 @@ export default {
     summaryUnidentifiedHint: '{count} 件は判定できません',
     summaryReadyToDecide: '判断待ち',
     itemsEmptyFiltered: 'この絞り込みに一致するレビュー項目はありません',
+    itemsNone: 'この案件にはレビュー項目がありません',
     caseColumn: '案件',
     statusColumn: '状態',
     evidenceFailed: '証拠の選択に失敗しました',

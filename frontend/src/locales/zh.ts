@@ -1539,6 +1539,7 @@ export default {
     summaryUnidentifiedHint: '{count} 项无法判定',
     summaryReadyToDecide: '待决策',
     itemsEmptyFiltered: '该筛选下没有核验项',
+    itemsNone: '该案件没有核验项',
     caseColumn: '案件',
     statusColumn: '状态',
     evidenceFailed: '选择证据失败',

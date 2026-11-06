@@ -1459,6 +1459,7 @@ export default {
     summaryUnidentifiedHint: '{count} point(s) indéterminé(s)',
     summaryReadyToDecide: 'En attente de décisions',
     itemsEmptyFiltered: 'Aucun point de revue ne correspond à ce filtre',
+    itemsNone: 'Ce dossier n’a aucun point de revue',
     caseColumn: 'Dossier',
     statusColumn: 'Statut',
     evidenceFailed: "Échec de la sélection de la preuve",

@@ -1531,6 +1531,7 @@ export default {
     summaryUnidentifiedHint: '{count} item(s) cannot be determined',
     summaryReadyToDecide: 'Awaiting decisions',
     itemsEmptyFiltered: 'No review items match this filter',
+    itemsNone: 'This case has no review items',
     caseColumn: 'Case',
     statusColumn: 'Status',
     evidenceFailed: 'Failed to select evidence',
