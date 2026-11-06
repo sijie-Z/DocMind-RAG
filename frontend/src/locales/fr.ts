@@ -1347,7 +1347,7 @@ export default {
   reviews: {
     subtitle: 'Politique/modèle + contrat V1/V2 : instantanés de preuve, alignement déterministe et rapport de revue',
     emptyFiltered: 'Aucun dossier de revue ne correspond aux filtres',
-    emptyFilteredHint: 'Aucun résultat avec les filtres actuels. Effacez les filtres pour voir tous les dossiers.',
+    emptyFilteredHint: 'Aucun résultat avec les filtres actuels. Effacez-les pour revenir à la liste des dossiers en cours.',
     clearFilters: 'Effacer les filtres',
     empty: 'Aucun dossier de revue',
     emptyHint: "Choisissez la politique/le modèle et les contrats V1/V2 dans la base de connaissances, puis créez une revue pour comparer clause par clause les conditions de paiement, les conditions de départ, les prérequis de réception/facturation et les exceptions.",
@@ -1457,6 +1457,8 @@ export default {
     summaryAwaitingExport: 'Prêt à exporter',
     summaryAwaitingExportHint: 'Tous les points sont décidés ; le rapport peut être exporté',
     summaryUnidentifiedHint: '{count} point(s) indéterminé(s)',
+    summaryReadyToDecide: 'En attente de décisions',
+    itemsEmptyFiltered: 'Aucun point de revue ne correspond à ce filtre',
     caseColumn: 'Dossier',
     statusColumn: 'Statut',
     evidenceFailed: "Échec de la sélection de la preuve",

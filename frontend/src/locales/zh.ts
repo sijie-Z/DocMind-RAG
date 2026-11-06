@@ -1426,7 +1426,7 @@ export default {
   reviews: {
     subtitle: '制度/模板 + 合同 V1/V2：证据快照、确定性抽取与核验单',
     emptyFiltered: '没有符合条件的核验案件',
-    emptyFilteredHint: '当前筛选条件下没有结果；清除筛选可查看全部案件。',
+    emptyFilteredHint: '当前筛选条件下没有结果；清除筛选可返回默认的进行中案件列表。',
     clearFilters: '清除筛选',
     empty: '还没有核验案件',
     emptyHint:
@@ -1537,6 +1537,8 @@ export default {
     summaryAwaitingExport: '待导出',
     summaryAwaitingExportHint: '所有核验项已决策，可导出核验单',
     summaryUnidentifiedHint: '{count} 项无法判定',
+    summaryReadyToDecide: '待决策',
+    itemsEmptyFiltered: '该筛选下没有核验项',
     caseColumn: '案件',
     statusColumn: '状态',
     evidenceFailed: '选择证据失败',

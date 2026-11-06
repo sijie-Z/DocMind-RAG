@@ -1346,7 +1346,7 @@ export default {
   reviews: {
     subtitle: '規程/テンプレート + 契約 V1/V2：証拠スナップショット、決定論的な抽出・照合、レビューシート',
     emptyFiltered: '条件に一致するレビュー案件はありません',
-    emptyFilteredHint: '現在の絞り込み条件では結果がありません。絞り込みを解除すると全案件を表示します。',
+    emptyFilteredHint: '現在の絞り込み条件では結果がありません。解除すると進行中の案件一覧に戻ります。',
     clearFilters: '絞り込みを解除',
     empty: 'レビュー案件はまだありません',
     emptyHint: 'ナレッジベースから規程/テンプレートと契約 V1/V2 を選び、レビューを作成すると、支払条件・起算条件・検収/請求前提・例外条項を条項ごとに比較できます。',
@@ -1456,6 +1456,8 @@ export default {
     summaryAwaitingExport: 'エクスポート待ち',
     summaryAwaitingExportHint: '全項目の判断が完了しました。レビュー結果をエクスポートできます',
     summaryUnidentifiedHint: '{count} 件は判定できません',
+    summaryReadyToDecide: '判断待ち',
+    itemsEmptyFiltered: 'この絞り込みに一致するレビュー項目はありません',
     caseColumn: '案件',
     statusColumn: '状態',
     evidenceFailed: '証拠の選択に失敗しました',

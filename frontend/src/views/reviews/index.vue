@@ -3,7 +3,7 @@
     <div class="max-w-7xl mx-auto">
       <div class="mb-6 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
         <div>
-          <h1 class="text-2xl md:text-3xl font-semibold tracking-tight text-slate-900 dark:text-slate-100">
+          <h1 class="text-2xl font-semibold tracking-tight text-slate-900 dark:text-slate-100 md:text-[28px]">
             {{ t('menu.reviews') }}
           </h1>
           <p class="text-slate-500 dark:text-slate-400 mt-1 text-sm flex items-center gap-2">
@@ -16,18 +16,20 @@
             v-model:value="statusFilter"
             :options="statusOptions"
             :placeholder="t('reviews.allStatuses')"
+            :aria-label="t('reviews.statusColumn')"
             clearable
-            class="w-40"
+            class="reviews-filter w-40"
             @update:value="applyFilter"
           />
           <n-select
             v-model:value="archivedFilter"
             :options="archivedOptions"
-            class="w-32"
+            :aria-label="t('reviews.archivedFilterLabel')"
+            class="reviews-filter w-32"
             data-testid="archived-filter"
             @update:value="applyFilter"
           />
-          <n-button type="primary" round data-testid="create-case-open" @click="createVisible = true">
+          <n-button type="primary" round class="create-case-btn" data-testid="create-case-open" @click="createVisible = true">
             {{ t('reviews.createCase') }}
           </n-button>
         </div>
@@ -54,7 +56,7 @@
             <p class="text-slate-500 dark:text-slate-400 mb-6 max-w-sm text-center text-sm leading-relaxed">
               {{ t('reviews.emptyFilteredHint') }}
             </p>
-            <n-button round data-testid="reviews-clear-filters" @click="clearFilters">
+            <n-button type="primary" round data-testid="reviews-clear-filters" @click="clearFilters">
               {{ t('reviews.clearFilters') }}
             </n-button>
           </template>
@@ -84,7 +86,7 @@
 
         <template v-else-if="rows.length > 0">
           <!-- 移动端：卡片列表（<768），避免宽表格被压成竖排 -->
-          <div class="space-y-3 md:hidden">
+          <div class="space-y-3 lg:hidden">
             <div
               v-for="row in rows"
               :key="row.id"
@@ -136,7 +138,7 @@
           </div>
 
           <!-- 桌面端：表格 -->
-          <div class="hidden md:block">
+          <div class="hidden lg:block">
             <n-data-table
               :columns="columns"
               :data="rows"
@@ -189,7 +191,7 @@ const createVisible = ref(false)
 const archivedFilter = ref<'active' | 'archived' | 'all'>('active')
 
 const viewportWidth = ref(typeof window === 'undefined' ? 1280 : window.innerWidth)
-const isCompact = computed(() => viewportWidth.value < 768)
+const isCompact = computed(() => viewportWidth.value < 1024)
 const handleResize = () => { viewportWidth.value = window.innerWidth }
 
 const STATUS_VALUES: ReviewCaseStatus[] = ['blocked', 'ready', 'in_review', 'completed']
@@ -356,7 +358,9 @@ const columns = computed(() => [
   {
     title: t('reviews.createdAt'),
     key: 'created_at',
-    render: (row: ReviewCaseSummary) => formatDateTime(row.created_at)
+    align: 'right',
+    render: (row: ReviewCaseSummary) =>
+      h('span', { class: 'tabular-nums' }, formatDateTime(row.created_at))
   },
   {
     title: '',
@@ -369,17 +373,11 @@ const columns = computed(() => [
 ])
 
 function rowProps(row: ReviewCaseSummary) {
+  // 行点击是鼠标增强；键盘路径由标题 <a> 与「打开」按钮承担，
+  // 不再给 <tr> 加 role/tabindex（会覆盖表格 row 语义并造成一停三焦点）。
   return {
     style: 'cursor: pointer',
-    role: 'link',
-    tabindex: 0,
-    onClick: () => open(row),
-    onKeydown: (event: KeyboardEvent) => {
-      if (event.key === 'Enter' || event.key === ' ') {
-        event.preventDefault()
-        open(row)
-      }
-    }
+    onClick: () => open(row)
   }
 }
 
@@ -438,10 +436,16 @@ onUnmounted(() => {
 </script>
 
 <style scoped>
-@media (max-width: 767.98px) {
+@media (max-width: 1023.98px) {
   .review-card-open.n-button {
     height: 44px !important;
     min-width: 72px;
+  }
+  .reviews-filter :deep(.n-base-selection) {
+    --n-height: 44px !important;
+  }
+  .create-case-btn.n-button {
+    height: 44px !important;
   }
 }
 </style>

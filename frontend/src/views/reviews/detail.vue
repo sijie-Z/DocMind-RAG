@@ -13,7 +13,7 @@
             <template #icon><n-icon><ArrowBackOutline /></n-icon></template>
           </n-button>
           <div>
-            <h1 class="text-2xl font-bold text-gray-800 dark:text-white">
+            <h1 class="text-2xl font-semibold text-gray-800 dark:text-white md:text-[28px]">
               {{ detail?.title || t('menu.reviews') }}
             </h1>
             <div class="mt-1 flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400">
@@ -85,12 +85,12 @@
 
           <!-- 结论横幅：结论 + 真实进度 + 计数筛选（数据全部来自 items 状态） -->
           <section
-            class="sticky top-0 z-20 -mx-4 mb-4 border-b border-slate-200 bg-gray-50/95 px-4 py-3 backdrop-blur dark:border-slate-800 dark:bg-gray-950/95 md:-mx-6 md:px-6"
+            class="sticky top-0 z-20 -mx-4 mb-4 border-b border-slate-200 bg-gray-50 px-4 py-3 dark:border-slate-800 dark:bg-gray-950 md:-mx-6 md:px-6"
             data-testid="review-conclusion"
           >
             <div class="flex flex-wrap items-center gap-2">
               <n-tag :type="conclusion.tag" size="medium">{{ conclusion.title }}</n-tag>
-              <span class="text-sm text-slate-600 dark:text-slate-300">{{ conclusion.hint }}</span>
+              <span class="line-clamp-2 text-sm text-slate-600 dark:text-slate-300">{{ conclusion.hint }}</span>
               <span v-if="detail.archived_at" class="text-xs text-slate-500 dark:text-slate-400">
                 {{ t('reviews.summaryArchivedHint') }}
               </span>
@@ -115,6 +115,7 @@
                   v-for="chip in itemFilterChips"
                   :key="chip.value"
                   size="tiny"
+                  class="review-chip"
                   :type="itemFilter === chip.value ? 'primary' : 'default'"
                   :secondary="itemFilter !== chip.value"
                   :aria-pressed="itemFilter === chip.value"
@@ -130,8 +131,9 @@
           <section class="mb-5 overflow-hidden rounded-xl border border-gray-200 bg-white dark:border-gray-800 dark:bg-gray-900">
             <button
               type="button"
-              class="flex w-full flex-wrap items-center gap-2 px-4 py-3 text-left"
+              class="flex w-full flex-wrap items-center gap-2 bg-white px-4 py-3 text-left text-gray-700 hover:bg-gray-50 dark:bg-gray-900 dark:text-gray-200 dark:hover:bg-gray-800"
               :aria-expanded="versionsOpen"
+              aria-controls="review-versions-panel"
               data-testid="review-versions-toggle"
               @click="versionsOpen = !versionsOpen"
             >
@@ -148,12 +150,13 @@
                   <template v-if="docOf(side)?.version_seq">#{{ docOf(side)?.version_seq }}</template>
                 </span>
               </span>
-              <n-icon class="ml-auto text-gray-500">
+              <n-icon class="ml-auto text-gray-500 dark:text-gray-300">
                 <component :is="versionsOpen ? ChevronUpOutline : ChevronDownOutline" />
               </n-icon>
             </button>
             <div
               v-if="versionsOpen"
+              id="review-versions-panel"
               class="grid gap-3 border-t border-gray-200 p-4 dark:border-gray-800 md:grid-cols-3"
             >
               <div
@@ -185,7 +188,7 @@
                   {{ docOf(side)?.version_label || '—' }}
                   <span v-if="docOf(side)?.version_seq">#{{ docOf(side)?.version_seq }}</span>
                 </div>
-                <div class="mt-1 break-all text-xs text-gray-400">
+                <div class="mt-1 break-all text-xs text-gray-500 dark:text-gray-400">
                   {{ t('reviews.contentSha') }}: {{ (docOf(side)?.content_sha256 || '—').slice(0, 16) }}
                 </div>
                 <div class="mt-1 flex flex-wrap gap-1">
@@ -208,6 +211,16 @@
             <span class="text-xs tabular-nums text-gray-500 dark:text-gray-400">
               {{ filteredItems.length }} / {{ itemStats.total }}
             </span>
+          </div>
+          <div
+            v-if="filteredItems.length === 0"
+            class="flex flex-col items-center justify-center rounded-xl border border-dashed border-gray-200 bg-white py-12 px-6 text-center dark:border-gray-700 dark:bg-gray-900"
+            data-testid="review-items-empty"
+          >
+            <p class="text-sm text-gray-600 dark:text-gray-300">{{ t('reviews.itemsEmptyFiltered') }}</p>
+            <n-button class="mt-4" size="small" type="primary" @click="itemFilter = 'all'">
+              {{ t('reviews.filterAllItems') }}
+            </n-button>
           </div>
           <div class="space-y-4">
             <div
@@ -232,20 +245,20 @@
 
               <!-- 文本事实 -->
               <div class="mt-2 space-y-1 text-xs text-gray-600 dark:text-gray-300">
-                <div class="font-medium text-gray-500">{{ t('reviews.factsTitle') }}</div>
+                <div class="font-medium text-gray-500 dark:text-gray-400">{{ t('reviews.factsTitle') }}</div>
                 <div v-for="line in factLines(item)" :key="line.side">
-                  <span class="text-gray-400">{{ docLabel(line.side) }}:</span>
+                  <span class="text-gray-500 dark:text-gray-400">{{ docLabel(line.side) }}:</span>
                   {{ line.text }}
                 </div>
               </div>
 
               <!-- 证据快照 -->
               <div class="mt-3">
-                <div class="mb-1 text-xs font-medium text-gray-500">{{ t('reviews.evidenceTitle') }}</div>
-                <div class="mb-1 text-[11px] text-gray-400">{{ t('reviews.selectHint') }}</div>
+                <div class="mb-1 text-xs font-medium text-gray-500 dark:text-gray-400">{{ t('reviews.evidenceTitle') }}</div>
+                <div class="mb-1 text-xs text-gray-500 dark:text-gray-400">{{ t('reviews.selectHint') }}</div>
                 <div class="grid gap-3 md:grid-cols-3">
                   <div v-for="side in SIDES" :key="side" class="rounded-lg bg-gray-50 p-2 dark:bg-gray-800/50">
-                    <div class="mb-1 text-xs font-medium text-gray-500">
+                    <div class="mb-1 text-xs font-medium text-gray-500 dark:text-gray-400">
                       {{ docLabel(side) }}
                     </div>
                     <template v-if="(item.evidence[side] || []).length">
@@ -257,7 +270,7 @@
                         <div class="whitespace-pre-wrap text-xs text-gray-700 dark:text-gray-200">
                           {{ row.quote }}
                         </div>
-                        <div class="mt-1 flex flex-wrap items-center gap-1 text-[11px] text-gray-400">
+                        <div class="mt-1 flex flex-wrap items-center gap-1 text-xs text-gray-500 dark:text-gray-400">
                           <span v-if="row.clause_no?.length">
                             {{ t('reviews.evidenceClause', { clause: row.clause_no.join(',') }) }}
                           </span>
@@ -295,7 +308,7 @@
                         </n-button>
                       </div>
                     </template>
-                    <div v-else class="text-xs text-gray-400">{{ t('reviews.evidenceEmpty') }}</div>
+                    <div v-else class="text-xs text-gray-500 dark:text-gray-400">{{ t('reviews.evidenceEmpty') }}</div>
                   </div>
                 </div>
               </div>
@@ -303,7 +316,7 @@
               <!-- 人工决策 -->
               <div
                 v-if="item.decided_by"
-                class="mt-3 text-[11px] text-gray-400"
+                class="mt-3 text-xs text-gray-500 dark:text-gray-400"
                 :data-testid="`decision-meta-${item.item_key}`"
               >
                 {{ t('reviews.decidedBy') }} #{{ item.decided_by }}
@@ -312,10 +325,11 @@
                 </span>
               </div>
               <div class="mt-3 flex flex-col gap-2 sm:flex-row sm:items-center">
-                <span class="text-xs font-medium text-gray-500">{{ t('reviews.decisionTitle') }}</span>
+                <span class="text-xs font-medium text-gray-500 dark:text-gray-400">{{ t('reviews.decisionTitle') }}</span>
                 <n-radio-group
                   v-model:value="decisionOf(item).status"
                   size="small"
+                  class="review-decision-group"
                   :disabled="detail.status === 'blocked' || !!detail.archived_at || !item.change_type"
                 >
                   <n-radio-button value="verified">{{ t('reviews.statusVerified') }}</n-radio-button>
@@ -368,7 +382,7 @@
                     })
                   }}
                 </div>
-                <div class="text-xs text-gray-400">
+                <div class="text-xs text-gray-500 dark:text-gray-400">
                   {{ t('reviews.exportSha') }}: {{ row.payload_sha256.slice(0, 16) }} ·
                   {{ formatDateTime(row.created_at) }}
                 </div>
@@ -509,6 +523,13 @@ const conclusion = computed(() => {
     return current.status === 'ready'
       ? { tag: 'info' as const, title: t('reviews.summaryReady'), hint: t('reviews.notAnalyzedHint') }
       : { tag: 'info' as const, title: t('reviews.summaryInReview'), hint: t('reviews.notAnalyzedHint') }
+  }
+  if (current.status === 'ready') {
+    return {
+      tag: 'info' as const,
+      title: t('reviews.summaryReadyToDecide'),
+      hint: t('reviews.summaryInReviewHint')
+    }
   }
   if (itemStats.value.needsHuman > 0 || itemStats.value.blockedItems > 0 || itemStats.value.unidentified > 0) {
     const hints: string[] = []
@@ -886,3 +907,28 @@ async function downloadExport(exportId: string, format: 'json' | 'markdown') {
 
 onMounted(load)
 </script>
+
+<style scoped>
+@media (max-width: 1023.98px) {
+  .review-chip.n-button {
+    height: 44px !important;
+    padding-left: 12px;
+    padding-right: 12px;
+  }
+  .review-decision-group {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+  }
+  .review-decision-group :deep(.n-radio-button) {
+    height: 44px !important;
+    line-height: 44px;
+  }
+  .review-export-empty :deep(.n-empty__description) {
+    color: #6b7280;
+  }
+}
+.review-export-empty :deep(.n-empty__description) {
+  color: #6b7280;
+}
+</style>

@@ -1419,7 +1419,7 @@ export default {
   reviews: {
     subtitle: 'Policy/template + contract V1/V2: evidence snapshots, deterministic alignment and review reports',
     emptyFiltered: 'No review cases match the current filters',
-    emptyFilteredHint: 'No results under the current filters. Clear filters to see all cases.',
+    emptyFilteredHint: 'No results under the current filters. Clear filters to return to the default active case list.',
     clearFilters: 'Clear filters',
     empty: 'No review cases yet',
     emptyHint: 'Pick the policy/template and contract V1/V2 from the knowledge base, then create a review to compare payment terms, start conditions, acceptance/invoice prerequisites and exceptions clause by clause.',
@@ -1529,6 +1529,8 @@ export default {
     summaryAwaitingExport: 'Ready to export',
     summaryAwaitingExportHint: 'All items decided; the review report can be exported',
     summaryUnidentifiedHint: '{count} item(s) cannot be determined',
+    summaryReadyToDecide: 'Awaiting decisions',
+    itemsEmptyFiltered: 'No review items match this filter',
     caseColumn: 'Case',
     statusColumn: 'Status',
     evidenceFailed: 'Failed to select evidence',
