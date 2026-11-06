@@ -520,4 +520,73 @@ describe('归档出口（Batch 7）', () => {
     await flushPromises()
     expect(wrapper.find('[data-testid="archive-case"]').exists()).toBe(false)
   })
+
+  it('结论横幅：状态、真实进度与差异计数来自详情 items', async () => {
+    api.get.mockResolvedValue({ data: { data: makeDetail() } } as never)
+    const wrapper = mountDetail()
+    await flushPromises()
+    const banner = wrapper.find('[data-testid="review-conclusion"]')
+    expect(banner.exists()).toBe(true)
+    expect(banner.text()).toContain('核验中')
+    expect(banner.text()).toContain('已处理 0/1 项')
+    expect(banner.text()).toContain('有变更 1')
+    expect(banner.text()).toContain('未决策')
+  })
+
+  it('completed 只由案件状态决定：全部已决策但未导出显示「待导出」', async () => {
+    const base = makeDetail()
+    api.get.mockResolvedValue({
+      data: { data: makeDetail({ items: [{ ...base.items[0], status: 'verified' }] }) }
+    } as never)
+    const wrapper = mountDetail()
+    await flushPromises()
+    const banner = wrapper.find('[data-testid="review-conclusion"]')
+    expect(banner.text()).toContain('待导出')
+    expect(banner.text()).not.toContain('核验完成')
+  })
+
+  it('completed 案件显示「核验完成」（即使仍有未决策项）', async () => {
+    api.get.mockResolvedValue({ data: { data: makeDetail({ status: 'completed' }) } } as never)
+    const wrapper = mountDetail()
+    await flushPromises()
+    const banner = wrapper.find('[data-testid="review-conclusion"]')
+    expect(banner.text()).toContain('核验完成')
+  })
+
+  it('计数 chip 可过滤核验项', async () => {
+    const base = makeDetail()
+    const second = {
+      ...base.items[0],
+      id: 'item-2',
+      item_key: 'start_condition',
+      ordinal: 2,
+      change_type: 'unchanged',
+      status: 'verified'
+    }
+    api.get.mockResolvedValue({
+      data: { data: makeDetail({ items: [base.items[0], second] }) }
+    } as never)
+    const wrapper = mountDetail()
+    await flushPromises()
+    expect(wrapper.findAll('[data-testid^="review-item-"]').length).toBe(2)
+
+    const decidedChip = wrapper
+      .findAll('button')
+      .find((button) => button.text().includes('已确认'))
+    expect(decidedChip).toBeTruthy()
+    await decidedChip!.trigger('click')
+    const items = wrapper.findAll('[data-testid^="review-item-"]')
+    expect(items.length).toBe(1)
+    expect(items[0].text()).toContain('起算条件')
+  })
+
+  it('版本条默认折叠，展开后显示文件名', async () => {
+    api.get.mockResolvedValue({ data: { data: makeDetail() } } as never)
+    const wrapper = mountDetail()
+    await flushPromises()
+    expect(wrapper.text()).not.toContain('contract-v1.pdf')
+    await wrapper.find('[data-testid="review-versions-toggle"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain('contract-v1.pdf')
+  })
 })

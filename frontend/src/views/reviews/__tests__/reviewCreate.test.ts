@@ -30,9 +30,11 @@ import { reviewsApi } from '@/api/reviews'
 import zh from '@/locales/zh'
 
 const push = vi.fn()
+const replace = vi.fn()
 
 vi.mock('vue-router', () => ({
-  useRouter: () => ({ push })
+  useRouter: () => ({ push, replace }),
+  useRoute: () => ({ params: {}, query: {} })
 }))
 
 vi.mock('@/api/reviews', () => ({

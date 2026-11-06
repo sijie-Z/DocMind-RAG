@@ -1,32 +1,29 @@
 <template>
-  <div class="min-h-screen bg-gradient-to-br from-slate-50 via-white to-blue-50 dark:from-gray-950 dark:via-gray-900 dark:to-slate-950 p-6">
+  <div class="p-4 md:p-6">
     <div class="max-w-7xl mx-auto">
-      <div class="mb-6 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+      <div class="mb-6 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
         <div>
-          <h1 class="text-2xl md:text-3xl font-bold tracking-tight text-slate-800 dark:text-slate-100">
+          <h1 class="text-2xl md:text-3xl font-semibold tracking-tight text-slate-900 dark:text-slate-100">
             {{ t('menu.reviews') }}
           </h1>
           <p class="text-slate-500 dark:text-slate-400 mt-1 text-sm flex items-center gap-2">
-            <span class="w-6 h-0.5 bg-blue-500 rounded-full"></span>
+            <span class="w-6 h-0.5 bg-blue-600 rounded-full"></span>
             {{ t('reviews.subtitle') }}
           </p>
         </div>
-        <div class="flex flex-wrap items-center gap-3">
+        <div class="flex flex-wrap items-center gap-2">
           <n-select
             v-model:value="statusFilter"
             :options="statusOptions"
             :placeholder="t('reviews.allStatuses')"
             clearable
-            class="w-44"
+            class="w-40"
             @update:value="applyFilter"
           />
-          <span class="text-xs text-gray-500 dark:text-gray-400">
-            {{ t('reviews.archivedFilterLabel') }}
-          </span>
           <n-select
             v-model:value="archivedFilter"
             :options="archivedOptions"
-            class="w-36"
+            class="w-32"
             data-testid="archived-filter"
             @update:value="applyFilter"
           />
@@ -44,54 +41,122 @@
       <n-spin :show="loading">
         <div
           v-if="!loading && !loadError && rows.length === 0"
-          class="flex flex-col items-center justify-center py-24 px-6 bg-white/80 dark:bg-gray-800/50 backdrop-blur-md rounded-3xl border border-dashed border-slate-200 dark:border-gray-600/50 shadow-inner"
+          class="flex flex-col items-center justify-center py-20 px-6 rounded-2xl border border-dashed border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-900"
           data-testid="reviews-empty-state"
         >
-          <div
-            class="w-24 h-24 rounded-2xl bg-gradient-to-br from-blue-100 to-slate-100 dark:from-blue-900/30 dark:to-slate-900/30 flex items-center justify-center mb-6 ring-4 ring-blue-100/50 dark:ring-blue-900/30"
-          >
-            <n-icon size="48" class="text-blue-500 dark:text-blue-400"><DocumentTextOutline /></n-icon>
+          <div class="mb-5 flex h-16 w-16 items-center justify-center rounded-2xl border border-slate-200 bg-slate-50 dark:border-slate-700 dark:bg-slate-800">
+            <n-icon size="30" class="text-slate-500 dark:text-slate-400"><DocumentTextOutline /></n-icon>
           </div>
-          <h2 class="text-xl font-bold text-slate-800 dark:text-slate-100 mb-2">
-            {{ archivedFilter === 'archived' ? t('reviews.emptyArchived') : t('reviews.empty') }}
-          </h2>
-          <p class="text-slate-500 dark:text-slate-400 mb-8 max-w-sm text-center text-sm leading-relaxed">
-            {{
-              archivedFilter === 'archived'
-                ? t('reviews.emptyArchivedHint')
-                : t('reviews.emptyHint')
-            }}
-          </p>
-          <n-button
-            v-if="archivedFilter !== 'archived'"
-            type="primary"
-            round
-            size="large"
-            class="px-8 shadow-lg shadow-blue-500/20"
-            data-testid="create-case-empty"
-            @click="createVisible = true"
-          >
-            {{ t('reviews.createCase') }}
-          </n-button>
+          <template v-if="hasActiveFilters">
+            <h2 class="text-lg font-semibold text-slate-800 dark:text-slate-100 mb-2">
+              {{ t('reviews.emptyFiltered') }}
+            </h2>
+            <p class="text-slate-500 dark:text-slate-400 mb-6 max-w-sm text-center text-sm leading-relaxed">
+              {{ t('reviews.emptyFilteredHint') }}
+            </p>
+            <n-button round data-testid="reviews-clear-filters" @click="clearFilters">
+              {{ t('reviews.clearFilters') }}
+            </n-button>
+          </template>
+          <template v-else>
+            <h2 class="text-lg font-semibold text-slate-800 dark:text-slate-100 mb-2">
+              {{ archivedFilter === 'archived' ? t('reviews.emptyArchived') : t('reviews.empty') }}
+            </h2>
+            <p class="text-slate-500 dark:text-slate-400 mb-6 max-w-sm text-center text-sm leading-relaxed">
+              {{
+                archivedFilter === 'archived'
+                  ? t('reviews.emptyArchivedHint')
+                  : t('reviews.emptyHint')
+              }}
+            </p>
+            <n-button
+              v-if="archivedFilter !== 'archived'"
+              type="primary"
+              round
+              size="large"
+              data-testid="create-case-empty"
+              @click="createVisible = true"
+            >
+              {{ t('reviews.createCase') }}
+            </n-button>
+          </template>
         </div>
-        <div v-else-if="rows.length > 0">
-          <n-data-table
-            :columns="columns"
-            :data="rows"
-            :bordered="false"
-            :single-line="false"
-            :row-props="rowProps"
-          />
-          <div class="mt-4 flex justify-end">
+
+        <template v-else-if="rows.length > 0">
+          <!-- 移动端：卡片列表（<768），避免宽表格被压成竖排 -->
+          <div class="space-y-3 md:hidden">
+            <div
+              v-for="row in rows"
+              :key="row.id"
+              class="rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-700 dark:bg-slate-900"
+              :data-testid="`review-card-${row.id}`"
+            >
+              <div class="flex items-start justify-between gap-3">
+                <a
+                  :href="`/reviews/${row.id}`"
+                  class="min-w-0 text-sm font-semibold text-slate-900 hover:text-blue-600 dark:text-slate-100 dark:hover:text-blue-400"
+                  @click.prevent="open(row)"
+                >
+                  {{ row.title }}
+                </a>
+                <n-button size="tiny" type="primary" secondary class="review-card-open" @click="open(row)">
+                  {{ t('reviews.open') }}
+                </n-button>
+              </div>
+              <div class="mt-2 flex flex-wrap items-center gap-1">
+                <n-tag :type="statusTagType[row.status]" size="small">
+                  {{ statusLabel[row.status] }}
+                </n-tag>
+                <n-tag v-if="row.archived_at" size="small" data-testid="row-archived-tag">
+                  {{ t('reviews.archived') }}
+                </n-tag>
+              </div>
+              <dl class="mt-3 grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-slate-500 dark:text-slate-400">
+                <div class="flex justify-between gap-2">
+                  <dt>{{ t('reviews.baseVersion') }}</dt>
+                  <dd class="text-slate-700 dark:text-slate-300">{{ row.base_version_label || '—' }}</dd>
+                </div>
+                <div class="flex justify-between gap-2">
+                  <dt>{{ t('reviews.revisedVersion') }}</dt>
+                  <dd class="text-slate-700 dark:text-slate-300">{{ row.revised_version_label || '—' }}</dd>
+                </div>
+                <div class="col-span-2 flex justify-between gap-2">
+                  <dt>{{ t('reviews.createdAt') }}</dt>
+                  <dd class="text-slate-700 dark:text-slate-300">{{ formatDateTime(row.created_at) }}</dd>
+                </div>
+              </dl>
+              <div
+                v-if="row.blocking_reasons.length"
+                class="mt-2 text-xs text-red-600 dark:text-red-400"
+                :title="row.blocking_reasons.join(' · ')"
+              >
+                {{ t('reviews.blockedReasons') }}: {{ reasonsLabel(t, row.blocking_reasons) }}
+              </div>
+            </div>
+          </div>
+
+          <!-- 桌面端：表格 -->
+          <div class="hidden md:block">
+            <n-data-table
+              :columns="columns"
+              :data="rows"
+              :bordered="false"
+              :single-line="false"
+              :row-props="rowProps"
+            />
+          </div>
+
+          <div class="mt-4 flex max-w-full justify-end overflow-x-auto">
             <n-pagination
               v-model:page="page"
               :page-size="pageSize"
               :item-count="total"
+              :simple="isCompact"
               :page-slot="7"
-              @update:page="load"
+              @update:page="handlePageChange"
             />
           </div>
-        </div>
+        </template>
       </n-spin>
     </div>
     <CreateCaseModal v-model:show="createVisible" @created="onCreated" />
@@ -99,8 +164,8 @@
 </template>
 
 <script setup lang="ts">
-import { computed, h, onMounted, ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { computed, h, onMounted, onUnmounted, ref, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { NButton, NPagination, NTag } from 'naive-ui'
 import { DocumentTextOutline } from '@vicons/ionicons5'
@@ -109,7 +174,8 @@ import { apiUnwrap } from '@/utils/apiUnwrap'
 import { reasonsLabel } from './reviewReasons'
 import CreateCaseModal from './components/CreateCaseModal.vue'
 
-const { t } = useI18n()
+const { t, locale } = useI18n()
+const route = useRoute()
 const router = useRouter()
 
 const rows = ref<ReviewCaseSummary[]>([])
@@ -121,6 +187,16 @@ const page = ref(1)
 const pageSize = 20
 const createVisible = ref(false)
 const archivedFilter = ref<'active' | 'archived' | 'all'>('active')
+
+const viewportWidth = ref(typeof window === 'undefined' ? 1280 : window.innerWidth)
+const isCompact = computed(() => viewportWidth.value < 768)
+const handleResize = () => { viewportWidth.value = window.innerWidth }
+
+const STATUS_VALUES: ReviewCaseStatus[] = ['blocked', 'ready', 'in_review', 'completed']
+const ARCHIVED_VALUES = ['active', 'archived', 'all'] as const
+
+// 归档视图本身有专属空态；只有状态筛选/翻页才显示「筛选无结果」。
+const hasActiveFilters = computed(() => statusFilter.value !== null || page.value > 1)
 
 const statusLabel = computed<Record<ReviewCaseStatus, string>>(() => ({
   blocked: t('reviews.statusBlocked'),
@@ -145,6 +221,50 @@ const statusOptions = computed(() =>
     label: statusLabel.value[value]
   }))
 )
+
+const dateFormatter = computed(
+  () => new Intl.DateTimeFormat(locale.value, { dateStyle: 'medium', timeStyle: 'short' })
+)
+function formatDateTime(value?: string | null) {
+  if (!value) return '—'
+  const date = new Date(value)
+  return Number.isNaN(date.getTime()) ? '—' : dateFormatter.value.format(date)
+}
+
+function readQueryState() {
+  const query = (route.query || {}) as Record<string, unknown>
+  const status = typeof query.status === 'string' && STATUS_VALUES.includes(query.status as ReviewCaseStatus)
+    ? (query.status as ReviewCaseStatus)
+    : null
+  const archived = typeof query.archived === 'string' && (ARCHIVED_VALUES as readonly string[]).includes(query.archived)
+    ? (query.archived as 'active' | 'archived' | 'all')
+    : 'active'
+  const parsedPage = Number.parseInt(String(query.page ?? '1'), 10)
+  const pageValue = Number.isFinite(parsedPage) && parsedPage > 0 ? parsedPage : 1
+  return { status, archived, page: pageValue }
+}
+
+function applyQueryState() {
+  const state = readQueryState()
+  statusFilter.value = state.status
+  archivedFilter.value = state.archived
+  page.value = state.page
+}
+
+function syncQuery() {
+  const query: Record<string, string> = {
+    ...((route.query || {}) as Record<string, string>)
+  }
+  if (statusFilter.value) query.status = statusFilter.value
+  else delete query.status
+  if (archivedFilter.value !== 'active') query.archived = archivedFilter.value
+  else delete query.archived
+  if (page.value > 1) query.page = String(page.value)
+  else delete query.page
+  // 测试/无路由替代实现下 replace 可能不存在；URL 同步失败不影响取数。
+  void (router as unknown as { replace?: (location: { query: Record<string, string> }) => Promise<unknown> })
+    .replace?.({ query })
+}
 
 async function load() {
   loading.value = true
@@ -176,8 +296,19 @@ const columns = computed(() => [
     key: 'title',
     render: (row: ReviewCaseSummary) =>
       h('div', [
-        h('div', { class: 'font-medium text-gray-800 dark:text-gray-100' }, row.title),
-        h('div', { class: 'text-xs text-gray-400' }, row.id.slice(0, 8))
+        h(
+          'a',
+          {
+            href: `/reviews/${row.id}`,
+            class: 'font-medium text-gray-800 hover:text-blue-600 dark:text-gray-100 dark:hover:text-blue-400',
+            onClick: (event: MouseEvent) => {
+              event.preventDefault()
+              open(row)
+            }
+          },
+          row.title
+        ),
+        h('div', { class: 'text-xs text-gray-500 dark:text-gray-400 tabular-nums' }, row.id.slice(0, 8))
       ])
   },
   {
@@ -225,8 +356,7 @@ const columns = computed(() => [
   {
     title: t('reviews.createdAt'),
     key: 'created_at',
-    render: (row: ReviewCaseSummary) =>
-      row.created_at ? new Date(row.created_at).toLocaleString() : '—'
+    render: (row: ReviewCaseSummary) => formatDateTime(row.created_at)
   },
   {
     title: '',
@@ -241,12 +371,34 @@ const columns = computed(() => [
 function rowProps(row: ReviewCaseSummary) {
   return {
     style: 'cursor: pointer',
-    onClick: () => open(row)
+    role: 'link',
+    tabindex: 0,
+    onClick: () => open(row),
+    onKeydown: (event: KeyboardEvent) => {
+      if (event.key === 'Enter' || event.key === ' ') {
+        event.preventDefault()
+        open(row)
+      }
+    }
   }
 }
 
 function applyFilter() {
   page.value = 1
+  syncQuery()
+  load()
+}
+
+function clearFilters() {
+  statusFilter.value = null
+  archivedFilter.value = 'active'
+  page.value = 1
+  syncQuery()
+  load()
+}
+
+function handlePageChange() {
+  syncQuery()
   load()
 }
 
@@ -255,5 +407,41 @@ function onCreated(caseId: string) {
   router.push(`/reviews/${caseId}`)
 }
 
-onMounted(load)
+watch(
+  () => route.query,
+  () => {
+    const state = readQueryState()
+    if (
+      state.status === statusFilter.value &&
+      state.archived === archivedFilter.value &&
+      state.page === page.value
+    ) {
+      return
+    }
+    statusFilter.value = state.status
+    archivedFilter.value = state.archived
+    page.value = state.page
+    void load()
+  },
+  { deep: true }
+)
+
+onMounted(() => {
+  applyQueryState()
+  window.addEventListener('resize', handleResize)
+  void load()
+})
+
+onUnmounted(() => {
+  window.removeEventListener('resize', handleResize)
+})
 </script>
+
+<style scoped>
+@media (max-width: 767.98px) {
+  .review-card-open.n-button {
+    height: 44px !important;
+    min-width: 72px;
+  }
+}
+</style>
