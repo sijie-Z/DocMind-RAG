@@ -1446,7 +1446,7 @@ export default {
     summaryNeedsHumanHint: '{count} 件が判断待ちです',
     summaryInsufficientHint: '{count} 件は証拠不足または解析失敗です',
     summaryCompleted: 'レビュー完了',
-    summaryCompletedHint: '全項目の判断が完了しました。レビュー結果をエクスポートできます',
+    summaryCompletedHint: 'エクスポート済みスナップショットはエクスポート履歴からダウンロードできます',
     summaryProgress: '処理済み {done}/{total}',
     summaryChanged: '{count} 件の差分',
     filterAllItems: 'すべて',

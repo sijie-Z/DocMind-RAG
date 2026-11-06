@@ -213,7 +213,14 @@
             </span>
           </div>
           <div
-            v-if="filteredItems.length === 0"
+            v-if="itemStats.total === 0"
+            class="rounded-xl border border-dashed border-gray-200 bg-white py-10 px-6 text-center text-sm text-gray-600 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300"
+            data-testid="review-items-none"
+          >
+            {{ t('reviews.itemsNone') }}
+          </div>
+          <div
+            v-else-if="filteredItems.length === 0"
             class="flex flex-col items-center justify-center rounded-xl border border-dashed border-gray-200 bg-white py-12 px-6 text-center dark:border-gray-700 dark:bg-gray-900"
             data-testid="review-items-empty"
           >
@@ -366,7 +373,7 @@
             <div class="mb-2 text-base font-semibold text-gray-700 dark:text-gray-200">
               {{ t('reviews.exportHistory') }}
             </div>
-            <n-empty v-if="exports.length === 0" :description="t('reviews.exportEmpty')" />
+            <n-empty v-if="exports.length === 0" class="review-export-empty" :description="t('reviews.exportEmpty')" />
             <div
               v-for="row in exports"
               :key="row.id"
@@ -513,23 +520,26 @@ const conclusion = computed(() => {
   }
   // completed 的权威来源是 status（= 已生成导出快照），不能用「全部已决策」冒充。
   if (current.status === 'completed') {
+    const hints: string[] = [t('reviews.summaryCompletedHint')]
+    if (itemStats.value.needsHuman > 0) {
+      hints.push(t('reviews.summaryNeedsHumanHint', { count: itemStats.value.needsHuman }))
+    }
+    if (itemStats.value.blockedItems > 0) {
+      hints.push(t('reviews.summaryInsufficientHint', { count: itemStats.value.blockedItems }))
+    }
+    if (itemStats.value.unidentified > 0) {
+      hints.push(t('reviews.summaryUnidentifiedHint', { count: itemStats.value.unidentified }))
+    }
     return {
       tag: 'success' as const,
       title: t('reviews.summaryCompleted'),
-      hint: t('reviews.summaryCompletedHint')
+      hint: hints.join(' · ')
     }
   }
   if (!analyzedAll.value) {
     return current.status === 'ready'
       ? { tag: 'info' as const, title: t('reviews.summaryReady'), hint: t('reviews.notAnalyzedHint') }
       : { tag: 'info' as const, title: t('reviews.summaryInReview'), hint: t('reviews.notAnalyzedHint') }
-  }
-  if (current.status === 'ready') {
-    return {
-      tag: 'info' as const,
-      title: t('reviews.summaryReadyToDecide'),
-      hint: t('reviews.summaryInReviewHint')
-    }
   }
   if (itemStats.value.needsHuman > 0 || itemStats.value.blockedItems > 0 || itemStats.value.unidentified > 0) {
     const hints: string[] = []
@@ -546,6 +556,13 @@ const conclusion = computed(() => {
       tag: 'warning' as const,
       title: t('reviews.summaryNeedsHuman'),
       hint: hints.join(' · ')
+    }
+  }
+  if (current.status === 'ready') {
+    return {
+      tag: 'info' as const,
+      title: t('reviews.summaryReadyToDecide'),
+      hint: t('reviews.summaryInReviewHint')
     }
   }
   if (itemStats.value.total > 0 && itemStats.value.decided === itemStats.value.total) {
@@ -621,7 +638,9 @@ const itemStatusTagType: Record<ReviewItemStatus, 'default' | 'success' | 'warni
     parse_failed: 'error'
   }
 
-const analyzed = computed(() => !!detail.value?.items.every((item) => item.change_type !== null))
+const analyzed = computed(() =>
+  !!detail.value && detail.value.items.length > 0 && detail.value.items.every((item) => item.change_type !== null)
+)
 const canArchive = computed(
   () =>
     !!detail.value &&

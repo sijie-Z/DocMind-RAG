@@ -580,6 +580,50 @@ describe('归档出口（Batch 7）', () => {
     expect(items[0].text()).toContain('起算条件')
   })
 
+  it('ready + 已分析且无异常 → 待决策；ready + unidentified → 需人工复核（不被 ready 分支吞掉）', async () => {
+    const base = makeDetail()
+    api.get.mockResolvedValue({ data: { data: makeDetail({ status: 'ready' }) } } as never)
+    const clean = mountDetail()
+    await flushPromises()
+    expect(clean.find('[data-testid="review-conclusion"]').text()).toContain('待决策')
+
+    api.get.mockResolvedValue({
+      data: {
+        data: makeDetail({
+          status: 'ready',
+          items: [{ ...base.items[0], change_type: 'unidentified', status: 'pending' }]
+        })
+      }
+    } as never)
+    const unidentified = mountDetail()
+    await flushPromises()
+    const banner = unidentified.find('[data-testid="review-conclusion"]').text()
+    expect(banner).toContain('需人工复核')
+    expect(banner).toContain('无法判定')
+    expect(banner).not.toContain('待决策')
+  })
+
+  it('completed 仍在横幅中如实披露待人工/无法判定计数', async () => {
+    const base = makeDetail()
+    api.get.mockResolvedValue({
+      data: {
+        data: makeDetail({
+          status: 'completed',
+          items: [
+            { ...base.items[0], status: 'needs_human', change_type: 'modified' },
+            { ...base.items[0], id: 'item-2', item_key: 'start_condition', ordinal: 2, status: 'pending', change_type: 'unidentified' }
+          ]
+        })
+      }
+    } as never)
+    const wrapper = mountDetail()
+    await flushPromises()
+    const banner = wrapper.find('[data-testid="review-conclusion"]').text()
+    expect(banner).toContain('核验完成')
+    expect(banner).toContain('待人工确认')
+    expect(banner).toContain('无法判定')
+  })
+
   it('版本条默认折叠，展开后显示文件名', async () => {
     api.get.mockResolvedValue({ data: { data: makeDetail() } } as never)
     const wrapper = mountDetail()

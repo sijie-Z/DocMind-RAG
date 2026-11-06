@@ -1527,7 +1527,7 @@ export default {
     summaryNeedsHumanHint: '{count} 项待人工确认',
     summaryInsufficientHint: '{count} 项证据不足或解析失败',
     summaryCompleted: '核验完成',
-    summaryCompletedHint: '所有核验项已决策，可导出核验单',
+    summaryCompletedHint: '已生成导出快照，可在导出历史中下载',
     summaryProgress: '已处理 {done}/{total} 项',
     summaryChanged: '{count} 处差异',
     filterAllItems: '全部',

@@ -86,7 +86,7 @@
 
         <template v-else-if="rows.length > 0">
           <!-- 移动端：卡片列表（<768），避免宽表格被压成竖排 -->
-          <div class="space-y-3 lg:hidden">
+          <div v-if="isCompact" class="space-y-3">
             <div
               v-for="row in rows"
               :key="row.id"
@@ -138,7 +138,7 @@
           </div>
 
           <!-- 桌面端：表格 -->
-          <div class="hidden lg:block">
+          <div v-else>
             <n-data-table
               :columns="columns"
               :data="rows"
@@ -426,6 +426,8 @@ watch(
 
 onMounted(() => {
   applyQueryState()
+  // 非法 query 回退后规范化 URL（bogus -> 默认值），避免刷新后继续带着无效参数。
+  syncQuery()
   window.addEventListener('resize', handleResize)
   void load()
 })

@@ -1519,7 +1519,7 @@ export default {
     summaryNeedsHumanHint: '{count} item(s) waiting for a decision',
     summaryInsufficientHint: '{count} item(s) with insufficient evidence or parse failure',
     summaryCompleted: 'Review complete',
-    summaryCompletedHint: 'All items decided; the review report can be exported',
+    summaryCompletedHint: 'Export snapshot generated; download it from the export history',
     summaryProgress: 'Decided {done}/{total}',
     summaryChanged: '{count} change(s)',
     filterAllItems: 'All',

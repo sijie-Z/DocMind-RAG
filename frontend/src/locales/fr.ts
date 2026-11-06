@@ -1447,7 +1447,7 @@ export default {
     summaryNeedsHumanHint: '{count} point(s) en attente de décision',
     summaryInsufficientHint: '{count} point(s) avec preuves insuffisantes ou échec d’analyse',
     summaryCompleted: 'Revue terminée',
-    summaryCompletedHint: 'Tous les points sont décidés ; le rapport peut être exporté',
+    summaryCompletedHint: 'Instantané d’export généré ; téléchargez-le depuis l’historique des exports',
     summaryProgress: 'Traités {done}/{total}',
     summaryChanged: '{count} écart(s)',
     filterAllItems: 'Tous',
