@@ -4,12 +4,18 @@
     class="markdown-body prose dark:prose-invert max-w-none text-sm leading-relaxed"
     :class="{ 'whitespace-pre-wrap': streaming }"
     v-html="renderedContent"
+    @click="handleCitationClick"
+    @keydown="handleCitationKeydown"
   ></div>
 </template>
 
 <script setup lang="ts">
 import { computed, onMounted, nextTick, watch, ref } from 'vue'
-import { renderMarkdownFull, renderMarkdownStreaming } from '@/utils/markdownRenderer'
+import {
+  renderMarkdownFull,
+  renderMarkdownStreaming,
+  renderMarkdownWithCitations,
+} from '@/utils/markdownRenderer'
 import 'highlight.js/styles/github-dark.css'
 import 'katex/dist/katex.min.css'
 import i18n from '@/locales'
@@ -18,9 +24,35 @@ interface Props {
   content: string
   /** 流式生成中：中间态走纯文本轻量渲染，终态再一次性做完整 Markdown+DOMPurify（E3） */
   streaming?: boolean
+  /** 聊天回答：把正文里的 [n] 渲染为可点击引用并在点击时 emit citation */
+  citations?: boolean
 }
 
-const props = withDefaults(defineProps<Props>(), { streaming: false })
+const props = withDefaults(defineProps<Props>(), { streaming: false, citations: false })
+
+const emit = defineEmits<{
+  citation: [index: number]
+}>()
+
+const citationIndexFromEvent = (target: EventTarget | null): number | null => {
+  const element = (target as HTMLElement | null)?.closest?.('[data-citation-index]')
+  if (!element || !rootEl.value?.contains(element)) return null
+  const index = Number((element as HTMLElement).dataset.citationIndex)
+  return Number.isInteger(index) && index > 0 ? index : null
+}
+
+const handleCitationClick = (event: MouseEvent) => {
+  const index = citationIndexFromEvent(event.target)
+  if (index !== null) emit('citation', index)
+}
+
+const handleCitationKeydown = (event: KeyboardEvent) => {
+  if (event.key !== 'Enter' && event.key !== ' ') return
+  const index = citationIndexFromEvent(event.target)
+  if (index === null) return
+  event.preventDefault()
+  emit('citation', index)
+}
 
 // 组件根节点：代码块复制按钮的定位范围（替代原全文档 querySelectorAll 扫描）
 const rootEl = ref<HTMLElement | null>(null)
@@ -33,16 +65,21 @@ const renderedContent = computed(() => {
   // E3：流式中间态轻量渲染（纯文本）——原实现每个 chunk 对全量累积内容跑一次
   // Markdown+hljs+DOMPurify，累计 O(n²)；完整渲染改到终态一次（streaming=false）。
   if (props.streaming) return renderMarkdownStreaming(props.content)
-  const cached = contentCache.get(props.content)
+  const cacheKey = `${props.citations ? 'cite:' : ''}${props.content}`
+  const cached = contentCache.get(cacheKey)
   if (cached) return cached
 
-  const sanitized = renderMarkdownFull(props.content)
+  const sanitized = props.citations
+    ? renderMarkdownWithCitations(props.content, (index) =>
+        i18n.global.t('chat.viewSource', { n: index })
+      )
+    : renderMarkdownFull(props.content)
 
   if (contentCache.size >= MAX_CACHE_SIZE) {
     const firstKey = contentCache.keys().next().value
     if (firstKey !== undefined) contentCache.delete(firstKey)
   }
-  contentCache.set(props.content, sanitized)
+  contentCache.set(cacheKey, sanitized)
   return sanitized
 })
 
@@ -83,8 +120,8 @@ onMounted(() => {
   addCopyButtons()
 })
 
-// 当内容更新时，重新添加复制按钮
-watch(() => props.content, () => {
+// 内容/渲染模式变化时重建复制按钮（v-html 重渲染会清掉动态按钮）
+watch(renderedContent, () => {
   nextTick(() => {
     addCopyButtons()
   })
@@ -137,6 +174,38 @@ watch(() => props.content, () => {
 
 .copy-btn[data-state="copied"] {
   color: #10b981;
+}
+
+/* 引用角标：聊天回答里的 [n]，点击/Enter 打开对应来源。
+   垂直 padding 扩大命中区但不撑行高；相邻角标留 2px 间距。 */
+.markdown-body .chat-citation {
+  color: #1d4ed8;
+  cursor: pointer;
+  font-size: 0.72em;
+  font-weight: 600;
+  line-height: 1;
+  padding: 0.35em 0.2em;
+  margin: 0 2px;
+  vertical-align: super;
+  border-radius: 2px;
+}
+.markdown-body .chat-citation:hover {
+  background: rgba(37, 99, 235, 0.12);
+}
+.markdown-body .chat-citation:focus-visible {
+  outline: 2px solid #2563eb;
+  outline-offset: 2px;
+}
+.dark .markdown-body .chat-citation {
+  color: #60a5fa;
+}
+.dark .markdown-body .chat-citation:focus-visible {
+  outline-color: #60a5fa;
+}
+@media (pointer: coarse) {
+  .markdown-body .chat-citation {
+    padding: 0.6em 0.3em;
+  }
 }
 
 /* KaTeX 修正 */

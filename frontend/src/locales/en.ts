@@ -315,6 +315,7 @@ export default {
     sseMode: 'SSE Mode (enterprise firewall compatible)',
     // Message sources
     sourcesLabel: 'Sources:',
+    viewSource: 'View source {n}',
     demoData: 'Demo data',
     unknownDoc: 'Unknown Document',
     noPreview: 'No Preview Available',

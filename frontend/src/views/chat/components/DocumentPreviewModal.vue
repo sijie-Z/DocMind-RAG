@@ -197,7 +197,7 @@ watch(
   min-height: 0;
   overflow: hidden;
 }
-@media (max-width: 767.98px) {
+@media (max-width: 1023.98px) {
   .docmind-preview-modal .n-card-header__close {
     width: 44px;
     height: 44px;

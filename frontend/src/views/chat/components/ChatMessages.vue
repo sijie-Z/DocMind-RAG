@@ -118,7 +118,13 @@
                     >{{ message.thinking }}</div>
                   </div>
                   <!-- E3：最后一条流式消息标记 streaming —— 中间态轻量渲染，终态一次完整 Markdown -->
-                  <Markdown :content="message.content" :streaming="isLoading && index === messages.length - 1" />
+                  <!-- 引用角标：回答正文里的 [n] 映射到 message.sources[n-1]，点击打开原文 -->
+                  <Markdown
+                    :content="message.content"
+                    :streaming="isLoading && index === messages.length - 1"
+                    :citations="message.messageType === 'assistant' && (message.sources?.length ?? 0) > 0"
+                    @citation="handleCitation(message, $event)"
+                  />
                   <span
                     v-if="isLoading && index === messages.length - 1"
                     class="inline-block w-0.5 h-4 bg-slate-500 dark:bg-slate-400 ml-0.5 align-middle animate-blink"
@@ -322,7 +328,7 @@ import RetryHintLine from '@/components/agent/RetryHintLine.vue'
 import RunReportBlock from '@/components/agent/RunReportBlock.vue'
 import type { ChatMessage, KnowledgeSource } from '@/types/chat'
 import type { AgentEvent } from '@/types/agent'
-import { citationRank } from '../utils/citations'
+import { citationRank, findSourceByCitation } from '../utils/citations'
 
 const { t } = useI18n()
 
@@ -378,7 +384,7 @@ function sourceScoreText(source: KnowledgeSource, index: number | string): strin
   return t('chat.rankPosition', { rank: source.rank ?? Number(index) + 1 })
 }
 
-defineEmits<{
+const emit = defineEmits<{
   scroll: []
   scrollToBottom: [behavior: ScrollBehavior, force?: boolean]
   useSuggestion: [suggestion: { title: string; desc: string }]
@@ -387,6 +393,12 @@ defineEmits<{
   regenerate: [msg: ChatMessage]
   openSource: [source: KnowledgeSource]
 }>()
+
+/** 正文引用 [n] → 按原始 rank 找来源（终态 sources 可能只保留被引用项）。 */
+const handleCitation = (message: ChatMessage, index: number) => {
+  const source = findSourceByCitation(message.sources ?? [], index)
+  if (source) emit('openSource', source)
+}
 </script>
 
 <style scoped>

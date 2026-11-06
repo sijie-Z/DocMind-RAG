@@ -293,6 +293,7 @@ export default {
     orgPrivacyDisabled: 'Le mode confidentialité est désactivé par la politique de l’organisation',
     sseMode: 'Mode SSE (compatible pare-feu d\'entreprise)',
     sourcesLabel: 'Sources :',
+    viewSource: 'Voir la source {n}',
     unknownDoc: 'Document inconnu',
     noPreview: 'Aperçu indisponible',
     // issue #185 : score de classement affiché en position ; seul le score absolu
