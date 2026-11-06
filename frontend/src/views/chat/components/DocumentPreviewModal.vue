@@ -60,8 +60,15 @@
 
       <div class="flex-1 overflow-y-auto pr-2 scrollbar-thin">
         <n-skeleton v-if="loading" :repeat="10" />
-        <div v-else-if="content" class="markdown-body text-sm leading-relaxed p-2 whitespace-pre-wrap">
-          {{ content }}
+        <div v-else-if="content" ref="contentEl" class="markdown-body text-sm leading-relaxed p-2 whitespace-pre-wrap">
+          <template v-for="(segment, index) in contentSegments" :key="index">
+            <mark
+              v-if="segment.focus"
+              data-testid="chat-preview-focus"
+              class="rounded-sm bg-amber-200/70 px-0.5 text-inherit dark:bg-amber-400/30"
+            >{{ segment.text }}</mark>
+            <template v-else>{{ segment.text }}</template>
+          </template>
         </div>
         <n-empty v-else :description="t('chat.noContent')" />
       </div>
@@ -94,7 +101,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { DocumentContent } from '@/api/knowledge'
 
@@ -122,6 +129,8 @@ const props = defineProps<{
   textProvenance?: DocumentContent['text_provenance']
   /** 服务端读取有界：true 时 content 不是全文。 */
   truncated?: boolean
+  /** 引用命中的分块原文：在全文里高亮并滚动到该处；找不到时安静降级。 */
+  focusText?: string
   downloadLoading?: boolean
   downloadError?: string
 }>()
@@ -135,4 +144,37 @@ const show = computed({
   get: () => props.show,
   set: (val) => emit('update:show', val)
 })
+
+const contentEl = ref<HTMLElement | null>(null)
+
+interface ContentSegment {
+  text: string
+  focus: boolean
+}
+
+const contentSegments = computed<ContentSegment[]>(() => {
+  const text = props.content || ''
+  const raw = props.focusText || ''
+  // 优先按原文匹配；服务端若返回带首尾空白的块文本，再退一步用 trim 后的形态。
+  const needle = [raw, raw.trim()].find((candidate) => candidate && text.includes(candidate)) || ''
+  if (!needle) return [{ text, focus: false }]
+  const index = text.indexOf(needle)
+  return [
+    { text: text.slice(0, index), focus: false },
+    { text: text.slice(index, index + needle.length), focus: true },
+    { text: text.slice(index + needle.length), focus: false }
+  ].filter((segment) => segment.text.length > 0)
+})
+
+watch(
+  [() => props.show, () => props.content, () => props.focusText, () => props.loading],
+  async () => {
+    if (!props.show) return
+    await nextTick()
+    contentEl.value
+      ?.querySelector<HTMLElement>('[data-testid="chat-preview-focus"]')
+      ?.scrollIntoView({ block: 'center', behavior: 'smooth' })
+  },
+  { flush: 'post' }
+)
 </script>

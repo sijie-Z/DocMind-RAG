@@ -11,8 +11,8 @@
  */
 import { describe, it, expect } from 'vitest'
 import { apiUnwrap } from '@/utils/apiUnwrap'
-import { getDocumentDetail, getDocumentContent } from '@/api/knowledge'
-import type { DocumentDetail, DocumentContent } from '@/api/knowledge'
+import { getDocumentDetail, getDocumentChunk, getDocumentContent } from '@/api/knowledge'
+import type { DocumentChunkPreview, DocumentDetail, DocumentContent } from '@/api/knowledge'
 
 /** 真机响应对象的最小化身（axios 响应挂 status/statusText/headers）。 */
 const respOf = <B>(body: B) => ({ data: body, status: 200, statusText: 'OK', headers: {}, config: {} })
@@ -87,5 +87,21 @@ describe('documents 响应形状契约 · 形态② {success, data}', () => {
   it('迁移等价性：既有视图路径 response.data?.data 与 apiUnwrap(response) 恒等', () => {
     const resp = respOf(REAL_DETAIL_BODY)
     expect(apiUnwrap(resp)).toBe(resp.data.data)
+  })
+
+  it('分块预览：模块导出面与 {success,data} 形状锚点（chunk 定位契约）', () => {
+    expect(typeof getDocumentChunk).toBe('function')
+    const chunk: DocumentChunkPreview = {
+      chunk_id: 'chunk-1',
+      chunk_index: 2,
+      page_number: 3,
+      text: '命中片段',
+      text_provenance: 'parser_original',
+      start_pos: 10,
+      end_pos: 14,
+      section_title: null
+    }
+    expect(apiUnwrap(respOf({ success: true, data: chunk }))).toBe(chunk)
+    expect(chunk.text_provenance).toBe('parser_original')
   })
 })

@@ -50,10 +50,12 @@ OTHER_ORG_DOC_ID = "doc-rbac-other-1"
 CONTENT_TEXT = "RBAC read body"
 
 DOC_PATH = f"/api/v1/documents/{DOC_ID}"
+CHUNK_PATH = f"{DOC_PATH}/chunk?chunk_id=chunk-rbac-1"
 DOC_PATHS = (
     DOC_PATH,
     f"{DOC_PATH}/content",
     f"{DOC_PATH}/download-url",
+    CHUNK_PATH,
     f"{DOC_PATH}/download",
 )
 OTHER_ORG_DOC_PATHS = tuple(path.replace(DOC_ID, OTHER_ORG_DOC_ID) for path in DOC_PATHS)
@@ -377,6 +379,11 @@ async def _assert_all_four_readable(env, headers: dict[str, str]) -> None:
     content = await env.client.get(f"{DOC_PATH}/content", headers=headers)
     assert content.status_code == 200, content.text
     assert CONTENT_TEXT in content.json()["data"]["content"]
+
+    chunk = await env.client.get(CHUNK_PATH, headers=headers)
+    assert chunk.status_code == 200, chunk.text
+    assert chunk.json()["data"]["chunk_id"] == "chunk-rbac-1"
+    assert chunk.json()["data"]["text"] == CONTENT_TEXT
 
     url_response = await env.client.get(f"{DOC_PATH}/download-url", headers=headers)
     assert url_response.status_code == 200, url_response.text

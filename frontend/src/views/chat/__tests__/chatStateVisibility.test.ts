@@ -76,6 +76,7 @@ vi.mock('@/api/knowledge', () => ({
   getKnowledgeBase: vi.fn().mockResolvedValue({ data: { data: { status: 'indexed' } } }),
   getDocumentDetail: vi.fn().mockResolvedValue({ data: { data: {} } }),
   getDocumentContent: vi.fn().mockResolvedValue({ data: { data: {} } }),
+  getDocumentChunk: vi.fn(),
 }))
 
 import ChatMessages from '../components/ChatMessages.vue'

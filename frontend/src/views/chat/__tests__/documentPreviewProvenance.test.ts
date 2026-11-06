@@ -78,3 +78,32 @@ describe('DocumentPreviewModal 原文口径提示', () => {
     expect(full.find('[data-testid="chat-preview-truncated"]').exists()).toBe(false)
   })
 })
+
+describe('DocumentPreviewModal 引用分块定位', () => {
+  it('focusText 命中时高亮该片段，正文其余部分保持可见', async () => {
+    const wrapper = await mountModal({
+      textProvenance: 'parser_original',
+      content: '前文。命中片段。后文。',
+      focusText: '命中片段。'
+    })
+
+    const mark = wrapper.find('[data-testid="chat-preview-focus"]')
+    expect(mark.exists()).toBe(true)
+    expect(mark.text()).toBe('命中片段。')
+    // 高亮不改变正文内容（不丢前文/后文）。
+    expect(wrapper.text()).toContain('前文。命中片段。后文。')
+  })
+
+  it('focusText 不在正文（截断或旧数据）：安静降级，不高亮不报错', async () => {
+    const wrapper = await mountModal({ content: '正文内容', focusText: '找不到的片段' })
+
+    expect(wrapper.find('[data-testid="chat-preview-focus"]').exists()).toBe(false)
+    expect(wrapper.text()).toContain('正文内容')
+  })
+
+  it('块文本带首尾空白时退回 trim 形态仍能定位', async () => {
+    const wrapper = await mountModal({ content: '甲 命中 乙', focusText: '\n命中\n' })
+
+    expect(wrapper.find('[data-testid="chat-preview-focus"]').text()).toBe('命中')
+  })
+})

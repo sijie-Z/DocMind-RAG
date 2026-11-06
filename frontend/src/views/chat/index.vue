@@ -6,6 +6,7 @@
     :content="previewContent"
     :text-provenance="previewProvenance"
     :truncated="previewTruncated"
+    :focus-text="previewFocusText"
     :download-loading="downloadLoading"
     :download-error="downloadError"
     @download="handleDownload"
@@ -154,8 +155,8 @@ import { CloudUploadOutline, AlertCircleOutline, ArrowBackOutline } from '@vicon
 import { getConversationMessages, clearConversationMessages } from '@/api/chat'
 import { getOrganizationSettings } from '@/api/organization'
 import type { Conversation } from '@/api/conversation'
-import { getDocumentDetail, getDocumentContent, getDocumentDownloadUrl } from '@/api/knowledge'
-import type { DocumentContent, DocumentDetail, DocumentDownloadUrl } from '@/api/knowledge'
+import { getDocumentDetail, getDocumentContent, getDocumentChunk, getDocumentDownloadUrl } from '@/api/knowledge'
+import type { DocumentContent, DocumentDetail, DocumentDownloadUrl, DocumentChunkPreview } from '@/api/knowledge'
 import type { ChatMessage, KnowledgeSource } from '@/types/chat'
 import { getToken } from '@/utils/auth'
 
@@ -659,6 +660,8 @@ const previewDoc = ref<{
   suggested_tags?: string[]
 } | undefined>(undefined)
 const previewContent = ref('')
+// 引用块原文：拿到后在全文预览里高亮并滚动到该处；拿不到就保持普通全文预览。
+const previewFocusText = ref('')
 // 预览原文口径：legacy/mixed 与截断都必须在弹窗可见，不能把可能含生成摘要
 // 的旧文本静默当成原文。
 const previewProvenance = ref<DocumentContent['text_provenance'] | undefined>(undefined)
@@ -738,6 +741,7 @@ const handleOpenSource = async (source: KnowledgeSource) => {
   const docId = source?.documentId
   if (docId === undefined || docId === null || docId === '') return
   const id = String(docId)
+  const chunkId = typeof source?.chunkId === 'string' ? source.chunkId : ''
   const requestSeq = ++previewRequestSeq
   const ownsRequest = () => requestSeq === previewRequestSeq
   resetDownloadState()
@@ -745,16 +749,24 @@ const handleOpenSource = async (source: KnowledgeSource) => {
   previewLoading.value = true
   previewDoc.value = { id, filename: source.filename }
   previewContent.value = ''
+  previewFocusText.value = ''
   previewProvenance.value = undefined
   previewTruncated.value = false
+  // chunk 定位是增强能力：失败（404/旧消息无 chunk/文档在 ES-only）只降级为
+  // 普通全文预览，不能让整个预览打不开。
+  const chunkRequest = chunkId
+    ? getDocumentChunk(id, chunkId, { silent: true }).catch(() => null)
+    : Promise.resolve(null)
   try {
-    const [docRes, contentRes] = await Promise.all([
+    const [docRes, contentRes, chunkRes] = await Promise.all([
       getDocumentDetail(id),
       getDocumentContent(id),
+      chunkRequest,
     ])
     if (!ownsRequest()) return
     const doc = (docRes?.data as { data?: DocumentDetail } | undefined)?.data
     const contentData = (contentRes?.data as { data?: DocumentContent } | undefined)?.data
+    const chunkData = (chunkRes?.data as { data?: DocumentChunkPreview } | undefined)?.data
     previewDoc.value = {
       id,
       title: doc?.title,
@@ -769,6 +781,9 @@ const handleOpenSource = async (source: KnowledgeSource) => {
       suggested_tags: contentData?.suggested_tags,
     }
     previewContent.value = contentData?.content || ''
+    // 分块原文用于在全文里高亮定位；若正文是 legacy/mixed，弹窗会照常
+    // 显示原文缺失警告，不会把生成摘要伪装成原文。
+    previewFocusText.value = chunkData?.text || ''
     previewProvenance.value = contentData?.text_provenance
     previewTruncated.value = contentData?.truncated === true
   } catch {

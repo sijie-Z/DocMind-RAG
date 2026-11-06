@@ -54,6 +54,7 @@ vi.mock('@/api/knowledge', () => ({
   getKnowledgeBase: vi.fn().mockResolvedValue({ data: { data: { status: 'indexed' } } }),
   getDocumentDetail: vi.fn(),
   getDocumentContent: vi.fn(),
+  getDocumentChunk: vi.fn(),
 }))
 
 import ChatPage from '../index.vue'

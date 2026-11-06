@@ -60,6 +60,90 @@ class DocumentPreviewText:
     truncated: bool
 
 
+@dataclass(frozen=True)
+class DocumentChunkPreview:
+    """按 chunk 取回的单块预览；文本口径与全文预览完全一致。"""
+
+    chunk_id: str
+    chunk_index: int
+    page_number: int | None
+    text: str
+    text_provenance: str
+    start_pos: int | None
+    end_pos: int | None
+    section_title: str | None
+
+
+def normalize_chunk_id(document_id: str, chunk_id: str) -> str:
+    """兼容两种 chunk id 语义。
+
+    worker 写入 ES 的 ``_id`` 是 ``{document_id}_{chunk_id}``，检索层把它当
+    来源 ``chunkId`` 下发；seed/Agent 路径则可能是原始 DB UUID。两者都接受，
+    但只去掉与本文档匹配的前缀，绝不跨文档猜测。
+    """
+    value = (chunk_id or "").strip()
+    prefix = f"{document_id}_"
+    if value.startswith(prefix):
+        return value[len(prefix) :]
+    return value
+
+
+async def load_document_chunk(
+    db: AsyncSession, document_id: str, chunk_id: str
+) -> DocumentChunkPreview | None:
+    """按 chunk id 读取单块预览；DB 无行时返回 None（调用方降级到全文预览）。
+
+    必须同时按 ``document_id`` 过滤：只按 chunk id 查会让跨文档/跨租户的
+    chunk id 泄露原文（调用方已做文档归属校验，这里再收紧一层）。
+    """
+    normalized = normalize_chunk_id(document_id, chunk_id)
+    if not normalized:
+        return None
+    row = (
+        await db.execute(
+            select(
+                DocumentChunk.id,
+                DocumentChunk.chunk_index,
+                DocumentChunk.original_text,
+                DocumentChunk.chunk_text,
+                DocumentChunk.meta_data,
+                DocumentChunk.page_number,
+                DocumentChunk.start_pos,
+                DocumentChunk.end_pos,
+                DocumentChunk.section_title,
+            ).where(
+                DocumentChunk.document_id == document_id,
+                DocumentChunk.id == normalized,
+            )
+        )
+    ).first()
+    if row is None:
+        return None
+    (
+        row_id,
+        chunk_index,
+        original_text,
+        chunk_text,
+        meta_data,
+        page_number,
+        start_pos,
+        end_pos,
+        section_title,
+    ) = row
+    return DocumentChunkPreview(
+        chunk_id=row_id,
+        chunk_index=chunk_index,
+        page_number=page_number,
+        text=_preview_chunk_text(original_text, chunk_text, meta_data),
+        text_provenance=(
+            PARSER_ORIGINAL if _is_original(original_text, meta_data) else LEGACY_UNVERIFIED
+        ),
+        start_pos=start_pos,
+        end_pos=end_pos,
+        section_title=section_title,
+    )
+
+
 async def load_document_preview_text(db: AsyncSession, document_id: str) -> DocumentPreviewText:
     """读取文档预览正文；先 DB（权威分块行），DB 无行时才回退 ES。"""
     total = (
@@ -257,9 +341,12 @@ def _es_chunk_index(hit: dict) -> int:
 
 __all__ = [
     "DocumentPreviewText",
+    "DocumentChunkPreview",
     "PARSER_ORIGINAL",
     "LEGACY_UNVERIFIED",
     "TEXT_PROVENANCE_NONE",
     "TEXT_PROVENANCE_MIXED",
     "load_document_preview_text",
+    "load_document_chunk",
+    "normalize_chunk_id",
 ]

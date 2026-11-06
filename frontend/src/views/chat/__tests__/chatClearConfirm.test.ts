@@ -83,6 +83,7 @@ vi.mock('@/api/knowledge', () => ({
   getKnowledgeBase: vi.fn().mockResolvedValue({ data: { data: { status: 'indexed' } } }),
   getDocumentDetail: vi.fn(),
   getDocumentContent: vi.fn(),
+  getDocumentChunk: vi.fn(),
 }))
 
 // 真响应形状（chat.py:353-390）：两条消息，用于验证取消后消息不变
