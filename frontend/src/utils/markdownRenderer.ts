@@ -52,6 +52,63 @@ export function renderMarkdownFull(content: string): string {
   })
 }
 
+const CITATION_PATTERN = /\[(\d{1,3})\]/
+
+/**
+ * 聊天回答专用：在完整 Markdown 渲染后把正文里的 `[n]` 变成可点击引用。
+ *
+ * - 只处理文本节点；代码块/行内代码/链接/公式内的 `[n]` 原样保留；
+ * - 先 DOMPurify 再走 DOM，避免把未消毒 HTML 放进临时容器；
+ * - 输出再次消毒（role/tabindex/data-* 均为 DOMPurify 默认允许）。
+ */
+export function renderMarkdownWithCitations(content: string): string {
+  const sanitizeOptions = {
+    ADD_TAGS: ['math', 'semantics', 'mrow', 'mi', 'mo', 'mn', 'msup', 'mfrac'],
+    ADD_ATTR: ['xmlns', 'mathvariant'],
+  }
+  const safe = DOMPurify.sanitize(md.render(content), sanitizeOptions)
+  if (typeof document === 'undefined') return safe
+
+  const container = document.createElement('div')
+  container.innerHTML = safe
+  const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT, {
+    acceptNode(node) {
+      const parent = (node as Text).parentElement
+      if (!parent) return NodeFilter.FILTER_REJECT
+      if (parent.closest('pre, code, a, .katex, .katex-display, .copy-btn')) {
+        return NodeFilter.FILTER_REJECT
+      }
+      return CITATION_PATTERN.test((node as Text).nodeValue || '')
+        ? NodeFilter.FILTER_ACCEPT
+        : NodeFilter.FILTER_REJECT
+    },
+  })
+  const textNodes: Text[] = []
+  while (walker.nextNode()) textNodes.push(walker.currentNode as Text)
+
+  for (const node of textNodes) {
+    const parts = (node.nodeValue || '').split(/(\[\d{1,3}\])/)
+    if (parts.length < 2) continue
+    const fragment = document.createDocumentFragment()
+    for (const part of parts) {
+      const match = /^\[(\d{1,3})\]$/.exec(part)
+      if (!match) {
+        if (part) fragment.appendChild(document.createTextNode(part))
+        continue
+      }
+      const citation = document.createElement('sup')
+      citation.className = 'chat-citation'
+      citation.dataset.citationIndex = match[1]
+      citation.setAttribute('role', 'button')
+      citation.setAttribute('tabindex', '0')
+      citation.textContent = part
+      fragment.appendChild(citation)
+    }
+    node.parentNode?.replaceChild(fragment, node)
+  }
+  return DOMPurify.sanitize(container.innerHTML, sanitizeOptions)
+}
+
 /**
  * 流式中间态轻量渲染：纯文本（HTML 转义，配合 whitespace-pre-wrap 保留换行）。
  * 不做 Markdown 解析 / hljs / DOMPurify —— 输出无标签、无属性，注入面为零。

@@ -139,6 +139,58 @@ describe('W2-T7 · ChatMessages 来源卡冒泡 openSource', () => {
     expect(emitted, '点击来源卡必须冒泡 openSource（修前无任何处理）').toBeTruthy()
     expect(emitted![0][0]).toMatchObject({ documentId: 'doc-7', filename: '架构文档.pdf' })
   })
+
+  it('正文引用 [1] 点击 → openSource 携带 sources[0]（行内引用与来源卡同源）', async () => {
+    const msg: ChatMessage = {
+      id: 2,
+      content: '付款期限为 30 天[1]，另有例外。',
+      messageType: 'assistant',
+      conversationId: 1,
+      sources: [SOURCE],
+    }
+    const wrapper = mount(ChatMessages, {
+      props: { messages: [msg], isLoading: false, showBackToBottom: false, userAvatar: '', suggestions: [] },
+      global: {
+        plugins: [messagesI18n],
+        stubs: {
+          'n-icon': true, 'n-avatar': true, 'n-button': true,
+          'n-tooltip': true, 'n-tag': NTagStub, 'n-popover': NPopoverStub,
+        },
+      },
+    })
+
+    const citation = wrapper.find('.chat-citation')
+    expect(citation.exists()).toBe(true)
+    await citation.trigger('click')
+
+    expect(wrapper.emitted('openSource')?.[0][0]).toMatchObject({
+      documentId: 'doc-7',
+      filename: '架构文档.pdf',
+    })
+  })
+
+  it('引用序号越界：安静忽略，不冒泡 openSource', async () => {
+    const msg: ChatMessage = {
+      id: 3,
+      content: '只有一条来源[9]。',
+      messageType: 'assistant',
+      conversationId: 1,
+      sources: [SOURCE],
+    }
+    const wrapper = mount(ChatMessages, {
+      props: { messages: [msg], isLoading: false, showBackToBottom: false, userAvatar: '', suggestions: [] },
+      global: {
+        plugins: [messagesI18n],
+        stubs: {
+          'n-icon': true, 'n-avatar': true, 'n-button': true,
+          'n-tooltip': true, 'n-tag': NTagStub, 'n-popover': NPopoverStub,
+        },
+      },
+    })
+
+    await wrapper.find('.chat-citation').trigger('click')
+    expect(wrapper.emitted('openSource')).toBeUndefined()
+  })
 })
 
 // ── Part B：chat 页收到 openSource → 打开预览弹窗并拉取全文 ──────────────
