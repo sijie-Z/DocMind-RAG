@@ -12,13 +12,27 @@
           </p>
         </div>
         <div class="flex flex-wrap items-center gap-2">
+          <n-input
+            v-model:value="searchInput"
+            :placeholder="t('reviews.searchPlaceholder')"
+            :aria-label="t('reviews.searchLabel')"
+            clearable
+            class="reviews-search"
+            data-testid="reviews-search"
+            @update:value="scheduleSearch"
+            @keyup.enter="runSearchNow"
+          >
+            <template #prefix>
+              <n-icon class="text-slate-400"><SearchOutline /></n-icon>
+            </template>
+          </n-input>
           <n-select
             v-model:value="statusFilter"
             :options="statusOptions"
             :placeholder="t('reviews.allStatuses')"
             :aria-label="t('reviews.statusColumn')"
             clearable
-            class="reviews-filter w-40"
+            class="reviews-filter w-44"
             @update:value="applyFilter"
           />
           <n-select
@@ -123,6 +137,14 @@
                   <dd class="text-slate-700 dark:text-slate-300">{{ row.revised_version_label || '—' }}</dd>
                 </div>
                 <div class="col-span-2 flex justify-between gap-2">
+                  <dt>{{ t('reviews.progressColumn') }}</dt>
+                  <dd class="text-slate-700 dark:text-slate-300">{{ progressText(row) }}</dd>
+                </div>
+                <div class="col-span-2 flex justify-between gap-2">
+                  <dt>{{ t('reviews.diffSummary') }}</dt>
+                  <dd class="text-slate-700 dark:text-slate-300">{{ diffSummary(row) }}</dd>
+                </div>
+                <div class="col-span-2 flex justify-between gap-2">
                   <dt>{{ t('reviews.createdAt') }}</dt>
                   <dd class="text-slate-700 dark:text-slate-300">{{ formatDateTime(row.created_at) }}</dd>
                 </div>
@@ -145,6 +167,7 @@
               :bordered="false"
               :single-line="false"
               :row-props="rowProps"
+              :scroll-x="1120"
             />
           </div>
 
@@ -169,8 +192,8 @@
 import { computed, h, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
-import { NButton, NPagination, NTag } from 'naive-ui'
-import { DocumentTextOutline } from '@vicons/ionicons5'
+import { NButton, NInput, NPagination, NTag } from 'naive-ui'
+import { DocumentTextOutline, SearchOutline } from '@vicons/ionicons5'
 import { reviewsApi, type ReviewCaseStatus, type ReviewCaseSummary } from '@/api/reviews'
 import { apiUnwrap } from '@/utils/apiUnwrap'
 import { reasonsLabel } from './reviewReasons'
@@ -185,6 +208,10 @@ const total = ref(0)
 const loading = ref(false)
 const loadError = ref(false)
 const statusFilter = ref<ReviewCaseStatus | null>(null)
+const q = ref('')
+const searchInput = ref('')
+const statusCounts = ref<Record<string, number> | null>(null)
+let searchTimer: ReturnType<typeof setTimeout> | null = null
 const page = ref(1)
 const pageSize = 20
 const createVisible = ref(false)
@@ -197,8 +224,10 @@ const handleResize = () => { viewportWidth.value = window.innerWidth }
 const STATUS_VALUES: ReviewCaseStatus[] = ['blocked', 'ready', 'in_review', 'completed']
 const ARCHIVED_VALUES = ['active', 'archived', 'all'] as const
 
-// 归档视图本身有专属空态；只有状态筛选/翻页才显示「筛选无结果」。
-const hasActiveFilters = computed(() => statusFilter.value !== null || page.value > 1)
+// 归档视图本身有专属空态；状态筛选/搜索/翻页都要给「筛选无结果」出口。
+const hasActiveFilters = computed(
+  () => statusFilter.value !== null || q.value !== '' || page.value > 1
+)
 
 const statusLabel = computed<Record<ReviewCaseStatus, string>>(() => ({
   blocked: t('reviews.statusBlocked'),
@@ -218,10 +247,16 @@ const archivedOptions = computed(() => [
   { value: 'all', label: t('reviews.filterAll') }
 ])
 const statusOptions = computed(() =>
-  (Object.keys(statusLabel.value) as ReviewCaseStatus[]).map((value) => ({
-    value,
-    label: statusLabel.value[value]
-  }))
+  (Object.keys(statusLabel.value) as ReviewCaseStatus[]).map((value) => {
+    const count = statusCounts.value?.[value]
+    return {
+      value,
+      label:
+        typeof count === 'number'
+          ? `${statusLabel.value[value]} (${count})`
+          : statusLabel.value[value]
+    }
+  })
 )
 
 const dateFormatter = computed(
@@ -231,6 +266,23 @@ function formatDateTime(value?: string | null) {
   if (!value) return '—'
   const date = new Date(value)
   return Number.isNaN(date.getTime()) ? '—' : dateFormatter.value.format(date)
+}
+
+/** 已决策/总项数；没有核验项时显示 —，不伪装成 0/0 进度。 */
+function progressText(row: ReviewCaseSummary) {
+  if (!row.item_count) return '—'
+  return t('reviews.progressValue', { decided: row.decided_count ?? 0, total: row.item_count })
+}
+
+/** 分析前不报告差异数；分析后差异与未识别分开，未识别不并入差异。 */
+function diffSummary(row: ReviewCaseSummary) {
+  if (!row.item_count) return '—'
+  if (!row.all_analyzed) return t('reviews.notAnalyzed')
+  const parts = [t('reviews.diffCount', { n: row.changed_count ?? 0 })]
+  if (row.unidentified_count) {
+    parts.push(t('reviews.unidentifiedCount', { n: row.unidentified_count }))
+  }
+  return parts.join(' · ')
 }
 
 function readQueryState() {
@@ -243,7 +295,8 @@ function readQueryState() {
     : 'active'
   const parsedPage = Number.parseInt(String(query.page ?? '1'), 10)
   const pageValue = Number.isFinite(parsedPage) && parsedPage > 0 ? parsedPage : 1
-  return { status, archived, page: pageValue }
+  const qValue = typeof query.q === 'string' ? query.q.trim().slice(0, 200) : ''
+  return { status, archived, page: pageValue, q: qValue }
 }
 
 function applyQueryState() {
@@ -251,6 +304,8 @@ function applyQueryState() {
   statusFilter.value = state.status
   archivedFilter.value = state.archived
   page.value = state.page
+  q.value = state.q
+  searchInput.value = state.q
 }
 
 function syncQuery() {
@@ -261,6 +316,8 @@ function syncQuery() {
   else delete query.status
   if (archivedFilter.value !== 'active') query.archived = archivedFilter.value
   else delete query.archived
+  if (q.value) query.q = q.value
+  else delete query.q
   if (page.value > 1) query.page = String(page.value)
   else delete query.page
   // 测试/无路由替代实现下 replace 可能不存在；URL 同步失败不影响取数。
@@ -275,12 +332,18 @@ async function load() {
     const response = await reviewsApi.list({
       status: statusFilter.value ?? undefined,
       archived: archivedFilter.value,
+      ...(q.value ? { q: q.value } : {}),
       page: page.value,
       page_size: pageSize
     })
-    const data = apiUnwrap<{ items: ReviewCaseSummary[]; total?: number }>(response)
+    const data = apiUnwrap<{
+      items: ReviewCaseSummary[]
+      total?: number
+      status_counts?: Record<string, number>
+    }>(response)
     rows.value = data?.items ?? []
     total.value = data?.total ?? rows.value.length
+    statusCounts.value = data?.status_counts ?? null
   } catch {
     loadError.value = true
   } finally {
@@ -328,6 +391,19 @@ const columns = computed(() => [
               })
             ])
           : null
+      ])
+  },
+  {
+    title: t('reviews.progressColumn'),
+    key: 'progress',
+    render: (row: ReviewCaseSummary) =>
+      h('div', [
+        h(
+          'div',
+          { class: 'text-sm tabular-nums text-slate-700 dark:text-slate-300' },
+          progressText(row)
+        ),
+        h('div', { class: 'text-xs text-slate-500 dark:text-slate-400' }, diffSummary(row))
       ])
   },
   {
@@ -387,9 +463,36 @@ function applyFilter() {
   load()
 }
 
+function commitSearch() {
+  if (searchTimer) {
+    clearTimeout(searchTimer)
+    searchTimer = null
+  }
+  const next = searchInput.value.trim().slice(0, 200)
+  if (next === q.value) return
+  q.value = next
+  page.value = 1
+  syncQuery()
+  void load()
+}
+
+function scheduleSearch() {
+  if (searchTimer) clearTimeout(searchTimer)
+  searchTimer = setTimeout(() => {
+    searchTimer = null
+    commitSearch()
+  }, 300)
+}
+
+function runSearchNow() {
+  commitSearch()
+}
+
 function clearFilters() {
   statusFilter.value = null
   archivedFilter.value = 'active'
+  q.value = ''
+  searchInput.value = ''
   page.value = 1
   syncQuery()
   load()
@@ -412,13 +515,16 @@ watch(
     if (
       state.status === statusFilter.value &&
       state.archived === archivedFilter.value &&
-      state.page === page.value
+      state.page === page.value &&
+      state.q === q.value
     ) {
       return
     }
     statusFilter.value = state.status
     archivedFilter.value = state.archived
     page.value = state.page
+    q.value = state.q
+    searchInput.value = state.q
     void load()
   },
   { deep: true }
@@ -434,11 +540,27 @@ onMounted(() => {
 
 onUnmounted(() => {
   window.removeEventListener('resize', handleResize)
+  if (searchTimer) {
+    clearTimeout(searchTimer)
+    searchTimer = null
+  }
 })
 </script>
 
 <style scoped>
+.reviews-search {
+  width: 15rem;
+}
+.reviews-search :deep(.n-input__input-el) {
+  font-size: 14px;
+}
 @media (max-width: 1023.98px) {
+  .reviews-search {
+    width: 100%;
+  }
+  .reviews-search :deep(.n-input) {
+    --n-height: 44px !important;
+  }
   .review-card-open.n-button {
     height: 44px !important;
     min-width: 72px;
