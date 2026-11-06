@@ -38,6 +38,10 @@ import { useUserStore } from '@/stores/user'
 import type { UserInfo } from '@/types/user'
 import zh from '@/locales/zh'
 
+vi.mock('@/api/knowledge', () => ({
+  getKnowledgeBases: vi.fn().mockResolvedValue({ data: { success: true, data: { data: [], total: 0 } } })
+}))
+
 const mockedSearch = vi.mocked(searchKnowledgeResponse)
 
 const searchResponse = <T,>(results: T[]) => ({

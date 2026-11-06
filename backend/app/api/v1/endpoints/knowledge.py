@@ -105,14 +105,18 @@ async def _diagnose_document_scope(
     ids = [doc_id for doc_id in document_ids if isinstance(doc_id, str) and doc_id][:50]
     if not ids:
         return []
-    rows = (
-        await db.execute(
-            select(Document.id, Document.title, Document.status, Document.chunk_count).where(
-                Document.id.in_(ids),
-                Document.organization_id == organization_id,
+    try:
+        rows = (
+            await db.execute(
+                select(Document.id, Document.title, Document.status, Document.chunk_count).where(
+                    Document.id.in_(ids),
+                    Document.organization_id == organization_id,
+                )
             )
-        )
-    ).all()
+        ).all()
+    except Exception as e:  # noqa: BLE001 — 诊断失败不得把一次正常空结果变成 500
+        logger.warning("诊断所选文档状态失败: %s", e)
+        return []
     by_id = {row[0]: row for row in rows}
     scope: list[dict[str, Any]] = []
     for doc_id in ids:

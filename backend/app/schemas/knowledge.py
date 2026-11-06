@@ -6,7 +6,7 @@ from datetime import datetime
 from enum import Enum
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class SearchMode(str, Enum):
@@ -44,6 +44,14 @@ class KnowledgeSearchRequest(BaseModel):
     )
     # 检索自测：返回每臂候选/RRF/rerank/MMR 诊断（仅本次请求，不落库）。
     debug: bool = Field(False, description="是否返回检索诊断信息")
+
+    @field_validator("document_ids")
+    @classmethod
+    def validate_document_ids(cls, value: list[str] | None) -> list[str] | None:
+        """空字符串会关闭检索器的 terms filter —— 必须在入口拒绝，不能静默全库。"""
+        if value is not None and any(not item.strip() for item in value):
+            raise ValueError("document_ids 不能包含空字符串")
+        return value
 
 
 class SearchResult(BaseModel):

@@ -396,6 +396,7 @@ const searchError = ref<string | null>(null)
 // 文档范围选择（检索自测）
 const documentOptions = ref<Array<{ label: string; value: string }>>([])
 const documentLoading = ref(false)
+let documentSeq = 0
 
 const currentOrgId = computed(() => userStore.currentOrgId)
 
@@ -457,11 +458,15 @@ const getFileTypeIcon = (type?: string) => {
 }
 
 // 空结果诊断：先看所选文档状态，再看组织索引状态，最后才说「没匹配到」。
+// 'completed' 是状态词表收敛前的列表旧词（api/knowledge.ts），按已索引处理。
+const isIndexedStatus = (status?: string | null): boolean =>
+  status === 'indexed' || status === 'completed'
+
 const emptyState = computed<{ title: string; desc: string; scope?: SearchScopeItem[] }>(() => {
   const response = lastResponse.value
   if (!response) return { title: t('search.noResults'), desc: t('search.noResultsDesc') }
   const scope = response.document_scope ?? []
-  const notReady = scope.filter((item) => !item.found || item.status !== 'indexed')
+  const notReady = scope.filter((item) => !item.found || !isIndexedStatus(item.status))
   if (notReady.length) {
     return { title: t('search.docScopeTitle'), desc: t('search.docNotIndexed'), scope }
   }
@@ -482,7 +487,7 @@ const emptyState = computed<{ title: string; desc: string; scope?: SearchScopeIt
 
 const scopeStatusLabel = (item: SearchScopeItem): string => {
   if (!item.found) return t('search.docNotFound')
-  if (item.status === 'indexed') return t('search.docStatusIndexed')
+  if (isIndexedStatus(item.status)) return t('search.docStatusIndexed')
   if (item.status === 'failed') return t('search.docStatusFailed')
   return t('search.docStatusProcessing')
 }
@@ -553,21 +558,23 @@ const selectSuggestion = (s: string) => { searchQuery.value = s; suggestions.val
 
 const loadDocumentOptions = async (query = '') => {
   if (!currentOrgId.value) return
+  const seq = ++documentSeq
   documentLoading.value = true
   try {
     const response = await getKnowledgeBases(
       { page: 1, page_size: 20, search: query || undefined },
       { silent: true }
     )
+    if (seq !== documentSeq) return
     const payload = (response.data as unknown as { data?: { data?: KnowledgeBase[] } })?.data
     documentOptions.value = (payload?.data ?? []).map((doc) => ({
       value: doc.id,
-      label: `${doc.title || doc.file_name}${doc.status === 'indexed' ? '' : ` · ${scopeStatusLabel({ document_id: doc.id, found: true, status: doc.status })}`}`
+      label: `${doc.title || doc.file_name}${isIndexedStatus(doc.status) ? '' : ` · ${scopeStatusLabel({ document_id: doc.id, found: true, status: doc.status })}`}`
     }))
   } catch {
     // 文档选择器是增强能力：失败不影响检索本身。
   } finally {
-    documentLoading.value = false
+    if (seq === documentSeq) documentLoading.value = false
   }
 }
 

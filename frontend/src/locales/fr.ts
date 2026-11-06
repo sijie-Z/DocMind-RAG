@@ -847,7 +847,7 @@ export default {
     indexErrorDesc: "L'index de recherche est indisponible. Contactez un administrateur pour vérifier la configuration.",
     indexUnknown: "État de l'index inconnu",
     indexUnknownDesc: "Le diagnostic de l'index a échoué ; cela ne signifie pas que la base est vide.",
-    indexHasData: "L'index contient {count} segments, mais cette requête n'en a trouvé aucun",
+    indexHasData: "L'index de l'organisation contient {count} segments, mais cette requête n'en a trouvé aucun",
     docScopeTitle: 'Les documents sélectionnés ne sont pas prêts',
     docNotIndexed: "Certains documents sélectionnés ne sont pas indexés ou n'existent pas ; ils n'ont donc pas pu être recherchés.",
     docNotFound: 'Document absent ou inaccessible',

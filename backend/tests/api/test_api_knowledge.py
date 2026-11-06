@@ -556,6 +556,18 @@ class TestKnowledgeSearchSelfTest:
         assert body["index_doc_count"] == 12
         assert body["document_scope"] == scope
         mock_scope.assert_awaited_once()
+        # 诊断必须使用生效组织（普通用户不能借请求体 organization_id 越权）。
+        assert mock_scope.await_args.args[1] == 1
+
+    def test_empty_document_id_is_422(self, client: TestClient):
+        """空字符串会关闭检索 terms filter；必须在入口拒绝而不是静默全库检索。"""
+        r, mock_ks, _ = self._post(
+            client,
+            {"query": "x", "organization_id": 1, "document_ids": ["doc-1", "  "]},
+        )
+
+        assert r.status_code == 422
+        assert not mock_ks.search_knowledge_with_meta.called
 
     def test_too_many_document_ids_is_422(self, client: TestClient):
         r, _, _ = self._post(

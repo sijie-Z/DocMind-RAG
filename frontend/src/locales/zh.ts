@@ -904,7 +904,7 @@ export default {
     indexErrorDesc: '检索索引不可用，请联系管理员检查索引配置。',
     indexUnknown: '无法确认索引状态',
     indexUnknownDesc: '索引诊断失败；这不代表知识库没有内容。',
-    indexHasData: '索引中有 {count} 个分块，但本次没有命中',
+    indexHasData: '组织索引中有 {count} 个分块，但本次没有命中',
     docScopeTitle: '所选文档尚未就绪',
     docNotIndexed: '部分所选文档未完成索引或不存在，因此本次检索不到它们。',
     docNotFound: '文档不存在或无权访问',

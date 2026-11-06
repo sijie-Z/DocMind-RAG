@@ -898,7 +898,7 @@ export default {
     indexErrorDesc: 'The search index is unavailable. Contact an administrator to check the index configuration.',
     indexUnknown: 'Index status unknown',
     indexUnknownDesc: 'Index diagnostics failed; this does not mean the knowledge base is empty.',
-    indexHasData: 'The index has {count} chunks, but this query matched none',
+    indexHasData: 'The organization index has {count} chunks, but this query matched none',
     docScopeTitle: 'Selected documents are not ready',
     docNotIndexed: 'Some selected documents are not indexed or do not exist, so they could not be searched.',
     docNotFound: 'Document missing or inaccessible',

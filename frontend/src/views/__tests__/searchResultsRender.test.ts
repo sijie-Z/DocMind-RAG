@@ -52,6 +52,10 @@ vi.mock('vue-router', () => ({
   useRoute: () => ({ query: {} }),
 }))
 
+vi.mock('@/api/knowledge', () => ({
+  getKnowledgeBases: vi.fn().mockResolvedValue({ data: { success: true, data: { data: [], total: 0 } } })
+}))
+
 const mockedSearch = vi.mocked(searchKnowledgeResponse)
 
 const searchResponse = <T,>(results: T[]) => ({
