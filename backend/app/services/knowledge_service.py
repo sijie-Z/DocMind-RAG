@@ -119,11 +119,37 @@ class KnowledgeService:
     async def search_knowledge(
         self, query: str, organization_id: str | int, top_k: int = 5, search_mode: str | None = None
     ) -> list[dict[str, Any]]:
+        """搜索知识库（兼容入口：只要结果，不要诊断信息）。"""
+        results, _ = await self.search_knowledge_with_meta(
+            query=query,
+            organization_id=organization_id,
+            top_k=top_k,
+            search_mode=search_mode,
+            document_ids=None,
+            debug=False,
+        )
+        return results
+
+    async def search_knowledge_with_meta(
+        self,
+        query: str,
+        organization_id: str | int,
+        top_k: int = 5,
+        search_mode: str | None = None,
+        document_ids: list[str] | None = None,
+        debug: bool = False,
+    ) -> tuple[list[dict[str, Any]], dict[str, Any] | None]:
         """
         搜索知识库 - 统一使用 RagService 以获得更强能力
 
         search_mode（hybrid/vector/keyword）：显式覆盖本次检索臂组合；None = 自动
         路由（issue #225 决策 7A：此前该参数收下即丢弃，三层链路都不生效）。
+
+        document_ids：限定检索范围的文档 id（检索器已有 org + document_id 双重
+        filter）；None = 全组织。
+
+        debug：返回 pipeline 的检索诊断（每臂候选、RRF、rerank、MMR 等）。普通
+        ``search_knowledge`` 不带诊断，避免调用方（建议词等）承担额外载荷。
 
         W0-6：organization_id 必填，且必须是正整数组织 ID（0/None 不再兜底）。
         """
@@ -138,11 +164,13 @@ class KnowledgeService:
             # pipeline 返回 (results, debug_info) 元组，必须解包——issue #219：
             # 这里曾把元组当列表迭代，`isinstance(res, dict)` 把「hits 列表」和
             # `None` 两个元素全部跳过，本方法恒返回 []，REST 搜索端点永远搜不到东西。
-            results, _ = await rag_service.search_knowledge_base(
+            results, debug_info = await rag_service.search_knowledge_base(
                 query=query,
                 organization_id=org_id,
                 top_k=top_k,
+                document_ids=document_ids,
                 search_mode=search_mode,
+                debug=debug,
             )
 
             # 安全修复：移除检索结果全文日志（原 DEBUG 日志把文档内容写入日志文件，
@@ -175,6 +203,13 @@ class KnowledgeService:
                         # issue #197：PDF 页码必须在本层重建结果时继续搬运——
                         # 端点读的是本层输出，漏搬会让 /search 恒返回 null。
                         "page_number": res.get("page_number"),
+                        # 检索命中的分块身份：列表页用它做去重/深链，详情页用它
+                        # 回到原文；旧索引缺字段时为 None/[]。
+                        "chunk_id": res.get("chunk_id"),
+                        "chunk_index": res.get("chunk_index"),
+                        "section_title": res.get("section_title"),
+                        "clause_no": res.get("clause_no") or [],
+                        "section_no": res.get("section_no") or [],
                         # 同族缺陷：检索链路已计算的命中标记与改写计数也须搬运，
                         # 否则端点 `.get(..., False)` 恒读默认值（has_keyword 恒 false）。
                         "has_keyword": res.get("has_keyword"),
@@ -193,7 +228,7 @@ class KnowledgeService:
                         },
                     }
                 )
-            return formatted_results
+            return formatted_results, debug_info if debug else None
         except RetrievalUnavailableError:
             # issue #292：检索后端服务故障/超时不得回落成「没有相关内容」（假空数组）。
             # 原样上抛 —— /search 端点映射为 502（ExternalServiceError），
@@ -207,7 +242,7 @@ class KnowledgeService:
             raise
         except Exception as e:
             logger.error(f"Knowledge search failed: {e}")
-            return []
+            return [], None
 
     async def get_search_suggestions(
         self, query: str, organization_id: str, limit: int = 5

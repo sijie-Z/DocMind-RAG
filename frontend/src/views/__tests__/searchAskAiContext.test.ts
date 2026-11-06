@@ -25,20 +25,29 @@ vi.mock('@/api/search', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/api/search')>()
   return {
     ...actual,
-    searchKnowledge: vi.fn(),
+    searchKnowledgeResponse: vi.fn(),
     getSearchSuggestions: vi.fn().mockResolvedValue([]),
     getSearchStats: vi.fn().mockResolvedValue({ total_files: 2, file_types: {}, recent_searches: [] }),
   }
 })
 
 import SearchView from '../search.vue'
-import { searchKnowledge } from '@/api/search'
+import { searchKnowledgeResponse } from '@/api/search'
 import type { SearchResult } from '@/api/search'
 import { useUserStore } from '@/stores/user'
 import type { UserInfo } from '@/types/user'
 import zh from '@/locales/zh'
 
-const mockedSearch = vi.mocked(searchKnowledge)
+const mockedSearch = vi.mocked(searchKnowledgeResponse)
+
+const searchResponse = <T,>(results: T[]) => ({
+  query: '',
+  results,
+  total_count: results.length,
+  search_mode: 'hybrid',
+  index_status: 'ok' as const
+})
+
 
 // 真实响应结果项（抓包原文结构；text 截断）
 const REAL_RESULT: SearchResult = {
@@ -83,7 +92,7 @@ async function mountAt() {
 }
 
 async function searchAndOpenFirstCard(wrapper: Awaited<ReturnType<typeof mountAt>>['wrapper']) {
-  mockedSearch.mockResolvedValue([REAL_RESULT])
+  mockedSearch.mockResolvedValue(searchResponse([REAL_RESULT]))
   await wrapper.find('input').setValue('架构设计')
   const searchBtn = wrapper.findAll('button').find((b) => b.text().includes('搜索'))
   expect(searchBtn, '搜索按钮应在屏').toBeTruthy()

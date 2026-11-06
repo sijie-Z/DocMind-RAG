@@ -30,7 +30,7 @@ import { createPinia, setActivePinia } from 'pinia'
 import { NMessageProvider } from 'naive-ui'
 
 import SearchView from '../search.vue'
-import { searchKnowledge } from '@/api/search'
+import { searchKnowledgeResponse } from '@/api/search'
 import type { SearchResult } from '@/api/search'
 import { useUserStore } from '@/stores/user'
 import type { UserInfo } from '@/types/user'
@@ -41,7 +41,7 @@ vi.mock('@/api/search', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/api/search')>()
   return {
     ...actual,
-    searchKnowledge: vi.fn(),
+    searchKnowledgeResponse: vi.fn(),
     getSearchSuggestions: vi.fn().mockResolvedValue([]),
     getSearchStats: vi.fn().mockResolvedValue({ total_files: 2, file_types: {}, recent_searches: [] }),
   }
@@ -52,7 +52,16 @@ vi.mock('vue-router', () => ({
   useRoute: () => ({ query: {} }),
 }))
 
-const mockedSearch = vi.mocked(searchKnowledge)
+const mockedSearch = vi.mocked(searchKnowledgeResponse)
+
+const searchResponse = <T,>(results: T[]) => ({
+  query: '',
+  results,
+  total_count: results.length,
+  search_mode: 'hybrid',
+  index_status: 'ok' as const
+})
+
 
 // ── Fixtures ────────────────────────────────────────────────────────────
 // 真实响应结果项（抓包原文；text/snippet 为可读性截断，其余字段逐字保留）
@@ -130,7 +139,7 @@ function mountView() {
 }
 
 async function doSearch(wrapper: ReturnType<typeof mountView>, results: SearchResult[]) {
-  mockedSearch.mockResolvedValue(results)
+  mockedSearch.mockResolvedValue(searchResponse(results))
   await wrapper.find('input').setValue('架构')
   await wrapper.find('button').trigger('click')
   await flushPromises()
@@ -182,8 +191,71 @@ describe('SearchView · 结果渲染（P1-3 真实响应不崩）', () => {
     expect(findCard(wrapper, '最小形状正文').find('svg').exists()).toBe(true)
   })
 
-  it('详情模态（点开结果卡）：类型列推导为 MD、重排分 0.83、无 NaN/Invalid Date', async () => {
+  it('结果卡展示检索序位/页码/小节/命中构成（检索自测字段）', async () => {
     const wrapper = mountView()
+    await doSearch(wrapper, [{
+      ...REAL_RESULT,
+      rank: 2,
+      page_number: 4,
+      section_title: '付款条款',
+      has_keyword: true,
+      has_vector: false
+    }])
+
+    const text = wrapper.text()
+    expect(text).toContain('#2')
+    expect(text).toContain('页码 4')
+    expect(text).toContain('付款条款')
+    expect(text).toContain('关键词')
+    expect(text).not.toContain('向量')
+  })
+
+  it('空结果 + 索引为空：显示索引诊断而不是通用「未找到」', async () => {
+    const wrapper = mountView()
+    mockedSearch.mockResolvedValue({
+      query: '',
+      results: [],
+      total_count: 0,
+      search_mode: 'keyword',
+      index_status: 'empty_index',
+      index_doc_count: 0
+    })
+    await wrapper.find('input').setValue('合同')
+    await wrapper.find('button').trigger('click')
+    await flushPromises()
+    await nextTick()
+
+    expect(wrapper.text()).toContain('索引为空')
+    expect(wrapper.text()).toContain('还没有已索引内容')
+  })
+
+  it('空结果 + 所选文档未索引：列出文档状态', async () => {
+    const wrapper = mountView()
+    mockedSearch.mockResolvedValue({
+      query: '',
+      results: [],
+      total_count: 0,
+      search_mode: 'hybrid',
+      index_status: 'ok',
+      document_scope: [{
+        document_id: 'doc-1',
+        found: true,
+        title: '合同 A.txt',
+        status: 'pending',
+        chunk_count: 0
+      }]
+    })
+    await wrapper.find('input').setValue('合同')
+    await wrapper.find('button').trigger('click')
+    await flushPromises()
+    await nextTick()
+
+    expect(wrapper.text()).toContain('所选文档尚未就绪')
+    expect(wrapper.text()).toContain('合同 A.txt')
+    expect(wrapper.text()).toContain('处理中')
+  })
+
+  it('详情模态（点开结果卡）：类型列推导为 MD、重排分 0.83、无 NaN/Invalid Date', async () => {    const wrapper = mountView()
     await doSearch(wrapper, [REAL_RESULT])
 
     const card = findCard(wrapper, 'architecture.md')

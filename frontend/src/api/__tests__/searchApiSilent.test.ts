@@ -1,5 +1,5 @@
 /**
- * E14/D2 判别用例：searchKnowledge 必须带 X-Silent-Error。
+ * E14/D2 判别用例：searchKnowledgeResponse 必须带 X-Silent-Error。
  *
  * 搜索页失败时改为页面内联错误态（含重试）呈现；若请求不带 silent 头，
  * 响应拦截器会再弹一条全局 toast —— 同一失败出现两个提示表面。
@@ -13,7 +13,7 @@ vi.mock('@/utils/request', () => ({
   FIRST_SCREEN_REQUEST_CONFIG: {},
 }))
 
-import { searchKnowledge } from '../search'
+import { searchKnowledgeResponse } from '../search'
 
 beforeEach(() => {
   postMock.mockReset()
@@ -21,8 +21,8 @@ beforeEach(() => {
 })
 
 describe('search API · 错误提示单一表面', () => {
-  it('searchKnowledge 请求带 X-Silent-Error: 1（失败由页面内联错误态呈现）', async () => {
-    await searchKnowledge({ query: 'q', organization_id: 1 })
+  it('searchKnowledgeResponse 请求带 X-Silent-Error: 1（失败由页面内联错误态呈现）', async () => {
+    await searchKnowledgeResponse({ query: 'q', organization_id: 1 })
     expect(postMock).toHaveBeenCalledTimes(1)
     const [url, body, config] = postMock.mock.calls[0]
     expect(url).toBe('/knowledge/search')

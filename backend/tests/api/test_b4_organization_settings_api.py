@@ -293,8 +293,8 @@ async def test_search_top_k_uses_org_setting(api):
     with (
         _patched_permissions(),
         patch(
-            "app.api.v1.endpoints.knowledge.knowledge_service.search_knowledge",
-            new=AsyncMock(return_value=_fake_search_result()),
+            "app.api.v1.endpoints.knowledge.knowledge_service.search_knowledge_with_meta",
+            new=AsyncMock(return_value=(_fake_search_result(), None)),
         ) as mocked,
     ):
         r = await api.client.post(SEARCH, json={"query": "报销", "organization_id": 1})
@@ -307,8 +307,8 @@ async def test_search_top_k_falls_back_to_existing_default(api):
     with (
         _patched_permissions(),
         patch(
-            "app.api.v1.endpoints.knowledge.knowledge_service.search_knowledge",
-            new=AsyncMock(return_value=_fake_search_result()),
+            "app.api.v1.endpoints.knowledge.knowledge_service.search_knowledge_with_meta",
+            new=AsyncMock(return_value=(_fake_search_result(), None)),
         ) as mocked,
     ):
         r = await api.client.post(SEARCH, json={"query": "报销", "organization_id": 1})
@@ -325,8 +325,8 @@ async def test_search_explicit_top_k_wins_over_org_setting(api):
     with (
         _patched_permissions(),
         patch(
-            "app.api.v1.endpoints.knowledge.knowledge_service.search_knowledge",
-            new=AsyncMock(return_value=_fake_search_result()),
+            "app.api.v1.endpoints.knowledge.knowledge_service.search_knowledge_with_meta",
+            new=AsyncMock(return_value=(_fake_search_result(), None)),
         ) as mocked,
     ):
         r = await api.client.post(SEARCH, json={"query": "报销", "organization_id": 1, "top_k": 7})

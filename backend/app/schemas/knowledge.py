@@ -38,6 +38,12 @@ class KnowledgeSearchRequest(BaseModel):
     search_mode: SearchMode | None = Field(
         None, description="搜索模式；缺省（null）= 自动路由，显式值强制本次检索臂组合"
     )
+    # 检索自测：限定文档范围（检索器已有 org + document_id 双重 filter）。
+    document_ids: list[str] | None = Field(
+        None, max_length=50, description="限定检索的文档 id 列表；缺省 = 全组织"
+    )
+    # 检索自测：返回每臂候选/RRF/rerank/MMR 诊断（仅本次请求，不落库）。
+    debug: bool = Field(False, description="是否返回检索诊断信息")
 
 
 class SearchResult(BaseModel):
@@ -65,6 +71,13 @@ class SearchResult(BaseModel):
     fresh_factor: float | None = Field(None, description="新鲜度提升因子")
     # issue #197：PDF 来源页码（解析期页偏移 → chunk → ES 顶层字段逐层透传）
     page_number: int | None = Field(None, description="PDF 来源页码；非 PDF/旧索引为 null")
+    # 检索命中的分块身份（与聊天引用同源）：rank 为 1-based 检索序位。
+    rank: int | None = Field(None, description="1-based 检索序位")
+    chunk_id: str | None = Field(None, description="命中的分块 id；旧索引可能为 null")
+    chunk_index: int | None = Field(None, description="文档内分块序号")
+    section_title: str | None = Field(None, description="分块所属小节标题")
+    clause_no: list[int] = Field(default_factory=list, description="条款号")
+    section_no: list[str] = Field(default_factory=list, description="节号")
 
 
 class KnowledgeSearchResponse(BaseModel):
@@ -91,6 +104,14 @@ class KnowledgeSearchResponse(BaseModel):
             "仅在结果为空时诊断，其余情况为 null"
         ),
     )
+    # 检索自测回显：本次实际生效的 top_k / 文档范围；document_scope 仅在
+    # 结果为空且请求限定文档时返回，说明所选文档自身的索引状态。
+    effective_top_k: int | None = Field(None, description="本次实际生效的 top_k")
+    document_ids: list[str] | None = Field(None, description="本次限定的文档 id（回显）")
+    document_scope: list[dict[str, Any]] | None = Field(
+        None, description="所选文档的索引状态（仅在空结果且限定文档时返回）"
+    )
+    debug: dict[str, Any] | None = Field(None, description="检索诊断（仅 debug=true 时返回）")
 
 
 class SearchSuggestionResponse(BaseModel):
