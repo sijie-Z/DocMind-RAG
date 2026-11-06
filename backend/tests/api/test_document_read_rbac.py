@@ -249,6 +249,17 @@ async def default_env(monkeypatch):
             user_organization.insert().values(user_id=DEFAULT_USER_ID, organization_id=ORG_ID)
         )
         session.add(_document(DOC_ID, ORG_ID, DEFAULT_USER_ID))
+        session.add(
+            DocumentChunk(
+                id="chunk-rbac-1",
+                document_id=DOC_ID,
+                chunk_index=0,
+                chunk_text=CONTENT_TEXT,
+                chunk_length=len(CONTENT_TEXT),
+                page_number=3,
+                section_title="付款条款",
+            )
+        )
         await session.commit()
         # 真实种子函数（不是测试自造的「全权限角色」）。
         await permission_service.initialize_default_permissions_and_roles(session)
@@ -299,7 +310,7 @@ def _assert_no_signing_artifacts(response: httpx.Response) -> None:
 
 
 @pytest.mark.asyncio
-async def test_jwt_role_without_document_read_denied_on_all_four_without_signing(env):
+async def test_jwt_role_without_document_read_denied_on_all_five_without_signing(env):
     headers = _auth(_jwt(DENIED_USER_ID))
 
     for path in DOC_PATHS:
@@ -329,7 +340,7 @@ async def test_jwt_role_without_document_read_denied_on_all_four_without_signing
 
 
 @pytest.mark.asyncio
-async def test_knowledge_read_api_key_without_document_role_denied_on_all_four(env):
+async def test_knowledge_read_api_key_without_document_role_denied_on_all_five(env):
     """API Key：scope 通过后仍必须受用户角色 RBAC 约束（审计中的绕过通道）。"""
     raw = await _make_key(env, DENIED_USER_ID, ["knowledge:read"])
     headers = _auth(raw)
@@ -355,7 +366,7 @@ async def test_scope_denial_precedes_rbac_and_never_signs(env):
 
 
 @pytest.mark.asyncio
-async def test_anonymous_denied_on_all_four_without_signing(env):
+async def test_anonymous_denied_on_all_five_without_signing(env):
     for path in DOC_PATHS:
         response = await env.client.get(path)
         assert response.status_code == 401, response.text
@@ -421,12 +432,12 @@ async def _assert_all_five_readable(env, headers: dict[str, str]) -> None:
 
 
 @pytest.mark.asyncio
-async def test_jwt_role_with_document_read_can_read_all_four(env):
+async def test_jwt_role_with_document_read_can_read_all_five(env):
     await _assert_all_five_readable(env, _auth(_jwt(ALLOWED_USER_ID)))
 
 
 @pytest.mark.asyncio
-async def test_default_seed_user_can_read_all_four(default_env):
+async def test_default_seed_user_can_read_all_five(default_env):
     """原生种子（系统 User 含 document:read）下行为中性：仍全部可读。"""
     await _assert_all_five_readable(default_env, _auth(_jwt(DEFAULT_USER_ID)))
 
