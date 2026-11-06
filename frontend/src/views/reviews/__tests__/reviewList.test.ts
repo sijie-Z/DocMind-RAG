@@ -11,10 +11,14 @@ import { reviewsApi } from '@/api/reviews'
 import zh from '@/locales/zh'
 
 const push = vi.fn()
+const routerState = vi.hoisted(() => ({
+  query: {} as Record<string, string>,
+  replace: vi.fn()
+}))
 
 vi.mock('vue-router', () => ({
-  useRouter: () => ({ push }),
-  useRoute: () => ({ params: {} })
+  useRouter: () => ({ push, replace: routerState.replace }),
+  useRoute: () => ({ params: {}, query: routerState.query })
 }))
 
 vi.mock('@/api/reviews', () => ({
@@ -52,6 +56,7 @@ function mountList() {
 
 beforeEach(() => {
   vi.clearAllMocks()
+  routerState.query = {}
   api.list.mockResolvedValue({ data: { data: { items: [ROW], total: 1 } } } as never)
 })
 
@@ -202,5 +207,39 @@ describe('归档筛选的事件接线', () => {
       page: 1,
       page_size: 20
     })
+  })
+})
+
+
+describe('URL 状态与筛选空态（UI-6）', () => {
+  it('从 URL 恢复状态/归档/页码并按其取数', async () => {
+    routerState.query = { status: 'ready', archived: 'archived', page: '2' }
+    mountList()
+    await flushPromises()
+    expect(api.list).toHaveBeenCalledWith({
+      status: 'ready',
+      archived: 'archived',
+      page: 2,
+      page_size: 20
+    })
+  })
+
+  it('筛选无结果显示清除入口，清除后回到默认并同步 URL', async () => {
+    api.list.mockResolvedValue({ data: { data: { items: [], total: 0 } } } as never)
+    routerState.query = { status: 'blocked' }
+    const wrapper = mountList()
+    await flushPromises()
+    expect(wrapper.text()).toContain('没有符合条件的核验案件')
+    const clear = wrapper.find('[data-testid="reviews-clear-filters"]')
+    expect(clear.exists()).toBe(true)
+    await clear.trigger('click')
+    await flushPromises()
+    expect(api.list).toHaveBeenLastCalledWith({
+      status: undefined,
+      archived: 'active',
+      page: 1,
+      page_size: 20
+    })
+    expect(routerState.replace).toHaveBeenCalled()
   })
 })
