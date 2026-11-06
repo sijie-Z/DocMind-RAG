@@ -36,7 +36,7 @@ from app.models.user import User
 from app.rag.source_provenance import SourceProvenanceUnavailableError
 from app.schemas.knowledge import DocumentDownloadUrl, DocumentDownloadUrlResponse
 from app.schemas.review import ReviewMetaUpsert
-from app.services.document_preview import load_document_preview_text
+from app.services.document_preview import load_document_chunk, load_document_preview_text
 from app.services.review_document_service import (
     ReviewMetaInput,
     compute_readiness,
@@ -462,6 +462,56 @@ async def get_document_full_content(
     except Exception as e:
         logger.error(f"Get document content failed: {str(e)}")
         raise AppError("获取文档内容失败")
+
+
+@router.get(
+    "/{document_id}/chunk",
+    response_model=dict,
+    dependencies=[
+        Depends(require_scope("knowledge:read")),
+        Depends(permission_required([PermissionType.DOCUMENT_READ])),
+    ],
+)
+async def get_document_chunk(
+    document_id: str,
+    chunk_id: str = Query(
+        ...,
+        min_length=1,
+        max_length=80,
+        description="分块 id：原始 UUID 或 {document_id}_{uuid} 复合 id",
+    ),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """按分块 id 取回引用片段原文（聊天引用定位用）。
+
+    文本口径与 ``/documents/{id}/content`` 完全一致：``parser_original`` 才
+    标记为原文，旧分块回退检索文本并显式标 ``legacy_unverified``。只按
+    ``document_id + id`` 查询，chunk id 不能跨文档读取。
+    """
+    try:
+        doc = await get_document_for_user(db, current_user, document_id)
+        chunk = await load_document_chunk(db, doc.id, chunk_id)
+        if chunk is None:
+            raise NotFoundError("文档分块不存在")
+        return {
+            "success": True,
+            "data": {
+                "chunk_id": chunk.chunk_id,
+                "chunk_index": chunk.chunk_index,
+                "page_number": chunk.page_number,
+                "text": chunk.text,
+                "text_provenance": chunk.text_provenance,
+                "start_pos": chunk.start_pos,
+                "end_pos": chunk.end_pos,
+                "section_title": chunk.section_title,
+            },
+        }
+    except (NotFoundError, AuthorizationError):
+        raise
+    except Exception as e:
+        logger.error(f"Get document chunk failed: {type(e).__name__}: {e}")
+        raise AppError("获取文档分块失败") from e
 
 
 @router.put(

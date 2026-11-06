@@ -13,13 +13,18 @@ import uuid
 from unittest.mock import AsyncMock
 
 import pytest
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
 
 import app.services.document_preview as preview_mod
 from app.core.database import Base
 from app.models.document import Document, DocumentChunk, DocumentStatus, DocumentType
-from app.services.document_preview import load_document_preview_text
+from app.services.document_preview import (
+    load_document_chunk,
+    load_document_preview_text,
+    normalize_chunk_id,
+)
 
 BACKGROUND = "【文档背景：模型生成的摘要】\n\n"
 
@@ -352,3 +357,82 @@ async def test_empty_document_reports_none(session_factory, monkeypatch):
     assert preview.content == ""
     assert preview.text_provenance == "none"
     assert preview.truncated is False
+
+
+async def _chunk_ids(factory, document_id: str) -> list[str]:
+    async with factory() as session:
+        return list(
+            (
+                await session.execute(
+                    select(DocumentChunk.id)
+                    .where(DocumentChunk.document_id == document_id)
+                    .order_by(DocumentChunk.chunk_index)
+                )
+            )
+            .scalars()
+            .all()
+        )
+
+
+@pytest.mark.asyncio
+async def test_load_document_chunk_original_and_composite_ids(session_factory):
+    """单块预览与全文同口径：原文优先，且兼容 {doc_id}_{chunk_id} 复合 id。"""
+    await _seed_chunks(
+        session_factory,
+        "doc-chunk",
+        [(0, "增强一", "原文一"), (1, "增强二", "原文二")],
+    )
+    ids = await _chunk_ids(session_factory, "doc-chunk")
+    async with session_factory() as session:
+        got = await load_document_chunk(session, "doc-chunk", ids[1])
+        assert got is not None
+        assert got.chunk_index == 1
+        assert got.text == "原文二"
+        assert got.text_provenance == "parser_original"
+
+        composite = await load_document_chunk(session, "doc-chunk", f"doc-chunk_{ids[1]}")
+        assert composite == got
+
+        # chunk id 必须与 document_id 同时匹配，不能跨文档读取。
+        assert await load_document_chunk(session, "other-doc", ids[1]) is None
+        assert await load_document_chunk(session, "doc-chunk", "missing-chunk") is None
+        assert await load_document_chunk(session, "doc-chunk", "") is None
+
+
+@pytest.mark.asyncio
+async def test_load_document_chunk_legacy_text_is_marked(session_factory):
+    """旧分块没有 parser 原文时回退检索文本，但必须标 legacy_unverified。"""
+    await _seed_chunks(session_factory, "doc-legacy", [(0, "增强文本", None)])
+    ids = await _chunk_ids(session_factory, "doc-legacy")
+    async with session_factory() as session:
+        got = await load_document_chunk(session, "doc-legacy", ids[0])
+        assert got is not None
+        assert got.text == "增强文本"
+        assert got.text_provenance == "legacy_unverified"
+
+
+def test_normalize_chunk_id_only_strips_matching_document_prefix():
+    assert normalize_chunk_id("doc-1", "doc-1_abc") == "abc"
+    # 非本文档前缀不得去：否则会跨文档猜测 chunk 身份。
+    assert normalize_chunk_id("doc-1", "doc-2_abc") == "doc-2_abc"
+    assert normalize_chunk_id("doc-1", "  abc  ") == "abc"
+
+
+@pytest.mark.asyncio
+async def test_load_document_chunk_falls_back_to_chunk_index_for_legacy_demo_ids(session_factory):
+    """旧 demo/seed 的 ES _id 是 {doc_id}_{chunk_index}（序号非 UUID），需安全回退。"""
+    await _seed_chunks(
+        session_factory,
+        "doc-demo",
+        [(0, "块零", None), (1, "块一", None)],
+    )
+    async with session_factory() as session:
+        got = await load_document_chunk(session, "doc-demo", "doc-demo_1")
+        assert got is not None
+        assert got.chunk_index == 1
+        assert got.text == "块一"
+
+        # 纯数字但超出该文档的 chunk 范围：不得跨文档/猜测。
+        assert await load_document_chunk(session, "doc-demo", "99") is None
+        # 非本文档前缀的复合 id 不剥离，也不会按序号解析。
+        assert await load_document_chunk(session, "doc-demo", "other-doc_1") is None

@@ -65,6 +65,11 @@ export interface KnowledgeSource {
   rank?: number
   content?: string
   documentId?: string | number | null
+  /**
+   * 检索命中的分块 id。worker 写入 ES 的 `_id` 为 `{document_id}_{chunk_id}`，
+   * seed/Agent 路径可能是原始 DB UUID；后端 chunk 端点两种都接受。
+   */
+  chunkId?: string | null
   hasKeyword?: boolean
   hasVector?: boolean
   rewriteHits?: number

@@ -183,8 +183,13 @@
                           size="tiny"
                           round
                           :bordered="false"
-                          class="cursor-pointer bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 hover:bg-blue-100 dark:hover:bg-blue-900/50 transition-colors"
-                          @click="$emit('openSource', source)"
+                          class="bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 transition-colors"
+                          :class="source.documentId ? 'cursor-pointer hover:bg-blue-100 dark:hover:bg-blue-900/50' : 'cursor-default opacity-70'"
+                          :role="source.documentId ? 'button' : undefined"
+                          :tabindex="source.documentId ? 0 : undefined"
+                          @click="source.documentId && $emit('openSource', source)"
+                          @keydown.enter.prevent="source.documentId && $emit('openSource', source)"
+                          @keydown.space.prevent="source.documentId && $emit('openSource', source)"
                         >
                           <template #icon>
                             <n-icon size="10" class="mr-0.5"><DocumentTextOutline /></n-icon>

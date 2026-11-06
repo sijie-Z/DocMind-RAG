@@ -6,6 +6,7 @@
     :content="previewContent"
     :text-provenance="previewProvenance"
     :truncated="previewTruncated"
+    :focus-text="previewFocusText"
     :download-loading="downloadLoading"
     :download-error="downloadError"
     @download="handleDownload"
@@ -154,8 +155,8 @@ import { CloudUploadOutline, AlertCircleOutline, ArrowBackOutline } from '@vicon
 import { getConversationMessages, clearConversationMessages } from '@/api/chat'
 import { getOrganizationSettings } from '@/api/organization'
 import type { Conversation } from '@/api/conversation'
-import { getDocumentDetail, getDocumentContent, getDocumentDownloadUrl } from '@/api/knowledge'
-import type { DocumentContent, DocumentDetail, DocumentDownloadUrl } from '@/api/knowledge'
+import { getDocumentDetail, getDocumentContent, getDocumentChunk, getDocumentDownloadUrl } from '@/api/knowledge'
+import type { DocumentContent, DocumentDetail, DocumentDownloadUrl, DocumentChunkPreview } from '@/api/knowledge'
 import type { ChatMessage, KnowledgeSource } from '@/types/chat'
 import { getToken } from '@/utils/auth'
 
@@ -659,6 +660,8 @@ const previewDoc = ref<{
   suggested_tags?: string[]
 } | undefined>(undefined)
 const previewContent = ref('')
+// 引用块原文：拿到后在全文预览里高亮并滚动到该处；拿不到就保持普通全文预览。
+const previewFocusText = ref('')
 // 预览原文口径：legacy/mixed 与截断都必须在弹窗可见，不能把可能含生成摘要
 // 的旧文本静默当成原文。
 const previewProvenance = ref<DocumentContent['text_provenance'] | undefined>(undefined)
@@ -669,6 +672,8 @@ let downloadRequestSeq = 0
 // 来源卡可被连续点击：慢的旧请求不得覆盖新来源的标题/正文（证据必须对应
 // 用户最后点击的来源，而不是最后返回的请求）。
 let previewRequestSeq = 0
+// 打开预览的来源卡：关闭弹窗后把焦点还回去（键盘用户不丢失位置）。
+let previewTrigger: HTMLElement | null = null
 
 const resetDownloadState = () => {
   downloadRequestSeq += 1
@@ -681,6 +686,8 @@ watch(showPreviewModal, (open) => {
   if (!open) {
     resetDownloadState()
     previewRequestSeq += 1
+    if (previewTrigger?.isConnected) previewTrigger.focus()
+    previewTrigger = null
   }
 })
 
@@ -738,15 +745,23 @@ const handleOpenSource = async (source: KnowledgeSource) => {
   const docId = source?.documentId
   if (docId === undefined || docId === null || docId === '') return
   const id = String(docId)
+  const chunkId = typeof source?.chunkId === 'string' ? source.chunkId : ''
   const requestSeq = ++previewRequestSeq
   const ownsRequest = () => requestSeq === previewRequestSeq
+  previewTrigger =
+    typeof document !== 'undefined' && document.activeElement instanceof HTMLElement
+      ? document.activeElement
+      : null
   resetDownloadState()
   showPreviewModal.value = true
   previewLoading.value = true
   previewDoc.value = { id, filename: source.filename }
   previewContent.value = ''
+  previewFocusText.value = ''
   previewProvenance.value = undefined
   previewTruncated.value = false
+  // chunk 定位是增强能力：失败（404/旧消息无 chunk/文档在 ES-only）只降级为
+  // 普通全文预览，不能让整个预览打不开；且它排在正文之后，慢请求不阻塞阅读。
   try {
     const [docRes, contentRes] = await Promise.all([
       getDocumentDetail(id),
@@ -771,6 +786,16 @@ const handleOpenSource = async (source: KnowledgeSource) => {
     previewContent.value = contentData?.content || ''
     previewProvenance.value = contentData?.text_provenance
     previewTruncated.value = contentData?.truncated === true
+    // 正文已就绪：先让弹窗结束 loading，再单独取分块做高亮定位。
+    if (ownsRequest()) previewLoading.value = false
+    if (chunkId) {
+      const chunkRes = await getDocumentChunk(id, chunkId, { silent: true }).catch(() => null)
+      if (!ownsRequest()) return
+      const chunkData = (chunkRes?.data as { data?: DocumentChunkPreview } | undefined)?.data
+      // 分块原文用于在全文里高亮定位；若正文是 legacy/mixed，弹窗会照常
+      // 显示原文缺失警告，不会把生成摘要伪装成原文。
+      previewFocusText.value = chunkData?.text || ''
+    }
   } catch {
     if (ownsRequest()) message.error(t('chat.sourcePreviewFailed'))
   } finally {

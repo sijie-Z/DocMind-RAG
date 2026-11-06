@@ -131,6 +131,29 @@ export const getDocumentContent = async (
   return request.get(`/documents/${id}/content`, options?.silent ? SILENT_HEADERS : undefined)
 }
 
+export interface DocumentChunkPreview {
+  chunk_id: string
+  chunk_index: number
+  page_number?: number | null
+  text: string
+  text_provenance: 'parser_original' | 'legacy_unverified'
+  start_pos?: number | null
+  end_pos?: number | null
+  section_title?: string | null
+}
+
+/** 按引用分块取回原文（与全文预览同口径；仅用于已校验归属的文档）。 */
+export const getDocumentChunk = async (
+  documentId: string,
+  chunkId: string,
+  options?: SilentRequestOptions
+): Promise<AxiosResponse<{ data: DocumentChunkPreview }>> => {
+  return request.get(`/documents/${documentId}/chunk`, {
+    params: { chunk_id: chunkId },
+    ...(options?.silent ? SILENT_HEADERS : {})
+  })
+}
+
 export const getDocumentDownloadUrl = async (
   id: string,
   options?: SilentRequestOptions

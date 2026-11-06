@@ -52,16 +52,18 @@ vi.mock('@/api/knowledge', () => ({
   getKnowledgeBase: vi.fn().mockResolvedValue({ data: { data: { status: 'indexed' } } }),
   getDocumentDetail: vi.fn(),
   getDocumentContent: vi.fn(),
+  getDocumentChunk: vi.fn(),
 }))
 
 import ChatPage from '../index.vue'
 import ChatMessages from '../components/ChatMessages.vue'
-import { getDocumentDetail, getDocumentContent } from '@/api/knowledge'
+import { getDocumentDetail, getDocumentContent, getDocumentChunk } from '@/api/knowledge'
 import { useUserStore } from '@/stores/user'
 import type { ChatMessage, KnowledgeSource } from '@/types/chat'
 
 const mockedGetDocument = vi.mocked(getDocumentDetail)
 const mockedGetDocumentContent = vi.mocked(getDocumentContent)
+const mockedGetDocumentChunk = vi.mocked(getDocumentChunk)
 
 // 真实来源形状（chat_service.build_sources_list 逐键对应）：documentId 是文档 id，
 // 无 fileId 键——实现按 fileId 取值会在此精确红（实机曾踩：vitest 自造 fileId 掩盖）。
@@ -156,6 +158,7 @@ const PreviewStub = defineComponent({
     content: String,
     textProvenance: String,
     truncated: Boolean,
+    focusText: String,
   },
   emits: ['update:show', 'download'],
   setup() {
@@ -214,6 +217,7 @@ describe('W2-T7 · chat 页来源卡 → 原文预览接通', () => {
     messageSpies.error.mockClear()
     mockedGetDocument.mockReset()
     mockedGetDocumentContent.mockReset()
+    mockedGetDocumentChunk.mockReset()
   })
 
   it('openSource → 拉取文档详情+全文，打开弹窗并填充内容（修前四 ref 无写入点）', async () => {
@@ -344,5 +348,138 @@ describe('W2-T7 · chat 页来源卡 → 原文预览接通', () => {
 
     expect(mockedGetDocument).not.toHaveBeenCalled()
     expect(wrapper.findComponent(PreviewStub).props('show')).toBe(false)
+  })
+
+  it('带 chunkId 的来源：并行取回分块原文并传给弹窗高亮定位', async () => {
+    mockedGetDocument.mockResolvedValue({
+      data: { success: true, data: { id: 'doc-7', filename: '架构文档.pdf' } },
+    } as never)
+    mockedGetDocumentContent.mockResolvedValue({
+      data: {
+        success: true,
+        data: {
+          id: 'doc-7',
+          filename: '架构文档.pdf',
+          content: '全文内容甲。命中片段乙。全文内容丙。',
+          text_provenance: 'parser_original',
+          truncated: false,
+        },
+      },
+    } as never)
+    mockedGetDocumentChunk.mockResolvedValue({
+      data: {
+        success: true,
+        data: {
+          chunk_id: 'chunk-1',
+          chunk_index: 2,
+          text: '命中片段乙。',
+          text_provenance: 'parser_original',
+          page_number: 3,
+        },
+      },
+    } as never)
+
+    const wrapper = await mountChat()
+    wrapper.findComponent(MsgStub).vm.$emit('openSource', { ...SOURCE, chunkId: 'doc-7_chunk-1' })
+    await flushPromises()
+    await flushPromises()
+
+    // 复合 id 原样交给后端（后端负责兼容 {documentId}_{chunkId}）。
+    expect(mockedGetDocumentChunk).toHaveBeenCalledWith('doc-7', 'doc-7_chunk-1', { silent: true })
+    const modal = wrapper.findComponent(PreviewStub)
+    expect(modal.props('show')).toBe(true)
+    expect(modal.props('content')).toBe('全文内容甲。命中片段乙。全文内容丙。')
+    expect(modal.props('focusText')).toBe('命中片段乙。')
+    expect(messageSpies.error).not.toHaveBeenCalled()
+  })
+
+  it('分块接口失败：降级为普通全文预览，不打断弹窗也不报错', async () => {
+    mockedGetDocument.mockResolvedValue({
+      data: { success: true, data: { id: 'doc-7', filename: '架构文档.pdf' } },
+    } as never)
+    mockedGetDocumentContent.mockResolvedValue({
+      data: {
+        success: true,
+        data: {
+          id: 'doc-7',
+          filename: '架构文档.pdf',
+          content: '全文内容甲',
+          text_provenance: 'legacy_unverified',
+          truncated: false,
+        },
+      },
+    } as never)
+    mockedGetDocumentChunk.mockRejectedValue(new Error('404'))
+
+    const wrapper = await mountChat()
+    wrapper.findComponent(MsgStub).vm.$emit('openSource', { ...SOURCE, chunkId: 'gone' })
+    await flushPromises()
+    await flushPromises()
+
+    const modal = wrapper.findComponent(PreviewStub)
+    expect(modal.props('show')).toBe(true)
+    expect(modal.props('content')).toBe('全文内容甲')
+    expect(modal.props('focusText')).toBe('')
+    expect(messageSpies.error).not.toHaveBeenCalled()
+  })
+
+  it('无 chunkId 的历史来源：不请求分块接口', async () => {
+    mockedGetDocument.mockResolvedValue({
+      data: { success: true, data: { id: 'doc-7', filename: '架构文档.pdf' } },
+    } as never)
+    mockedGetDocumentContent.mockResolvedValue({
+      data: { success: true, data: { content: '全文', text_provenance: 'parser_original' } },
+    } as never)
+
+    const wrapper = await mountChat()
+    wrapper.findComponent(MsgStub).vm.$emit('openSource', SOURCE)
+    await flushPromises()
+    await flushPromises()
+
+    expect(mockedGetDocumentChunk).not.toHaveBeenCalled()
+    expect(wrapper.findComponent(PreviewStub).props('focusText')).toBe('')
+  })
+
+  it('连续点击：慢的旧分块请求不得覆盖新来源的高亮片段', async () => {
+    let resolveSlowChunk!: (value: unknown) => void
+    const slowChunk = new Promise((resolve) => { resolveSlowChunk = resolve })
+    mockedGetDocument.mockResolvedValue({
+      data: { success: true, data: { id: 'doc-8', filename: '新文档.pdf' } },
+    } as never)
+    mockedGetDocumentContent.mockResolvedValue({
+      data: { success: true, data: { content: '新文档正文', text_provenance: 'parser_original' } },
+    } as never)
+    mockedGetDocumentChunk.mockImplementation((((
+      _docId: string,
+      chunkId: string
+    ) =>
+      chunkId === 'old-chunk'
+        ? slowChunk
+        : Promise.resolve({
+            data: { success: true, data: { text: '新片段', text_provenance: 'parser_original' } },
+          })) as never))
+
+    const wrapper = await mountChat()
+    const messages = wrapper.findComponent(MsgStub)
+    messages.vm.$emit('openSource', { ...SOURCE, chunkId: 'old-chunk' })
+    await nextTick()
+    messages.vm.$emit('openSource', {
+      ...SOURCE,
+      documentId: 'doc-8',
+      filename: '新文档.pdf',
+      chunkId: 'new-chunk',
+    })
+    await flushPromises()
+    await flushPromises()
+
+    resolveSlowChunk({
+      data: { success: true, data: { text: '旧片段', text_provenance: 'parser_original' } },
+    })
+    await flushPromises()
+
+    const modal = wrapper.findComponent(PreviewStub)
+    expect(modal.props('focusText')).toBe('新片段')
+    expect(modal.props('content')).toBe('新文档正文')
+    expect(messageSpies.error).not.toHaveBeenCalled()
   })
 })

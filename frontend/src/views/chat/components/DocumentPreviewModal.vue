@@ -3,9 +3,10 @@
     v-model:show="show"
     preset="card"
     :title="doc?.filename || t('chat.documentPreview')"
-    class="max-w-4xl w-[90vw]"
+    class="docmind-preview-modal max-w-4xl w-[90vw]"
     style="height: 80vh"
     :segmented="{ content: true, footer: true }"
+    :aria-label="doc?.filename || t('chat.documentPreview')"
   >
     <div class="h-full flex flex-col overflow-hidden">
       <div class="bg-gray-50 dark:bg-gray-900/50 p-4 rounded-xl mb-4 border border-gray-100 dark:border-gray-800 flex flex-col gap-3">
@@ -60,8 +61,15 @@
 
       <div class="flex-1 overflow-y-auto pr-2 scrollbar-thin">
         <n-skeleton v-if="loading" :repeat="10" />
-        <div v-else-if="content" class="markdown-body text-sm leading-relaxed p-2 whitespace-pre-wrap">
-          {{ content }}
+        <div v-else-if="content" ref="contentEl" class="markdown-body text-sm leading-relaxed p-2 whitespace-pre-wrap">
+          <template v-for="(segment, index) in contentSegments" :key="index">
+            <mark
+              v-if="segment.focus"
+              data-testid="chat-preview-focus"
+              class="rounded-sm bg-amber-200/70 px-0.5 text-inherit dark:bg-amber-400/30"
+            >{{ segment.text }}</mark>
+            <template v-else>{{ segment.text }}</template>
+          </template>
         </div>
         <n-empty v-else :description="t('chat.noContent')" />
       </div>
@@ -94,7 +102,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { DocumentContent } from '@/api/knowledge'
 
@@ -122,6 +130,8 @@ const props = defineProps<{
   textProvenance?: DocumentContent['text_provenance']
   /** 服务端读取有界：true 时 content 不是全文。 */
   truncated?: boolean
+  /** 引用命中的分块原文：在全文里高亮并滚动到该处；找不到时安静降级。 */
+  focusText?: string
   downloadLoading?: boolean
   downloadError?: string
 }>()
@@ -135,4 +145,65 @@ const show = computed({
   get: () => props.show,
   set: (val) => emit('update:show', val)
 })
+
+/**
+ * Naive card 的内容区默认 `min-height: auto`，在固定 80vh 高度下会被正文撑开，
+ * 把页脚挤出卡片、并让滚动落到外层弹窗（滚走标题/关闭按钮）。把内容区限制为
+ * 唯一滚动容器，定位高亮时只滚正文。
+ */
+
+const contentEl = ref<HTMLElement | null>(null)
+
+interface ContentSegment {
+  text: string
+  focus: boolean
+}
+
+const contentSegments = computed<ContentSegment[]>(() => {
+  const text = props.content || ''
+  const raw = props.focusText || ''
+  // 优先按原文匹配；服务端若返回带首尾空白的块文本，再退一步用 trim 后的形态。
+  const needle = [raw, raw.trim()].find((candidate) => candidate && text.includes(candidate)) || ''
+  if (!needle) return [{ text, focus: false }]
+  const index = text.indexOf(needle)
+  return [
+    { text: text.slice(0, index), focus: false },
+    { text: text.slice(index, index + needle.length), focus: true },
+    { text: text.slice(index + needle.length), focus: false }
+  ].filter((segment) => segment.text.length > 0)
+})
+
+watch(
+  [() => props.show, () => props.content, () => props.focusText, () => props.loading],
+  async () => {
+    if (!props.show) return
+    await nextTick()
+    const reduceMotion =
+      typeof window !== 'undefined' &&
+      typeof window.matchMedia === 'function' &&
+      window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    contentEl.value
+      ?.querySelector<HTMLElement>('[data-testid="chat-preview-focus"]')
+      ?.scrollIntoView({ block: 'start', behavior: reduceMotion ? 'auto' : 'smooth' })
+  },
+  { flush: 'post' }
+)
 </script>
+
+<style>
+/* 弹窗内容区是 Naive 内部节点（teleport 后 scoped 选择器匹配不到），
+   用弹窗根类做约束：内容区必须是唯一滚动容器，页脚始终留在卡片内。 */
+.docmind-preview-modal .n-card-content {
+  min-height: 0;
+  overflow: hidden;
+}
+@media (max-width: 767.98px) {
+  .docmind-preview-modal .n-card-header__close {
+    width: 44px;
+    height: 44px;
+  }
+  .docmind-preview-modal .n-card__footer .n-button {
+    min-height: 44px;
+  }
+}
+</style>
