@@ -283,8 +283,51 @@ describe('UserDashboard · 分块骨架（E6）', () => {
     const opt = chartInstances[chartInstances.length - 1].setOption.mock.calls[0][0] as {
       xAxis: { data: string[] }
     }
-    expect(opt.xAxis.data).toEqual(['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'])
+    // 活动趋势是「今天往前 7 天」滚动序列；标签必须与真实日期对齐（不再固定周一..周日）。
+    const fmt = new Intl.DateTimeFormat('en', { weekday: 'short' })
+    const expected = Array.from({ length: 7 }, (_, i) =>
+      fmt.format(new Date(Date.now() - (6 - i) * 24 * 60 * 60 * 1000))
+    )
+    expect(opt.xAxis.data).toEqual(expected)
     expect(wrapper.text()).toContain('Recent conversations: 1')
     expect(wrapper.text()).not.toContain('最近')
+  })
+})
+
+describe('UserDashboard · 数据诚实性（D 轮）', () => {
+  it('RAG 零查询：显示暂无数据，而不是「1 次查询 + 红色需关注」', async () => {
+    vi.mocked(getRAGStats).mockResolvedValue({
+      data: {
+        hit_rate: 0,
+        total_queries_7d: 0,
+        hits_with_documents: 0,
+        avg_documents_retrieved: 0,
+        hit_rate_trend_7d: [0, 0, 0, 0, 0, 0, 0, 0],
+      },
+    } as never)
+    const wrapper = mountUser()
+    await flushPromises()
+    expect(wrapper.text()).toContain('暂无数据')
+    expect(wrapper.text()).toContain('还没有检索记录')
+    expect(wrapper.text()).not.toContain('需关注')
+  })
+
+  it('用户统计降级且从未成功：显示暂不可用，不把全零当真实数据', async () => {
+    vi.mocked(getUserStats).mockResolvedValue({
+      data: {
+        conversation_count: 0,
+        message_count: 0,
+        file_count: 0,
+        knowledge_count: 0,
+        storage_used: 0,
+        activity_trend: [0, 0, 0, 0, 0, 0, 0],
+        degraded: true,
+        reason: 'db down',
+      },
+    } as never)
+    const wrapper = mountUser()
+    await flushPromises()
+    expect(wrapper.text()).toContain('统计服务暂时不可用')
+    expect(wrapper.text()).toContain('数据暂不可用')
   })
 })

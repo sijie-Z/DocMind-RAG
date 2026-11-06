@@ -98,7 +98,7 @@ describe('UserDashboard · 统计卡行为与样式一致（C6）', () => {
     await flushPromises()
     await nextTick()
 
-    const statNumbers = wrapper.findAll('p.text-3xl.font-bold.text-gray-900')
+    const statNumbers = wrapper.findAll('p.text-2xl.font-semibold.text-slate-900')
     expect(statNumbers.length, '四张统计卡数字应在屏').toBe(4)
 
     const cards = statNumbers.map((n) => n.element.parentElement as HTMLElement)
@@ -118,7 +118,7 @@ describe('UserDashboard · 统计卡行为与样式一致（C6）', () => {
     await flushPromises()
     await nextTick()
 
-    const statNumber = wrapper.find('p.text-3xl.font-bold.text-gray-900')
+    const statNumber = wrapper.find('p.text-2xl.font-semibold.text-slate-900')
     await statNumber.trigger('click')
     expect(push).not.toHaveBeenCalled()
 

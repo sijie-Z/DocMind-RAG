@@ -306,6 +306,9 @@ class AuthService:
 
             # 安全加固：登录成功清除失败计数
             await self._clear_login_failures(username)
+            # 管理端「24 小时活跃用户」的真值来源：此前该字段从未写入，指标恒 0。
+            # 由登录端点的会话提交一并持久化；失败不阻塞登录。
+            user.last_login_at = datetime.now()
             logger.info(f"Login success for user: {username}")
             return user
 

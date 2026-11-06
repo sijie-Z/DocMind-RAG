@@ -170,6 +170,7 @@ def test_llm_stats_returns_real_known_usage(client: TestClient):
         ),
         4,
     )
-    assert len(data["token_trend_7d"]) == 7
-    assert all(v > 0 for v in data["token_trend_7d"]), "有真实用量时趋势不得全零"
+    # D 轮诚实性：没有按日持久化的 token 真源时不得伪造 7 天平线；
+    # 前端空序列显示「暂无数据」，而不是把总量均分当趋势。
+    assert data["token_trend_7d"] == []
     assert isinstance(data["request_count_today"], int)

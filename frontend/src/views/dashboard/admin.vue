@@ -1,5 +1,14 @@
 <template>
   <div class="admin-dashboard p-4 md:p-6 space-y-5">
+    <div class="mb-1">
+      <h1 class="text-2xl font-semibold tracking-tight text-slate-900 dark:text-white md:text-[28px]">
+        {{ t('dashboard.adminTitle') }}
+      </h1>
+      <p class="mt-1 flex items-center gap-2 text-sm text-slate-500 dark:text-slate-400">
+        <span class="h-0.5 w-6 rounded-full bg-blue-600"></span>
+        {{ t('dashboard.adminSubtitle') }}
+      </p>
+    </div>
     <!-- 分块加载：KPI 卡 / 图表 / 表格各自骨架；哪块数据先到就先替换哪块，互不阻塞 -->
     <!-- 顶部统计卡片 - 渐变背景（摘要数据未到 → 整排骨架） -->
     <div v-if="summaryState === 'loading'" class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3" data-testid="kpi-skeleton">
@@ -14,102 +23,118 @@
       class="flex flex-col items-center justify-center gap-3 py-10 bg-white dark:bg-gray-800 rounded-xl border border-gray-100 dark:border-gray-700"
       data-testid="kpi-error"
     >
-      <span class="text-sm text-gray-500 dark:text-gray-400">{{ t('dashboard.loadFailed') }}</span>
+      <span class="text-sm text-slate-600 dark:text-slate-300">{{ t('dashboard.loadFailed') }}</span>
+      <span class="text-xs text-slate-500 dark:text-slate-400">{{ t('dashboard.errorHint') }}</span>
+      <n-button size="small" @click="loadSummary">{{ t('dashboard.retry') }}</n-button>
+    </div>
+    <div
+      v-else-if="summaryDegraded && !summaryEverReady"
+      class="flex flex-col items-center justify-center gap-3 rounded-xl border border-dashed border-amber-300 bg-amber-50/50 py-10 dark:border-amber-800/60 dark:bg-amber-900/10"
+      data-testid="kpi-degraded"
+    >
+      <span class="text-sm text-amber-800 dark:text-amber-200">{{ t('dashboard.dataUnavailable') }}</span>
       <n-button size="small" @click="loadSummary">{{ t('dashboard.retry') }}</n-button>
     </div>
     <div v-else class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
-      <div class="bg-gradient-to-br from-blue-500 to-blue-600 rounded-xl p-4 text-white shadow-lg shadow-blue-500/20">
+      <div
+        v-if="summaryDegraded"
+        class="col-span-full rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-800/60 dark:bg-amber-900/10 dark:text-amber-200"
+        data-testid="kpi-stale"
+      >
+        {{ t('dashboard.statsStale') }}
+      </div>
+      <div class="rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-700 dark:bg-slate-900">
         <div class="flex items-center justify-between mb-2">
-          <span class="text-xs font-medium text-slate-100">{{ t('dashboard.totalUsers') }}</span>
-          <div class="w-8 h-8 bg-white/20 rounded-lg flex items-center justify-center">
-            <n-icon size="18" class="text-white"><PeopleOutline /></n-icon>
+          <span class="text-xs font-medium text-slate-500 dark:text-slate-400">{{ t('dashboard.totalUsers') }}</span>
+          <div class="w-8 h-8 bg-slate-100 dark:bg-slate-800 flex items-center justify-center">
+            <n-icon size="18" class="text-slate-600 dark:text-slate-300"><PeopleOutline /></n-icon>
           </div>
         </div>
-        <p class="text-2xl font-bold">{{ adminStats.totalUsers.toLocaleString() }}</p>
-        <div class="flex items-center gap-1 mt-1 text-xs text-slate-200">
-          <TrendingUpOutline class="text-xs" />
-          <span>{{ t('dashboard.activeUsers') }}: {{ adminStats.activeUsers }}</span>
+        <p class="text-2xl font-semibold tabular-nums text-slate-900 dark:text-white">{{ adminStats.totalUsers.toLocaleString() }}</p>
+        <div class="flex items-center gap-1 mt-1 text-xs text-slate-500 dark:text-slate-400">
         </div>
       </div>
 
-      <div class="bg-gradient-to-br from-emerald-500 to-emerald-600 rounded-xl p-4 text-white shadow-lg shadow-emerald-500/20">
+      <div class="rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-700 dark:bg-slate-900">
         <div class="flex items-center justify-between mb-2">
-          <span class="text-xs font-medium text-emerald-100">{{ t('dashboard.totalSessions') }}</span>
-          <div class="w-8 h-8 bg-white/20 rounded-lg flex items-center justify-center">
-            <n-icon size="18" class="text-white"><ChatbubbleEllipsesOutline /></n-icon>
+          <span class="text-xs font-medium text-slate-500 dark:text-slate-400">{{ t('dashboard.totalSessions') }}</span>
+          <div class="w-8 h-8 bg-slate-100 dark:bg-slate-800 flex items-center justify-center">
+            <n-icon size="18" class="text-slate-600 dark:text-slate-300"><ChatbubbleEllipsesOutline /></n-icon>
           </div>
         </div>
-        <p class="text-2xl font-bold">{{ adminStats.totalSessions.toLocaleString() }}</p>
-        <div class="flex items-center gap-1 mt-1 text-xs text-emerald-200">
+        <p class="text-2xl font-semibold tabular-nums text-slate-900 dark:text-white">{{ adminStats.totalSessions.toLocaleString() }}</p>
+        <div class="flex items-center gap-1 mt-1 text-xs text-slate-500 dark:text-slate-400">
           <!-- W2-T7：此前是写死的「↑ +12%（对比上周）」（§八实机实锤假趋势）；
                改为后端 sessions_this_week/last_week 真环比，无基线（上周 0/缺）如实说 -->
           <template v-if="sessionTrend !== null">
-            <span>{{ sessionTrend >= 0 ? '↑' : '↓' }} {{ sessionTrend >= 0 ? '+' : '' }}{{ sessionTrend }}%</span>
-            <span>对比上周</span>
+            <span :class="sessionTrend >= 0 ? 'text-emerald-700 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'">
+              {{ sessionTrend >= 0 ? '↑' : '↓' }} {{ sessionTrend >= 0 ? '+' : '' }}{{ sessionTrend }}%
+            </span>
+            <span>{{ t('dashboard.compareLastWeek') }}</span>
           </template>
           <span v-else>{{ t('dashboard.lastWeekNoData') }}</span>
         </div>
       </div>
 
-      <div class="bg-gradient-to-br from-blue-500 to-blue-600 rounded-xl p-4 text-white shadow-lg shadow-blue-500/20">
+      <div class="rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-700 dark:bg-slate-900">
         <div class="flex items-center justify-between mb-2">
-          <span class="text-xs font-medium text-slate-100">{{ t('dashboard.totalDocs') }}</span>
-          <div class="w-8 h-8 bg-white/20 rounded-lg flex items-center justify-center">
-            <n-icon size="18" class="text-white"><DocumentTextOutline /></n-icon>
+          <span class="text-xs font-medium text-slate-500 dark:text-slate-400">{{ t('dashboard.totalDocs') }}</span>
+          <div class="w-8 h-8 bg-slate-100 dark:bg-slate-800 flex items-center justify-center">
+            <n-icon size="18" class="text-slate-600 dark:text-slate-300"><DocumentTextOutline /></n-icon>
           </div>
         </div>
-        <p class="text-2xl font-bold">{{ adminStats.totalDocs.toLocaleString() }}</p>
-        <div class="flex items-center gap-1 mt-1 text-xs text-slate-200">
+        <p class="text-2xl font-semibold tabular-nums text-slate-900 dark:text-white">{{ adminStats.totalDocs.toLocaleString() }}</p>
+        <div class="flex items-center gap-1 mt-1 text-xs text-slate-500 dark:text-slate-400">
           <span>{{ t('dashboard.totalOrgs') }}: {{ adminStats.totalOrgs }}</span>
         </div>
       </div>
 
-      <div class="bg-gradient-to-br from-orange-500 to-orange-600 rounded-xl p-4 text-white shadow-lg shadow-orange-500/20">
+      <div class="rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-700 dark:bg-slate-900">
         <div class="flex items-center justify-between mb-2">
-          <span class="text-xs font-medium text-orange-100">{{ t('dashboard.activeUsers') }}</span>
-          <div class="w-8 h-8 bg-white/20 rounded-lg flex items-center justify-center">
-            <n-icon size="18" class="text-white"><PulseOutline /></n-icon>
+          <span class="text-xs font-medium text-slate-500 dark:text-slate-400">{{ t('dashboard.activeUsers') }}</span>
+          <div class="w-8 h-8 bg-slate-100 dark:bg-slate-800 flex items-center justify-center">
+            <n-icon size="18" class="text-slate-600 dark:text-slate-300"><PulseOutline /></n-icon>
           </div>
         </div>
-        <p class="text-2xl font-bold text-emerald-100">{{ adminStats.activeUsers }}</p>
-        <div class="flex items-center gap-1 mt-1 text-xs text-orange-200">
-          <span>24小时活跃</span>
+        <p class="text-2xl font-semibold tabular-nums text-slate-900 dark:text-white">{{ adminStats.activeUsers }}</p>
+        <div class="flex items-center gap-1 mt-1 text-xs text-slate-500 dark:text-slate-400">
+          <span>{{ t('dashboard.active24h') }}</span>
         </div>
       </div>
 
-      <div class="bg-gradient-to-br from-cyan-500 to-cyan-600 rounded-xl p-4 text-white shadow-lg shadow-cyan-500/20">
+      <div class="rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-700 dark:bg-slate-900">
         <div class="flex items-center justify-between mb-2">
-          <span class="text-xs font-medium text-cyan-100">{{ t('dashboard.todayRequests') }}</span>
-          <div class="w-8 h-8 bg-white/20 rounded-lg flex items-center justify-center">
-            <n-icon size="18" class="text-white"><GitNetworkOutline /></n-icon>
+          <span class="text-xs font-medium text-slate-500 dark:text-slate-400">{{ t('dashboard.todayRequests') }}</span>
+          <div class="w-8 h-8 bg-slate-100 dark:bg-slate-800 flex items-center justify-center">
+            <n-icon size="18" class="text-slate-600 dark:text-slate-300"><GitNetworkOutline /></n-icon>
           </div>
         </div>
-        <p class="text-2xl font-bold">
+        <p class="text-2xl font-semibold tabular-nums text-slate-900 dark:text-white" data-testid="kpi-llm-value">
           <n-skeleton v-if="llmState === 'loading'" text style="width: 64px" />
-          <template v-else>{{ llmStats.requestCountToday.toLocaleString() }}</template>
+          <template v-else>{{ llmCardValue }}</template>
         </p>
-        <div class="flex items-center gap-1 mt-1 text-xs text-cyan-200">
+        <div class="flex items-center gap-1 mt-1 text-xs text-slate-500 dark:text-slate-400" data-testid="kpi-llm-sub">
           <n-skeleton v-if="llmState === 'loading'" text style="width: 80px" />
-          <span v-else>平均 {{ llmStats.avgLatency || 0 }}ms</span>
+          <span v-else>{{ llmCardSub }}</span>
         </div>
       </div>
 
-      <div class="bg-gradient-to-br from-gray-600 to-gray-700 rounded-xl p-4 text-white shadow-lg">
+      <div class="rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-700 dark:bg-slate-900">
         <div class="flex items-center justify-between mb-2">
-          <span class="text-xs font-medium text-gray-300">{{ t('dashboard.systemStatus') }}</span>
-          <div class="w-8 h-8 bg-white/20 rounded-lg flex items-center justify-center">
-            <n-icon size="18" class="text-white"><ServerOutline /></n-icon>
+          <span class="text-xs font-medium text-slate-500 dark:text-slate-400">{{ t('dashboard.systemStatus') }}</span>
+          <div class="w-8 h-8 bg-slate-100 dark:bg-slate-800 flex items-center justify-center">
+            <n-icon size="18" class="text-slate-600 dark:text-slate-300"><ServerOutline /></n-icon>
           </div>
         </div>
         <div class="mt-3">
           <n-skeleton v-if="healthState === 'loading'" text style="width: 48px" />
-          <n-tag v-else :type="healthState === 'ready' ? (systemHealthy ? 'success' : 'error') : 'default'" size="small" round>
-            {{ healthState === 'ready' ? (systemHealthy ? t('dashboard.healthy') : t('dashboard.unhealthy')) : '—' }}
+          <n-tag v-else :type="healthTone" size="small" round>
+            {{ healthLabel }}
           </n-tag>
         </div>
-        <div class="flex items-center gap-1 mt-2 text-xs text-gray-300">
+        <div class="flex items-center gap-1 mt-2 text-xs text-slate-500 dark:text-slate-400">
           <span>{{ t('dashboard.esLabel') }}: {{ healthState === 'ready' ? esHealthText : '—' }}</span>
-          <n-button v-if="healthState === 'error'" text size="tiny" class="text-gray-200" @click="loadHealth">
+          <n-button v-if="healthState === 'error'" text size="tiny" class="text-slate-600 dark:text-slate-300" @click="loadHealth">
             {{ t('dashboard.retry') }}
           </n-button>
         </div>
@@ -120,14 +145,14 @@
     <div class="grid grid-cols-1 lg:grid-cols-2 gap-5">
       <!-- AI 资源监控 -->
       <div class="bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700 shadow-sm overflow-hidden">
-        <div class="px-5 py-4 border-b border-gray-100 dark:border-gray-700 flex items-center justify-between bg-gradient-to-r from-slate-50 to-transparent dark:from-slate-900/10">
+        <div class="px-5 py-4 border-b border-gray-100 dark:border-gray-700 flex items-center justify-between">
           <div class="flex items-center gap-2">
             <div class="w-8 h-8 bg-slate-100 dark:bg-slate-900/30 rounded-lg flex items-center justify-center">
               <n-icon class="text-blue-600 dark:text-blue-400"><PulseOutline /></n-icon>
             </div>
             <div>
               <h3 class="font-semibold text-gray-900 dark:text-white">{{ t('dashboard.aiMonitor') }}</h3>
-              <p class="text-xs text-gray-500 dark:text-gray-400">LLM 资源与成本</p>
+              <p class="text-xs text-slate-500 dark:text-slate-400">{{ t('dashboard.llmSubtitle') }}</p>
             </div>
           </div>
           <div class="flex items-center gap-2">
@@ -135,7 +160,7 @@
               <template #icon><n-icon size="12"><WarningOutline /></n-icon></template>
               {{ t('dashboard.costWarning') }}
             </n-tag>
-            <span class="text-xs text-gray-400">{{ new Date().toLocaleDateString() }}</span>
+            <span class="text-xs text-slate-500 dark:text-slate-400">{{ todayLabel }}</span>
           </div>
         </div>
         <div v-if="llmState === 'loading'" class="p-5" data-testid="llm-skeleton">
@@ -149,11 +174,25 @@
         </div>
         <div v-else-if="llmState === 'error'" class="p-5" data-testid="llm-error">
           <div class="flex flex-col items-center justify-center gap-3 py-10">
-            <span class="text-sm text-gray-500 dark:text-gray-400">{{ t('dashboard.loadFailed') }}</span>
+            <span class="text-sm text-slate-600 dark:text-slate-300">{{ t('dashboard.loadFailed') }}</span>
+            <span class="text-xs text-slate-500 dark:text-slate-400">{{ t('dashboard.errorHint') }}</span>
+            <n-button size="small" @click="loadLLM">{{ t('dashboard.retry') }}</n-button>
+          </div>
+        </div>
+        <div v-else-if="llmDegraded && !llmEverReady" class="p-5" data-testid="llm-degraded">
+          <div class="flex flex-col items-center justify-center gap-3 py-10">
+            <span class="text-sm text-slate-600 dark:text-slate-300">{{ t('dashboard.dataUnavailable') }}</span>
             <n-button size="small" @click="loadLLM">{{ t('dashboard.retry') }}</n-button>
           </div>
         </div>
         <div v-else class="p-5">
+          <div
+            v-if="llmDegraded"
+            class="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-800/60 dark:bg-amber-900/10 dark:text-amber-200"
+            data-testid="llm-stale"
+          >
+            {{ t('dashboard.statsStale') }}
+          </div>
           <!-- 统计数据 -->
           <div class="grid grid-cols-2 gap-4 mb-5">
             <div class="bg-gray-50 dark:bg-gray-700/50 rounded-xl p-4">
@@ -162,7 +201,7 @@
                 <span class="text-xs text-gray-500 dark:text-gray-400">{{ t('dashboard.tokensToday') }}</span>
               </div>
               <p class="text-xl font-bold text-gray-900 dark:text-white">{{ llmStats.tokensToday.toLocaleString() }}</p>
-              <p class="text-xs text-gray-400 mt-1">输入 + 输出</p>
+              <p class="text-xs text-slate-500 dark:text-slate-400 mt-1">{{ t('dashboard.inputOutput') }}</p>
             </div>
             <div class="bg-gray-50 dark:bg-gray-700/50 rounded-xl p-4">
               <div class="flex items-center gap-2 mb-1">
@@ -173,7 +212,7 @@
               <!-- W2-T7：实际推理栈是 DeepSeek（settings.DEEPSEEK_MODEL），后端成本
                    已按 token_usage 真源费率（deepseek $0.0005/$0.002 per 1K）计算；
                    旧标签「GPT-4o-mini 费率」与实际供应商不符 -->
-              <p class="text-xs text-gray-400 mt-1">DeepSeek 费率</p>
+              <p class="text-xs text-slate-500 dark:text-slate-400 mt-1">{{ t('dashboard.deepseekRate') }}</p>
             </div>
             <div class="bg-gray-50 dark:bg-gray-700/50 rounded-xl p-4">
               <div class="flex items-center gap-2 mb-1">
@@ -181,7 +220,7 @@
                 <span class="text-xs text-gray-500 dark:text-gray-400">{{ t('dashboard.avgLatency') }}</span>
               </div>
               <p class="text-xl font-bold text-gray-900 dark:text-white">{{ llmStats.avgLatency }}<span class="text-sm font-normal text-gray-400">ms</span></p>
-              <p class="text-xs text-gray-400 mt-1">p50 响应时间</p>
+              <p class="text-xs text-slate-500 dark:text-slate-400 mt-1">{{ t('dashboard.httpLatencyHint') }}</p>
             </div>
             <div class="bg-gray-50 dark:bg-gray-700/50 rounded-xl p-4">
               <div class="flex items-center gap-2 mb-1">
@@ -189,32 +228,36 @@
                 <span class="text-xs text-gray-500 dark:text-gray-400">{{ t('dashboard.p95Latency') }}</span>
               </div>
               <p class="text-xl font-bold text-gray-900 dark:text-white">{{ llmStats.p95Latency }}<span class="text-sm font-normal text-gray-400">ms</span></p>
-              <p class="text-xs text-gray-400 mt-1">p95 响应时间</p>
+              <p class="text-xs text-slate-500 dark:text-slate-400 mt-1">{{ t('dashboard.httpP95Hint') }}</p>
             </div>
           </div>
-          <!-- 趋势图 -->
-          <div class="h-44 rounded-xl bg-gray-50 dark:bg-gray-700/30 p-3">
+          <!-- 趋势图：后端没有按日 token 真源时返回空数组，不画假坐标轴 -->
+          <div v-if="llmStats.trend.length" class="h-44 rounded-xl bg-gray-50 dark:bg-gray-700/30 p-3">
             <div ref="llmChartRef" class="w-full h-full"></div>
+          </div>
+          <div v-else class="flex h-44 items-center justify-center rounded-xl border border-dashed border-slate-200 dark:border-slate-700">
+            <span class="text-sm text-slate-600 dark:text-slate-300">{{ t('dashboard.llmNoDailyTrend') }}</span>
           </div>
         </div>
       </div>
 
       <!-- RAG 命中率 -->
-      <div class="bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700 shadow-sm overflow-hidden flex flex-col" data-testid="rag-card">
-        <div class="px-5 py-4 border-b border-gray-100 dark:border-gray-700 flex items-center justify-between bg-gradient-to-r from-emerald-50 to-transparent dark:from-emerald-900/10">
+      <div class="bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700 shadow-sm overflow-hidden flex flex-col lg:self-start" data-testid="rag-card">
+        <div class="px-5 py-4 border-b border-gray-100 dark:border-gray-700 flex items-center justify-between">
           <div class="flex items-center gap-2">
             <div class="w-8 h-8 bg-emerald-100 dark:bg-emerald-900/30 rounded-lg flex items-center justify-center">
               <n-icon class="text-emerald-600 dark:text-emerald-400"><AnalyticsOutline /></n-icon>
             </div>
             <div>
               <h3 class="font-semibold text-gray-900 dark:text-white">{{ t('dashboard.ragStats') }}</h3>
-              <p class="text-xs text-gray-500 dark:text-gray-400">近 24 小时文档检索效果（3 小时桶）</p>
+              <p class="text-xs text-slate-500 dark:text-slate-400">{{ t('dashboard.ragSubtitle24h') }}</p>
             </div>
           </div>
           <div class="flex items-center gap-2">
-            <n-tag :type="ragStats.hitRate > 60 ? 'success' : ragStats.hitRate > 30 ? 'warning' : 'error'" size="small" round>
-              {{ ragStats.hitRate > 60 ? '良好' : ragStats.hitRate > 30 ? '一般' : '较差' }}
+            <n-tag v-if="ragHasData" :type="ragQualityTag" size="small" round>
+              {{ ragQualityLabel }}
             </n-tag>
+            <n-tag v-else type="default" size="small" round>{{ t('dashboard.ragNoData') }}</n-tag>
           </div>
         </div>
         <div v-if="ragState === 'loading'" class="p-5" data-testid="rag-skeleton">
@@ -235,15 +278,28 @@
         </div>
         <div v-else-if="ragState === 'error'" class="p-5" data-testid="rag-error">
           <div class="flex flex-col items-center justify-center gap-3 py-10">
-            <span class="text-sm text-gray-500 dark:text-gray-400">{{ t('dashboard.loadFailed') }}</span>
+            <span class="text-sm text-slate-600 dark:text-slate-300">{{ t('dashboard.loadFailed') }}</span>
+            <span class="text-xs text-slate-500 dark:text-slate-400">{{ t('dashboard.errorHint') }}</span>
+            <n-button size="small" data-testid="rag-retry" @click="loadRAG">{{ t('dashboard.retry') }}</n-button>
+          </div>
+        </div>
+        <div v-else-if="ragDegraded && !ragEverReady" class="p-5" data-testid="rag-degraded">
+          <div class="flex flex-col items-center justify-center gap-3 py-10">
+            <span class="text-sm text-slate-600 dark:text-slate-300">{{ t('dashboard.dataUnavailable') }}</span>
             <n-button size="small" data-testid="rag-retry" @click="loadRAG">{{ t('dashboard.retry') }}</n-button>
           </div>
         </div>
         <div v-else class="p-5 flex-1 flex flex-col">
+          <div
+            v-if="ragDegraded"
+            class="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-800/60 dark:bg-amber-900/10 dark:text-amber-200"
+          >
+            {{ t('dashboard.statsStale') }}
+          </div>
           <!-- 命中率主指标 -->
-          <div class="flex items-center gap-4 mb-5">
+          <div v-if="ragHasData" class="flex items-center gap-4 mb-5">
             <div class="flex-1">
-              <p class="text-sm text-gray-500 dark:text-gray-400 mb-3">{{ t('dashboard.hitRate') }}</p>
+              <p class="text-sm text-slate-500 dark:text-slate-400 mb-3">{{ t('dashboard.hitRate') }}</p>
               <n-progress
                 type="line"
                 :percentage="ragStats.hitRate"
@@ -252,12 +308,15 @@
                 :border-radius="10"
                 :fill-border-radius="10"
                 :color="ragStats.hitRate > 60 ? CHART_COLORS.secondary : ragStats.hitRate > 30 ? CHART_COLORS.warning : CHART_COLORS.danger"
-                :rail-color="'#f3f4f6'"
+                :rail-color="isDark ? '#1f2937' : '#f3f4f6'"
               />
             </div>
             <div class="text-right">
-              <p class="text-4xl font-bold text-emerald-600 dark:text-emerald-400">{{ ragStats.hitRate }}<span class="text-xl">%</span></p>
+              <p class="text-4xl font-semibold tabular-nums" :class="hitRateClass">{{ ragStats.hitRate }}<span class="text-xl">%</span></p>
             </div>
+          </div>
+          <div v-else class="mb-5 rounded-xl border border-dashed border-slate-200 px-4 py-8 text-center dark:border-slate-700">
+            <p class="text-sm text-slate-600 dark:text-slate-300">{{ t('dashboard.ragNoDataHint') }}</p>
           </div>
           <!-- 统计数字 -->
           <div class="grid grid-cols-3 gap-3 mb-5">
@@ -265,33 +324,34 @@
               <p class="text-xs text-gray-500 dark:text-gray-400 mb-1">{{ t('dashboard.queries7d') }}</p>
               <p class="text-lg font-bold text-gray-900 dark:text-white">{{ ragStats.totalQueries.toLocaleString() }}</p>
             </div>
-            <div class="text-center p-3 bg-emerald-50 dark:bg-emerald-900/20 rounded-xl">
-              <p class="text-xs text-gray-500 dark:text-gray-400 mb-1">{{ t('dashboard.hits') }}</p>
-              <p class="text-lg font-bold text-emerald-600 dark:text-emerald-400">{{ ragStats.hits.toLocaleString() }}</p>
+            <div class="text-center p-3 rounded-xl" :class="ragStats.hits > 0 ? 'bg-emerald-50 dark:bg-emerald-900/20' : 'bg-gray-50 dark:bg-gray-700/50'">
+              <p class="text-xs text-slate-500 dark:text-slate-400 mb-1">{{ t('dashboard.hits') }}</p>
+              <p class="text-lg font-bold tabular-nums" :class="ragStats.hits > 0 ? 'text-emerald-700 dark:text-emerald-400' : 'text-slate-900 dark:text-white'">{{ ragStats.hits.toLocaleString() }}</p>
             </div>
             <div class="text-center p-3 bg-gray-50 dark:bg-gray-700/50 rounded-xl">
               <p class="text-xs text-gray-500 dark:text-gray-400 mb-1">{{ t('dashboard.avgDocs') }}</p>
-              <p class="text-lg font-bold text-gray-900 dark:text-white">{{ ragStats.avgDocs }}</p>
+              <p class="text-lg font-bold text-gray-900 dark:text-white" :title="t('dashboard.metricNotAvailable')">—</p>
             </div>
           </div>
           <!-- 趋势图（flex-1：与左卡等高时填充剩余空间，消除卡底空白） -->
-          <div class="flex-1 min-h-28 rounded-xl bg-gray-50 dark:bg-gray-700/30 p-3" data-testid="rag-chart">
+          <div v-if="ragHasData" class="h-44 rounded-xl bg-gray-50 dark:bg-gray-700/30 p-3" data-testid="rag-chart">
             <div ref="ragChartRef" class="w-full h-full"></div>
           </div>
+
         </div>
       </div>
     </div>
 
     <!-- 组织概览 -->
     <div class="bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700 shadow-sm overflow-hidden">
-      <div class="px-5 py-4 border-b border-gray-100 dark:border-gray-700 flex items-center justify-between bg-gradient-to-r from-slate-50 to-transparent dark:from-slate-900/10">
+      <div class="px-5 py-4 border-b border-gray-100 dark:border-gray-700 flex items-center justify-between">
         <div class="flex items-center gap-2">
           <div class="w-8 h-8 bg-slate-100 dark:bg-slate-900/30 rounded-lg flex items-center justify-center">
             <n-icon class="text-blue-600 dark:text-blue-400"><BusinessOutline /></n-icon>
           </div>
           <div>
             <h3 class="font-semibold text-gray-900 dark:text-white">{{ t('org.title') }}</h3>
-            <p class="text-xs text-gray-500 dark:text-gray-400">{{ t('org.stats.total') }}: {{ orgList.length }} {{ t('org.level1').replace('Level 1', 'organizations') }}</p>
+            <p class="text-xs text-gray-500 dark:text-gray-400">{{ t('dashboard.totalOrgs') }}: {{ orgState === 'ready' ? orgList.length : '—' }}</p>
           </div>
         </div>
         <n-button text type="primary" size="small" @click="$router.push('/organizations')">
@@ -312,7 +372,9 @@
           </div>
         </div>
         <div v-else-if="orgState === 'error'" class="flex flex-col items-center justify-center gap-3 py-10" data-testid="org-error">
-          <span class="text-sm text-gray-500 dark:text-gray-400">{{ t('dashboard.loadFailed') }}</span>
+          <span class="text-sm text-slate-600 dark:text-slate-300">
+            {{ orgDegraded ? t('dashboard.dataUnavailable') : t('dashboard.loadFailed') }}
+          </span>
           <n-button size="small" @click="loadOrg">{{ t('dashboard.retry') }}</n-button>
         </div>
         <template v-else>
@@ -320,8 +382,13 @@
           <div
             v-for="(org, idx) in orgList"
             :key="org.org_id"
-            class="group p-4 rounded-xl border-2 border-transparent hover:border-slate-200 dark:hover:border-blue-700 bg-gray-50 dark:bg-gray-700/30 hover:bg-slate-50/50 dark:hover:bg-slate-900/10 transition-all duration-200 cursor-pointer"
+            class="group p-4 rounded-xl border-2 border-transparent hover:border-slate-200 dark:hover:border-blue-700 bg-gray-50 dark:bg-gray-700/30 hover:bg-slate-50/50 dark:hover:bg-slate-900/10 transition-all duration-200 cursor-pointer focus-visible:ring-2 focus-visible:ring-blue-500"
             :style="{ animationDelay: `${idx * 50}ms` }"
+            role="link"
+            tabindex="0"
+            @click="$router.push('/organizations')"
+            @keydown.enter.prevent="$router.push('/organizations')"
+            @keydown.space.prevent="$router.push('/organizations')"
           >
             <div class="flex items-center gap-3">
               <div class="w-10 h-10 rounded-xl flex items-center justify-center text-white font-bold text-sm" :style="{ backgroundColor: ORG_AVATAR_COLORS[idx % ORG_AVATAR_COLORS.length] }">
@@ -353,14 +420,14 @@
 
     <!-- 最近操作日志 -->
     <div class="bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700 shadow-sm overflow-hidden">
-      <div class="px-5 py-4 border-b border-gray-100 dark:border-gray-700 flex items-center justify-between bg-gradient-to-r from-red-50 to-transparent dark:from-red-900/10">
+      <div class="px-5 py-4 border-b border-gray-100 dark:border-gray-700 flex items-center justify-between">
         <div class="flex items-center gap-2">
           <div class="w-8 h-8 bg-red-100 dark:bg-red-900/30 rounded-lg flex items-center justify-center">
             <n-icon class="text-red-600 dark:text-red-400"><ShieldCheckmarkOutline /></n-icon>
           </div>
           <div>
             <h3 class="font-semibold text-gray-900 dark:text-white">{{ t('dashboard.recentAuditLogs') }}</h3>
-            <p class="text-xs text-gray-500 dark:text-gray-400">敏感操作以红色标注</p>
+            <p class="text-xs text-slate-500 dark:text-slate-400">{{ t('dashboard.auditSubtitle') }}</p>
           </div>
         </div>
         <n-button type="primary" size="small" @click="$router.push('/audit-logs')">
@@ -378,6 +445,7 @@
         </div>
         <n-data-table
           v-else
+          :scroll-x="720"
           :columns="auditColumns"
           :data="recentLogs"
           :bordered="false"
@@ -390,19 +458,19 @@
 
     <!-- 快捷入口 -->
     <div class="flex flex-wrap gap-3">
-      <n-button type="primary" size="large" @click="$router.push('/users')" class="shadow-md">
+      <n-button type="primary" size="large" @click="$router.push('/users')" >
         <template #icon><n-icon><PeopleOutline /></n-icon></template>
         {{ t('dashboard.manageUsers') }}
       </n-button>
-      <n-button type="info" size="large" @click="$router.push('/knowledge')" class="shadow-md">
+      <n-button secondary size="large" @click="$router.push('/knowledge')">
         <template #icon><n-icon><BookOutline /></n-icon></template>
         {{ t('dashboard.manageKB') }}
       </n-button>
-      <n-button type="warning" size="large" @click="$router.push('/monitoring')" class="shadow-md">
+      <n-button secondary size="large" @click="$router.push('/monitoring')">
         <template #icon><n-icon><PulseOutline /></n-icon></template>
         {{ t('dashboard.systemMonitor') }}
       </n-button>
-      <n-button type="error" size="large" @click="$router.push('/audit-logs')" class="shadow-md">
+      <n-button secondary size="large" @click="$router.push('/audit-logs')">
         <template #icon><n-icon><ShieldCheckmarkOutline /></n-icon></template>
         {{ t('menu.auditLogs') }}
       </n-button>
@@ -411,30 +479,57 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted, h, nextTick } from 'vue'
+import { ref, computed, onMounted, onUnmounted, h, nextTick, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { useIsDark } from '@/composables/useIsDark'
 import { NTag } from 'naive-ui'
 import { getAuditLogs, type AuditLogEntry } from '@/api/user'
 import { getLLMStats, getRAGStats, getAdminSummary, getOrgSummary, getMonitoringHealth, type OrgSummary } from '@/api/monitoring'
 import { FIRST_SCREEN_REQUEST_CONFIG } from '@/utils/request'
 import { formatDate } from '@/utils/format'
-import { CHART_COLORS } from '@/utils/chartTheme'
+import { CHART_COLORS, CHART_THEME, DARK_CHART_THEME } from '@/utils/chartTheme'
 import {
   PulseOutline, AnalyticsOutline, PeopleOutline, BookOutline, BusinessOutline,
   DocumentTextOutline, ServerOutline, ChatbubbleEllipsesOutline, GitNetworkOutline,
-  ChevronForwardOutline, TrendingUpOutline, ShieldCheckmarkOutline, WarningOutline
+  ChevronForwardOutline, ShieldCheckmarkOutline, WarningOutline
 } from '@vicons/ionicons5'
 import echarts from '@/utils/echarts'
 import type { EChartsType } from 'echarts/core'
 
-const { t } = useI18n()
+const { t, locale } = useI18n()
+const isDark = useIsDark()
 
 /**
  * 分块加载状态：'loading' 骨架 / 'ready' 内容 / 'error' 区块错误态 + 重试。
  * 每个区块只依赖自己那路请求 —— 慢接口不会把整屏锁在 spinner 上。
  */
 type BlockState = 'loading' | 'ready' | 'error'
+const llmCardValue = computed(() => {
+  if (llmState.value !== 'ready' || (llmDegraded.value && !llmEverReady.value)) return '—'
+  return llmStats.value.requestCountToday.toLocaleString()
+})
+const llmCardSub = computed(() => {
+  if (llmState.value !== 'ready' || (llmDegraded.value && !llmEverReady.value)) return '—'
+  return t('dashboard.avgLatencyValue', { ms: llmStats.value.avgLatency || 0 })
+})
+const hitRateClass = computed(() => {
+  if (!ragHasData.value) return 'text-slate-900 dark:text-white'
+  const rate = ragStats.value.hitRate
+  return rate > 60
+    ? 'text-emerald-700 dark:text-emerald-400'
+    : rate > 30
+      ? 'text-amber-700 dark:text-amber-400'
+      : 'text-red-600 dark:text-red-400'
+})
 const summaryState = ref<BlockState>('loading')
+const summaryDegraded = ref(false)
+const summaryEverReady = ref(false)
+const llmDegraded = ref(false)
+const llmEverReady = ref(false)
+const ragDegraded = ref(false)
+const ragEverReady = ref(false)
+const orgDegraded = ref(false)
+const orgEverReady = ref(false)
 const healthState = ref<BlockState>('loading')
 const llmState = ref<BlockState>('loading')
 const ragState = ref<BlockState>('loading')
@@ -469,6 +564,20 @@ const ES_HEALTH_I18N_KEY: Record<string, string> = {
   disconnected: 'dashboard.esHealthDisconnected',
 }
 
+const healthTone = computed<'default' | 'success' | 'warning' | 'error'>(() => {
+  if (healthState.value !== 'ready') return 'default'
+  if (!systemHealthy.value || ['red', 'disconnected'].includes(esHealth.value)) return 'error'
+  if (['yellow', 'unknown'].includes(esHealth.value)) return 'warning'
+  return 'success'
+})
+const healthLabel = computed(() => {
+  if (healthState.value !== 'ready') return '—'
+  if (!systemHealthy.value || ['red', 'disconnected'].includes(esHealth.value)) {
+    return t('dashboard.unhealthy')
+  }
+  if (['yellow', 'unknown'].includes(esHealth.value)) return t('dashboard.attention')
+  return t('dashboard.healthy')
+})
 const esHealthText = computed(() => {
   // E6 分块加载后健康值拆为独立 esHealth ref（healthState 管加载门控），
   // 此处只负责值域 → 词条映射；空值由渲染侧与这里共同兜底为 '—'。
@@ -497,6 +606,20 @@ const llmStats = ref({
   requestCountToday: 0
 })
 
+const ragHasData = computed(() => ragStats.value.totalQueries > 0)
+const ragQualityLabel = computed(() =>
+  ragStats.value.hitRate > 60
+    ? t('dashboard.ragQualityGood')
+    : ragStats.value.hitRate > 30
+      ? t('dashboard.ragQualityMedium')
+      : t('dashboard.ragQualityPoor')
+)
+const ragQualityTag = computed(() =>
+  ragStats.value.hitRate > 60 ? 'success' : ragStats.value.hitRate > 30 ? 'warning' : 'error'
+)
+const todayLabel = computed(() =>
+  new Intl.DateTimeFormat(locale.value, { dateStyle: 'medium' }).format(new Date())
+)
 const ragStats = ref({
   hitRate: 0,
   totalQueries: 0,
@@ -579,7 +702,7 @@ const ragBucketLabels = (count: number): string[] => {
 const emptyChartSubtext = (data: number[]) => ({
   title: {
     text: '',
-    subtext: data.length ? '' : '暂无数据',
+    subtext: data.length ? '' : t('dashboard.noChartData'),
     subtextStyle: { color: '#9ca3af', fontSize: 12 },
     left: 'center',
     top: 'middle'
@@ -597,12 +720,13 @@ const initLlmChart = () => {
   llmChart?.dispose()
   llmChart = echarts.init(llmChartRef.value)
   const llmTrend = llmStats.value.trend
+  const theme = isDark.value ? DARK_CHART_THEME : CHART_THEME
   llmChart.setOption({
     ...emptyChartSubtext(llmTrend),
-    tooltip: { trigger: 'axis', backgroundColor: 'rgba(255,255,255,0.95)', borderColor: '#e5e7eb', textStyle: { color: '#374151' } },
-    grid: { left: '2%', right: '3%', bottom: '3%', top: '8%', containLabel: true },
-    xAxis: { type: 'category', data: llmDays.value, axisLine: { lineStyle: { color: '#e5e7eb' } }, axisLabel: { color: '#6b7280', fontSize: 10 }, splitLine: { show: false } },
-    yAxis: { type: 'value', axisLine: { show: false }, axisLabel: { color: '#6b7280', fontSize: 10 }, splitLine: { lineStyle: { color: '#f3f4f6' } } },
+    tooltip: theme.tooltip,
+    grid: { ...theme.grid, left: '2%', right: '3%', bottom: '3%', top: '8%' },
+    xAxis: { ...theme.xAxis, type: 'category', data: llmDays.value, splitLine: { show: false } },
+    yAxis: { ...theme.yAxis, type: 'value' },
     series: [{
       // 无数据即为空序列（旧实现回退 [1200,1800,…] 伪造曲线——已删）
       data: llmTrend,
@@ -628,12 +752,13 @@ const initRagChart = () => {
   ragChart?.dispose()
   ragChart = echarts.init(ragChartRef.value)
   const ragTrend = ragStats.value.trend
+  const theme = isDark.value ? DARK_CHART_THEME : CHART_THEME
   ragChart.setOption({
     ...emptyChartSubtext(ragTrend),
-    tooltip: { trigger: 'axis', backgroundColor: 'rgba(255,255,255,0.95)', borderColor: '#e5e7eb', textStyle: { color: '#374151' } },
-    grid: { left: '2%', right: '3%', bottom: '3%', top: '8%', containLabel: true },
-    xAxis: { type: 'category', data: ragBucketLabels(ragTrend.length), axisLine: { lineStyle: { color: '#e5e7eb' } }, axisLabel: { color: '#6b7280', fontSize: 10 }, splitLine: { show: false } },
-    yAxis: { type: 'value', min: 0, max: 100, axisLine: { show: false }, axisLabel: { color: '#6b7280', fontSize: 10, formatter: '{value}%' }, splitLine: { lineStyle: { color: '#f3f4f6' } } },
+    tooltip: theme.tooltip,
+    grid: { ...theme.grid, left: '2%', right: '3%', bottom: '3%', top: '8%' },
+    xAxis: { ...theme.xAxis, type: 'category', data: ragBucketLabels(ragTrend.length), splitLine: { show: false } },
+    yAxis: { ...theme.yAxis, type: 'value', min: 0, max: 100, axisLabel: { ...theme.yAxis.axisLabel, formatter: '{value}%' } },
     series: [{
       // 真实 8 桶数据；空即空（旧实现回退 [0,…,hitRate] 伪造末点——已删）
       data: ragTrend,
@@ -659,6 +784,14 @@ const loadSummary = async () => {
   summaryState.value = 'loading'
   try {
     const adminRes = await getAdminSummary()
+    if (!adminRes.data) throw new Error('empty admin-summary payload')
+    const degraded = adminRes.data.degraded === true
+    summaryDegraded.value = degraded
+    if (degraded) {
+      // 降级全零不得覆盖历史真实 KPI；首次降级由模板显示「暂不可用」。
+      summaryState.value = 'ready'
+      return
+    }
     if (adminRes.data) {
       adminStats.value = {
         totalUsers: adminRes.data.total_users || 0,
@@ -671,6 +804,7 @@ const loadSummary = async () => {
         sessionsLastWeek: adminRes.data.sessions_last_week ?? null,
       }
     }
+    summaryEverReady.value = true
     summaryState.value = 'ready'
   } catch {
     summaryState.value = 'error'
@@ -697,6 +831,12 @@ const loadLLM = async () => {
   try {
     const llmRes = await getLLMStats()
     if (!llmRes.data) throw new Error('empty llm-stats payload')
+    const degraded = llmRes.data.degraded === true
+    llmDegraded.value = degraded
+    if (degraded) {
+      llmState.value = 'ready'
+      return
+    }
     llmStats.value = {
       tokensToday: llmRes.data.total_tokens_today || 0,
       costToday: llmRes.data.cost_today_usd || 0,
@@ -709,10 +849,11 @@ const loadLLM = async () => {
       // 替代此前 total_sessions 顶替的谎言口径。
       requestCountToday: llmRes.data.request_count_today || 0
     }
+    llmEverReady.value = true
     llmState.value = 'ready'
     // 等本区块内容（含图表容器）渲染后再初始化，不依赖其它区块是否到齐
     await nextTick()
-    initLlmChart()
+    if (llmStats.value.trend.length) initLlmChart()
   } catch {
     llmState.value = 'error'
   }
@@ -723,6 +864,12 @@ const loadRAG = async () => {
   try {
     const ragRes = await getRAGStats()
     if (!ragRes.data) throw new Error('empty rag-stats payload')
+    const degraded = ragRes.data.degraded === true
+    ragDegraded.value = degraded
+    if (degraded) {
+      ragState.value = 'ready'
+      return
+    }
     ragStats.value = {
       hitRate: ragRes.data.hit_rate || 0,
       totalQueries: ragRes.data.total_queries_7d || 0,
@@ -730,9 +877,10 @@ const loadRAG = async () => {
       avgDocs: ragRes.data.avg_documents_retrieved || 0,
       trend: ragRes.data.hit_rate_trend_7d || []
     }
+    ragEverReady.value = true
     ragState.value = 'ready'
     await nextTick()
-    initRagChart()
+    if (ragHasData.value) initRagChart()
   } catch {
     ragState.value = 'error'
   }
@@ -742,9 +890,17 @@ const loadOrg = async () => {
   orgState.value = 'loading'
   try {
     const orgRes = await getOrgSummary()
+    if (orgRes.data?.degraded === true) {
+      orgDegraded.value = true
+      // 首次降级不渲染 0 个组织；曾成功过则保留旧列表并给 stale 提示。
+      orgState.value = orgEverReady.value ? 'ready' : 'error'
+      return
+    }
     if (orgRes.data?.organizations) {
       orgList.value = orgRes.data.organizations
+      orgEverReady.value = true
     }
+    orgDegraded.value = false
     orgState.value = 'ready'
   } catch {
     orgState.value = 'error'
@@ -756,6 +912,8 @@ const loadAudit = async () => {
   try {
     const auditRes = await getAuditLogs({ limit: 10 }, FIRST_SCREEN_REQUEST_CONFIG)
     const auditData = auditRes.data as unknown as Record<string, unknown>
+    // 后端查询失败会返回 HTTP 200 + {success:false}；不能当空表静默成功。
+    if (auditData?.success === false) throw new Error('audit query failed')
     const auditInner = auditData?.data as Record<string, unknown> | undefined
     if (auditInner?.items) {
       recentLogs.value = auditInner.items as AuditLogEntry[]
@@ -782,6 +940,16 @@ const loadData = () => {
 onMounted(() => {
   loadData()
   window.addEventListener('resize', handleResize)
+})
+
+watch(locale, () => {
+  if (llmState.value === 'ready' && llmStats.value.trend.length) initLlmChart()
+  if (ragState.value === 'ready' && ragHasData.value) initRagChart()
+})
+
+watch(isDark, () => {
+  if (llmState.value === 'ready' && llmStats.value.trend.length) initLlmChart()
+  if (ragState.value === 'ready') initRagChart()
 })
 
 const handleResize = () => {

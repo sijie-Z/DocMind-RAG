@@ -966,7 +966,9 @@ async def get_rag_stats(
         from app.services.rag_service import rag_service
 
         # 从 rag_service 获取真实指标
-        metrics = rag_service.get_metrics(window_seconds=7 * 24 * 3600)  # 7天窗口
+        # 事件保留期与 8×3h 趋势都是 24h；字段名 *_7d 为兼容保留，实际窗口统一 24h，
+        # 避免「总量含 24h-7d 前事件、趋势只覆盖 24h」的自相矛盾。
+        metrics = rag_service.get_metrics(window_seconds=24 * 3600)
 
         retrieval_total = metrics.get("retrieval_total", 0)
         retrieval_hit = metrics.get("retrieval_hit", 0)

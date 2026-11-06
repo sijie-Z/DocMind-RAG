@@ -78,3 +78,11 @@ class TestRAGMetrics:
         m.inc("grounded_hit", 8)
         snap = m.get_snapshot()
         assert abs(snap["groundedness"] - 0.8) < 0.01
+
+    def test_window_zero_events_returns_zero(self):
+        """零事件窗口必须返回 0（旧实现 max(1) 把「没有查询」伪装成 1 次）。"""
+        m = RAGMetrics()
+        snap = m.get_snapshot(window_seconds=3600)
+        assert snap["retrieval_total"] == 0
+        assert snap["retrieval_hit"] == 0
+        assert snap["hit_rate"] == 0

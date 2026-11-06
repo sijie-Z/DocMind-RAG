@@ -118,6 +118,9 @@ export const getNotificationStatus = async (): Promise<{ data: NotificationServi
 }
 
 export interface LLMStats {
+  /** llm-stats 查询失败时为 true（HTTP 200 + 全零），前端不得当真实零使用 */
+  degraded?: boolean
+  reason?: string
   total_tokens_today: number
   cost_today_usd: number
   avg_latency_ms: number
@@ -146,6 +149,9 @@ export const getLLMStatus = async (): Promise<{
 }
 
 export interface RAGStats {
+  /** 统计查询失败时的降级标记（HTTP 200 + 全零），前端不得当真实 0 展示 */
+  degraded?: boolean
+  reason?: string
   total_queries_7d: number
   hits_with_documents: number
   hit_rate: number
@@ -155,6 +161,9 @@ export interface RAGStats {
 }
 
 export interface AdminSummary {
+  /** 统计查询失败时的降级标记（HTTP 200 + 全零） */
+  degraded?: boolean
+  reason?: string
   total_users: number
   total_documents: number
   total_sessions: number
@@ -176,7 +185,9 @@ export const getAdminSummary = async (): Promise<{ data: AdminSummary }> => {
   return request.get('/monitoring/admin-summary', FIRST_SCREEN_REQUEST_CONFIG)
 }
 
-export const getOrgSummary = async (): Promise<{ data: { organizations: OrgSummary[] } }> => {
+export const getOrgSummary = async (): Promise<{
+  data: { organizations: OrgSummary[]; degraded?: boolean; reason?: string }
+}> => {
   return request.get('/monitoring/org-summary', FIRST_SCREEN_REQUEST_CONFIG)
 }
 

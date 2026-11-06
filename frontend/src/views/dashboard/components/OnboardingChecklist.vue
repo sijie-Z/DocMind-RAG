@@ -8,7 +8,7 @@
   >
     <!-- 折叠态（跳过之后）：保留进度与再次查看入口 -->
     <div
-      v-if="collapsed"
+      v-if="showCollapsed"
       data-testid="onboarding-collapsed"
       class="flex flex-wrap items-center justify-between gap-3 px-5 py-4"
     >
@@ -20,7 +20,7 @@
           <p class="font-semibold text-gray-900 dark:text-white truncate">{{ t('dashboard.onboarding.title') }}</p>
           <p class="text-xs text-gray-500 dark:text-gray-400 truncate">
             <span data-testid="onboarding-progress">{{ progressText }}</span>
-            · {{ t('dashboard.onboarding.skippedHint') }}
+            · {{ allDone ? t('dashboard.onboarding.completedHint') : t('dashboard.onboarding.skippedHint') }}
           </p>
         </div>
       </div>
@@ -31,7 +31,7 @@
 
     <!-- 展开态：4 步清单 -->
     <div v-else data-testid="onboarding-steps">
-      <div class="px-5 py-4 border-b border-gray-100 dark:border-gray-700 flex flex-wrap items-start justify-between gap-3 bg-gradient-to-r from-blue-50 to-transparent dark:from-blue-900/10">
+      <div class="px-5 py-4 border-b border-gray-100 dark:border-gray-700 flex flex-wrap items-start justify-between gap-3">
         <div class="flex items-center gap-3">
           <div class="w-9 h-9 rounded-xl bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center flex-shrink-0">
             <n-icon size="20" class="text-blue-600 dark:text-blue-400"><RocketOutline /></n-icon>
@@ -151,6 +151,7 @@ const llmChecked = ref(false)
 const llmError = ref(false)
 const llmLoading = ref(false)
 const collapsed = ref(false)
+const userExpanded = ref(false)
 
 const skippedKey = computed(() => `docmind.onboarding.skipped.${props.userId ?? 'guest'}`)
 
@@ -173,6 +174,7 @@ function skip() {
 
 function expand() {
   collapsed.value = false
+  userExpanded.value = true
   try {
     localStorage.removeItem(skippedKey.value)
   } catch {
@@ -261,6 +263,9 @@ const steps = computed(() => [
 ])
 
 const doneCount = computed(() => steps.value.filter((s) => s.done).length)
+const allDone = computed(() => steps.value.length > 0 && doneCount.value === steps.value.length)
+// 全部完成后默认收成一行摘要（避免已完成清单压过「开始做事」）；用户展开后本次会话保持展开。
+const showCollapsed = computed(() => collapsed.value || (allDone.value && !userExpanded.value))
 const progressText = computed(() =>
   t('dashboard.onboarding.progress', { done: doneCount.value, total: steps.value.length }),
 )
