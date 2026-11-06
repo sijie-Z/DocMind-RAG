@@ -1464,7 +1464,6 @@ export default {
     searchLabel: '搜索核验案件',
     progressColumn: '核验进度',
     progressValue: '{decided}/{total} 已决策',
-    diffSummary: '差异',
     diffSummaryLabel: '差异概览',
     diffCount: '{n} 处差异',
     unidentifiedCount: '{n} 项未识别',

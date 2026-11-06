@@ -1384,7 +1384,6 @@ export default {
     searchLabel: 'レビュー案件を検索',
     progressColumn: '進捗',
     progressValue: '{decided}/{total} 判断済み',
-    diffSummary: '差分',
     diffSummaryLabel: '差分',
     diffCount: '{n} 件の差分',
     unidentifiedCount: '{n} 件の未識別',

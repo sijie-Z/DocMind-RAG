@@ -1385,7 +1385,6 @@ export default {
     searchLabel: 'Rechercher des dossiers de revue',
     progressColumn: 'Progression',
     progressValue: '{decided}/{total} décidés',
-    diffSummary: 'Écarts',
     diffSummaryLabel: 'Écarts',
     diffCount: '{n} écarts',
     unidentifiedCount: '{n} non identifiés',

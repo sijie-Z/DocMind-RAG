@@ -21,7 +21,7 @@
             class="reviews-search"
             data-testid="reviews-search"
             @update:value="scheduleSearch"
-            @keyup.enter="onSearchEnter"
+            @keydown.enter="onSearchEnter"
           >
             <template #prefix>
               <n-icon class="text-slate-400"><SearchOutline /></n-icon>
@@ -505,8 +505,8 @@ function runSearchNow() {
 }
 
 function onSearchEnter(event: KeyboardEvent) {
-  // 中文输入法用 Enter 确认候选词时不应提交半成品查询。
-  if (event.isComposing) return
+  // IME 组合中的 Enter 用于确认候选词（keyCode 229），不提交搜索。
+  if (event.isComposing || event.keyCode === 229) return
   runSearchNow()
 }
 
@@ -580,10 +580,14 @@ onUnmounted(() => {
   width: 15rem;
   flex: none;
 }
+/* 非聚焦态边界需可辨识（WCAG 1.4.11 非文本对比 3:1）；仅本页搜索框加深。 */
+.reviews-search :deep(.n-input__border) {
+  border-color: #64748b;
+}
 .reviews-search :deep(.n-input__input-el) {
   font-size: 14px;
 }
-@media (max-width: 1023.98px) {
+@media (max-width: 1199.98px) {
   .reviews-search {
     width: 100%;
   }

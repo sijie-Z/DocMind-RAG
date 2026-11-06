@@ -697,6 +697,22 @@ async def test_list_cases_search_and_progress_aggregates(factory):
                 created_by=USER_ID,
             )
         )
+        # 另一个状态（blocked）的案件：用于验证 status_counts 不受 status 自身过滤影响。
+        db.add(
+            ReviewCase(
+                id="case-blocked-001",
+                organization_id=ORG,
+                title="旧模板案件（阻断）",
+                policy_document_id=POLICY,
+                base_document_id=BASE,
+                revised_document_id=REVISED,
+                checklist_version="v1",
+                status="blocked",
+                blocking_reasons=["base:not_indexed"],
+                readiness_snapshot={},
+                created_by=USER_ID,
+            )
+        )
         # 未分析案件：有核验项但 change_type 全为 NULL。
         for ordinal, key in enumerate(("payment_term", "start_condition"), start=1):
             db.add(
@@ -713,7 +729,7 @@ async def test_list_cases_search_and_progress_aggregates(factory):
 
     async with factory() as db:
         page = await svc.list_cases(db, organization_id=ORG)
-        assert page["total"] == 2
+        assert page["total"] == 3
         row_a = next(row for row in page["items"] if row["id"] == case_a.id)
         assert row_a["item_count"] == 4
         assert row_a["decided_count"] == 3
@@ -727,7 +743,7 @@ async def test_list_cases_search_and_progress_aggregates(factory):
         assert row_b["analysis_pending_count"] == 2
         assert row_b["all_analyzed"] is False
         assert page["status_counts"] == {
-            "blocked": 0,
+            "blocked": 1,
             "ready": 2,
             "in_review": 0,
             "completed": 0,
@@ -736,6 +752,7 @@ async def test_list_cases_search_and_progress_aggregates(factory):
         only_a = await svc.list_cases(db, organization_id=ORG, q="采购")
         assert [row["id"] for row in only_a["items"]] == [case_a.id]
         assert only_a["status_counts"]["ready"] == 1
+        assert only_a["status_counts"]["blocked"] == 0
 
         # % 必须按字面匹配：测试数据里只有 B 标题含字面 %。
         # 未转义时 LIKE '%%%' 会命中全部案件。
@@ -755,7 +772,7 @@ async def test_list_cases_search_and_progress_aggregates(factory):
         # 状态筛选不改变其它状态的可选计数（faceted counts）。
         filtered = await svc.list_cases(db, organization_id=ORG, status="ready")
         assert filtered["status_counts"] == {
-            "blocked": 0,
+            "blocked": 1,
             "ready": 2,
             "in_review": 0,
             "completed": 0,

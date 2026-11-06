@@ -1457,7 +1457,6 @@ export default {
     searchLabel: 'Search review cases',
     progressColumn: 'Progress',
     progressValue: '{decided}/{total} decided',
-    diffSummary: 'Changes',
     diffSummaryLabel: 'Changes',
     diffCount: '{n} changes',
     unidentifiedCount: '{n} unidentified',
