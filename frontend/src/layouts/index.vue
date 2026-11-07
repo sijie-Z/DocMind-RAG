@@ -11,12 +11,13 @@
     <!-- 侧边栏 -->
     <div
       ref="drawerRef"
+      id="app-sidebar"
       class="bg-white dark:bg-gray-900 border-r border-gray-200 dark:border-gray-800 flex flex-col shrink-0 transition-all duration-300"
       :inert="sidebarInert"
       :aria-hidden="sidebarInert ? 'true' : undefined"
       @keydown="handleDrawerKeydown"
       :class="[
-        appStore.sidebarCollapsed ? 'w-20' : 'w-64',
+        effectiveCollapsed ? 'w-20' : 'w-64',
         'max-md:fixed max-md:inset-y-0 max-md:left-0 max-md:z-50',
         mobileMenuOpen ? 'max-md:translate-x-0' : 'max-md:-translate-x-full',
       ]"
@@ -28,7 +29,7 @@
         class="h-16 flex shrink-0 items-center gap-2 px-3 border-b border-gray-100 dark:border-gray-800/50 bg-white/50 dark:bg-gray-900/50 overflow-hidden whitespace-nowrap"
       >
         <div
-          v-if="!appStore.sidebarCollapsed"
+          v-if="!effectiveCollapsed"
           class="flex min-w-0 flex-1 items-center space-x-3 cursor-pointer rounded-lg transition-opacity hover:opacity-80"
           role="link"
           tabindex="0"
@@ -43,24 +44,19 @@
           </span>
         </div>
         <button
-          v-else
           type="button"
-          data-testid="sidebar-expand-toggle"
-          class="mx-auto hidden h-11 w-11 shrink-0 items-center justify-center rounded-lg border-0 bg-transparent text-gray-500 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-800 md:flex"
-          :aria-label="t('layout.expandSidebar')"
+          data-testid="sidebar-toggle"
+          class="hidden h-11 w-11 shrink-0 items-center justify-center rounded-lg border-0 bg-transparent text-gray-500 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-800 md:flex"
+          :class="effectiveCollapsed ? 'mx-auto' : 'ml-auto'"
+          :aria-label="effectiveCollapsed ? t('layout.expandSidebar') : t('layout.collapseSidebar')"
+          :aria-expanded="!effectiveCollapsed"
+          aria-controls="app-sidebar"
           @click="appStore.toggleSidebar"
         >
-          <n-icon size="18"><ChevronForwardOutline /></n-icon>
-        </button>
-        <button
-          v-if="!appStore.sidebarCollapsed"
-          type="button"
-          data-testid="sidebar-collapse-toggle"
-          class="ml-auto hidden h-11 w-11 shrink-0 items-center justify-center rounded-lg border-0 bg-transparent text-gray-500 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-800 md:flex"
-          :aria-label="t('layout.collapseSidebar')"
-          @click="appStore.toggleSidebar"
-        >
-          <n-icon size="18"><ChevronBackOutline /></n-icon>
+          <n-icon size="18">
+            <ChevronForwardOutline v-if="effectiveCollapsed" />
+            <ChevronBackOutline v-else />
+          </n-icon>
         </button>
         <button
           ref="drawerCloseRef"
@@ -81,7 +77,7 @@
         :aria-label="t('layout.mainNavigation')"
       >
         <n-menu
-          :collapsed="appStore.sidebarCollapsed"
+          :collapsed="effectiveCollapsed"
           :collapsed-width="80"
           :collapsed-icon-size="22"
           :options="menuOptions"
@@ -156,7 +152,7 @@
             >
               {{ userInfo?.username?.charAt(0).toUpperCase() }}
             </n-avatar>
-            <div v-if="!appStore.sidebarCollapsed" class="flex-1 min-w-0">
+            <div v-if="!effectiveCollapsed" class="flex-1 min-w-0">
               <p class="text-sm font-medium text-gray-900 dark:text-gray-100 truncate">
                 {{ userInfo?.username }}
               </p>
@@ -392,6 +388,8 @@ const isMobileViewport = useMediaQuery('(max-width: 639.98px)')
 // 抽屉（max-md）关闭时对辅助技术隐藏并移出焦点顺序；桌面侧栏不受影响。
 const isDrawerViewport = useMediaQuery('(max-width: 767.98px)')
 const sidebarInert = computed(() => isDrawerViewport.value && !mobileMenuOpen.value)
+// 移动抽屉始终按展开态呈现：桌面折叠偏好不应让 <768px 抽屉只剩 80px 图标轨。
+const effectiveCollapsed = computed(() => appStore.sidebarCollapsed && !isDrawerViewport.value)
 const navRef = ref<HTMLElement | null>(null)
 const drawerRef = ref<HTMLElement | null>(null)
 const drawerCloseRef = ref<HTMLElement | null>(null)
@@ -686,14 +684,14 @@ const toMenuOption = (item: MenuItemDef): MenuOption => ({
  * title 悬浮呈现完整词条，不挤压图标列。
  */
 const renderGroupLabel = (label: string) => () => {
-  if (appStore.sidebarCollapsed) return null
+  if (effectiveCollapsed.value) return null
   return h('span', { class: 'block truncate', title: label }, label)
 }
 
 const menuNodeProps = (option: MenuOption): Record<string, string> => {
   if ((option as MenuGroupOption).type === 'group') {
     // 分组标题不是可操作项：不进入 Tab 顺序（折叠态额外 aria-hidden）。
-    return appStore.sidebarCollapsed
+    return effectiveCollapsed.value
       ? { class: 'sidebar-group-title--collapsed', 'aria-hidden': 'true' }
       : {}
   }

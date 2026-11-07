@@ -670,7 +670,7 @@ export default {
       ctaLogin: 'Log in',
     },
     mock: {
-      label: 'Illustrative UI',
+      label: 'Illustrative UI: the payment term changes from 30 to 60 days between the policy and the revised contract, with the evidence quote and a cited Q&A ([1][2])',
       caseTitle: 'Purchase contract V1 → V2',
       reviewTitle: 'Review item · Payment term',
       policyLabel: 'Policy / template',
@@ -681,7 +681,7 @@ export default {
       evidenceLabel: 'Evidence',
       evidenceQuote: 'Party B shall pay the contract price within 60 days after acceptance.',
       evidenceMeta: 'Contract V2 · Clause 8.2 · Page 3',
-      evidenceIntact: 'Evidence text unchanged',
+      evidenceIntact: 'Snapshot intact',
       qaQuestion: 'What are the requirements for the advance payment and payment term?',
       qaAnswer: 'The advance payment may not exceed 30% of the contract value, [1] with the balance paid within 60 days of acceptance. [2]',
       qaSource1: '[1] Procurement policy.pdf · Page 4',

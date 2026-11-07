@@ -831,7 +831,7 @@ button:focus-visible {
   transition: background-color 0.15s;
 }
 .btn-cta:hover {
-  background: #3b82f6;
+  background: #1d4ed8;
 }
 .btn-cta:active {
   background: var(--c-accent-strong);

@@ -621,7 +621,7 @@ export default {
       ctaLogin: 'Connexion',
     },
     mock: {
-      label: 'Aperçu de l’interface',
+      label: "Aperçu de l’interface : le délai de paiement passe de 30 à 60 jours entre la politique et le contrat révisé, avec la preuve citée et une Q&R sourcée [1][2]",
       caseTitle: 'Contrat d’achat V1 → V2',
       reviewTitle: 'Point de revue · Délai de paiement',
       policyLabel: 'Politique / modèle',
@@ -632,7 +632,7 @@ export default {
       evidenceLabel: 'Preuve',
       evidenceQuote: 'Le contractant paie le prix du contrat dans les 60 jours suivant la réception.',
       evidenceMeta: 'Contrat V2 · Clause 8.2 · Page 3',
-      evidenceIntact: 'Texte de preuve inchangé',
+      evidenceIntact: 'Instantané intact',
       qaQuestion: 'Quelles sont les exigences pour l’acompte et le délai de paiement ?',
       qaAnswer: 'L’acompte ne peut dépasser 30 % du montant du contrat, [1] le solde étant payé dans les 60 jours suivant la réception. [2]',
       qaSource1: '[1] Politique d’achat.pdf · Page 4',

@@ -677,7 +677,7 @@ export default {
       ctaLogin: '登录',
     },
     mock: {
-      label: '界面示意',
+      label: '界面示意：制度与合同修订版的付款期限由 30 日变为 60 日，附证据原文与 [1][2] 引用问答',
       caseTitle: '采购合同 V1 → V2',
       reviewTitle: '核验项 · 付款期限',
       policyLabel: '制度/模板',
@@ -688,7 +688,7 @@ export default {
       evidenceLabel: '证据原文',
       evidenceQuote: '乙方应在验收合格后 60 日内支付合同价款。',
       evidenceMeta: '合同 V2 · 第 8.2 条 · 第 3 页',
-      evidenceIntact: '证据原文未变',
+      evidenceIntact: '证据快照完整',
       qaQuestion: '预付款比例与付款期限有什么要求？',
       qaAnswer: '预付款不得超过合同总额的 30%，[1] 余款在验收合格后 60 日内支付。[2]',
       qaSource1: '[1] 采购管理制度.pdf · 第 4 页',

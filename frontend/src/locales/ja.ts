@@ -620,7 +620,7 @@ export default {
       ctaLogin: 'ログイン',
     },
     mock: {
-      label: '画面イメージ',
+      label: '画面イメージ：規程と契約改訂版で支払期限が 30 日から 60 日に変わり、証拠原文と [1][2] 引用付き Q&A を示します',
       caseTitle: '購買契約 V1 → V2',
       reviewTitle: 'レビュー項目 · 支払期限',
       policyLabel: '規程・テンプレート',
@@ -631,7 +631,7 @@ export default {
       evidenceLabel: '証拠原文',
       evidenceQuote: '乙は検収合格後 60 日以内に契約代金を支払うものとする。',
       evidenceMeta: '契約 V2 · 第 8.2 条 · 3 ページ',
-      evidenceIntact: '証拠原文は未変更',
+      evidenceIntact: 'スナップショット一致',
       qaQuestion: '前払い比率と支払期限の要件は何ですか？',
       qaAnswer: '前払いは契約総額の 30% を超えてはならず、[1] 残額は検収合格後 60 日以内に支払います。[2]',
       qaSource1: '[1] 購買管理規程.pdf · 4 ページ',
