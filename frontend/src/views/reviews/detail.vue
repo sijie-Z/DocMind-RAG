@@ -346,14 +346,24 @@
                     </div>
                     <template v-if="(item.evidence[side] || []).length">
                       <div
-                        v-for="row in item.evidence[side]"
+                        v-for="row in evidenceRows(item, side)"
                         :key="row.id"
+                        :data-testid="`review-evidence-row-${side}`"
                         class="mb-2 rounded-md border border-gray-200 bg-white p-2 dark:border-gray-700 dark:bg-gray-900"
                       >
                         <div class="whitespace-pre-wrap text-xs text-gray-700 dark:text-gray-200">
                           {{ row.quote }}
                         </div>
                         <div class="mt-1 flex flex-wrap items-center gap-1 text-xs text-gray-500 dark:text-gray-400">
+                          <n-tag
+                            v-if="isPrimaryEvidence(item, row)"
+                            type="info"
+                            size="small"
+                            data-testid="evidence-primary"
+                            :title="t('reviews.evidencePrimaryHint')"
+                          >
+                            {{ t('reviews.evidencePrimary') }}
+                          </n-tag>
                           <span v-if="row.clause_no?.length">
                             {{ t('reviews.evidenceClause', { clause: row.clause_no.join(',') }) }}
                           </span>
@@ -1016,6 +1026,29 @@ function factLocator(item: ReviewItem, side: ReviewSide): string {
     parts.push(t('reviews.evidencePage', { page: fact.page_number }))
   }
   return parts.join(' · ')
+}
+
+/** 分析层抽取该侧事实时实际定位的分块；旧数据/未识别项可能没有。 */
+function primaryChunkId(item: ReviewItem, side: ReviewSide): string {
+  const facts = (item.facts || {}) as Record<string, unknown>
+  const fact = facts[side] as Record<string, unknown> | undefined
+  return fact && typeof fact === 'object' && fact.chunk_id ? String(fact.chunk_id) : ''
+}
+
+/** 分析定位的证据候选置顶；其余保持服务端分块顺序（稳定排序）。 */
+function evidenceRows(item: ReviewItem, side: ReviewSide): ReviewEvidenceRow[] {
+  const rows = item.evidence[side] || []
+  const primary = primaryChunkId(item, side)
+  if (!primary) return rows
+  return [...rows].sort(
+    (a, b) =>
+      Number(b.chunk_id_at_capture === primary) - Number(a.chunk_id_at_capture === primary)
+  )
+}
+
+function isPrimaryEvidence(item: ReviewItem, row: ReviewEvidenceRow): boolean {
+  const primary = primaryChunkId(item, row.side)
+  return !!primary && row.chunk_id_at_capture === primary
 }
 
 async function load(
