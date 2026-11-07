@@ -497,8 +497,15 @@ async def run_rag_pipeline(
     event_queue: asyncio.Queue | None = None,
     debug: bool = False,
     regenerate: bool = False,
+    llm_client=None,
+    llm_model: str | None = None,
 ) -> None:
     """RAG pipeline core logic; pushes events into ``event_queue``.
+
+    ``llm_client`` / ``llm_model``：调用方（chat 端点）按个人 AI 模型设置解析出的
+    per-user 客户端与模型（``llm_settings_service.resolve_for_user``）。为 None 时
+    保持既有行为：全局 ``rag_service.openai_client`` + 组织默认模型/进程默认模型。
+    只覆盖答案生成；embedding/rerank/查询分解等仍走全局配置。
 
     ``regenerate=True``：对会话最新一轮做**原地重新生成**——复用同一 user 行
     与 assistant 行（id/seq 不变），不再插入重复 user 消息；历史只取该 user
@@ -537,7 +544,8 @@ async def run_rag_pipeline(
     # 修前 `chat_stream` 把 "LLM未配置" 当正文 chunk 下发：用户消息与
     # 「LLM未配置」ASSISTANT 消息双双落库、还写入长期记忆；语义缓存命中
     # 路径同样会把缓存答案当作正常回答落库。
-    if rag_service.openai_client is None:
+    effective_llm_client = llm_client or rag_service.openai_client
+    if effective_llm_client is None:
         _emit(
             RAGEvent(
                 type="error",
@@ -950,7 +958,10 @@ async def run_rag_pipeline(
             system_prompt_override=system_prompt_override,
             enable_masking=privacy_mode,
             mask_mapping_sink=mask_mapping,
-            model_override=org_policy.default_model,
+            # 个人模型设置（per-user）优先于组织默认模型；均为 None 时保持
+            # pipeline 内部既有默认（进程级 Settings）。
+            model_override=llm_model or org_policy.default_model,
+            client_override=llm_client,
         ):
             full_response += chunk
             _emit(
@@ -1035,8 +1046,8 @@ async def run_rag_pipeline(
         if token_usage and token_usage[0] > 0:
             from app.api.v1.endpoints.token_usage import record_token_usage
 
-            # B4（D5）：用量记录与真实调用模型一致（组织默认模型或平台默认）。
-            model = org_policy.default_model
+            # B4（D5）：用量记录与真实调用模型一致（个人设置 > 组织默认模型）。
+            model = llm_model or org_policy.default_model
             await record_token_usage(
                 db=session,
                 user_id=user_id,
