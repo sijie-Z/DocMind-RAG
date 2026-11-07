@@ -57,6 +57,36 @@ EVIDENCE_FIELDS = (
     "stale",
 )
 
+# Markdown 报告是给业务方的交付物：渲染层把内部枚举翻成业务文案，
+# 不改动 JSON 快照（快照保持机器可读、可复算哈希）。文案与前端
+# `reviews.*` 词条口径一致；未知码原样透传，不吞信息。
+SIDE_LABELS = {"base": "合同基准版", "revised": "合同修订版", "policy": "制度/模板"}
+ITEM_LABELS = {
+    "payment_term": "付款期限",
+    "start_condition": "起算条件",
+    "acceptance_invoice": "验收/发票前提",
+    "exception": "例外/暂缓/另有约定",
+}
+CHANGE_TYPE_LABELS = {
+    "unchanged": "无差异",
+    "modified": "有差异",
+    "added": "仅修订版有",
+    "removed": "仅基准版有",
+    "renumbered": "条号变化",
+    "unidentified": "未识别",
+}
+ITEM_STATUS_LABELS = {
+    "verified": "已核对",
+    "needs_human": "需人工处理",
+    "not_applicable": "不适用",
+}
+FACT_STATUS_LABELS = {"identified": "已识别", "ambiguous": "存疑", "not_found": "未识别"}
+FACT_REASON_LABELS = {
+    "unit_unclear": "单位无法判定（自然日/工作日）",
+    "multiple_durations": "同一核验项出现多个期限候选",
+}
+UNIT_LABELS = {"day": "自然日", "workday": "工作日", "month": "个月"}
+
 
 def _now() -> datetime:
     return datetime.now(UTC)
@@ -367,13 +397,125 @@ def _flatten(value: Any) -> str:
     return " ".join(text.split())
 
 
+def _label(mapping: dict[str, str], value: Any) -> str:
+    text = "" if value is None else str(value)
+    return mapping.get(text, text)
+
+
+def _labels(mapping: dict[str, str], values: Any) -> str:
+    if not isinstance(values, (list, tuple)):
+        return _flatten(_label(mapping, values))
+    return "、".join(_flatten(_label(mapping, value)) for value in values)
+
+
+def _locator_text(clause_no: Any, section_no: Any, page_number: Any) -> str:
+    parts: list[str] = []
+    if isinstance(clause_no, (list, tuple)) and clause_no:
+        parts.append("第 " + ",".join(_flatten(n) for n in clause_no) + " 条")
+    if isinstance(section_no, (list, tuple)) and section_no:
+        parts.append("第 " + ",".join(_flatten(n) for n in section_no) + " 节")
+    if page_number:
+        parts.append(f"第 {_flatten(page_number)} 页")
+    return " · ".join(parts)
+
+
+def _fact_reason(reason: Any) -> str:
+    """组合码（如 ``unit_unclear+multiple_durations``）逐段翻译，未知段透传。"""
+    parts = [part.strip() for part in str(reason or "").split("+") if part.strip()]
+    return " · ".join(_flatten(FACT_REASON_LABELS.get(part, part)) for part in parts)
+
+
+def _unit_text(unit_raw: Any, unit: Any) -> str:
+    if unit_raw:
+        return _flatten(unit_raw)
+    if unit:
+        return _flatten(UNIT_LABELS.get(str(unit), str(unit)))
+    return ""
+
+
+def _fact_values(fact: dict[str, Any]) -> str:
+    candidates = fact.get("candidates")
+    if isinstance(candidates, list) and candidates:
+        raws: list[str] = []
+        for candidate in candidates:
+            if isinstance(candidate, dict):
+                raw = candidate.get("raw")
+                if raw:
+                    raws.append(_flatten(raw))
+                elif candidate.get("value") is not None:
+                    unit = _unit_text(candidate.get("unit_raw"), candidate.get("unit"))
+                    raws.append(_flatten(f"{candidate.get('value')} {unit}"))
+            elif candidate is not None:
+                raws.append(_flatten(candidate))
+        if raws:
+            return " / ".join(raws)
+    parts: list[str] = []
+    if fact.get("value") is not None:
+        unit = _unit_text(fact.get("unit_raw"), fact.get("unit"))
+        parts.append(_flatten(f"{fact.get('value')} {unit}"))
+    for key, label in (
+        ("events", "起算事件"),
+        ("terms", "命中词"),
+        ("cross_refs", "引用条款"),
+    ):
+        values = fact.get(key)
+        if isinstance(values, list) and values:
+            parts.append(f"{label}：{'、'.join(_flatten(value) for value in values)}")
+    return " · ".join(parts)
+
+
+def _fact_text(fact: Any) -> str:
+    """单个侧文本事实 → 业务文案；歧义只列候选与原因，不替用户选值。"""
+    if not isinstance(fact, dict):
+        return "—"
+    status = str(fact.get("status") or "")
+    if status == "identified":
+        return _fact_values(fact) or "无"
+    if status == "ambiguous":
+        text = _fact_reason(fact.get("reason")) or "未识别"
+        candidates = _fact_values(fact)
+        if candidates:
+            text += f" · 候选：{candidates}"
+        return text
+    if status == "not_found":
+        return "未识别"
+    return _label(FACT_STATUS_LABELS, status) or "—"
+
+
+def _fact_locator(fact: Any) -> str:
+    if not isinstance(fact, dict):
+        return ""
+    return _locator_text(fact.get("clause_no"), fact.get("section_no"), fact.get("page_number"))
+
+
+def _status_summary(items: list[dict[str, Any]]) -> str:
+    counts: dict[str, int] = {}
+    for item in items:
+        status = item.get("status")
+        if status:
+            counts[str(status)] = counts.get(str(status), 0) + 1
+    ordered = list(DECISION_STATUSES) + [key for key in counts if key not in DECISION_STATUSES]
+    return " · ".join(
+        f"{_label(ITEM_STATUS_LABELS, status)} {counts[status]}"
+        for status in ordered
+        if counts.get(status)
+    )
+
+
 def render_markdown(payload: dict[str, Any]) -> str:
-    """把导出 payload 渲染为 Markdown；内容只来自快照，不引入第二套真源。"""
+    """把导出 payload 渲染为可交付的 Markdown 报告。
+
+    内容只来自快照：事实歧义列出候选与原因，未识别如实标注，不引入第二套真源。
+    """
     case = payload["case"]
-    lines = [f"# 核验单：{_flatten(case['title'])}", ""]
-    lines.append(f"- 案件：{case['id']}")
-    lines.append(f"- 清单版本：{case['checklist_version']}")
-    lines.append(f"- 源文档在建案后发生变化：{'是' if payload['source_stale'] else '否'}")
+    items = payload.get("items") or []
+    lines = [f"# 核验单：{_flatten(case.get('title'))}", ""]
+    lines.append(f"- 案件：{_flatten(case.get('id'))}")
+    lines.append(f"- 清单版本：{_flatten(case.get('checklist_version'))}")
+    lines.append(f"- 源文档在建案后发生变化：{'是' if payload.get('source_stale') else '否'}")
+    summary = _status_summary(items)
+    if summary:
+        lines.append(f"- 核验项：{len(items)} 项 · {summary}")
     lines.append("")
     lines.append("## 文档与版本")
     lines.append("| 侧 | 文件 | 版本 | 内容哈希 |")
@@ -381,44 +523,90 @@ def render_markdown(payload: dict[str, Any]) -> str:
     for side in REVIEW_SIDES:
         entry = payload["documents"].get(side) or {}
         lines.append(
-            f"| {_cell(side)} | {_cell(entry.get('filename') or '')} | "
+            f"| {_cell(_label(SIDE_LABELS, side))} | {_cell(entry.get('filename') or '')} | "
             f"{_cell(entry.get('version_label') or '')} | {_cell(entry.get('content_sha256') or '')} |"
         )
     lines.append("")
     lines.append("## 核验项")
     lines.append("| 核验项 | 差异类型 | 决策 | 决策人 | 决策时间 | 说明 |")
     lines.append("| --- | --- | --- | --- | --- | --- |")
-    for item in payload["items"]:
+    for item in items:
+        decided_by = item.get("decided_by")
         lines.append(
-            f"| {_cell(item['item_key'])} | {_cell(item.get('change_type') or '')} | "
-            f"{_cell(item['status'])} | {_cell(item.get('decided_by') or '')} | "
+            f"| {_cell(_label(ITEM_LABELS, item.get('item_key')))} | "
+            f"{_cell(_label(CHANGE_TYPE_LABELS, item.get('change_type')))} | "
+            f"{_cell(_label(ITEM_STATUS_LABELS, item.get('status')))} | "
+            f"{_cell(f'#{decided_by}' if decided_by is not None else '')} | "
             f"{_cell(item.get('decided_at') or '')} | {_cell(item.get('decision_note') or '')} |"
         )
     lines.append("")
+    lines.append("## 逐项核验")
+    for item in items:
+        change = _label(CHANGE_TYPE_LABELS, item.get("change_type"))
+        heading = _flatten(_label(ITEM_LABELS, item.get("item_key")))
+        lines.append(f"### {heading}{f'（{_flatten(change)}）' if change else ''}")
+        lines.append(f"- 决策：{_flatten(_label(ITEM_STATUS_LABELS, item.get('status')))}")
+        decided_by = item.get("decided_by")
+        if decided_by is not None:
+            lines.append(f"- 决策人：#{_flatten(decided_by)}")
+        if item.get("decided_at"):
+            lines.append(f"- 决策时间：{_flatten(item.get('decided_at'))}")
+        note = item.get("decision_note")
+        if note and str(note).strip():
+            lines.append(f"- 说明：{_flatten(note)}")
+        facts = item.get("facts") or {}
+        fact_lines: list[str] = []
+        for side in REVIEW_SIDES:
+            fact = facts.get(side) if isinstance(facts, dict) else None
+            if not isinstance(fact, dict):
+                continue
+            locator = _fact_locator(fact)
+            suffix = f"（{locator}）" if locator else ""
+            fact_lines.append(f"- {SIDE_LABELS[side]}：{_fact_text(fact)}{suffix}")
+        if fact_lines:
+            lines.append("")
+            lines.append("**文本事实**")
+            lines.extend(fact_lines)
+        base_fact = facts.get("base") if isinstance(facts, dict) else None
+        revised_fact = facts.get("revised") if isinstance(facts, dict) else None
+        if (
+            item.get("change_type") in ("modified", "renumbered")
+            and isinstance(base_fact, dict)
+            and isinstance(revised_fact, dict)
+            and _fact_text(base_fact) == _fact_text(revised_fact)
+        ):
+            # 与工作台口径一致：差异来自正文/条号时，不拿相同的提取值硬造对比。
+            lines.append("")
+            lines.append("- 提示：文本事实一致；差异来自正文或条号变化。")
+        lines.append("")
     lines.append("## 证据（原文引用）")
-    for item in payload["items"]:
-        lines.append(f"### {item['item_key']}")
+    for item in items:
+        lines.append(f"### {_flatten(_label(ITEM_LABELS, item.get('item_key')))}")
         has_evidence = False
         for side in REVIEW_SIDES:
             for row in item["evidence"].get(side) or []:
                 has_evidence = True
-                clause = row.get("clause_no") or []
-                locator = f"第{','.join(str(n) for n in clause)}条" if clause else "未识别条号"
-                page = row.get("page_number")
+                locator = _locator_text(
+                    row.get("clause_no"), row.get("section_no"), row.get("page_number")
+                )
+                stale = " · 快照已过期（当前文档已变化）" if row.get("stale") else ""
                 lines.append(
-                    f"- [{side}] {locator}{' 第' + str(page) + '页' if page else ''}："
-                    f"{_flatten(row['quote'])}"
+                    f"- [{SIDE_LABELS[side]}] {locator or '定位未记录'}{stale}："
+                    f"{_flatten(row.get('quote'))}"
                 )
         if not has_evidence:
             lines.append("- （无已选证据）")
         lines.append("")
-    coverage = payload["coverage"]
+    coverage = payload.get("coverage") or {}
     lines.append("## 覆盖范围")
-    lines.append(f"- 固定核验项：{', '.join(coverage['checklist_items'])}")
-    lines.append(f"- 未识别项：{', '.join(coverage['unidentified_items']) or '无'}")
-    lines.append(f"- 需人工处理项：{', '.join(coverage['needs_human_items']) or '无'}")
+    lines.append(f"- 固定核验项：{_labels(ITEM_LABELS, coverage.get('checklist_items')) or '无'}")
+    lines.append(f"- 未识别项：{_labels(ITEM_LABELS, coverage.get('unidentified_items')) or '无'}")
     lines.append(
-        f"- 无已选证据项：{', '.join(coverage['items_without_selected_evidence']) or '无'}"
+        f"- 需人工处理项：{_labels(ITEM_LABELS, coverage.get('needs_human_items')) or '无'}"
+    )
+    lines.append(
+        "- 无已选证据项："
+        f"{_labels(ITEM_LABELS, coverage.get('items_without_selected_evidence')) or '无'}"
     )
     scan = coverage.get("scan") or {}
     if scan:
