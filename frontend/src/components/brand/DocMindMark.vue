@@ -1,7 +1,6 @@
 <template>
-  <!-- DocMind 品牌标识：折页 M + 证据菱形。
-       M 的两道折线像折起的纸页，谷底压接的实心菱形代表被钉住、可核验的证据；
-       单色 currentColor，可复用于侧栏、登录页与 favicon/PWA。 -->
+  <!-- DocMind 品牌标识：证据菱章 + M 负形。
+       单一 currentColor，M 为负形（透出承载背景）；16–48px 均可辨识。 -->
   <svg
     :width="size"
     :height="size"
@@ -14,13 +13,11 @@
     focusable="false"
   >
     <path
-      d="M3.6 19.4V6.9L12 13.2 20.4 6.9v12.5"
-      stroke="currentColor"
-      stroke-width="2.1"
-      stroke-linecap="round"
-      stroke-linejoin="round"
+      fill="currentColor"
+      fill-rule="evenodd"
+      clip-rule="evenodd"
+      d="M12 1.5 22.5 12 12 22.5 1.5 12 12 1.5Zm-5.2 14.3V8.2h2.5l3.2 2.55 3.2-2.55h2.5v7.6h-2.5v-4.3L12 14.1l-3.2-2.6v4.3H6.8Z"
     />
-    <path d="M12 12.8l2.4 2.4-2.4 2.4-2.4-2.4z" fill="currentColor" />
   </svg>
 </template>
 
