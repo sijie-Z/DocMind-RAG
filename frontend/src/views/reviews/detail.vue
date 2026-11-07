@@ -24,12 +24,13 @@
             </div>
           </div>
         </div>
-        <div class="flex flex-wrap gap-2">
+        <div class="review-top-actions flex flex-wrap gap-2">
           <n-button :loading="loading" quaternary @click="load(true)">
             <template #icon><n-icon><RefreshOutline /></n-icon></template>
             {{ t('reviews.retry') }}
           </n-button>
           <n-button
+            v-if="!analyzedAll || !canAnalyze"
             type="primary"
             :loading="analyzing"
             :disabled="!canAnalyze"
@@ -38,6 +39,7 @@
             {{ analyzing ? t('reviews.analyzing') : t('reviews.analyze') }}
           </n-button>
           <n-button
+            v-if="!analyzedAll"
             type="primary"
             secondary
             :loading="exporting"
@@ -85,12 +87,12 @@
 
           <!-- 结论横幅：结论 + 真实进度 + 计数筛选（数据全部来自 items 状态） -->
           <section
-            class="sticky top-0 z-20 -mx-4 mb-4 border-b border-slate-200 bg-gray-50 px-4 py-3 dark:border-slate-800 dark:bg-gray-950 md:-mx-6 md:px-6"
+            class="review-conclusion sticky top-0 z-20 -mx-4 mb-4 border-b border-slate-200 bg-gray-50 px-4 py-3 dark:border-slate-800 dark:bg-gray-950 md:-mx-6 md:px-6"
             data-testid="review-conclusion"
           >
             <div class="flex flex-wrap items-center gap-2">
               <n-tag :type="conclusion.tag" size="medium">{{ conclusion.title }}</n-tag>
-              <span class="line-clamp-2 text-sm text-slate-600 dark:text-slate-300">{{ conclusion.hint }}</span>
+              <span class="line-clamp-1 text-sm text-slate-600 dark:text-slate-300 md:line-clamp-2">{{ conclusion.hint }}</span>
               <span v-if="detail.archived_at" class="text-xs text-slate-500 dark:text-slate-400">
                 {{ t('reviews.summaryArchivedHint') }}
               </span>
@@ -99,7 +101,7 @@
               <span class="tabular-nums">
                 {{ t('reviews.summaryProgress', { done: itemStats.decided, total: itemStats.total }) }}
               </span>
-              <div class="w-32">
+              <div class="review-progress w-32">
                 <n-progress
                   type="line"
                   :percentage="decisionProgress"
@@ -110,11 +112,11 @@
               <span class="tabular-nums">
                 {{ t('reviews.summaryChanged', { count: itemStats.changed }) }}
               </span>
-              <div class="flex flex-wrap gap-1">
+              <div class="review-filter-chips flex flex-wrap gap-1">
                 <n-button
                   v-for="chip in itemFilterChips"
                   :key="chip.value"
-                  size="tiny"
+                  size="small"
                   class="review-chip"
                   :type="itemFilter === chip.value ? 'primary' : 'default'"
                   :secondary="itemFilter !== chip.value"
@@ -127,16 +129,7 @@
             </div>
             <div class="mt-2 flex flex-wrap items-center gap-2" data-testid="review-primary-actions">
               <n-button
-                v-if="canAnalyze && !analyzedAll"
-                size="small"
-                type="primary"
-                :loading="analyzing"
-                @click="runAnalyze"
-              >
-                {{ analyzing ? t('reviews.analyzing') : t('reviews.analyze') }}
-              </n-button>
-              <n-button
-                v-else-if="nextPendingCount > 0"
+                v-if="nextPendingCount > 0 && detail.status !== 'blocked' && !detail.archived_at"
                 size="small"
                 type="primary"
                 data-testid="review-next-pending"
@@ -145,22 +138,29 @@
                 {{ t('reviews.nextPending') }} · {{ nextPendingCount }}
               </n-button>
               <n-button
-                v-if="canExport"
+                v-if="analyzedAll"
                 size="small"
                 type="primary"
                 secondary
+                data-testid="review-export"
                 :loading="exporting"
+                :disabled="!canExport"
                 @click="runExport"
               >
                 {{ exporting ? t('reviews.exporting') : t('reviews.export') }}
               </n-button>
               <n-button v-if="exports.length" size="small" data-testid="review-latest-download" @click="downloadExport(exports[0].id, 'json')">
-                {{ t('reviews.downloadJson') }}
+                {{ t('reviews.downloadLatest') }}
               </n-button>
               <n-tag v-if="detail.stale_evidence_count" type="warning" size="small">
                 {{ t('reviews.staleCount', { count: detail.stale_evidence_count }) }}
               </n-tag>
-              <span v-if="hasUnsavedDrafts" class="text-xs text-amber-700 dark:text-amber-400">
+              <span
+                v-if="hasUnsavedDrafts"
+                role="status"
+                aria-live="polite"
+                class="text-xs text-amber-700 dark:text-amber-400"
+              >
                 {{ t('reviews.unsavedDraftsHint') }}
               </span>
             </div>
@@ -273,12 +273,12 @@
               v-for="item in filteredItems"
               :id="`review-item-${item.item_key}`"
               :key="item.id"
-              class="scroll-mt-24 rounded-xl border border-gray-200 bg-white/80 p-4 dark:border-gray-800 dark:bg-gray-900/60"
+              class="scroll-mt-44 rounded-xl border border-gray-200 bg-white/80 p-4 dark:border-gray-800 dark:bg-gray-900/60 md:scroll-mt-32"
               :data-testid="`review-item-${item.item_key}`"
             >
               <div class="flex flex-wrap items-center gap-2">
                 <span
-                  class="text-base font-semibold text-gray-800 focus:outline-none dark:text-gray-100"
+                  class="text-base font-semibold text-gray-800 dark:text-gray-100"
                   tabindex="-1"
                   data-item-heading
                 >{{ itemLabel(item.item_key) }}</span>
@@ -319,7 +319,7 @@
               <div
                 v-if="diffSummary(item)"
                 data-testid="item-diff"
-                class="mt-2 line-clamp-2 rounded-md border border-amber-200 bg-amber-50 px-2 py-1.5 text-xs leading-relaxed text-amber-900 dark:border-amber-800/60 dark:bg-amber-900/10 dark:text-amber-200"
+                class="mt-2 rounded-md border border-amber-200 bg-amber-50 px-2 py-1.5 text-xs leading-relaxed text-amber-900 dark:border-amber-800/60 dark:bg-amber-900/10 dark:text-amber-200 xl:line-clamp-2"
                 :title="diffSummary(item)"
               >
                 <span class="font-semibold">
@@ -327,13 +327,20 @@
                 </span>
                 {{ diffSummary(item) }}
               </div>
+              <div
+                v-else-if="item.change_type === 'modified' || item.change_type === 'renumbered'"
+                data-testid="item-diff-same"
+                class="mt-2 text-xs text-slate-500 dark:text-slate-400"
+              >
+                {{ t('reviews.diffTextSameHint') }}
+              </div>
 
               <!-- 证据快照 -->
               <div class="mt-3">
                 <div class="mb-1 text-xs font-medium text-gray-500 dark:text-gray-400">{{ t('reviews.evidenceTitle') }}</div>
                 <div class="mb-1 text-xs text-gray-500 dark:text-gray-400">{{ t('reviews.selectHint') }}</div>
                 <div class="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-                  <div v-for="side in SIDES" :key="side" class="rounded-lg bg-gray-50 p-2 dark:bg-gray-800/50">
+                  <div v-for="side in EVIDENCE_SIDES" :key="side" class="rounded-lg bg-gray-50 p-2 dark:bg-gray-800/50">
                     <div class="mb-1 text-xs font-medium text-gray-500 dark:text-gray-400">
                       {{ docLabel(side) }}
                     </div>
@@ -374,6 +381,7 @@
                           class="evidence-select"
                           :type="row.selected ? 'success' : 'primary'"
                           :aria-pressed="row.selected"
+                          :aria-label="`${row.selected ? t('reviews.evidenceDeselect') : t('reviews.evidenceSelect')} · ${docLabel(row.side)}`"
                           :loading="evidenceBusy === row.id"
                           :disabled="!canSelectEvidence || !!evidenceBusy"
                           @click="toggleEvidence(item, row)"
@@ -408,6 +416,7 @@
                   v-model:value="decisionOf(item).status"
                   size="small"
                   class="review-decision-group"
+                  role="radiogroup"
                   :aria-label="t('reviews.decisionTitle')"
                   :disabled="detail.status === 'blocked' || !!detail.archived_at || !item.change_type"
                 >
@@ -424,7 +433,7 @@
                   size="small"
                   class="review-decision-note flex-1"
                   :placeholder="t('reviews.decisionNote')"
-                  :aria-label="t('reviews.decisionNote')"
+                  :input-props="{ 'aria-label': t('reviews.decisionNote') }"
                   :maxlength="2000"
                   :disabled="detail.status === 'blocked' || !!detail.archived_at"
                 />
@@ -485,7 +494,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useMessage } from 'naive-ui'
@@ -533,6 +542,7 @@ function filterFromRoute(): ItemFilter {
 }
 const itemFilter = ref<ItemFilter>(filterFromRoute())
 let loadSeq = 0
+let foregroundSeq = 0
 
 const itemStats = computed(() => {
   const items = detail.value?.items ?? []
@@ -776,8 +786,8 @@ function goNextPending() {
   itemFilter.value = 'pending'
   void nextTick(() => {
     const element = document.getElementById(`review-item-${next.item_key}`)
-    element?.scrollIntoView({ block: 'start', behavior: 'smooth' })
-    element?.querySelector<HTMLElement>('[data-item-heading]')?.focus()
+    element?.scrollIntoView?.({ block: 'start', behavior: 'smooth' })
+    element?.querySelector<HTMLElement>('[data-item-heading]')?.focus({ preventScroll: true })
   })
 }
 
@@ -793,6 +803,9 @@ const ITEM_LABELS: Record<string, string> = {
   acceptance_invoice: 'reviews.itemAcceptanceInvoice',
   exception: 'reviews.itemException'
 }
+// 证据对比顺序：基准 ↔ 修订优先（核心对比），制度/模板整段引文放最后，
+// 避免两栏布局下 policy+base 占一行、真正要对比的修订版被推到下一行。
+const EVIDENCE_SIDES: ReviewSide[] = ['base', 'revised', 'policy']
 function docLabel(side: ReviewSide) {
   return t(DOC_LABELS[side])
 }
@@ -901,8 +914,8 @@ function diffSummary(item: ReviewItem): string {
   if (!type || type === 'unchanged' || type === 'unidentified') return ''
   const base = factText(item, 'base')
   const revised = factText(item, 'revised')
-  if (type === 'added') return `— → ${revised}`
-  if (type === 'removed') return `${base} → —`
+  if (type === 'added') return base === '—' && revised === '—' ? '' : `— → ${revised}`
+  if (type === 'removed') return base === '—' && revised === '—' ? '' : `${base} → —`
   // 文本事实相同（差异来自正文哈希/条号）时不展示 `A → A` 的误导性对比。
   if (base === revised) return ''
   return `${base} → ${revised}`
@@ -916,6 +929,9 @@ function factLocator(item: ReviewItem, side: ReviewSide): string {
   const parts: string[] = []
   if (Array.isArray(fact.clause_no) && fact.clause_no.length) {
     parts.push(t('reviews.evidenceClause', { clause: fact.clause_no.join(',') }))
+  }
+  if (Array.isArray(fact.section_no) && fact.section_no.length) {
+    parts.push(t('reviews.evidenceSection', { section: fact.section_no.join(',') }))
   }
   if (fact.page_number) {
     parts.push(t('reviews.evidencePage', { page: fact.page_number }))
@@ -931,28 +947,49 @@ async function load(
   const seq = ++loadSeq
   const background = options.background === true
   const includeExports = options.includeExports !== false
-  if (!background) loading.value = true
-  loadError.value = false
+  // 前后台各用独立令牌：后台请求不得让前台 spinner 永久卡住。
+  const foregroundToken = background ? null : ++foregroundSeq
+  if (!background) {
+    loading.value = true
+    loadError.value = false
+  }
   try {
     const data = apiUnwrap<ReviewCaseDetail>(await reviewsApi.get(caseId.value))
     if (seq !== loadSeq) return
+    // 脏合并：只有用户真的改过的草稿才保留；未被编辑的项采纳服务端最新值
+    // （其他评审的决策/备注会收敛进来，不会被 keepDrafts 整表冻结）。
+    const previousById = new Map((detail.value?.items ?? []).map((item) => [item.id, item]))
     detail.value = data
+    loadError.value = false
     for (const item of data.items) {
+      const previous = previousById.get(item.id)
+      const draft = decisions[item.id]
+      const previousDecided = previous &&
+        (previous.status === 'verified' ||
+          previous.status === 'needs_human' ||
+          previous.status === 'not_applicable')
+        ? previous.status
+        : null
+      const draftDirty =
+        !!previous &&
+        !!draft &&
+        (draft.status !== previousDecided ||
+          (draft.note || '').trim() !== (previous.decision_note || '').trim())
+      if (keepDrafts && draftDirty) continue
       const decided =
         item.status === 'verified' ||
         item.status === 'needs_human' ||
         item.status === 'not_applicable'
-      if (keepDrafts && decisions[item.id]) continue
       decisions[item.id] = {
         status: decided ? (item.status as ReviewDecisionStatus) : null,
         note: item.decision_note || ''
       }
     }
   } catch {
-    // 后台刷新失败不把整页打成错误态；保留当前内容。
+    // 后台刷新失败不把整页打成错误态；保留当前内容与已有错误提示。
     if (seq === loadSeq && !background) loadError.value = true
   } finally {
-    if (!background && seq === loadSeq) loading.value = false
+    if (foregroundToken !== null && foregroundToken === foregroundSeq) loading.value = false
   }
   if (!includeExports) return
   try {
@@ -1091,9 +1128,7 @@ watch(itemFilter, (value) => {
   const query = { ...((route.query || {}) as Record<string, string>) }
   if (value === 'all') delete query.filter
   else query.filter = value
-  void (
-    router as unknown as { replace?: (location: { query: Record<string, string> }) => Promise<unknown> }
-  ).replace?.({ query })
+  void router.replace({ query })
 })
 
 watch(
@@ -1107,14 +1142,42 @@ watch(
   }
 )
 
-onMounted(load)
+function handleBeforeUnload(event: BeforeUnloadEvent) {
+  if (!hasUnsavedDrafts.value) return
+  event.preventDefault()
+  event.returnValue = ''
+}
+
+onMounted(() => {
+  window.addEventListener('beforeunload', handleBeforeUnload)
+  void load()
+})
+
+onBeforeUnmount(() => {
+  window.removeEventListener('beforeunload', handleBeforeUnload)
+})
 </script>
 
 <style scoped>
 .evidence-select.n-button {
   min-height: 32px;
 }
-@media (max-width: 1023.98px) {
+[data-item-heading]:focus {
+  outline: 2px solid #2563eb;
+  outline-offset: 4px;
+  border-radius: 4px;
+}
+@media (max-width: 1024px) {
+  .review-top-actions .n-button,
+  [data-testid="review-primary-actions"] .n-button {
+    min-height: 44px;
+  }
+  .review-decision-note :deep(.n-input__input-el) {
+    font-size: 16px;
+  }
+  .review-decision-note.n-input {
+    --n-height: 44px !important;
+  }
   .review-chip.n-button {
     height: 44px !important;
     padding-left: 12px;
@@ -1135,15 +1198,26 @@ onMounted(load)
   .review-decision-save.n-button {
     min-height: 44px;
   }
-  .review-decision-note :deep(.n-input__input-el) {
-    font-size: 16px;
-  }
-  [data-testid="review-primary-actions"] .n-button {
-    min-height: 44px;
-  }
   .review-export-empty :deep(.n-empty__description) {
     color: #6b7280;
   }
+}
+@media (max-width: 767.98px) {
+  .review-conclusion {
+    padding-top: 8px;
+    padding-bottom: 8px;
+  }
+  .review-progress {
+    display: none;
+  }
+  .review-filter-chips {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    padding-bottom: 2px;
+  }
+}
+.dark .review-export-empty :deep(.n-empty__description) {
+  color: #9ca3af;
 }
 .review-export-empty :deep(.n-empty__description) {
   color: #6b7280;
