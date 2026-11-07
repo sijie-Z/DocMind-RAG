@@ -213,18 +213,28 @@ def clear_client_cache() -> None:
     _CLIENT_CACHE.clear()
 
 
-def _cached_client(provider: str, base_url: str, api_key: str) -> AsyncOpenAI:
-    """按配置哈希缓存客户端（连接池复用）；配置变更 ⇒ 哈希变 ⇒ 新客户端。"""
-    fingerprint = hashlib.sha256(f"{provider}|{base_url}|{api_key}".encode()).hexdigest()
+def _new_client(provider: str, base_url: str, api_key: str) -> AsyncOpenAI:
+    if provider == "ollama":
+        # Ollama 的 OpenAI 兼容端点不校验 key，但 SDK 要求非空字符串。
+        return AsyncOpenAI(api_key=api_key or "ollama", base_url=base_url)
+    return AsyncOpenAI(api_key=api_key, base_url=base_url)
+
+
+def _cached_client(provider: str, base_url: str, cache_id: str, api_key: str) -> AsyncOpenAI:
+    """按保存时生成的随机 ``config_id`` 缓存客户端（连接池复用）。
+
+    缓存键不含 API key（也无需对 key 做哈希）：每次保存都会生成新的
+    ``config_id``，key/base_url 变更必然得到新客户端。历史配置没有
+    ``config_id`` 时不缓存，避免以任何形式指纹化密钥。
+    """
+    if not cache_id:
+        return _new_client(provider, base_url, api_key)
+    fingerprint = f"{provider}|{base_url}|{cache_id}"
     cached = _CLIENT_CACHE.get(fingerprint)
     if cached is not None:
         _CLIENT_CACHE.move_to_end(fingerprint)
         return cached
-    if provider == "ollama":
-        # Ollama 的 OpenAI 兼容端点不校验 key，但 SDK 要求非空字符串。
-        client = AsyncOpenAI(api_key=api_key or "ollama", base_url=base_url)
-    else:
-        client = AsyncOpenAI(api_key=api_key, base_url=base_url)
+    client = _new_client(provider, base_url, api_key)
     _CLIENT_CACHE[fingerprint] = client
     while len(_CLIENT_CACHE) > _MAX_CACHED_CLIENTS:
         _CLIENT_CACHE.popitem(last=False)
@@ -246,7 +256,7 @@ def build_user_llm_client(config: dict[str, Any]) -> tuple[AsyncOpenAI, str, str
     effective_base = base_url or provider_default_base_url(provider)
     if not effective_base:
         raise LLMConfigError("缺少 Base URL")
-    client = _cached_client(provider, effective_base, api_key)
+    client = _cached_client(provider, effective_base, str(config.get("config_id") or ""), api_key)
     return client, model, provider, effective_base, api_key
 
 

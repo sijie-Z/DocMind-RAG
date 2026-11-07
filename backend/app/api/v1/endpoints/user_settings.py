@@ -3,6 +3,7 @@ DocMind AI知识库系统 - 用户设置端点
 """
 
 import logging
+import uuid
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
@@ -211,7 +212,12 @@ async def update_providers(
             detail="该提供商需要 API Key；如需使用服务端默认，请选择「使用服务端默认」",
         )
 
-    stored: dict = {"provider": provider, "model": model}
+    stored: dict = {
+        "provider": provider,
+        "model": model,
+        # 客户端缓存用随机 id（不含密钥指纹）；每次保存都会刷新。
+        "config_id": uuid.uuid4().hex,
+    }
     if base_url:
         stored["base_url"] = base_url
     if llm_settings_service.provider_requires_key(provider) and api_key:
@@ -223,12 +229,7 @@ async def update_providers(
     await db.commit()
     await db.refresh(settings_obj)
 
-    logger.info(
-        "用户 AI Provider 设置已更新（user_id=%s provider=%s model=%s）",
-        current_user.id,
-        provider,
-        model,
-    )
+    logger.info("用户 AI Provider 设置已更新（user_id=%s）", current_user.id)
     return {
         "success": True,
         "message": "已保存，后续对话与 Agent 将使用该配置",

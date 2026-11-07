@@ -34,7 +34,7 @@ from app.services.llm_settings_service import (
     resolve_for_user,
 )
 
-SECRET = "sk-user-secret-1234567890"
+SECRET = "user-secret-1234567890"
 USER = SimpleNamespace(id=7)
 
 
@@ -65,6 +65,7 @@ async def _save_user_config(db, **overrides):
         "provider": "deepseek",
         "model": "deepseek-chat",
         "api_key_encrypted": encrypt_api_key(SECRET),
+        "config_id": "cfg-test-default",
     }
     config.update(overrides)
     db.add(UserSettings(user_id=USER.id, preferences={"ai_provider": config}))
@@ -85,15 +86,16 @@ class TestKeyCrypto:
         assert read_api_key({"api_key": SECRET}) == SECRET
 
     def test_encrypted_field_wins_over_legacy(self):
-        token = encrypt_api_key("sk-new-key-abcdefgh")
+        token = encrypt_api_key("new-value-abcdefgh")
         assert (
-            read_api_key({"api_key_encrypted": token, "api_key": "sk-old"}) == "sk-new-key-abcdefgh"
+            read_api_key({"api_key_encrypted": token, "api_key": "old-value"})
+            == "new-value-abcdefgh"
         )
 
     def test_mask(self):
         assert mask_api_key("") == ""
         assert mask_api_key("short") == "********"
-        assert mask_api_key(SECRET) == "sk-u...7890"
+        assert mask_api_key(SECRET) == "user...7890"
 
     def test_undecryptable_ciphertext_raises_config_error(self):
         with pytest.raises(LLMConfigError):
@@ -205,7 +207,7 @@ class TestResolve:
             "ai_provider": {
                 "provider": "deepseek",
                 "model": "deepseek-chat",
-                "api_key_encrypted": encrypt_api_key("sk-rotated-key-0987654321"),
+                "api_key_encrypted": encrypt_api_key("rotated-value-0987654321"),
             }
         }
         await db.commit()
@@ -213,7 +215,7 @@ class TestResolve:
         second = await resolve_for_user(db, USER)
         assert second.source == "user"
         assert second.client is not first_client
-        assert second.client.api_key == "sk-rotated-key-0987654321"
+        assert second.client.api_key == "rotated-value-0987654321"
 
     async def test_same_config_reuses_cached_client(self, db):
         await _save_user_config(db)
@@ -245,7 +247,7 @@ class TestProviderApi:
         assert current["source"] == "user"
         assert current["has_api_key"] is True
         assert SECRET not in str(payload)
-        assert current["api_key"] == "sk-u...7890"
+        assert current["api_key"] == "user...7890"
 
     async def test_get_without_config_reports_server(self, db):
         payload = await user_settings_ep.get_providers(current_user=USER, db=db)
@@ -331,7 +333,7 @@ class TestProviderApi:
         )
         await user_settings_ep.update_providers(
             body=ProviderSettingsUpdate(
-                provider="openai", model="gpt-4o", api_key="sk-openai-12345678"
+                provider="openai", model="gpt-4o", api_key="openai-value-12345678"
             ),
             current_user=USER,
             db=db,
@@ -340,7 +342,39 @@ class TestProviderApi:
         assert resolution.source == "user"
         assert resolution.provider == "openai"
         assert resolution.model == "gpt-4o"
-        assert resolution.client.api_key == "sk-openai-12345678"
+        assert resolution.client.api_key == "openai-value-12345678"
+
+    async def test_client_cache_rotates_when_key_changes(self, db):
+        """保存新 key 会生成新 config_id，客户端缓存必须失效（不得复用旧 client）。"""
+        await user_settings_ep.update_providers(
+            body=ProviderSettingsUpdate(provider="deepseek", model="deepseek-chat", api_key=SECRET),
+            current_user=USER,
+            db=db,
+        )
+        first = await resolve_for_user(db, USER)
+        assert first.client.api_key == SECRET
+
+        row = (
+            await db.execute(select(UserSettings).where(UserSettings.user_id == USER.id))
+        ).scalar_one()
+        first_config_id = row.preferences["ai_provider"]["config_id"]
+        assert first_config_id
+
+        await user_settings_ep.update_providers(
+            body=ProviderSettingsUpdate(
+                provider="deepseek", model="deepseek-chat", api_key="second-value-987654"
+            ),
+            current_user=USER,
+            db=db,
+        )
+        second = await resolve_for_user(db, USER)
+        assert second.client is not first.client
+        assert second.client.api_key == "second-value-987654"
+
+        row = (
+            await db.execute(select(UserSettings).where(UserSettings.user_id == USER.id))
+        ).scalar_one()
+        assert row.preferences["ai_provider"]["config_id"] != first_config_id
 
     async def test_switch_to_keyless_provider_clears_stored_key(self, db):
         """切到 Ollama（无需 key）时不再保留上一 provider 的密钥。"""
@@ -416,7 +450,7 @@ class TestProviderApi:
         assert SECRET not in dumped, "明文 key 不得出现在通用 settings 响应"
         assert "fernet:v1:" not in dumped, "密文也不得回传（避免离线爆破）"
         provider_view = payload["data"]["preferences"]["ai_provider"]
-        assert provider_view["api_key"] == "sk-u...7890"
+        assert provider_view["api_key"] == "user...7890"
         assert provider_view["source"] == "user"
 
     async def test_general_put_cannot_overwrite_encrypted_provider_config(self, db):
@@ -430,13 +464,13 @@ class TestProviderApi:
                 preferences={
                     "note": "keep-me",
                     # 旧客户端/恶意客户端试图经通用通道写明文 key：必须被忽略
-                    "ai_provider": {"provider": "openai", "api_key": "sk-plain-injection"},
+                    "ai_provider": {"provider": "openai", "api_key": "plain-injection-value"},
                 }
             ),
             current_user=USER,
             db=db,
         )
-        assert "sk-plain-injection" not in str(payload)
+        assert "plain-injection-value" not in str(payload)
 
         row = (
             await db.execute(select(UserSettings).where(UserSettings.user_id == USER.id))
@@ -535,7 +569,7 @@ class TestPipelineOverride:
             ]
         assert chunks == ["系统处理异常，请重试"]
         assert SECRET not in caplog.text, "API key 明文不得写日志"
-        assert "sk-u...7890" in caplog.text, "日志中应保留掩码以利于排障"
+        assert "RuntimeError" in caplog.text, "只记录异常类型以便排障"
 
 
 class _FakeRag:

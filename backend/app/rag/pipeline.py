@@ -51,14 +51,6 @@ from app.rag.source_provenance import filter_original_results, original_text_of
 logger = logging.getLogger(__name__)
 
 
-def _redact_api_key(text: str, api_key: Any) -> str:
-    """把异常文本里可能回显的 API key 替换为掩码（个人设置密钥不得写日志）。"""
-    key = api_key if isinstance(api_key, str) else ""
-    if len(key) >= 6 and key in text:
-        return text.replace(key, f"{key[:4]}...{key[-4:]}" if len(key) > 8 else "***")
-    return text
-
-
 def no_context_system_prompt(intent_guidance: str = "请基于通用知识作答。") -> str:
     """无检索上下文时的通用知识提示词（chat_stream 与 #209 闸门降级共用）。
 
@@ -882,12 +874,8 @@ class RAGPipeline:
         except Exception as e:
             LLM_REQUEST_ERRORS.inc()
             if client_override is not None:
-                # 个人设置密钥不得写日志：异常文本可能回显 key 片段，且 traceback
-                # 会携带同一消息——用户客户端路径只记录脱敏后的消息。
-                logger.error(
-                    "LLM streaming failed (user provider): %s",
-                    _redact_api_key(str(e), getattr(llm_client, "api_key", None)),
-                )
+                # 个人设置密钥不得写日志：异常文本可能回显 key 片段，只记录异常类型。
+                logger.error("LLM streaming failed (user provider): %s", type(e).__name__)
             else:
                 logger.error(f"LLM streaming failed: {e}", exc_info=True)
             yield "系统处理异常，请重试"

@@ -1285,9 +1285,7 @@ async def chat_stream_endpoint(
                     user_id=current_user.id,
                     session_id=conversation_id,
                     config=config,
-                    llm_client=(
-                        llm_resolution.client if llm_resolution.source == "user" else None
-                    ),
+                    llm_client=(llm_resolution.client if llm_resolution.source == "user" else None),
                     llm_model=(llm_resolution.model if llm_resolution.source == "user" else None),
                 ):
                     last_event_type = agent_event.type
