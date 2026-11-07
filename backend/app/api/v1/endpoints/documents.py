@@ -379,10 +379,7 @@ async def get_document_status(
 
         is_chat_upload = bool(
             doc.description
-            and (
-                "来自聊天" in doc.description
-                or "uploaded from chat" in doc.description.lower()
-            )
+            and ("来自聊天" in doc.description or "uploaded from chat" in doc.description.lower())
         )
         return {
             "success": True,
