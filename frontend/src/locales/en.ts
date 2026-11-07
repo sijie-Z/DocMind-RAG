@@ -38,6 +38,7 @@ export default {
     retry: 'Retry',
     tryAgain: 'Please try again later',
     noDescription: 'No description',
+    none: 'None',
     weekdays: { '0': 'Sun', '1': 'Mon', '2': 'Tue', '3': 'Wed', '4': 'Thu', '5': 'Fri', '6': 'Sat' },
   },
   profile: {
@@ -373,6 +374,14 @@ export default {
   },
   knowledge: {
     subtitle: 'Upload and manage your enterprise knowledge documents',
+    uploadSource: 'Upload Source',
+    fileSize: 'File Size',
+    processingStatus: 'Processing Status',
+    previewLoading: 'Loading preview...',
+    fileDescription: 'File Description',
+    documentPreviewTitle: 'Document Preview',
+    parseErrorTitle: 'Parsing Error Details',
+    parseErrorRawHint: 'Raw Parsing Error:',
     documentDetail: {
       back: 'Back to Knowledge',
       titleFallback: 'Document Details',

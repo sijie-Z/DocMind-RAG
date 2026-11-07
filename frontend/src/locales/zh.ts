@@ -39,6 +39,7 @@ export default {
     tryAgain: '请稍后重试',
     actions: '操作',
     noDescription: '暂无描述',
+    none: '无',
     // 通用星期词条（0=周日，与 Date/cron 口径一致；展示顺序由使用方决定）
     weekdays: { '0': '周日', '1': '周一', '2': '周二', '3': '周三', '4': '周四', '5': '周五', '6': '周六' },
   },
@@ -380,6 +381,14 @@ export default {
   },
   knowledge: {
     subtitle: '上传并管理您的企业知识文档',
+    uploadSource: '上传来源',
+    fileSize: '文件大小',
+    processingStatus: '处理状态',
+    previewLoading: '加载预览中...',
+    fileDescription: '文件描述',
+    documentPreviewTitle: '文档预览',
+    parseErrorTitle: '解析错误详情',
+    parseErrorRawHint: '以下为原始解析错误信息：',
     documentDetail: {
       back: '返回知识库',
       titleFallback: '文档详情',

@@ -108,7 +108,7 @@
                     {{ formatFileSize(detail.file_size) }}
                   </n-tag>
                   <n-tag v-if="detail?.created_at" size="small" quaternary round>
-                    {{ t('knowledge.documentDetail.uploadedAt') }} {{ formatLocalizedDate(detail.created_at) }}
+                    {{ t('knowledge.documentDetail.uploadedAt') }} {{ formatUploadedAt(detail.created_at) }}
                   </n-tag>
                   <n-tag v-if="chunkTotal" size="small" quaternary round>
                     {{ chunkCountLabel }}
@@ -246,8 +246,9 @@ import {
 import type { DocumentChunkPreview, DocumentContent, DocumentDetail } from '@/api/knowledge'
 import { apiUnwrap } from '@/utils/apiUnwrap'
 import { getErrorMessage } from '@/utils/apiError'
-import { formatFileSize } from '@/utils/format'
+import { formatDateTime, formatFileSize } from '@/utils/format'
 import { splitFocusText } from '@/utils/focusText'
+import { setPageTitleKey, setPageTitleText } from '@/locales'
 import { useDedupedMessage } from '@/utils/message'
 import { parseTrustedDownloadUrl } from '@/views/chat/utils/downloadUrl'
 import { docIconColor, docStatusLabel, docStatusType } from './docDisplay'
@@ -259,20 +260,7 @@ const router = useRouter()
 const { t, locale } = useI18n()
 const message = useDedupedMessage()
 
-// 文档页是审计视图：时间用绝对格式而不是「x 小时前」，且跟随界面语言
-// （共享 formatDate 的相时文案固定中文，英文/日文界面会回退）。
-const formatLocalizedDate = (value?: string): string => {
-  if (!value) return '-'
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return '-'
-  return new Intl.DateTimeFormat(locale.value, {
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit'
-  }).format(date)
-}
+const formatUploadedAt = (value?: string): string => formatDateTime(value, locale.value)
 
 // 优先使用后端稳定 code；旧响应没有 code 时退回原始展示文案。
 const uploadSourceLabel = (doc: DocumentDetail): string => {
@@ -430,6 +418,8 @@ const loadDocument = async () => {
   loadedDocumentId.value = ''
   errorKind.value = null
   errorMessage.value = ''
+  // 异步详情返回前先落路由级标题；失败时不会残留上一篇文档名。
+  setPageTitleKey('router.knowledgeDocument')
 
   if (!docId) {
     loading.value = false
@@ -448,6 +438,9 @@ const loadDocument = async () => {
     if (seq !== documentSeq) return
     detail.value = apiUnwrap<DocumentDetail>(detailRes) || null
     loadedDocumentId.value = docId
+    setPageTitleText(
+      detail.value?.title || detail.value?.filename || t('knowledge.documentDetail.titleFallback')
+    )
     const contentData = apiUnwrap<DocumentContent>(contentRes) || {}
     content.value = contentData.content || ''
     provenance.value = contentData.text_provenance
@@ -472,6 +465,13 @@ watch(chunkId, () => {
   // 文档切换尚未完成时由 loadDocument 统一取块；这里只处理同文档内换 chunk。
   if (loading.value || loadedDocumentId.value !== documentId.value) return
   void loadChunk()
+})
+// 标题回退词条跟随语言；文件名本身不翻译。
+watch(locale, () => {
+  if (!detail.value) return
+  setPageTitleText(
+    detail.value.title || detail.value.filename || t('knowledge.documentDetail.titleFallback')
+  )
 })
 
 watch(

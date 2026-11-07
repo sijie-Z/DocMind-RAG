@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { formatDate, formatFileSize, formatDuration, truncateText } from '../format'
+import { formatDate, formatDateTime, formatFileSize, formatDuration, truncateText } from '../format'
 
 describe('formatDate', () => {
   it('returns "-" for null/undefined', () => {
@@ -105,5 +105,29 @@ describe('truncateText', () => {
 
   it('handles empty string', () => {
     expect(truncateText('', 5)).toBe('')
+  })
+})
+
+describe('formatDateTime（审计列表绝对时间）', () => {
+  const iso = '2026-11-07T10:30:00'
+
+  it('zh 输出绝对时间，不再是「x小时前」', () => {
+    const text = formatDateTime(iso, 'zh')
+    expect(text).toContain('2026')
+    expect(text).not.toContain('前')
+  })
+
+  it('en/ja/fr 跟随 locale，不回落中文相对词', () => {
+    for (const locale of ['en', 'ja', 'fr']) {
+      const text = formatDateTime(iso, locale)
+      expect(text).toContain('2026')
+      expect(text).not.toContain('小时')
+      expect(text).not.toContain('分钟')
+    }
+  })
+
+  it('空值与非法日期返回 -', () => {
+    expect(formatDateTime(null, 'en')).toBe('-')
+    expect(formatDateTime('not-a-date', 'en')).toBe('-')
   })
 })

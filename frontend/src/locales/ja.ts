@@ -35,6 +35,8 @@ export default {
     retry: '再試行',
     tryAgain: 'しばらくしてからもう一度お試しください',
     noDescription: '説明なし',
+    none: 'なし',
+    close: '閉じる',
     weekdays: { '0': '日曜', '1': '月曜', '2': '火曜', '3': '水曜', '4': '木曜', '5': '金曜', '6': '土曜' },
   },
   profile: {
@@ -342,6 +344,15 @@ export default {
   },
   knowledge: {
     subtitle: '企業ナレッジドキュメントをアップロード・管理します',
+    viewDetail: '詳細を表示',
+    uploadSource: 'アップロード元',
+    fileSize: 'ファイルサイズ',
+    processingStatus: '処理状態',
+    previewLoading: 'プレビューを読み込み中...',
+    fileDescription: 'ファイルの説明',
+    documentPreviewTitle: 'ドキュメントプレビュー',
+    parseErrorTitle: '解析エラーの詳細',
+    parseErrorRawHint: '解析エラーの元データ：',
     documentDetail: {
       back: 'ナレッジに戻る',
       titleFallback: 'ドキュメント詳細',

@@ -339,7 +339,7 @@
               <div class="mt-3">
                 <div class="mb-1 text-xs font-medium text-gray-500 dark:text-gray-400">{{ t('reviews.evidenceTitle') }}</div>
                 <div class="mb-1 text-xs text-gray-500 dark:text-gray-400">{{ t('reviews.selectHint') }}</div>
-                <div class="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                <div class="grid gap-3 lg:grid-cols-2 xl:grid-cols-3">
                   <div v-for="side in EVIDENCE_SIDES" :key="side" class="rounded-lg bg-gray-50 p-2 dark:bg-gray-800/50">
                     <div class="mb-1 text-xs font-medium text-gray-500 dark:text-gray-400">
                       {{ docLabel(side) }}

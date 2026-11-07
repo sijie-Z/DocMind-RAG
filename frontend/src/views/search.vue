@@ -208,8 +208,8 @@
                 {{ t('search.legacyTextWarning') }}
               </div>
 
-              <div class="mt-3 flex items-center justify-between border-t border-slate-100 pt-3 dark:border-slate-800">
-                <div class="flex items-center gap-2">
+              <div class="mt-3 flex flex-wrap items-center justify-between gap-y-2 border-t border-slate-100 pt-3 dark:border-slate-800">
+                <div class="flex min-w-0 flex-wrap items-center gap-2">
                   <n-button size="tiny" secondary round type="primary" class="result-action" @click.stop="askAI(result)">
                     <template #icon><n-icon><ChatbubblesOutline /></n-icon></template>
                     {{ t('search.askAI', '问问 AI') }}
@@ -230,7 +230,7 @@
                   size="tiny"
                   quaternary
                   circle
-                  class="result-action"
+                  class="result-action shrink-0 ml-auto"
                   :aria-label="t('common.copy', '复制内容')"
                   :title="t('common.copy', '复制内容')"
                   @click.stop="copyResultContent(result)"
@@ -298,6 +298,7 @@
     <n-modal
       v-model:show="showDetailModal"
       preset="card"
+      class="search-result-detail-modal"
       style="width: min(800px, 90vw)"
       :title="selectedResult ? filenameOf(selectedResult) : ''"
     >
@@ -678,6 +679,11 @@ onMounted(async () => {
   .search-results-scroll { overflow: visible; }
 }
 
+/* 平板（含触控）也需要 44px：结果卡操作是 size=tiny，仅在手机断点放大不够。 */
+@media (max-width: 1024px) {
+  .result-action.n-button { min-height: 44px; min-width: 44px; }
+}
+
 @media (max-width: 767px) {
   .search-page { padding: 1rem; }
   .search-stats { flex-wrap: wrap; }
@@ -691,5 +697,14 @@ onMounted(async () => {
   .search-filter :deep(.n-button) { min-height: 44px; }
   .suggestion-item { min-height: 44px; }
   .result-action.n-button { min-height: 44px; }
+}
+</style>
+
+<style>
+/* 弹窗 teleport 到 body 后 scoped 选择器失效：用弹窗根类约束触控高度。 */
+@media (max-width: 1024px) {
+  .search-result-detail-modal .n-button {
+    min-height: 44px;
+  }
 }
 </style>
