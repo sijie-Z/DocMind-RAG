@@ -281,6 +281,16 @@ class TestDocumentGet:
             data = r.json()
             assert data["success"] is True
             assert data["data"]["id"] == "doc-123"
+            # 展示文案与稳定 code 同时返回：新客户端只依赖 code 做 i18n 映射。
+            assert data["data"]["upload_source_code"] == "knowledge"
+            assert data["data"]["upload_source"] == "知识库上传"
+
+            doc.description = "来自聊天上传的合同"
+            r2 = client.get(
+                "/api/v1/documents/doc-123", headers={"Authorization": "Bearer test_token"}
+            )
+            assert r2.status_code == 200
+            assert r2.json()["data"]["upload_source_code"] == "chat"
         finally:
             app.dependency_overrides.pop(get_db, None)
             app.dependency_overrides.pop(get_current_user, None)

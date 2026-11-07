@@ -18,6 +18,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import { defineComponent, h, nextTick } from 'vue'
 import { createI18n } from 'vue-i18n'
+import { createKnowledgeTestRouter } from '@/test-utils/knowledgeRouter'
 import { createPinia, setActivePinia } from 'pinia'
 import naive, { NDialogProvider, NMessageProvider } from 'naive-ui'
 
@@ -96,6 +97,7 @@ const Host = defineComponent({
 function mountView() {
   const pinia = createPinia()
   setActivePinia(pinia)
+  const router = createKnowledgeTestRouter()
   const user = useUserStore()
   user.userInfo = {
     id: 1, username: 'tester', email: 't@t', isAdmin: false,
@@ -104,7 +106,7 @@ function mountView() {
 
   return mount(Host, {
     global: {
-      plugins: [naive, pinia, i18n],
+      plugins: [naive, pinia, i18n, router],
       stubs: {
         KnowledgeUploadPanel: true,
         KnowledgeDetailModals: true,

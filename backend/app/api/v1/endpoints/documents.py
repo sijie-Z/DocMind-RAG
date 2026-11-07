@@ -377,6 +377,13 @@ async def get_document_status(
             else status_map.get(raw_status, raw_status)
         )
 
+        is_chat_upload = bool(
+            doc.description
+            and (
+                "来自聊天" in doc.description
+                or "uploaded from chat" in doc.description.lower()
+            )
+        )
         return {
             "success": True,
             "data": {
@@ -397,15 +404,10 @@ async def get_document_status(
                 "chunk_count": doc.chunk_count,
                 "description": doc.description,
                 "keywords": doc.keywords or [],
-                "upload_source": "聊天上传"
-                if (
-                    doc.description
-                    and (
-                        "来自聊天" in doc.description
-                        or "uploaded from chat" in doc.description.lower()
-                    )
-                )
-                else "知识库上传",
+                # upload_source 是中文展示文案（历史契约）；新客户端按稳定 code
+                # 映射 i18n，避免在视图层比较中文字面量。
+                "upload_source": "聊天上传" if is_chat_upload else "知识库上传",
+                "upload_source_code": "chat" if is_chat_upload else "knowledge",
             },
         }
     except (NotFoundError, AuthorizationError):

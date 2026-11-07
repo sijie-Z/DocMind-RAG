@@ -14,7 +14,6 @@ import zh from '@/locales/zh'
 import DocumentPreviewModal from '../components/DocumentPreviewModal.vue'
 
 enableAutoUnmount(afterEach)
-
 const i18n = createI18n({
   legacy: false,
   locale: 'zh',
@@ -114,5 +113,15 @@ describe('DocumentPreviewModal 引用分块定位', () => {
     expect(wrapper.find('img').exists()).toBe(false)
     expect(wrapper.text()).toContain(payload)
     expect(wrapper.find('[data-testid="chat-preview-focus"]').text()).toBe(payload)
+  })
+})
+
+describe('DocumentPreviewModal 在新页打开', () => {
+  it('点击按钮发出 openInPage 事件（路由由 chat 页负责）', async () => {
+    const wrapper = await mountModal({ doc: { id: 'doc-1', filename: 'a.pdf' } })
+
+    await wrapper.find('[data-testid="open-in-document-page"]').trigger('click')
+
+    expect(wrapper.emitted('openInPage')).toHaveLength(1)
   })
 })

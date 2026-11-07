@@ -377,3 +377,26 @@ describe('SearchView · 结果渲染（P1-3 真实响应不崩）', () => {
     expect(wrapper.text()).not.toContain('NaN')
   })
 })
+
+describe('SearchView · 结果卡键盘与内部按钮（I1）', () => {
+  it('卡片自身 Enter 打开详情；内部「打开文档页」按钮的 Enter 不被卡片拦截', async () => {
+    const wrapper = mountView()
+    await doSearch(wrapper, [REAL_RESULT])
+
+    const card = findCard(wrapper, 'architecture.md')
+    await card.trigger('keydown.enter')
+    expect(wrapper.find('.n-modal-stub').exists()).toBe(true)
+
+    const wrapper2 = mountView()
+    await doSearch(wrapper2, [REAL_RESULT])
+    const btn = findCard(wrapper2, 'architecture.md').find('[data-testid="search-open-original"]')
+    expect(btn.exists()).toBe(true)
+
+    const event = new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })
+    btn.element.dispatchEvent(event)
+
+    expect(event.defaultPrevented).toBe(false)
+    // 内部按钮的 Enter 不得触发卡片详情（模态内容不出现该结果的类型列）。
+    expect(wrapper2.find('.n-modal-stub').text()).not.toContain('MD')
+  })
+})

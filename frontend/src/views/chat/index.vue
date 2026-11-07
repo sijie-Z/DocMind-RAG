@@ -10,6 +10,7 @@
     :download-loading="downloadLoading"
     :download-error="downloadError"
     @download="handleDownload"
+    @open-in-page="handleOpenInPage"
   />
 
   <div class="flex h-full w-full bg-gray-50 dark:bg-gray-950 overflow-hidden transition-colors duration-300">
@@ -662,6 +663,8 @@ const previewDoc = ref<{
 const previewContent = ref('')
 // 引用块原文：拿到后在全文预览里高亮并滚动到该处；拿不到就保持普通全文预览。
 const previewFocusText = ref('')
+// 当前预览来源的分块 id：去独立文档页时把它带进 ?chunk=，保持同一定位。
+const previewChunkId = ref('')
 // 预览原文口径：legacy/mixed 与截断都必须在弹窗可见，不能把可能含生成摘要
 // 的旧文本静默当成原文。
 const previewProvenance = ref<DocumentContent['text_provenance'] | undefined>(undefined)
@@ -686,10 +689,24 @@ watch(showPreviewModal, (open) => {
   if (!open) {
     resetDownloadState()
     previewRequestSeq += 1
+    previewChunkId.value = ''
     if (previewTrigger?.isConnected) previewTrigger.focus()
     previewTrigger = null
   }
 })
+
+// 弹窗内「在新页打开」：落到文档独立页，携带同一分块定位，URL 可分享。
+const handleOpenInPage = () => {
+  const id = previewDoc.value?.id
+  if (!id) return
+  const chunk = previewChunkId.value
+  showPreviewModal.value = false
+  void router.push({
+    name: 'KnowledgeDocument',
+    params: { documentId: id },
+    query: chunk ? { chunk } : {}
+  })
+}
 
 const handleDownload = async (fileId?: string) => {
   if (!fileId || downloadLoading.value) return
@@ -758,6 +775,7 @@ const handleOpenSource = async (source: KnowledgeSource) => {
   previewDoc.value = { id, filename: source.filename }
   previewContent.value = ''
   previewFocusText.value = ''
+  previewChunkId.value = chunkId
   previewProvenance.value = undefined
   previewTruncated.value = false
   // chunk 定位是增强能力：失败（404/旧消息无 chunk/文档在 ES-only）只降级为

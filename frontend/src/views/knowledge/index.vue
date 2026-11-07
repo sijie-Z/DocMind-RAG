@@ -202,7 +202,9 @@
                         </div>
                         <div class="flex-1 min-w-0">
                           <h3 class="font-medium text-gray-900 dark:text-gray-100 truncate text-sm leading-tight mb-1" :title="item.title">
-                            {{ item.title }}
+                            <router-link :to="documentRoute(item)" class="text-gray-900 no-underline hover:text-blue-700 hover:underline focus-visible:underline dark:text-gray-100 dark:hover:text-blue-400">
+                              {{ item.title }}
+                            </router-link>
                           </h3>
                           <p class="text-xs text-gray-500 dark:text-gray-400 truncate">{{ item.file_name }}</p>
                         </div>
@@ -309,7 +311,9 @@
                               <DocumentAttachOutline v-else />
                             </n-icon>
                             <div>
-                              <div class="font-medium text-gray-900 dark:text-gray-100">{{ item.title }}</div>
+                              <router-link :to="documentRoute(item)" class="font-medium text-gray-900 no-underline hover:text-blue-700 hover:underline focus-visible:underline dark:text-gray-100 dark:hover:text-blue-400">
+                                {{ item.title }}
+                              </router-link>
                               <div class="text-xs text-gray-500 dark:text-gray-400">{{ item.file_name }}</div>
                             </div>
                          </div>
@@ -415,6 +419,7 @@
           :get-status-label="getStatusLabel"
           :format-file-size="formatFileSize"
           :format-date="formatDate"
+          @open-document="openDocumentPage"
         />
 
       </div>
@@ -424,6 +429,7 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
+import { useRouter } from 'vue-router'
 import { useMediaQuery } from '@vueuse/core'
 import { NIcon, NButton, NTag } from 'naive-ui'
 import { useDialog } from 'naive-ui'
@@ -475,6 +481,7 @@ interface UploadForm {
 
 const message = useDedupedMessage()
 const dialog = useDialog()
+const router = useRouter()
 const { t } = useI18n()
 const userStore = useUserStore()
 const loading = ref(false)
@@ -837,6 +844,18 @@ const uploadFile = async () => {
 }
 
 // ✅ 核心修复：现在点击按钮会正确打开弹窗
+const documentRoute = (item: KnowledgeBase) => ({
+  name: 'KnowledgeDocument',
+  params: { documentId: item.id }
+})
+
+// 文档标题/弹窗「打开文档页」：独立可分享深链（详情 + 全文 + 下载）。
+const openDocumentPage = (id?: string) => {
+  if (!id) return
+  showDetailModal.value = false
+  void router.push({ name: 'KnowledgeDocument', params: { documentId: id } })
+}
+
 const viewKnowledge = async (item: KnowledgeBase) => {
   const requestSeq = ++previewRequestSeq
   const ownsRequest = () => requestSeq === previewRequestSeq
