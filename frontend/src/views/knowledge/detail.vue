@@ -9,14 +9,14 @@
           </n-button>
           <div class="document-actions flex flex-wrap items-center gap-2">
             <n-button
-              v-if="focusFound"
+              v-if="focusFound && !evidenceId"
               secondary
               data-testid="document-clear-focus"
               @click="clearFocus"
             >
               {{ t('knowledge.documentDetail.viewFullText') }}
             </n-button>
-            <n-button secondary data-testid="document-copy-link" @click="copyLink">
+            <n-button v-if="!evidenceId" secondary data-testid="document-copy-link" @click="copyLink">
               <template #icon><n-icon><CopyOutline /></n-icon></template>
               {{ t('knowledge.documentDetail.copyLink') }}
             </n-button>
@@ -54,7 +54,7 @@
         </div>
 
         <div
-          v-else-if="errorKind"
+          v-else-if="errorKind && !evidenceDetail"
           data-testid="document-error"
           class="rounded-lg border border-slate-200 bg-white py-10 dark:border-slate-700 dark:bg-slate-900"
         >
@@ -89,7 +89,7 @@
                   data-testid="document-title"
                   class="break-words text-[22px] font-semibold leading-8 text-slate-900 dark:text-slate-100"
                 >
-                  {{ detail?.title || detail?.filename || t('knowledge.documentDetail.titleFallback') }}
+                  {{ detail?.title || detail?.filename || evidenceDetail?.document.filename || evidenceDetail?.case.title || t('knowledge.documentDetail.titleFallback') }}
                 </h2>
                 <p
                   v-if="detail?.filename && detail.filename !== detail.title"
@@ -143,6 +143,104 @@
           >
             {{ detail.parse_error }}
           </n-alert>
+
+          <n-alert
+            v-if="errorKind && evidenceDetail"
+            type="warning"
+            :bordered="false"
+            class="mt-4"
+            data-testid="document-snapshot-only"
+          >
+            {{ t('knowledge.documentDetail.evidenceDocumentUnavailable') }}
+          </n-alert>
+
+          <div
+            v-if="evidenceId"
+            data-testid="document-evidence-banner"
+            role="region"
+            aria-labelledby="document-evidence-title"
+            class="mt-4 rounded-lg border border-slate-200 bg-white p-4 dark:border-slate-700 dark:bg-slate-900 md:p-5"
+          >
+            <div v-if="evidenceLoading" class="text-sm text-slate-600 dark:text-slate-300">
+              {{ t('knowledge.documentDetail.evidenceLoading') }}
+            </div>
+            <div v-else-if="evidenceErrorKind" class="flex flex-wrap items-center gap-3">
+              <n-alert type="warning" :bordered="false" data-testid="document-evidence-error">
+                {{ evidenceErrorText }}
+              </n-alert>
+              <n-button size="small" secondary data-testid="evidence-retry" @click="loadEvidence">
+                {{ t('common.retry') }}
+              </n-button>
+            </div>
+            <template v-else-if="evidenceDetail">
+              <div class="flex flex-wrap items-start justify-between gap-3">
+                <div class="min-w-0">
+                  <div class="flex flex-wrap items-center gap-2">
+                    <h3 id="document-evidence-title" class="text-sm font-semibold text-slate-900 dark:text-slate-100">
+                      {{ t('knowledge.documentDetail.evidenceSnapshotTitle') }}
+                    </h3>
+                    <n-tag
+                      size="small"
+                      :type="evidenceDetail.replay.quote_unchanged ? 'success' : 'warning'"
+                      :bordered="false"
+                      round
+                    >
+                      {{ evidenceDetail.replay.quote_unchanged
+                        ? t('knowledge.documentDetail.evidenceCurrentMatch')
+                        : t('knowledge.documentDetail.evidenceStaleBadge') }}
+                    </n-tag>
+                    <n-tag v-if="evidenceDetail.evidence.doc_version_label" size="small" quaternary round>
+                      {{ t('knowledge.documentDetail.evidenceVersion', { label: evidenceDetail.evidence.doc_version_label }) }}
+                    </n-tag>
+                    <n-tag v-if="evidenceDetail.evidence.page_number" size="small" quaternary round>
+                      {{ t('knowledge.documentDetail.evidencePage', { page: evidenceDetail.evidence.page_number }) }}
+                    </n-tag>
+                  </div>
+                  <p class="mt-1 break-words text-xs text-slate-500 dark:text-slate-400">
+                    {{ t('knowledge.documentDetail.evidenceCaseLabel') }}{{ t('knowledge.documentDetail.evidenceLabelSeparator') }}{{ evidenceDetail.case.title }}
+                    · {{ t('knowledge.documentDetail.evidenceCapturedAt') }}
+                    {{ formatUploadedAt(evidenceDetail.evidence.captured_at) }}
+                  </p>
+                </div>
+                <div class="flex flex-wrap gap-2">
+                  <n-button
+                    size="small"
+                    secondary
+                    data-testid="evidence-back-to-case"
+                    @click="router.push({ name: 'ReviewDetail', params: { id: evidenceDetail.case.id } })"
+                  >
+                    {{ t('knowledge.documentDetail.evidenceBackToCase') }}
+                  </n-button>
+                  <n-button size="small" secondary data-testid="evidence-copy-link" @click="copyLink">
+                    {{ t('knowledge.documentDetail.evidenceCopyLink') }}
+                  </n-button>
+                  <n-button v-if="!errorKind" size="small" tertiary @click="clearFocus">
+                    {{ t('knowledge.documentDetail.viewFullText') }}
+                  </n-button>
+                </div>
+              </div>
+              <div
+                data-testid="document-evidence-quote"
+                class="mt-3 max-h-64 overflow-y-auto whitespace-pre-wrap break-words rounded-md border border-slate-100 bg-slate-50/60 p-3 text-sm leading-6 text-slate-700 dark:border-slate-800 dark:bg-slate-800/40 dark:text-slate-200"
+              >
+                {{ evidenceDetail.evidence.quote }}
+              </div>
+              <ul v-if="evidenceWarnings.length" class="mt-2 space-y-0.5 text-xs text-amber-700 dark:text-amber-400">
+                <li v-for="warning in evidenceWarnings" :key="warning">· {{ warning }}</li>
+              </ul>
+              <details
+                v-if="evidenceDetail.live_chunk.found && evidenceDetail.live_chunk.text && !evidenceDetail.live_chunk.matches_snapshot"
+                class="mt-3"
+              >
+                <summary class="cursor-pointer text-xs font-medium text-slate-600 dark:text-slate-300">
+                  {{ t('knowledge.documentDetail.evidenceCompareCurrent') }}
+                </summary>
+                <div class="mt-2 whitespace-pre-wrap break-words rounded-md border border-amber-200 bg-amber-50/50 p-3 text-xs leading-5 text-slate-700 dark:border-amber-800/50 dark:bg-amber-900/10 dark:text-slate-200">
+                  {{ evidenceDetail.live_chunk.text }}
+                </div>
+              </details>
+            </template>
+          </div>
 
           <div
             v-if="chunkRequested"
@@ -204,7 +302,7 @@
             {{ t('knowledge.previewTruncated') }}
           </n-alert>
 
-          <section class="mt-4 overflow-hidden rounded-lg border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-900">
+          <section v-if="!errorKind" class="mt-4 overflow-hidden rounded-lg border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-900">
             <div class="flex items-center justify-between gap-3 border-b border-slate-100 px-5 py-3 dark:border-slate-800">
               <h3 class="text-sm font-semibold text-slate-800 dark:text-slate-100">
                 {{ t('knowledge.documentDetail.contentTitle') }}
@@ -258,6 +356,8 @@ import {
   getDocumentDownloadUrl
 } from '@/api/knowledge'
 import type { DocumentChunkPreview, DocumentContent, DocumentDetail } from '@/api/knowledge'
+import { reviewsApi } from '@/api/reviews'
+import type { ReviewEvidenceDetail } from '@/api/reviews'
 import { apiUnwrap } from '@/utils/apiUnwrap'
 import { getErrorMessage } from '@/utils/apiError'
 import { formatDateTime, formatFileSize } from '@/utils/format'
@@ -274,7 +374,7 @@ const router = useRouter()
 const { t, locale } = useI18n()
 const message = useDedupedMessage()
 
-const formatUploadedAt = (value?: string): string => formatDateTime(value, locale.value)
+const formatUploadedAt = (value?: string | null): string => formatDateTime(value, locale.value)
 
 // 优先使用后端稳定 code；旧响应没有 code 时退回原始展示文案。
 const uploadSourceLabel = (doc: DocumentDetail): string => {
@@ -284,7 +384,10 @@ const uploadSourceLabel = (doc: DocumentDetail): string => {
 }
 
 const documentId = computed(() => (typeof route.params.documentId === 'string' ? route.params.documentId : ''))
-const chunkId = computed(() => (typeof route.query.chunk === 'string' ? route.query.chunk : ''))
+const queryString = (value: unknown): string =>
+  typeof value === 'string' ? value : Array.isArray(value) && typeof value[0] === 'string' ? value[0] : ''
+const chunkId = computed(() => queryString(route.query.chunk))
+const evidenceId = computed(() => queryString(route.query.evidence))
 
 const loading = ref(false)
 const detail = ref<DocumentDetail | null>(null)
@@ -309,6 +412,12 @@ const chunkLoadedKey = ref('')
 const errorKind = ref<ErrorKind | null>(null)
 const errorMessage = ref('')
 
+// 证据永久链接：快照为主体；当前 chunk 只作为可选定位增强。
+const evidenceDetail = ref<ReviewEvidenceDetail | null>(null)
+const evidenceLoading = ref(false)
+const evidenceErrorKind = ref<'notFound' | 'forbidden' | 'failed' | null>(null)
+let evidenceSeq = 0
+
 const downloadLoading = ref(false)
 const downloadError = ref('')
 
@@ -319,8 +428,20 @@ let chunkSeq = 0
 // (文档, 分块) 的在途请求只保留一个，避免重复请求与旧响应覆盖。
 let inFlightChunkKey = ''
 
-const chunkRequested = computed(() => chunkId.value.length > 0)
-const currentChunkKey = computed(() => `${documentId.value}|${chunkId.value}`)
+const evidenceChunkId = computed(() => {
+  const evidence = evidenceDetail.value
+  if (!evidence) return ''
+  return evidence.replay.can_highlight_current_chunk
+    ? evidence.evidence.chunk_id_at_capture
+    : ''
+})
+// 证据优先：stale 时绝不把当前文本当证据高亮；没有 evidence 时沿用 ?chunk=。
+const effectiveChunkId = computed(() =>
+  evidenceDetail.value ? evidenceChunkId.value : chunkId.value
+)
+
+const chunkRequested = computed(() => effectiveChunkId.value.length > 0)
+const currentChunkKey = computed(() => `${documentId.value}|${effectiveChunkId.value}`)
 const chunkPending = computed(
   () => chunkRequested.value && chunkLoadedKey.value !== currentChunkKey.value
 )
@@ -357,6 +478,26 @@ const tags = computed(() => {
   return keywords.length > 0 ? keywords : suggestedTags.value
 })
 
+const EVIDENCE_WARNING_KEYS: Record<string, string> = {
+  chunk_missing: 'knowledge.documentDetail.evidenceWarningChunkMissing',
+  chunk_text_empty: 'knowledge.documentDetail.evidenceWarningChunkEmpty',
+  chunk_text_changed: 'knowledge.documentDetail.evidenceWarningChunkChanged',
+  document_missing: 'knowledge.documentDetail.evidenceWarningDocumentMissing',
+  document_hash_changed: 'knowledge.documentDetail.evidenceWarningHashChanged',
+  document_version_changed: 'knowledge.documentDetail.evidenceWarningVersionChanged',
+  document_identity_changed: 'knowledge.documentDetail.evidenceWarningIdentityChanged'
+}
+const evidenceWarnings = computed(() =>
+  (evidenceDetail.value?.replay.warnings || []).map((code) =>
+    EVIDENCE_WARNING_KEYS[code] ? t(EVIDENCE_WARNING_KEYS[code]) : code
+  )
+)
+const evidenceErrorText = computed(() => {
+  if (evidenceErrorKind.value === 'notFound') return t('knowledge.documentDetail.evidenceNotFound')
+  if (evidenceErrorKind.value === 'forbidden') return t('knowledge.documentDetail.evidenceForbidden')
+  return t('knowledge.documentDetail.evidenceLoadFailed')
+})
+
 // 英文/法文按单复数选择词形；zh/ja 只有单一形态。
 const chunkCountLabel = computed(() => {
   const count = chunkTotal.value
@@ -391,7 +532,7 @@ const emptyContentHint = computed(() => {
 const contentEl = ref<HTMLElement | null>(null)
 
 const loadChunk = async (manual = false) => {
-  const rawId = chunkId.value
+  const rawId = effectiveChunkId.value
   const docId = documentId.value
   const key = `${docId}|${rawId}`
   if (!rawId) {
@@ -445,6 +586,40 @@ const retryChunk = () => {
   void loadChunk(true)
 }
 
+const loadEvidence = async () => {
+  const id = evidenceId.value
+  const seq = ++evidenceSeq
+  evidenceDetail.value = null
+  evidenceErrorKind.value = null
+  if (!id) {
+    evidenceLoading.value = false
+    return
+  }
+  evidenceLoading.value = true
+  try {
+    const res = await reviewsApi.getEvidence(id)
+    if (seq !== evidenceSeq) return
+    const data = apiUnwrap<ReviewEvidenceDetail>(res)
+    if (!data?.evidence) throw new Error('invalid evidence payload')
+    evidenceDetail.value = data
+    // 链接中的 documentId 与证据捕获文档不一致：纠正到权威文档并保留证据 id。
+    if (data.evidence.document_id !== documentId.value) {
+      await router.replace({
+        name: 'KnowledgeDocument',
+        params: { documentId: data.evidence.document_id },
+        query: { evidence: id }
+      })
+    }
+  } catch (error) {
+    if (seq !== evidenceSeq) return
+    const status = (error as { response?: { status?: number } })?.response?.status
+    evidenceErrorKind.value =
+      status === 404 ? 'notFound' : status === 403 ? 'forbidden' : 'failed'
+  } finally {
+    if (seq === evidenceSeq) evidenceLoading.value = false
+  }
+}
+
 const loadDocument = async () => {
   const docId = documentId.value
   const seq = ++documentSeq
@@ -472,6 +647,14 @@ const loadDocument = async () => {
   }
 
   loading.value = true
+  // 同路由换文档（证据纠正/异常链接）不得在快照旁残留另一份文档的身份。
+  detail.value = null
+  content.value = ''
+  provenance.value = undefined
+  truncated.value = false
+  contentSummary.value = ''
+  suggestedTags.value = []
+  chunkTotal.value = null
   try {
     const [detailRes, contentRes] = await Promise.all([
       getDocumentDetail(docId, { silent: true }),
@@ -503,7 +686,8 @@ const loadDocument = async () => {
 }
 
 watch(documentId, () => { void loadDocument() }, { immediate: true })
-watch(chunkId, () => {
+watch(evidenceId, () => { void loadEvidence() }, { immediate: true })
+watch(effectiveChunkId, () => {
   // 文档切换尚未完成时由 loadDocument 统一取块；这里只处理同文档内换 chunk。
   if (loading.value || loadedDocumentId.value !== documentId.value) return
   void loadChunk()
@@ -520,12 +704,15 @@ watch(locale, () => {
 onBeforeUnmount(() => {
   documentSeq += 1
   chunkSeq += 1
+  evidenceSeq += 1
 })
 
 watch(
   [() => content.value, () => chunk.value, () => loading.value, () => focusFound.value],
   async () => {
     if (!focusFound.value) return
+    // 证据模式以快照为主体：首屏不滚动，避免把证据横幅推出视口。
+    if (evidenceId.value) return
     await nextTick()
     const reduceMotion =
       typeof window !== 'undefined' &&
@@ -542,18 +729,23 @@ const goBack = () => router.push({ name: 'Knowledge' })
 
 const clearFocus = () => {
   const query = Object.fromEntries(
-    Object.entries(route.query).filter(([key]) => key !== 'chunk')
+    Object.entries(route.query).filter(([key]) => key !== 'chunk' && key !== 'evidence')
   )
   void router.replace({ name: 'KnowledgeDocument', params: { documentId: documentId.value }, query })
 }
 
 const copyLink = async () => {
   try {
-    // 只复制当前文档/分块的规范深链，不带页面上的其它临时 query。
+    // 有证据时复制永久证据链接；否则复制当前分块深链。
+    const query = evidenceId.value
+      ? { evidence: evidenceId.value }
+      : chunkId.value
+        ? { chunk: chunkId.value }
+        : {}
     const href = router.resolve({
       name: 'KnowledgeDocument',
       params: { documentId: documentId.value },
-      query: chunkId.value ? { chunk: chunkId.value } : {}
+      query
     }).href
     await navigator.clipboard.writeText(new URL(href, window.location.origin).href)
     message.success(t('knowledge.documentDetail.linkCopied'))

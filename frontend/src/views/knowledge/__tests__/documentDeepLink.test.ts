@@ -22,6 +22,7 @@ import {
   getDocumentDetail,
   getDocumentDownloadUrl
 } from '@/api/knowledge'
+import { reviewsApi } from '@/api/reviews'
 
 vi.mock('@/api/knowledge', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/api/knowledge')>()
@@ -31,6 +32,14 @@ vi.mock('@/api/knowledge', async (importOriginal) => {
     getDocumentContent: vi.fn(),
     getDocumentChunk: vi.fn(),
     getDocumentDownloadUrl: vi.fn()
+  }
+})
+
+vi.mock('@/api/reviews', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/api/reviews')>()
+  return {
+    ...actual,
+    reviewsApi: { ...actual.reviewsApi, getEvidence: vi.fn() }
   }
 })
 
@@ -49,6 +58,7 @@ const mockedDetail = vi.mocked(getDocumentDetail)
 const mockedContent = vi.mocked(getDocumentContent)
 const mockedChunk = vi.mocked(getDocumentChunk)
 const mockedDownloadUrl = vi.mocked(getDocumentDownloadUrl)
+const mockedGetEvidence = vi.mocked(reviewsApi.getEvidence)
 
 enableAutoUnmount(afterEach)
 
@@ -133,6 +143,35 @@ beforeEach(() => {
   mockedDetail.mockResolvedValue(ok(DOC))
   mockedContent.mockResolvedValue(ok(CONTENT))
   mockedChunk.mockResolvedValue(ok(CHUNK))
+  mockedGetEvidence.mockResolvedValue(
+    ok({
+      evidence: {
+        id: 'ev-1',
+        document_id: 'doc-1',
+        chunk_id_at_capture: 'chunk-1',
+        chunk_index: 1,
+        page_number: 2,
+        clause_no: [2],
+        quote: '第二条 付款 30 日',
+        quote_sha256: 'q',
+        doc_version_label: 'V1',
+        captured_at: '2026-11-01T09:00:00',
+        stale: false
+      },
+      case: { id: 'case-1', title: '采购合同核验', status: 'completed' },
+      item: { id: 'item-1', item_key: 'payment_term', ordinal: 1, change_type: 'modified', status: 'verified' },
+      document: {
+        document_id: 'doc-1',
+        filename: '软件采购合同.pdf',
+        missing: false,
+        identity_changed: false,
+        document_hash_changed: false,
+        document_version_changed: false
+      },
+      live_chunk: { found: true, chunk_index: 1, text: '第二条 付款 30 日', matches_snapshot: true },
+      replay: { quote_unchanged: true, can_highlight_current_chunk: true, warnings: [] }
+    }) as never
+  )
 })
 
 describe('文档深链页 · 定位与降级', () => {
@@ -527,5 +566,77 @@ describe('文档深链页 · 卸载与标题', () => {
     await nextTick()
 
     expect(document.title).toContain('保留标题')
+  })
+})
+
+
+describe('文档深链页 · 证据永久链接', () => {
+  it('?evidence= fresh：展示快照并定位捕获分块', async () => {
+    const { wrapper } = await mountPage('/knowledge/doc-1?evidence=ev-1')
+    await flushPromises()
+    await nextTick()
+
+    expect(mockedGetEvidence).toHaveBeenCalledWith('ev-1')
+    const banner = wrapper.find('[data-testid="document-evidence-banner"]')
+    expect(banner.exists()).toBe(true)
+    expect(banner.text()).toContain('证据快照')
+    expect(banner.text()).toContain('证据原文未变')
+    expect(wrapper.find('[data-testid="document-evidence-quote"]').text()).toContain('第二条 付款 30 日')
+    expect(wrapper.find('[data-testid="document-focus"]').text()).toBe('第二条 付款 30 日')
+  })
+
+  it('?evidence= stale：不自动高亮当前文本，展示快照与漂移原因', async () => {
+    mockedGetEvidence.mockResolvedValueOnce(ok({
+      evidence: {
+        id: 'ev-1', document_id: 'doc-1', chunk_id_at_capture: 'chunk-1', chunk_index: 1,
+        quote: '第二条 付款 30 日', quote_sha256: 'q', captured_at: '2026-11-01T09:00:00', stale: true
+      },
+      case: { id: 'case-1', title: '采购合同核验', status: 'completed' },
+      item: { id: 'item-1', item_key: 'payment_term', ordinal: 1, change_type: 'modified', status: 'verified' },
+      document: { document_id: 'doc-1', missing: false, identity_changed: false, document_hash_changed: false, document_version_changed: false },
+      live_chunk: { found: true, chunk_index: 1, text: '第二条 付款 90 日', matches_snapshot: false },
+      replay: { quote_unchanged: false, can_highlight_current_chunk: false, warnings: ['chunk_text_changed'] }
+    }) as never)
+    const { wrapper } = await mountPage('/knowledge/doc-1?evidence=ev-1')
+
+    expect(wrapper.find('[data-testid="document-focus"]').exists()).toBe(false)
+    const banner = wrapper.find('[data-testid="document-evidence-banner"]')
+    expect(banner.text()).toContain('证据已变化')
+    expect(banner.text()).toContain('分块原文已变化')
+    expect(wrapper.find('[data-testid="document-evidence-quote"]').text()).toContain('30 日')
+    expect(banner.text()).toContain('当前版本文本')
+    expect(banner.text()).toContain('90 日')
+  })
+
+  it('文档 404 但证据快照可读：仍回放证据并说明仅剩快照', async () => {
+    mockedDetail.mockRejectedValueOnce({ response: { status: 404 } })
+    mockedGetEvidence.mockResolvedValueOnce(ok({
+      evidence: {
+        id: 'ev-1', document_id: 'doc-1', chunk_id_at_capture: 'chunk-1', chunk_index: 1,
+        quote: '第二条 付款 30 日', quote_sha256: 'q', captured_at: '2026-11-01T09:00:00', stale: true
+      },
+      case: { id: 'case-1', title: '已归档合同核验', status: 'completed' },
+      item: { id: 'item-1', item_key: 'payment_term', ordinal: 1, change_type: 'modified', status: 'verified' },
+      document: { document_id: 'doc-1', missing: true, identity_changed: false, document_hash_changed: false, document_version_changed: false },
+      live_chunk: { found: false, matches_snapshot: false },
+      replay: { quote_unchanged: false, can_highlight_current_chunk: false, warnings: ['document_missing', 'chunk_missing'] }
+    }) as never)
+    const { wrapper } = await mountPage('/knowledge/doc-1?evidence=ev-1')
+
+    expect(wrapper.find('[data-testid="document-error"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="document-snapshot-only"]').text()).toContain('仅能回放证据快照')
+    expect(wrapper.find('[data-testid="document-evidence-quote"]').text()).toContain('第二条 付款 30 日')
+  })
+
+  it('复制证据链接写入 ?evidence= 而不是 chunk', async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined)
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true })
+    const { wrapper } = await mountPage('/knowledge/doc-1?evidence=ev-1')
+
+    await wrapper.find('[data-testid="evidence-copy-link"]').trigger('click')
+    await flushPromises()
+
+    const copied = String(writeText.mock.calls[0]?.[0] || '')
+    expect(copied).toContain('/knowledge/doc-1?evidence=ev-1')
   })
 })

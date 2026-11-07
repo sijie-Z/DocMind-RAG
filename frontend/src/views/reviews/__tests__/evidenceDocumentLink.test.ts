@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { createMemoryHistory, createRouter } from 'vue-router'
-import { buildEvidenceLinkTarget } from '../evidenceLink'
+import { buildEvidenceLinkTarget, buildEvidencePermalink } from '../evidenceLink'
 
 const row = { document_id: 'doc-base', chunk_id_at_capture: 'chunk-1' }
 
@@ -43,5 +43,21 @@ describe('真实路由解析', () => {
 
     const href = router.resolve(target!).href
     expect(href).toBe('/knowledge/doc%20%E4%B8%AD%E6%96%87?chunk=c+1%23x')
+  })
+})
+
+
+describe('证据永久链接目标', () => {
+  it('只依赖证据 id 与捕获文档 id', () => {
+    expect(buildEvidencePermalink({ id: 'ev-1', document_id: 'doc-base' })).toEqual({
+      name: 'KnowledgeDocument',
+      params: { documentId: 'doc-base' },
+      query: { evidence: 'ev-1' }
+    })
+  })
+
+  it('缺证据 id 或文档 id 时返回 null', () => {
+    expect(buildEvidencePermalink({ id: '', document_id: 'doc-base' })).toBeNull()
+    expect(buildEvidencePermalink({ id: 'ev-1', document_id: '' })).toBeNull()
   })
 })
