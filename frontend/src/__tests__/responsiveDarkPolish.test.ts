@@ -213,21 +213,40 @@ describe('E16-H5 · firsthome 暗色适配', () => {
 
 
 describe('触控与证据网格断点（UI 收口批）', () => {
-  it('检索结果操作在 ≤1024 为 44×44，弹窗按钮同样 44px', () => {
+  it('检索结果与筛选声明在 1024 块内，不含 767 兜底假绿', () => {
     const search = read('src/views/search.vue')
-    expect(search).toContain('@media (max-width: 1024px)')
-    expect(search).toContain('.result-action.n-button { min-height: 44px; min-width: 44px; }')
+    const start = search.indexOf('@media (max-width: 1024px) {')
+    expect(start).toBeGreaterThan(-1)
+    const end = search.indexOf('\n}', start)
+    const block = search.slice(start, end)
+    expect(block).toContain('.result-action.n-button { min-height: 44px; min-width: 44px; }')
+    expect(block).toContain('.search-filter :deep(.n-base-selection) { --n-height: 44px !important; }')
+    expect(block).toContain('.search-filter :deep(.n-radio) { min-height: 44px; align-items: center; }')
+    expect(block).toContain('.search-filter :deep(.n-switch) { min-height: 44px; display: inline-flex; align-items: center; }')
+    expect(block).toContain('.search-filter :deep(.n-button) { min-height: 44px; }')
+  })
+
+  it('检索/知识库弹窗 close 为 44×44，按钮规则保留', () => {
+    const search = read('src/views/search.vue')
+    expect(search).toMatch(/\.search-result-detail-modal \.n-base-close\.n-card-header__close \{\s*width: 44px;\s*height: 44px;\s*\}/)
     expect(search).toContain('.search-result-detail-modal .n-button')
+
+    const modal = read('src/views/knowledge/components/KnowledgeDetailModals.vue')
+    expect(modal).toMatch(/\.knowledge-detail-modal \.n-base-close\.n-card-header__close \{\s*width: 44px;\s*height: 44px;\s*\}/)
+    expect(modal).toContain('.knowledge-detail-modal .n-button {')
+    expect(modal).toContain('min-height: 44px;')
+  })
+
+  it('深链页按钮与重试按钮在 ≤1024 为 44px', () => {
+    const detail = read('src/views/knowledge/detail.vue')
+    expect(detail).toContain('@media (max-width: 1024px)')
+    expect(detail).toContain('.document-page :deep(.n-button)')
+    expect(detail).toContain('min-height: 44px;')
   })
 
   it('核验证据 768 单列、1024 起两列（不再用 md 断点堆叠控件）', () => {
     const reviews = read('src/views/reviews/detail.vue')
     expect(reviews).toContain('lg:grid-cols-2 xl:grid-cols-3')
     expect(reviews).not.toContain('md:grid-cols-2 xl:grid-cols-3')
-  })
-
-  it('知识库详情/解析错误弹窗 ≤1024 按钮 44px', () => {
-    const modal = read('src/views/knowledge/components/KnowledgeDetailModals.vue')
-    expect(modal).toMatch(/@media \(max-width: 1024px\)/)
   })
 })

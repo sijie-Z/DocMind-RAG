@@ -371,6 +371,8 @@ export default {
       focusMiss: 'Le segment cité n\'a pas pu être localisé ; affichage du texte intégral.',
       focusMissTruncated: 'Le segment cité n\'a pas pu être localisé dans le contenu chargé. Le document est long ; téléchargez l\'original pour consulter le texte intégral.',
       focusMissEmpty: 'Le document n\'a pas de texte affichable ; le segment cité ne peut pas être localisé.',
+      chunkLoadFailed: 'Échec du chargement du segment cité. Cela peut être dû à un problème réseau ou à un service temporairement indisponible.',
+      chunkForbidden: 'Vous n\'avez pas accès à ce segment. Vérifiez les permissions de votre organisation.',
       viewFullText: 'Voir le texte intégral',
       copyLink: 'Copier le lien',
       linkCopied: 'Lien copié',

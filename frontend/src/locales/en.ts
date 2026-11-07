@@ -399,6 +399,8 @@ export default {
       focusMiss: 'The cited chunk could not be located; showing the full text.',
       focusMissTruncated: 'The cited chunk could not be located in the loaded content. The document is long; download the original to view the full text.',
       focusMissEmpty: 'There is no previewable text in this document, so the cited chunk cannot be located.',
+      chunkLoadFailed: 'Failed to load the cited chunk. This may be due to network or a temporary service issue.',
+      chunkForbidden: 'You do not have access to this chunk. Check your organization permissions.',
       viewFullText: 'View Full Text',
       copyLink: 'Copy Link',
       linkCopied: 'Link copied',

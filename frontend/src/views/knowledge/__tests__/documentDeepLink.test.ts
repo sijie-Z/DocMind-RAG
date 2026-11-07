@@ -128,7 +128,8 @@ beforeAll(() => {
 })
 
 beforeEach(() => {
-  vi.clearAllMocks()
+  // reset 而非 clear：清掉未消费的 mockResolvedValueOnce 队列，避免用例失败后级联。
+  vi.resetAllMocks()
   mockedDetail.mockResolvedValue(ok(DOC))
   mockedContent.mockResolvedValue(ok(CONTENT))
   mockedChunk.mockResolvedValue(ok(CHUNK))
@@ -165,20 +166,88 @@ describe('文档深链页 · 定位与降级', () => {
     expect(wrapper.text()).toContain('第三条 验收')
   })
 
-  it('分块获取失败：正文照常可读，如实提示未定位（不冒充已定位）', async () => {
-    mockedChunk.mockRejectedValueOnce(new Error('not found'))
+  it('分块网络/5xx 失败：正文照常可读，提示可重试', async () => {
+    mockedChunk.mockRejectedValueOnce(new Error('network'))
     const { wrapper } = await mountPage('/knowledge/doc-1?chunk=missing')
 
     expect(wrapper.find('[data-testid="document-focus"]').exists()).toBe(false)
     const miss = wrapper.find('[data-testid="document-focus-miss"]')
     expect(miss.exists()).toBe(true)
-    expect(miss.text()).toContain('未能定位到引用分块')
+    expect(miss.text()).toContain('引用分块加载失败')
+    expect(wrapper.find('[data-testid="document-chunk-retry"]').exists()).toBe(true)
     expect(wrapper.text()).toContain('第三条 验收')
+  })
+
+  it('分块 404：按未定位降级且不提供无意义重试', async () => {
+    mockedChunk.mockRejectedValueOnce({ response: { status: 404 } })
+    const { wrapper } = await mountPage('/knowledge/doc-1?chunk=missing')
+
+    const miss = wrapper.find('[data-testid="document-focus-miss"]')
+    expect(miss.text()).toContain('未能定位到引用分块')
+    expect(wrapper.find('[data-testid="document-chunk-retry"]').exists()).toBe(false)
+  })
+
+  it('重试定位：再次请求分块并恢复高亮', async () => {
+    mockedChunk.mockRejectedValueOnce(new Error('network'))
+    mockedChunk.mockResolvedValueOnce(ok(CHUNK) as never)
+    const { wrapper } = await mountPage('/knowledge/doc-1?chunk=chunk-1')
+
+    await wrapper.find('[data-testid="document-chunk-retry"]').trigger('click')
+    await flushPromises()
+    await nextTick()
+
+    expect(mockedChunk).toHaveBeenCalledTimes(2)
+    expect(mockedChunk).toHaveBeenLastCalledWith('doc-1', 'chunk-1', {
+      silent: true,
+      maxRetries: 1
+    })
+    expect(wrapper.find('[data-testid="document-focus"]').text()).toBe('第二条 付款 30 日')
+    expect(wrapper.find('[data-testid="document-chunk-retry"]').exists()).toBe(false)
+  })
+
+  it('手动重试在途时按钮保持挂载（loading 态），完成后按结果收起', async () => {
+    mockedChunk.mockRejectedValueOnce(new Error('network'))
+    const retry = deferred<unknown>()
+    mockedChunk.mockReturnValueOnce(retry.promise as never)
+    const { wrapper } = await mountPage('/knowledge/doc-1?chunk=chunk-1')
+
+    await wrapper.find('[data-testid="document-chunk-retry"]').trigger('click')
+    await nextTick()
+    const button = wrapper.find('[data-testid="document-chunk-retry"]')
+    expect(button.exists()).toBe(true)
+    expect(button.classes().join(' ')).toContain('n-button--loading')
+
+    retry.resolve(ok(CHUNK))
+    await flushPromises()
+    await nextTick()
+    expect(wrapper.find('[data-testid="document-focus"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="document-chunk-retry"]').exists()).toBe(false)
+  })
+
+  it('分块 403：提示无权查看且不提供重试', async () => {
+    mockedChunk.mockRejectedValueOnce({ response: { status: 403 } })
+    const { wrapper } = await mountPage('/knowledge/doc-1?chunk=chunk-1')
+
+    expect(wrapper.find('[data-testid="document-focus-miss"]').text()).toContain('无权查看')
+    expect(wrapper.find('[data-testid="document-chunk-retry"]').exists()).toBe(false)
+  })
+
+  it.each([422, 500])('分块 %s：4xx 不重试，5xx 可重试', async (status) => {
+    mockedChunk.mockRejectedValueOnce({ response: { status } })
+    const { wrapper } = await mountPage('/knowledge/doc-1?chunk=chunk-1')
+
+    const retry = wrapper.find('[data-testid="document-chunk-retry"]')
+    if (status >= 500) {
+      expect(retry.exists()).toBe(true)
+    } else {
+      expect(retry.exists()).toBe(false)
+      expect(wrapper.find('[data-testid="document-focus-miss"]').text()).toContain('未能定位')
+    }
   })
 
   it('截断文档中分块未命中：文案不得声称「已显示全文」', async () => {
     mockedContent.mockResolvedValueOnce(ok({ ...CONTENT, truncated: true }) as never)
-    mockedChunk.mockRejectedValueOnce(new Error('missing'))
+    mockedChunk.mockRejectedValueOnce({ response: { status: 404 } })
     const { wrapper } = await mountPage('/knowledge/doc-1?chunk=missing')
 
     const miss = wrapper.find('[data-testid="document-focus-miss"]')
@@ -440,5 +509,23 @@ describe('文档深链页 · A→B→A 在途重取', () => {
     await flushPromises()
     await nextTick()
     expect(wrapper.find('[data-testid="document-title"]').text()).toContain('软件采购合同')
+  })
+})
+
+
+describe('文档深链页 · 卸载与标题', () => {
+  it('卸载后迟到的详情响应不改写标题', async () => {
+    const pending = deferred<unknown>()
+    mockedDetail.mockReturnValueOnce(pending.promise as never)
+    mockedContent.mockResolvedValueOnce(ok(CONTENT) as never)
+    const { wrapper } = await mountPage('/knowledge/doc-1')
+
+    setPageTitleText('保留标题')
+    wrapper.unmount()
+    pending.resolve(ok(DOC))
+    await flushPromises()
+    await nextTick()
+
+    expect(document.title).toContain('保留标题')
   })
 })
