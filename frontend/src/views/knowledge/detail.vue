@@ -318,7 +318,9 @@ const currentChunkKey = computed(() => `${documentId.value}|${chunkId.value}`)
 const chunkPending = computed(
   () => chunkRequested.value && chunkLoadedKey.value !== currentChunkKey.value
 )
-const segments = computed(() => splitFocusText(content.value, chunk.value?.text || ''))
+const segments = computed(() =>
+  splitFocusText(content.value, chunkPending.value ? '' : (chunk.value?.text || ''))
+)
 const focusFound = computed(
   () =>
     chunkRequested.value &&
@@ -384,9 +386,8 @@ const loadChunk = async () => {
   const rawId = chunkId.value
   const docId = documentId.value
   const key = `${docId}|${rawId}`
-  const seq = ++chunkSeq
-  chunkLoadedKey.value = ''
   if (!rawId) {
+    chunkSeq += 1
     chunk.value = null
     chunkLoading.value = false
     chunkLoadedKey.value = key
@@ -394,7 +395,10 @@ const loadChunk = async () => {
   }
   // 文档尚未就绪时由 loadDocument 末尾统一取块，避免双请求。
   if (!docId || loadedDocumentId.value !== docId) return
+  // 去重必须在推进 seq 之前：否则被去重的调用会作废它本想复用的在途请求。
   if (inFlightChunkKey === key) return
+  const seq = ++chunkSeq
+  chunkLoadedKey.value = ''
   inFlightChunkKey = key
   chunkLoading.value = true
   try {

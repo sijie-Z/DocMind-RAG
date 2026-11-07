@@ -385,3 +385,53 @@ describe('文档深链页 · 竞态与诚实性', () => {
     expect(mockedChunk).toHaveBeenCalledTimes(1)
   })
 })
+
+describe('文档深链页 · A→B→A 在途重取', () => {
+  it('旧 chunk 在途时返回 A 会重新取块，迟到旧响应不覆盖', async () => {
+    const { wrapper, router } = await mountPage('/knowledge/doc-1')
+    const dB = deferred<unknown>()
+    const cB = deferred<unknown>()
+    const a1 = deferred<unknown>()
+    const a2 = deferred<unknown>()
+    let aCalls = 0
+    mockedDetail.mockImplementation((id: string) => (
+      id === 'doc-2' ? dB.promise : Promise.resolve(ok(DOC))
+    ) as never)
+    mockedContent.mockImplementation((id: string) => (
+      id === 'doc-2' ? cB.promise : Promise.resolve(ok(CONTENT))
+    ) as never)
+    mockedChunk.mockImplementation((id: string, chunkId: string) => {
+      if (id === 'doc-1' && chunkId === 'chunk-1') {
+        aCalls += 1
+        return (aCalls === 1 ? a1.promise : a2.promise) as never
+      }
+      return Promise.resolve(ok(CHUNK)) as never
+    })
+
+    await router.push('/knowledge/doc-1?chunk=chunk-1')
+    await nextTick()
+    await router.push('/knowledge/doc-2')
+    await nextTick()
+    await router.push('/knowledge/doc-1?chunk=chunk-1')
+    await nextTick()
+    await flushPromises()
+    await nextTick()
+    expect(aCalls).toBe(2)
+
+    a2.resolve(ok(CHUNK))
+    await flushPromises()
+    await nextTick()
+    expect(wrapper.find('[data-testid="document-focus"]').text()).toBe('第二条 付款 30 日')
+
+    a1.resolve(ok({ ...CHUNK, text: '第一条 标的', chunk_index: 0 }))
+    await flushPromises()
+    await nextTick()
+    expect(wrapper.find('[data-testid="document-focus"]').text()).toBe('第二条 付款 30 日')
+
+    dB.resolve(ok({ ...DOC, id: 'doc-2', title: '文档 B' }))
+    cB.resolve(ok({ ...CONTENT, id: 'doc-2', content: 'B 正文', total_chunks: 1 }))
+    await flushPromises()
+    await nextTick()
+    expect(wrapper.find('[data-testid="document-title"]').text()).toContain('软件采购合同')
+  })
+})
