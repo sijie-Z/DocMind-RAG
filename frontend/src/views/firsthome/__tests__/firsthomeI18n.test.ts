@@ -50,13 +50,17 @@ afterEach(() => {
 })
 
 describe('FirstHome 整页中文化纳入 i18n（四语）', () => {
-  it('zh 相位渲染既有中文文案（回归锁）', async () => {
+  it('zh 相位渲染产品化中文文案（回归锁）', async () => {
     const wrapper = await mountAt('zh')
     wrappers.push(wrapper)
     const text = wrapper.text()
-    expect(text).toContain('让每一份文档')
-    expect(text).toContain('三步构建你的知识库')
+    expect(text).toContain('合同核验，')
+    expect(text).toContain('逐条有据')
+    expect(text).toContain('从两份合同到一份核验单')
     expect(text).toContain('免费开始')
+    // 旧版不可解释的评测数字已移除，不再出现在对外首屏
+    expect(text).not.toContain('88%')
+    expect(text).not.toContain('ClauseHit')
   })
 
   it('en 相位不冒中文 —— 整页不再含 CJK 字符', async () => {
@@ -64,20 +68,21 @@ describe('FirstHome 整页中文化纳入 i18n（四语）', () => {
     wrappers.push(wrapper)
     const text = wrapper.text()
     expect(text, `en 相位仍残留硬编码中文：${text.match(CJK)?.input?.slice(0, 40)}`).not.toMatch(CJK)
-    expect(text).toContain('Build your knowledge base in three steps')
-    expect(text).toContain('Every document')
+    expect(text).toContain('Contract review,')
+    expect(text).toContain('every clause backed by evidence')
+    expect(text).toContain('From two contract versions to one review report')
   })
 
   it('ja / fr 相位各自渲染本语词条（不回退中文）', async () => {
     const jaWrapper = await mountAt('ja')
     wrappers.push(jaWrapper)
     // 日文本身含汉字，不能以 CJK 字符面判红；以「中文原文不得出现」为判别
-    expect(jaWrapper.text()).not.toContain('三步构建你的知识库')
-    expect(jaWrapper.text()).toContain('3 ステップでナレッジベースを構築')
+    expect(jaWrapper.text()).not.toContain('从两份合同到一份核验单')
+    expect(jaWrapper.text()).toContain('条項ごとに根拠つきで')
 
     const frWrapper = await mountAt('fr')
     wrappers.push(frWrapper)
     expect(frWrapper.text()).not.toMatch(CJK)
-    expect(frWrapper.text()).toContain('Construisez votre base de connaissances en trois étapes')
+    expect(frWrapper.text()).toContain('chaque clause avec sa preuve')
   })
 })

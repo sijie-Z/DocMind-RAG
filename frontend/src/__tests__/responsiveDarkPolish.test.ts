@@ -203,11 +203,12 @@ describe('E16-H5 · firsthome 暗色适配', () => {
     expect(hexLuminance(bg)).toBeLessThan(0.35)
   })
 
-  it('渐变标题在暗色下换了高对比渐变（不沿用 #1e40af 深蓝）', () => {
+  it('强调标题在暗色下使用高对比亮蓝（不再依赖装饰性渐变）', () => {
     expect(css).toMatch(/html\.dark\s+\.hero-title-accent\s*\{/)
     const accent = declarationsFor(css, /html\.dark\s+\.hero-title-accent/)
-    const gradient = accent['background-image'] || accent['background'] || ''
-    expect(gradient, '暗色渐变应为亮蓝系').toMatch(/#(?:60a5fa|93c5fd|bfdbfe)/i)
+    expect(accent['color'], '暗色强调标题应为亮蓝').toMatch(/#(?:60a5fa|93c5fd|bfdbfe)/i)
+    // 设计系统 v1：营销页同样禁止装饰性渐变，强调只靠颜色层级。
+    expect(accent['background-image']).toBeUndefined()
   })
 })
 
