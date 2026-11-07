@@ -569,7 +569,7 @@ def test_markdown_ambiguous_facts_and_unknown_codes_are_explicit():
                 "status": "needs_human",
                 "decided_by": None,
                 "decided_at": None,
-                "decision_note": None,
+                "decision_note": "备注\r## 注入|单元\n第二行",
                 "facts": {
                     "base": {
                         "status": "ambiguous",
@@ -584,7 +584,7 @@ def test_markdown_ambiguous_facts_and_unknown_codes_are_explicit():
                 "evidence": {
                     "base": [
                         {
-                            "quote": "就30日",
+                            "quote": "就30日\n## 伪造",
                             "clause_no": [2],
                             "section_no": [],
                             "page_number": 1,
@@ -661,6 +661,10 @@ def test_markdown_ambiguous_facts_and_unknown_codes_are_explicit():
     # 文档内容/未知键里的换行与 Markdown 结构不得注入新行/新章节。
     assert "\nz" not in markdown
     assert "\n## 注入" not in markdown
+    assert "\n## 伪造" not in markdown
+    assert "就30日 ## 伪造" in markdown, "证据 quote 换行必须折叠"
+    assert "\r" not in markdown, "CR 必须折叠，不得破坏表格行"
+    assert "备注 ## 注入\\|单元 第二行" in markdown, "表格单元需折叠空白并转义竖线"
     assert "x|y z" in markdown
     # 字段缺失的证据行不得崩溃，定位如实标注。
     assert "定位未记录：" in markdown
