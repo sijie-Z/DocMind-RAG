@@ -402,7 +402,7 @@ export default {
       chunkLoadFailed: 'Failed to load the cited chunk. This may be due to network or a temporary service issue.',
       chunkForbidden: 'You do not have access to this chunk. Check your organization permissions.',
       evidenceSnapshotTitle: 'Evidence Snapshot',
-      evidenceCurrentMatch: 'Matches current document',
+      evidenceCurrentMatch: 'Evidence text unchanged',
       evidenceStaleBadge: 'Evidence changed',
       evidenceCaseLabel: 'Case',
       evidenceLabelSeparator: ': ',

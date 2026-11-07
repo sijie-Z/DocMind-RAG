@@ -373,7 +373,7 @@ export default {
       chunkLoadFailed: '引用チャンクの読み込みに失敗しました。ネットワーク変動または一時的なサービス障害の可能性があります。',
       chunkForbidden: 'このチャンクの原文を表示する権限がありません。組織の権限を確認してください。',
       evidenceSnapshotTitle: '証拠スナップショット',
-      evidenceCurrentMatch: '現在のドキュメントと一致',
+      evidenceCurrentMatch: '証拠原文は未変更',
       evidenceStaleBadge: '証拠が変更されています',
       evidenceCaseLabel: '案件',
       evidenceLabelSeparator: '：',

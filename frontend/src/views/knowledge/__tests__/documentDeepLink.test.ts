@@ -580,7 +580,7 @@ describe('文档深链页 · 证据永久链接', () => {
     const banner = wrapper.find('[data-testid="document-evidence-banner"]')
     expect(banner.exists()).toBe(true)
     expect(banner.text()).toContain('证据快照')
-    expect(banner.text()).toContain('与当前文档一致')
+    expect(banner.text()).toContain('证据原文未变')
     expect(wrapper.find('[data-testid="document-evidence-quote"]').text()).toContain('第二条 付款 30 日')
     expect(wrapper.find('[data-testid="document-focus"]').text()).toBe('第二条 付款 30 日')
   })

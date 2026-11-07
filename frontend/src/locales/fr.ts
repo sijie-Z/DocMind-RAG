@@ -374,7 +374,7 @@ export default {
       chunkLoadFailed: 'Échec du chargement du segment cité. Cela peut être dû à un problème réseau ou à un service temporairement indisponible.',
       chunkForbidden: 'Vous n\'avez pas accès à ce segment. Vérifiez les permissions de votre organisation.',
       evidenceSnapshotTitle: 'Instantané de preuve',
-      evidenceCurrentMatch: 'Correspond au document actuel',
+      evidenceCurrentMatch: 'Texte de preuve inchangé',
       evidenceStaleBadge: 'Preuve modifiée',
       evidenceCaseLabel: 'Dossier',
       evidenceLabelSeparator: ' : ',

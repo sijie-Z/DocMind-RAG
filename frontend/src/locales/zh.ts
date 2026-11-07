@@ -409,7 +409,7 @@ export default {
       chunkLoadFailed: '引用分块加载失败，可能是网络波动或服务暂时不可用。',
       chunkForbidden: '无权查看该分块原文，请确认组织权限。',
       evidenceSnapshotTitle: '证据快照',
-      evidenceCurrentMatch: '与当前文档一致',
+      evidenceCurrentMatch: '证据原文未变',
       evidenceStaleBadge: '证据已变化',
       evidenceCaseLabel: '所属案件',
       evidenceLabelSeparator: '：',

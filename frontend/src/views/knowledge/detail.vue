@@ -647,6 +647,14 @@ const loadDocument = async () => {
   }
 
   loading.value = true
+  // 同路由换文档（证据纠正/异常链接）不得在快照旁残留另一份文档的身份。
+  detail.value = null
+  content.value = ''
+  provenance.value = undefined
+  truncated.value = false
+  contentSummary.value = ''
+  suggestedTags.value = []
+  chunkTotal.value = null
   try {
     const [detailRes, contentRes] = await Promise.all([
       getDocumentDetail(docId, { silent: true }),
