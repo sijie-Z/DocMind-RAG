@@ -9,14 +9,14 @@
           </n-button>
           <div class="document-actions flex flex-wrap items-center gap-2">
             <n-button
-              v-if="focusFound"
+              v-if="focusFound && !evidenceId"
               secondary
               data-testid="document-clear-focus"
               @click="clearFocus"
             >
               {{ t('knowledge.documentDetail.viewFullText') }}
             </n-button>
-            <n-button secondary data-testid="document-copy-link" @click="copyLink">
+            <n-button v-if="!evidenceId" secondary data-testid="document-copy-link" @click="copyLink">
               <template #icon><n-icon><CopyOutline /></n-icon></template>
               {{ t('knowledge.documentDetail.copyLink') }}
             </n-button>
@@ -157,26 +157,28 @@
           <div
             v-if="evidenceId"
             data-testid="document-evidence-banner"
+            role="region"
+            aria-labelledby="document-evidence-title"
             class="mt-4 rounded-lg border border-slate-200 bg-white p-4 dark:border-slate-700 dark:bg-slate-900 md:p-5"
           >
             <div v-if="evidenceLoading" class="text-sm text-slate-600 dark:text-slate-300">
               {{ t('knowledge.documentDetail.evidenceLoading') }}
             </div>
-            <n-alert
-              v-else-if="evidenceErrorKind"
-              type="warning"
-              :bordered="false"
-              data-testid="document-evidence-error"
-            >
-              {{ evidenceErrorText }}
-            </n-alert>
+            <div v-else-if="evidenceErrorKind" class="flex flex-wrap items-center gap-3">
+              <n-alert type="warning" :bordered="false" data-testid="document-evidence-error">
+                {{ evidenceErrorText }}
+              </n-alert>
+              <n-button size="small" secondary data-testid="evidence-retry" @click="loadEvidence">
+                {{ t('common.retry') }}
+              </n-button>
+            </div>
             <template v-else-if="evidenceDetail">
               <div class="flex flex-wrap items-start justify-between gap-3">
                 <div class="min-w-0">
                   <div class="flex flex-wrap items-center gap-2">
-                    <span class="text-sm font-semibold text-slate-900 dark:text-slate-100">
+                    <h3 id="document-evidence-title" class="text-sm font-semibold text-slate-900 dark:text-slate-100">
                       {{ t('knowledge.documentDetail.evidenceSnapshotTitle') }}
-                    </span>
+                    </h3>
                     <n-tag
                       size="small"
                       :type="evidenceDetail.replay.quote_unchanged ? 'success' : 'warning'"
@@ -195,7 +197,7 @@
                     </n-tag>
                   </div>
                   <p class="mt-1 break-words text-xs text-slate-500 dark:text-slate-400">
-                    {{ t('knowledge.documentDetail.evidenceCaseLabel') }}：{{ evidenceDetail.case.title }}
+                    {{ t('knowledge.documentDetail.evidenceCaseLabel') }}{{ t('knowledge.documentDetail.evidenceLabelSeparator') }}{{ evidenceDetail.case.title }}
                     · {{ t('knowledge.documentDetail.evidenceCapturedAt') }}
                     {{ formatUploadedAt(evidenceDetail.evidence.captured_at) }}
                   </p>
@@ -212,7 +214,7 @@
                   <n-button size="small" secondary data-testid="evidence-copy-link" @click="copyLink">
                     {{ t('knowledge.documentDetail.evidenceCopyLink') }}
                   </n-button>
-                  <n-button size="small" tertiary @click="clearFocus">
+                  <n-button v-if="!errorKind" size="small" tertiary @click="clearFocus">
                     {{ t('knowledge.documentDetail.viewFullText') }}
                   </n-button>
                 </div>
@@ -701,6 +703,8 @@ watch(
   [() => content.value, () => chunk.value, () => loading.value, () => focusFound.value],
   async () => {
     if (!focusFound.value) return
+    // 证据模式以快照为主体：首屏不滚动，避免把证据横幅推出视口。
+    if (evidenceId.value) return
     await nextTick()
     const reduceMotion =
       typeof window !== 'undefined' &&

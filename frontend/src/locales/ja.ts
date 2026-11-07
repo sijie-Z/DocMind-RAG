@@ -376,6 +376,7 @@ export default {
       evidenceCurrentMatch: '現在のドキュメントと一致',
       evidenceStaleBadge: '証拠が変更されています',
       evidenceCaseLabel: '案件',
+      evidenceLabelSeparator: '：',
       evidenceCapturedAt: '取得日時',
       evidenceVersion: 'バージョン {label}',
       evidencePage: '{page} ページ',

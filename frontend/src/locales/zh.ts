@@ -412,6 +412,7 @@ export default {
       evidenceCurrentMatch: '与当前文档一致',
       evidenceStaleBadge: '证据已变化',
       evidenceCaseLabel: '所属案件',
+      evidenceLabelSeparator: '：',
       evidenceCapturedAt: '捕获于',
       evidenceVersion: '版本 {label}',
       evidencePage: '第 {page} 页',

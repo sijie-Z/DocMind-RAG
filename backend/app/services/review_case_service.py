@@ -661,7 +661,9 @@ async def evidence_detail(
             "matches_snapshot": chunk_matches,
         },
         "replay": {
-            "quote_unchanged": not reasons,
+            # 徽标只表达「证据文本是否仍与当前分块一致」；文档版本/哈希/重处理
+            # 等来源漂移通过 warnings 单独提示，不能把 same quote 说成已变化。
+            "quote_unchanged": chunk_matches,
             "can_highlight_current_chunk": chunk_found and chunk_matches and not missing,
             "warnings": reasons,
         },

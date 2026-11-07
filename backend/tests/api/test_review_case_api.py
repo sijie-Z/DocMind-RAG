@@ -943,3 +943,25 @@ async def test_evidence_permalink_cross_org_forbidden(factory, monkeypatch):
     async with _Ctx(_user(org=OTHER_ORG), factory) as ac:
         r = await ac.get(f"/api/v1/reviews/evidence/{evidence_id}")
         assert r.status_code == 403, r.text
+
+
+@pytest.mark.asyncio
+async def test_evidence_permalink_partial_drift_keeps_quote_match(factory):
+    """版本/哈希漂移但原文未变：quote_unchanged 仍为 True，仅通过 warnings 提示。"""
+    async with _Ctx(_user(superuser=True), factory) as ac:
+        case = await _create_case(ac)
+        payment = next(i for i in case["items"] if i["item_key"] == "payment_term")
+        candidate = payment["evidence"]["base"][0]
+
+    async with factory() as db:
+        meta = await db.get(ReviewDocumentMeta, BASE)
+        meta.version_label = "V1.1"
+        await db.commit()
+
+    async with _Ctx(_user(superuser=True), factory) as ac:
+        r = await ac.get(f"/api/v1/reviews/evidence/{candidate['id']}")
+        assert r.status_code == 200, r.text
+        data = r.json()["data"]
+        assert "document_version_changed" in data["replay"]["warnings"]
+        assert data["replay"]["quote_unchanged"] is True
+        assert data["replay"]["can_highlight_current_chunk"] is True

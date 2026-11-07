@@ -405,6 +405,7 @@ export default {
       evidenceCurrentMatch: 'Matches current document',
       evidenceStaleBadge: 'Evidence changed',
       evidenceCaseLabel: 'Case',
+      evidenceLabelSeparator: ': ',
       evidenceCapturedAt: 'Captured',
       evidenceVersion: 'Version {label}',
       evidencePage: 'Page {page}',

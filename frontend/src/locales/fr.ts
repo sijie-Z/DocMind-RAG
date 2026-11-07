@@ -377,6 +377,7 @@ export default {
       evidenceCurrentMatch: 'Correspond au document actuel',
       evidenceStaleBadge: 'Preuve modifiée',
       evidenceCaseLabel: 'Dossier',
+      evidenceLabelSeparator: ' : ',
       evidenceCapturedAt: 'Capturée le',
       evidenceVersion: 'Version {label}',
       evidencePage: 'Page {page}',
