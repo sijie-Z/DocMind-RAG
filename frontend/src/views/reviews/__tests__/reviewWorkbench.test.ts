@@ -945,3 +945,77 @@ describe('证据永久链接（复制）', () => {
     expect(calls).not.toContain('/content')
   })
 })
+
+describe('证据分析定位', () => {
+  const baseItem = makeDetail().items[0]
+  const headingRow = {
+    ...baseItem.evidence.base[0],
+    id: 'ev-heading',
+    chunk_id_at_capture: 'chunk-0',
+    chunk_index: 0,
+    quote: '第二条 付款方式'
+  }
+  const bodyRow = {
+    ...baseItem.evidence.base[0],
+    id: 'ev-body',
+    chunk_id_at_capture: 'chunk-1',
+    chunk_index: 1,
+    quote: '2.1 合同签订后 10 个工作日内，采购方支付合同总价的 20% 作为预付款。'
+  }
+
+  it('分析层定位的证据候选置顶并标注', async () => {
+    api.get.mockResolvedValue({
+      data: {
+        data: makeDetail({
+          items: [
+            {
+              ...baseItem,
+              facts: {
+                base: { status: 'identified', value: 30, unit: 'day', chunk_id: 'chunk-1' },
+                revised: { status: 'identified', value: 60, unit: 'day', chunk_id: 'chunk-r' },
+                policy: { status: 'not_found' }
+              },
+              evidence: { ...baseItem.evidence, base: [headingRow, bodyRow] }
+            }
+          ]
+        })
+      }
+    } as never)
+    const wrapper = mountDetail()
+    await flushPromises()
+
+    const rows = wrapper.findAll('[data-testid="review-evidence-row-base"]')
+    expect(rows).toHaveLength(2)
+    expect(rows[0].text()).toContain('2.1 合同签订后')
+    expect(rows[0].find('[data-testid="evidence-primary"]').text()).toContain('分析定位')
+    expect(rows[1].text()).toContain('第二条 付款方式')
+    expect(rows[1].find('[data-testid="evidence-primary"]').exists()).toBe(false)
+  })
+
+  it('缺少分析定位时保持服务端顺序且不标注', async () => {
+    api.get.mockResolvedValue({
+      data: {
+        data: makeDetail({
+          items: [
+            {
+              ...baseItem,
+              facts: {
+                base: { status: 'identified', value: 30, unit: 'day' },
+                revised: { status: 'not_found' },
+                policy: { status: 'not_found' }
+              },
+              evidence: { ...baseItem.evidence, base: [headingRow, bodyRow] }
+            }
+          ]
+        })
+      }
+    } as never)
+    const wrapper = mountDetail()
+    await flushPromises()
+
+    const rows = wrapper.findAll('[data-testid="review-evidence-row-base"]')
+    expect(rows).toHaveLength(2)
+    expect(rows[0].text()).toContain('第二条 付款方式')
+    expect(wrapper.find('[data-testid="evidence-primary"]').exists()).toBe(false)
+  })
+})

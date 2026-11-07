@@ -1658,6 +1658,8 @@ export default {
     evidenceDeselect: '取消选择',
     evidenceSelected: '已选证据',
     evidenceSelectedCount: '已选 {count} 条',
+    evidencePrimary: '分析定位',
+    evidencePrimaryHint: '分析层抽取该核验事实时实际定位的分块，建议优先核对',
     nextPending: '下一项未决策',
     unsavedDraftsHint: '有未保存的决策，保存后才能导出',
     staleCount: '{count} 项证据已变化',

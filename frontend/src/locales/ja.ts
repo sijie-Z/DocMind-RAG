@@ -1579,6 +1579,8 @@ export default {
     evidenceDeselect: '選択解除',
     evidenceSelected: '選択済み',
     evidenceSelectedCount: '{count} 件選択',
+    evidencePrimary: '分析上の特定位置',
+    evidencePrimaryHint: '分析がこの事実を抽出した分塊です。優先して確認してください',
     nextPending: '次の未判断項目',
     unsavedDraftsHint: '未保存の判断があります。保存してから書き出してください。',
     staleCount: '{count} 件の証拠が変化しました',

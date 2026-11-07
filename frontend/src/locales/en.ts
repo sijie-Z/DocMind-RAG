@@ -1650,6 +1650,8 @@ export default {
     evidenceDeselect: 'Deselect',
     evidenceSelected: 'Selected',
     evidenceSelectedCount: '{count} selected',
+    evidencePrimary: 'Analyzer locator',
+    evidencePrimaryHint: 'Chunk where the analyzer extracted this fact; review it first',
     nextPending: 'Next pending',
     unsavedDraftsHint: 'You have unsaved decisions. Save them before exporting.',
     staleCount: '{count} evidence items changed',

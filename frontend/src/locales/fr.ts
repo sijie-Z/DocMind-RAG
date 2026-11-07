@@ -1580,6 +1580,8 @@ export default {
     evidenceDeselect: 'Désélectionner',
     evidenceSelected: 'Sélectionné',
     evidenceSelectedCount: '{count} sélectionnés',
+    evidencePrimary: 'Emplacement analysé',
+    evidencePrimaryHint: "Fragment où l'analyse a extrait ce fait ; à vérifier en priorité",
     nextPending: 'Suivant à décider',
     unsavedDraftsHint: 'Des décisions ne sont pas enregistrées. Enregistrez-les avant l’export.',
     staleCount: '{count} éléments de preuve modifiés',
