@@ -402,6 +402,17 @@
                           <n-button
                             size="tiny"
                             tertiary
+                            class="evidence-select evidence-copy-link"
+                            data-testid="evidence-copy-link"
+                            :aria-label="`${t('reviews.evidenceCopyLink')} · ${docLabel(row.side)}`"
+                            :title="t('reviews.evidenceCopyLink')"
+                            @click="copyEvidenceLink(row)"
+                          >
+                            <template #icon><n-icon><CopyOutline /></n-icon></template>
+                          </n-button>
+                          <n-button
+                            size="tiny"
+                            tertiary
                             class="evidence-select"
                             :type="row.selected ? 'success' : 'primary'"
                             :aria-pressed="row.selected"
@@ -523,7 +534,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } 
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useMessage } from 'naive-ui'
-import { ArrowBackOutline, ChevronDownOutline, ChevronUpOutline, OpenOutline, RefreshOutline } from '@vicons/ionicons5'
+import { ArrowBackOutline, ChevronDownOutline, ChevronUpOutline, CopyOutline, OpenOutline, RefreshOutline } from '@vicons/ionicons5'
 import {
   reviewsApi,
   type ReviewCaseDetail,
@@ -538,7 +549,7 @@ import {
 import { apiUnwrap } from '@/utils/apiUnwrap'
 import { getErrorMessage } from '@/utils/apiError'
 import { reasonLabel, reasonsLabel } from './reviewReasons'
-import { buildEvidenceLinkTarget } from './evidenceLink'
+import { buildEvidencePermalink, buildEvidenceLinkTarget } from './evidenceLink'
 
 const SIDES: ReviewSide[] = ['policy', 'base', 'revised']
 
@@ -867,6 +878,21 @@ function evidenceUnavailableHint(row: ReviewEvidenceRow): string {
   return docOf(row.side)?.missing
     ? t('reviews.evidenceOpenUnavailableHint')
     : t('reviews.evidenceOpenNoChunkHint')
+}
+
+async function copyEvidenceLink(row: ReviewEvidenceRow) {
+  const target = buildEvidencePermalink(row)
+  if (!target) {
+    message.warning(t('reviews.evidenceLinkUnavailable'))
+    return
+  }
+  try {
+    const href = router.resolve(target).href
+    await navigator.clipboard.writeText(new URL(href, window.location.origin).href)
+    message.success(t('reviews.evidenceLinkCopied'))
+  } catch {
+    message.error(t('reviews.evidenceLinkCopyFailed'))
+  }
 }
 function decisionOf(item: ReviewItem) {
   if (!decisions[item.id]) {
@@ -1215,6 +1241,9 @@ onBeforeUnmount(() => {
 .evidence-select.n-button {
   min-height: 32px;
 }
+.evidence-copy-link.n-button {
+  min-width: 32px;
+}
 .evidence-open-original {
   min-height: 32px;
 }
@@ -1250,6 +1279,9 @@ onBeforeUnmount(() => {
   }
   .evidence-select.n-button {
     min-height: 44px;
+  }
+  .evidence-copy-link.n-button {
+    min-width: 44px;
   }
   .evidence-open-original {
     min-height: 44px;

@@ -860,3 +860,86 @@ async def test_archived_case_rejects_evidence_selection(factory):
         )
         assert put.status_code == 409, put.text
         assert put.json()["error_code"] == "REVIEW_CASE_ARCHIVED"
+
+
+@pytest.mark.asyncio
+async def test_evidence_permalink_returns_snapshot_and_live_state(factory):
+    async with _Ctx(_user(superuser=True), factory) as ac:
+        case = await _create_case(ac)
+        payment = next(i for i in case["items"] if i["item_key"] == "payment_term")
+        candidate = payment["evidence"]["base"][0]
+
+        r = await ac.get(f"/api/v1/reviews/evidence/{candidate['id']}")
+        assert r.status_code == 200, r.text
+        data = r.json()["data"]
+        assert data["evidence"]["id"] == candidate["id"]
+        assert data["evidence"]["quote"] == candidate["quote"]
+        assert data["evidence"]["quote_sha256"] == candidate["quote_sha256"]
+        assert data["evidence"]["stale"] is False
+        assert data["case"]["id"] == case["id"]
+        assert data["item"]["item_key"] == "payment_term"
+        assert data["document"]["missing"] is False
+        assert data["live_chunk"]["found"] is True
+        assert data["live_chunk"]["matches_snapshot"] is True
+        assert data["replay"]["can_highlight_current_chunk"] is True
+
+        # 不存在的证据 404；不得返回快照。
+        missing = await ac.get(f"/api/v1/reviews/evidence/{uuid.uuid4()}")
+        assert missing.status_code == 404, missing.text
+
+
+@pytest.mark.asyncio
+async def test_evidence_permalink_stale_when_chunk_changed_or_missing(factory):
+    async with _Ctx(_user(superuser=True), factory) as ac:
+        case = await _create_case(ac)
+        payment = next(i for i in case["items"] if i["item_key"] == "payment_term")
+        candidate = payment["evidence"]["base"][0]
+        chunk_id = candidate["chunk_id_at_capture"]
+
+    # 原文被改写：quote 快照不变，但不得再用新文本高亮。
+    async with factory() as db:
+        chunk = await db.get(DocumentChunk, chunk_id)
+        chunk.original_text = "第一条 付款期限被人为改写为90天。"
+        chunk.chunk_text = "【文档背景：摘要】第一条 付款期限被人为改写为90天。"
+        await db.commit()
+
+    async with _Ctx(_user(superuser=True), factory) as ac:
+        changed = await ac.get(f"/api/v1/reviews/evidence/{candidate['id']}")
+        assert changed.status_code == 200, changed.text
+        data = changed.json()["data"]
+        assert data["evidence"]["quote"] == candidate["quote"]
+        assert data["evidence"]["stale"] is True
+        assert "chunk_text_changed" in data["replay"]["warnings"]
+        assert data["replay"]["can_highlight_current_chunk"] is False
+        assert data["live_chunk"]["matches_snapshot"] is False
+
+    # chunk 行被删除：快照仍可回放，但不能定位。
+    async with factory() as db:
+        chunk = await db.get(DocumentChunk, chunk_id)
+        await db.delete(chunk)
+        await db.commit()
+
+    async with _Ctx(_user(superuser=True), factory) as ac:
+        gone = await ac.get(f"/api/v1/reviews/evidence/{candidate['id']}")
+        assert gone.status_code == 200, gone.text
+        data = gone.json()["data"]
+        assert data["evidence"]["quote"] == candidate["quote"]
+        assert "chunk_missing" in data["replay"]["warnings"]
+        assert data["replay"]["can_highlight_current_chunk"] is False
+
+
+@pytest.mark.asyncio
+async def test_evidence_permalink_cross_org_forbidden(factory, monkeypatch):
+    async def _grant_all(_db, _user_obj, organization_id=None):
+        return {PermissionType.DOCUMENT_READ.value, PermissionType.DOCUMENT_UPDATE.value}
+
+    monkeypatch.setattr("app.core.security.permission_service.get_user_permissions", _grant_all)
+
+    async with _Ctx(_user(superuser=True), factory) as ac:
+        case = await _create_case(ac)
+        payment = next(i for i in case["items"] if i["item_key"] == "payment_term")
+        evidence_id = payment["evidence"]["base"][0]["id"]
+
+    async with _Ctx(_user(org=OTHER_ORG), factory) as ac:
+        r = await ac.get(f"/api/v1/reviews/evidence/{evidence_id}")
+        assert r.status_code == 403, r.text

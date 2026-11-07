@@ -200,6 +200,47 @@ export interface DecisionPayload {
  */
 const SILENT_HEADERS = { headers: { 'X-Silent-Error': '1' } } as const
 
+export interface ReviewEvidenceDetail {
+  evidence: ReviewEvidenceRow & { stale_reasons: string[] }
+  case: {
+    id: string
+    title: string
+    status: ReviewCaseStatus
+    archived_at?: string | null
+    created_at?: string | null
+  }
+  item: {
+    id: string
+    item_key: string
+    ordinal: number
+    change_type: ReviewChangeType | null
+    status: ReviewItemStatus
+  }
+  document: {
+    document_id: string
+    filename?: string | null
+    missing: boolean
+    live_status?: string | null
+    identity_changed: boolean
+    document_hash_changed: boolean
+    document_version_changed: boolean
+    document_sha256_live?: string | null
+    version_label_live?: string | null
+    version_seq_live?: number | null
+  }
+  live_chunk: {
+    found: boolean
+    chunk_index?: number | null
+    text?: string | null
+    matches_snapshot: boolean
+  }
+  replay: {
+    quote_unchanged: boolean
+    can_highlight_current_chunk: boolean
+    warnings: string[]
+  }
+}
+
 export const reviewsApi = {
   list(params?: {
     status?: string
@@ -224,6 +265,9 @@ export const reviewsApi = {
   },
   get(id: string) {
     return request.get(`/reviews/${id}`)
+  },
+  getEvidence(evidenceId: string) {
+    return request.get(`/reviews/evidence/${encodeURIComponent(evidenceId)}`, SILENT_HEADERS)
   },
   analyze(id: string) {
     return request.post(`/reviews/${id}/analyze`)

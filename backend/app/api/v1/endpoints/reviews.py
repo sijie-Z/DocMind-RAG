@@ -139,6 +139,33 @@ async def list_review_candidates(
         raise AppError("获取候选文档失败") from e
 
 
+@router.get("/evidence/{evidence_id}", response_model=dict, dependencies=_READ_DEPS)
+async def get_review_evidence(
+    evidence_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """证据永久链接：按 evidence id 返回快照与当前文档/chunk 漂移状态。
+
+    快照以案件权限为准（案件详情本就返回全部 quote）；当前正文只作为对照。
+    """
+    try:
+        evidence, case, item = await case_service.get_evidence_for_user(
+            db, current_user, evidence_id
+        )
+        return {
+            "success": True,
+            "data": await case_service.evidence_detail(db, evidence, case, item),
+        }
+    except (NotFoundError, AuthorizationError):
+        raise
+    except AppError:
+        raise
+    except Exception as e:
+        logger.error(f"Get review evidence failed: {type(e).__name__}: {e}")
+        raise AppError("获取证据快照失败") from e
+
+
 @router.get("/{review_id}", response_model=dict, dependencies=_READ_DEPS)
 async def get_review_case(
     review_id: str,

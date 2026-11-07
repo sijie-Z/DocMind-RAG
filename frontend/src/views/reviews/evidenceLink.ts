@@ -6,6 +6,25 @@ export interface EvidenceLinkTarget {
   query: { chunk: string }
 }
 
+export interface EvidencePermalinkTarget {
+  name: 'KnowledgeDocument'
+  params: { documentId: string }
+  query: { evidence: string }
+}
+
+/** 永久证据链接只依赖证据 id；文档删除后仍可回放快照。 */
+export function buildEvidencePermalink(
+  row: Pick<ReviewEvidenceRow, 'id' | 'document_id'>
+): EvidencePermalinkTarget | null {
+  if (!row.id || !row.document_id) return null
+  return {
+    name: 'KnowledgeDocument',
+    params: { documentId: row.document_id },
+    query: { evidence: row.id }
+  }
+}
+
+
 /**
  * 证据行 → 文档深链。证据快照里的 document_id/chunk_id_at_capture 是捕获时
  * 的权威定位；文档已删除（missing）或快照缺 chunk id 时不生成链接，由界面

@@ -30,9 +30,15 @@ import zh from '@/locales/zh'
 const routerMocks = vi.hoisted(() => ({
   replace: vi.fn(),
   push: vi.fn(),
-  resolve: vi.fn((target: { params: { documentId: string }; query: { chunk: string } }) => ({
-    href: `/knowledge/${target.params.documentId}?chunk=${target.query.chunk}`
-  }))
+  resolve: vi.fn((target: { params: { documentId: string }; query?: Record<string, string> }) => {
+    const query = target.query || {}
+    const suffix = query.evidence
+      ? `?evidence=${query.evidence}`
+      : query.chunk
+        ? `?chunk=${query.chunk}`
+        : ''
+    return { href: `/knowledge/${target.params.documentId}${suffix}` }
+  })
 }))
 
 vi.mock('vue-router', () => ({
@@ -916,5 +922,26 @@ describe('证据行 → 原文深链（单侧文档缺失）', () => {
     const unavailable = wrapper.find('[data-testid="evidence-open-unavailable"]')
     expect(unavailable.text()).toContain('原文不可用')
     expect(unavailable.attributes('title')).toContain('文档已删除或不可读')
+  })
+})
+
+
+describe('证据永久链接（复制）', () => {
+  it('复制按钮写入 ?evidence= 链接且不请求文档正文', async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined)
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true })
+    api.get.mockResolvedValue({ data: { data: makeDetail() } } as never)
+    const wrapper = mountDetail()
+    await flushPromises()
+
+    const button = wrapper.find('[data-testid="evidence-copy-link"]')
+    expect(button.exists()).toBe(true)
+    await button.trigger('click')
+    await flushPromises()
+
+    const copied = String(writeText.mock.calls[0]?.[0] || '')
+    expect(copied).toContain('/knowledge/b1-captured?evidence=ev-1')
+    const calls = JSON.stringify([api.get.mock.calls, api.exports.mock.calls])
+    expect(calls).not.toContain('/content')
   })
 })

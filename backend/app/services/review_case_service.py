@@ -565,6 +565,109 @@ async def get_item_for_case(session: AsyncSession, case: ReviewCase, item_id: st
     return item
 
 
+async def get_evidence_for_user(
+    session: AsyncSession, current_user: User, evidence_id: str
+) -> tuple[ReviewEvidence, ReviewCase, ReviewItem]:
+    """按证据 id 加载快照并做案件组织隔离（证据本身无 org 字段）。"""
+    evidence = await session.get(ReviewEvidence, evidence_id)
+    if evidence is None:
+        raise NotFoundError("证据不存在", resource="review_evidence", resource_id=evidence_id)
+    case = await get_case_for_user(session, current_user, evidence.case_id)
+    item = await get_item_for_case(session, case, evidence.item_id)
+    return evidence, case, item
+
+
+async def evidence_detail(
+    session: AsyncSession,
+    evidence: ReviewEvidence,
+    case: ReviewCase,
+    item: ReviewItem,
+) -> dict[str, Any]:
+    """证据永久链接详情：快照为主体，当前 chunk/文档状态只描述、不改写快照。
+
+    ``replay.can_highlight_current_chunk`` 为 false 时前端不得把当前文本当作
+    证据高亮（stale 但 chunk 仍在时，新文本不能冒充旧证据）。
+    """
+    chunk = await session.get(DocumentChunk, evidence.chunk_id_at_capture)
+    chunk_found = chunk is not None and chunk.document_id == evidence.document_id
+    current_text = chunk.original_text if chunk_found else None
+    chunk_matches = bool(
+        current_text is not None and _quote_sha256(current_text) == evidence.quote_sha256
+    )
+    document = await session.get(Document, evidence.document_id)
+    meta = await get_review_meta(session, evidence.document_id)
+    states = await _document_states(session, case)
+    state = states.get(evidence.side) or {}
+    missing = document is None
+    hash_changed = bool(meta is not None and meta.content_sha256 != evidence.document_sha256)
+    version_changed = bool(
+        meta is not None
+        and (
+            meta.doc_role != evidence.doc_role
+            or meta.version_label != evidence.doc_version_label
+            or meta.version_seq != evidence.doc_version_seq
+        )
+    )
+    reasons: list[str] = []
+    if not chunk_found:
+        reasons.append("chunk_missing")
+    elif not current_text:
+        reasons.append("chunk_text_empty")
+    elif not chunk_matches:
+        reasons.append("chunk_text_changed")
+    if missing:
+        reasons.append("document_missing")
+    if hash_changed:
+        reasons.append("document_hash_changed")
+    if version_changed:
+        reasons.append("document_version_changed")
+    if state.get("identity_changed"):
+        reasons.append("document_identity_changed")
+
+    evidence_data = evidence_to_dict(evidence, stale=bool(reasons))
+    evidence_data["stale_reasons"] = reasons
+    return {
+        "evidence": evidence_data,
+        "case": {
+            "id": case.id,
+            "title": case.title,
+            "status": case.status,
+            "archived_at": _iso(case.archived_at),
+            "created_at": _iso(case.created_at),
+        },
+        "item": {
+            "id": item.id,
+            "item_key": item.item_key,
+            "ordinal": item.ordinal,
+            "change_type": item.change_type,
+            "status": item.status,
+        },
+        "document": {
+            "document_id": evidence.document_id,
+            "filename": document.filename if document is not None else None,
+            "missing": missing,
+            "live_status": document.status.value if document is not None else None,
+            "identity_changed": bool(state.get("identity_changed")),
+            "document_hash_changed": hash_changed,
+            "document_version_changed": version_changed,
+            "document_sha256_live": meta.content_sha256 if meta is not None else None,
+            "version_label_live": meta.version_label if meta is not None else None,
+            "version_seq_live": meta.version_seq if meta is not None else None,
+        },
+        "live_chunk": {
+            "found": chunk_found,
+            "chunk_index": chunk.chunk_index if chunk_found else None,
+            "text": current_text,
+            "matches_snapshot": chunk_matches,
+        },
+        "replay": {
+            "quote_unchanged": not reasons,
+            "can_highlight_current_chunk": chunk_found and chunk_matches and not missing,
+            "warnings": reasons,
+        },
+    }
+
+
 async def _lock_case_current(session: AsyncSession, case: ReviewCase) -> ReviewCase:
     """当前读锁定案件行并返回最新值（MySQL RR 的 read view 规避）。
 
