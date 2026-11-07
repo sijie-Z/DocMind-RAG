@@ -242,7 +242,7 @@ class PERAgentLoop:
             tail_window=6,
         )
         if self.client:
-            self.context_engine.set_llm_client(self.client)
+            self.context_engine.set_llm_client(self.client, self.config.get_quick_model())
 
         # Memory bridge
         self.memory = AgentMemoryBridge(

@@ -64,6 +64,7 @@ from app.rag.source_provenance import (
 from app.schemas.chat import ChatSessionCreate, ChatStreamRequest, FeedbackRequest
 from app.services.chat_service import RAGEvent, run_rag_pipeline
 from app.services.document_preview import TEXT_PROVENANCE_MIXED
+from app.services.llm_settings_service import resolve_for_user
 from app.services.rag_service import rag_service
 from app.services.session_service import (
     SessionAccessScope,
@@ -773,6 +774,10 @@ async def websocket_endpoint(
                     search_org_id = user_state.organization_id
                     org_id = user_state.organization_id or None
 
+                    # 个人 AI 模型设置（本批）：WS 与 SSE 同源解析；未配置/无效
+                    # 时 source=server，传 None 保持全局默认行为。
+                    llm_resolution = await resolve_for_user(session, user_state)
+
                     # Use an asyncio.Queue to collect pipeline events
                     queue: asyncio.Queue = asyncio.Queue()
 
@@ -790,6 +795,12 @@ async def websocket_endpoint(
                             privacy_mode=privacy_mode,
                             event_queue=queue,
                             regenerate=regenerate,
+                            llm_client=(
+                                llm_resolution.client if llm_resolution.source == "user" else None
+                            ),
+                            llm_model=(
+                                llm_resolution.model if llm_resolution.source == "user" else None
+                            ),
                         )
                     )
 
@@ -1242,6 +1253,8 @@ async def chat_stream_endpoint(
                     enable_memory=True,
                     enable_thinking=payload_data.get("enableThinking", True),
                 )
+                # 个人 AI 模型设置：Agent PER loop 与 Chat 同源生效（服务端默认回退）。
+                llm_resolution = await resolve_for_user(db, current_user)
                 full_response = ""
                 agent_sources: list[dict] = []
                 # 修复：agent 模式下加载会话历史，支持多轮对话（原实现恒传空 history）
@@ -1272,6 +1285,8 @@ async def chat_stream_endpoint(
                     user_id=current_user.id,
                     session_id=conversation_id,
                     config=config,
+                    llm_client=(llm_resolution.client if llm_resolution.source == "user" else None),
+                    llm_model=(llm_resolution.model if llm_resolution.source == "user" else None),
                 ):
                     last_event_type = agent_event.type
                     if agent_event.type == "chunk":
@@ -1487,6 +1502,10 @@ async def chat_stream_endpoint(
                 search_org_id = effective_org_id
                 org_id = effective_org_id
 
+                # 个人 AI 模型设置（本批）：Chat/RAG 答案生成使用 per-user
+                # provider/model/key；未配置或配置无效 → 服务端默认。
+                llm_resolution = await resolve_for_user(session, current_user)
+
                 queue: asyncio.Queue = asyncio.Queue()
 
                 pipeline_task = asyncio.create_task(
@@ -1503,6 +1522,12 @@ async def chat_stream_endpoint(
                         event_queue=queue,
                         debug=body.debug,
                         regenerate=regenerate,
+                        llm_client=(
+                            llm_resolution.client if llm_resolution.source == "user" else None
+                        ),
+                        llm_model=(
+                            llm_resolution.model if llm_resolution.source == "user" else None
+                        ),
                     )
                 )
 

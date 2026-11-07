@@ -346,6 +346,8 @@ class AgentService:
         config: AgentConfig | None = None,
         referenced_document_ids: list[str] | None = None,
         request_id: str | None = None,
+        llm_client: AsyncOpenAI | None = None,
+        llm_model: str | None = None,
     ) -> AsyncGenerator[AgentEvent, None]:
         """Run the PER agent loop and yield events.
 
@@ -364,12 +366,19 @@ class AgentService:
                 逐条以 warning 事件诚实外发，绝不静默。
             request_id: 本次 HTTP 请求编号（与 X-Request-ID 同源，issue #510
                 第二步）；None 时回退当前请求 contextvar。只做关联，不落快照。
+            llm_client: 个人 AI 模型设置解析出的 per-user 客户端
+                （``llm_settings_service.resolve_for_user``）；None = 服务端默认。
+                PER loop 的 planner/executor/reflector/reviewer 全部使用它。
+            llm_model: 个人模型名；给出时覆盖本次运行的 AgentConfig.model
+                （个人设置 > Agent 会话配置默认值）。
         """
         # issue #510：request_id 是"这次请求"的属性。端点显式传入优先；直接调用
         # 本服务（测试 / 后台）时回退到 RequestIDMiddleware 的 contextvar。
         request_id = request_id or get_request_id()
 
-        if not self.client:
+        active_client = llm_client or self.client
+        if not active_client:
+            # 文案必须命中 error_mapping 的安全白名单（否则对外被降级为通用文案）。
             err_event = AgentEvent(
                 type="error", content="LLM 未配置，请检查 DEEPSEEK_API_KEY 环境变量。"
             )
@@ -393,6 +402,11 @@ class AgentService:
         # Apply session-scoped agent_id
         if session_id:
             agent_config.agent_id = f"session:{session_id}"
+
+        # 个人 AI 模型设置优先：选择 provider/model 后 Agent 真实调用使用该模型
+        # （reviewer/reflector 的 deep/quick 模型在未显式配置时回退到 model）。
+        if llm_model:
+            agent_config.model = llm_model
 
         # 任务行（issue #201 最小版）：一次 run 一行，checkpoint 的快照载体。
         # 建行失败不影响聊天（fail-open：整个 checkpoint 面静默缺席）。
@@ -438,7 +452,7 @@ class AgentService:
 
             # Create the PER loop
             agent = PERAgentLoop(
-                openai_client=self.client,
+                openai_client=active_client,
                 config=agent_config,
                 organization_id=organization_id,
                 user_id=user_id,

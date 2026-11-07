@@ -360,33 +360,63 @@
                       />
                     </div>
 
-                    <!-- AI Provider 设置（W2-T7：实验功能·暂不生效——后端无消费方，
-                         推理只走服务端全局配置；禁用编辑避免"配置了却没反应"陷阱） -->
+                    <!-- AI 模型设置（本批：真实生效——保存后 Chat 与 Agent 的 LLM
+                         调用使用个人 provider/model/key；未配置回退服务端默认） -->
                     <div class="p-4 bg-gray-50 dark:bg-gray-800 rounded-xl space-y-4 mt-4">
-                      <div class="font-medium text-gray-800 dark:text-white">AI 模型设置</div>
-                      <n-alert type="warning" :bordered="false" class="text-xs">
-                        <template #header>{{ t('profile.aiProviderExpTitle') }}</template>
-                        {{ t('profile.aiProviderExpDesc') }}
+                      <div class="font-medium text-gray-800 dark:text-white">{{ t('profile.aiProviderTitle') }}</div>
+                      <n-alert type="info" :bordered="false" class="text-xs">
+                        {{ t('profile.aiProviderDesc') }}
                       </n-alert>
                       <n-alert v-if="providersLoadError" type="error" :bordered="false" class="text-xs">
                         {{ t('profile.providerLoadFailed') }}
                       </n-alert>
+                      <n-alert
+                        v-if="providerForm.hasSavedConfig && providerForm.source === 'server'"
+                        type="warning"
+                        :bordered="false"
+                        class="text-xs"
+                        data-testid="provider-fallback-hint"
+                      >
+                        {{ t('profile.aiProviderFallbackHint') }}
+                      </n-alert>
+
+                      <div class="flex items-center justify-between p-3 bg-white dark:bg-gray-900/40 rounded-lg">
+                        <div>
+                          <div class="text-sm font-medium text-gray-700 dark:text-gray-200">{{ t('profile.aiProviderUseServerDefault') }}</div>
+                          <div class="text-xs text-gray-400 mt-0.5">{{ t('profile.aiProviderUseServerDefaultDesc') }}</div>
+                        </div>
+                        <n-switch v-model:value="providerForm.useServerDefault" />
+                      </div>
+
                       <div>
-                        <div class="text-sm text-gray-500 mb-2">提供商</div>
-                        <n-select v-model:value="providerForm.provider" :options="providerOptions" @update:value="onProviderChange" size="small" disabled />
+                        <div class="text-sm text-gray-500 mb-2">{{ t('profile.aiProviderProvider') }}</div>
+                        <n-select v-model:value="providerForm.provider" :options="providerOptions" @update:value="onProviderChange" size="small" :disabled="providerForm.useServerDefault" />
                       </div>
                       <div>
-                        <div class="text-sm text-gray-500 mb-2">模型</div>
-                        <n-select v-model:value="providerForm.model" :options="currentModelOptions" :allow-input="providerForm.provider === 'custom'" filterable size="small" disabled />
+                        <div class="text-sm text-gray-500 mb-2">{{ t('profile.aiProviderModel') }}</div>
+                        <n-select v-model:value="providerForm.model" :options="currentModelOptions" :allow-input="providerForm.provider === 'custom'" filterable size="small" :disabled="providerForm.useServerDefault" />
                       </div>
-                      <div v-if="currentProviderNeedsKey">
+                      <div v-if="currentProviderNeedsKey && !providerForm.useServerDefault">
                         <div class="text-sm text-gray-500 mb-2">API Key</div>
-                        <n-input v-model:value="providerForm.api_key" type="password" show-password-on="click" placeholder="sk-..." size="small" disabled />
+                        <n-input v-model:value="providerForm.api_key" type="password" show-password-on="click" placeholder="sk-..." size="small" />
+                        <div class="text-xs text-gray-400 mt-1">{{ t('profile.aiProviderKeyHint') }}</div>
                       </div>
-                      <div v-if="providerForm.provider === 'custom'">
+                      <div v-if="providerForm.provider === 'custom' && !providerForm.useServerDefault">
                         <div class="text-sm text-gray-500 mb-2">Base URL</div>
-                        <n-input v-model:value="providerForm.base_url" placeholder="https://api.example.com/v1" size="small" disabled />
+                        <n-input v-model:value="providerForm.base_url" placeholder="https://api.example.com/v1" size="small" />
                       </div>
+
+                      <div class="flex flex-wrap items-center gap-3 pt-1">
+                        <n-button type="primary" size="small" @click="handleSaveProviders" :loading="savingProviders">
+                          {{ t('profile.aiProviderSave') }}
+                        </n-button>
+                        <n-text v-if="providerSaveMessage" :type="providerSaveSuccess ? 'success' : 'error'" class="text-sm">
+                          {{ providerSaveMessage }}
+                        </n-text>
+                      </div>
+                      <n-text depth="3" class="text-xs block">
+                        {{ providerForm.source === 'user' ? t('profile.aiProviderSourceUser') : t('profile.aiProviderSourceServer') }}
+                      </n-text>
                     </div>
 
                     <div class="pt-4">
@@ -467,6 +497,7 @@ const {
   savingSettings, settingsSaveMessage, settingsSaveSuccess, providers, providerForm,
   providerOptions, currentProvider, currentModelOptions, currentProviderNeedsKey,
   providersLoadError, onProviderChange, loadProviders, settingsChanged, handleSaveSettings, updatingProfile,
+  savingProviders, providerSaveMessage, providerSaveSuccess, handleSaveProviders,
   updatingPassword, storageChartRef, activityChartRef, initCharts, handleResize,
   editFormRef, passwordFormRef, editForm, passwordForm,
   editFormRules, passwordFormRules, getApiBaseUrl, normalizeAvatarUrl,

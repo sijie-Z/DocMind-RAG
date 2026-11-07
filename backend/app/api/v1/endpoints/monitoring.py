@@ -621,14 +621,24 @@ async def health_check(
 @router.get("/llm-status", summary="LLM 配置状态")
 async def get_llm_status(
     current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
 ):
-    """返回当前进程实际生效的 LLM 配置状态（B5 onboarding「连模型」数据源）。
+    """返回当前用户实际生效的 LLM 配置状态（B5 onboarding「连模型」数据源）。
 
-    只暴露 provider/model 与是否已配置，不泄露密钥。本地模型
+    只暴露 provider/model 与是否已配置，不泄露密钥。个人模型设置生效时
+    以 source=user 返回；否则回退服务端/本地模型口径。本地模型
     （ENABLE_LOCAL_LLM）在不启动 Ollama 的前提下无法探测连通性，此处以开关
     + 模型名作为「已配置」口径；实际连通性由首次问答的结果兜底。
     """
-    if settings.ENABLE_LOCAL_LLM:
+    from app.services.llm_settings_service import resolve_for_user
+
+    resolution = await resolve_for_user(db, current_user)
+    if resolution.source == "user":
+        provider = resolution.provider or "custom"
+        model = resolution.model
+        configured = True
+        source = "user"
+    elif settings.ENABLE_LOCAL_LLM:
         provider = "local"
         model = settings.LOCAL_LLM_MODEL
         configured = bool(model)

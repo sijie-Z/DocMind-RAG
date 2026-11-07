@@ -198,6 +198,76 @@ async def test_rag_stream_unchanged_without_use_agent(client, monkeypatch):
     assert all(f["data"].get("code") != "DEEP_ANALYSIS_MOVED_TO_AGENT" for f in frames)
 
 
+@pytest.mark.asyncio
+async def test_rag_stream_passes_personal_llm_resolution(client, monkeypatch):
+    """端点接线：个人配置解析出的 client/model 必须真正到达 run_rag_pipeline。"""
+    from app.services.chat_service import RAGEvent
+
+    monkeypatch.setattr(chat_api, "DEEP_ANALYSIS_GUARD_ENABLED", True)
+    monkeypatch.setattr(chat_api, "AsyncSessionLocal", lambda: _FakeSessionCtx())
+    personal_client = object()
+
+    async def _resolve(_db, _user):
+        return SimpleNamespace(source="user", client=personal_client, model="personal-model")
+
+    monkeypatch.setattr(chat_api, "resolve_for_user", _resolve)
+    captured: dict = {}
+
+    async def _fake_rag(**kwargs):
+        captured.update(kwargs)
+        queue = kwargs["event_queue"]
+        await queue.put(
+            RAGEvent(
+                type="message",
+                content="ok",
+                conversation_id="conv-640",
+                message_id="msg-640",
+            )
+        )
+
+    monkeypatch.setattr(chat_api, "run_rag_pipeline", _fake_rag)
+
+    resp = await client.post(STREAM_URL, json={"content": "个人模型"})
+
+    assert resp.status_code == 200
+    assert captured.get("llm_client") is personal_client
+    assert captured.get("llm_model") == "personal-model"
+
+
+@pytest.mark.asyncio
+async def test_rag_stream_server_default_passes_none(client, monkeypatch):
+    """未配置个人模型时保持原行为：llm_client/llm_model 均为 None。"""
+    from app.services.chat_service import RAGEvent
+
+    monkeypatch.setattr(chat_api, "DEEP_ANALYSIS_GUARD_ENABLED", True)
+    monkeypatch.setattr(chat_api, "AsyncSessionLocal", lambda: _FakeSessionCtx())
+
+    async def _resolve(_db, _user):
+        return SimpleNamespace(source="server", client=None, model="server-model")
+
+    monkeypatch.setattr(chat_api, "resolve_for_user", _resolve)
+    captured: dict = {}
+
+    async def _fake_rag(**kwargs):
+        captured.update(kwargs)
+        await kwargs["event_queue"].put(
+            RAGEvent(
+                type="message",
+                content="ok",
+                conversation_id="conv-640",
+                message_id="msg-640",
+            )
+        )
+
+    monkeypatch.setattr(chat_api, "run_rag_pipeline", _fake_rag)
+
+    resp = await client.post(STREAM_URL, json={"content": "服务端默认"})
+
+    assert resp.status_code == 200
+    assert captured.get("llm_client") is None
+    assert captured.get("llm_model") is None
+
+
 class _FakeSessionCtx:
     async def __aenter__(self):
         return SimpleNamespace()

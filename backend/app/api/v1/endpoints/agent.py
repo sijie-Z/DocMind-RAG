@@ -74,6 +74,7 @@ from app.models.chat import (
     MessageType,
 )
 from app.models.user import User
+from app.services.llm_settings_service import resolve_for_user
 from app.services.session_service import (
     SessionAccessScope,
     load_accessible_session,
@@ -403,6 +404,9 @@ async def agent_chat(
 
             # Run agent
             answers = FinalAnswerAccumulator()
+            # 个人 AI 模型设置（本批）：用户选择 provider/model/key 后，PER loop
+            # 的真实 LLM 调用使用该配置；未配置/无效时回退服务端默认。
+            llm_resolution = await resolve_for_user(db, current_user)
             async for event in agent_service.chat(
                 query=body.query,
                 history=history,
@@ -413,6 +417,8 @@ async def agent_chat(
                 referenced_document_ids=body.referenced_document_ids,
                 # issue #510 第二步：request_id = 本次 HTTP 请求（X-Request-ID 同源）
                 request_id=resolve_request_id(request),
+                llm_client=(llm_resolution.client if llm_resolution.source == "user" else None),
+                llm_model=(llm_resolution.model if llm_resolution.source == "user" else None),
             ):
                 last_event_type = event.type
                 sse_data = public_agent_event_data(event)
