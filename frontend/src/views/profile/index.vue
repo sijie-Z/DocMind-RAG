@@ -370,6 +370,15 @@
                       <n-alert v-if="providersLoadError" type="error" :bordered="false" class="text-xs">
                         {{ t('profile.providerLoadFailed') }}
                       </n-alert>
+                      <n-alert
+                        v-if="providerForm.hasSavedConfig && providerForm.source === 'server'"
+                        type="warning"
+                        :bordered="false"
+                        class="text-xs"
+                        data-testid="provider-fallback-hint"
+                      >
+                        {{ t('profile.aiProviderFallbackHint') }}
+                      </n-alert>
 
                       <div class="flex items-center justify-between p-3 bg-white dark:bg-gray-900/40 rounded-lg">
                         <div>

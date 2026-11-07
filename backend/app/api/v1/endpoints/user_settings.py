@@ -106,10 +106,16 @@ async def update_user_settings(
 # Provider 目录/加密/解析统一由 llm_settings_service 提供（单一事实源）。
 
 _AVAILABLE_PROVIDERS = llm_settings_service.AVAILABLE_PROVIDERS
+_KNOWN_PROVIDER_IDS = {p["id"] for p in _AVAILABLE_PROVIDERS}
 
 
 def _current_provider_view(raw: dict | None) -> dict:
-    """把已存配置投影为 API 响应：只回掩码，绝不回明文 key。"""
+    """把已存配置投影为 API 响应：只回掩码，绝不回明文 key。
+
+    source 必须反映运行时真实口径：保存了但不可解析（未知 provider/缺 key/
+    解密失败/模型为空）时 resolver 会回退服务端默认，这里也回 source=server，
+    并标记 has_saved_config 供 UI 提示「已保存但当前回退」。
+    """
     if not isinstance(raw, dict) or not raw.get("provider"):
         return {
             "provider": "deepseek",
@@ -118,18 +124,35 @@ def _current_provider_view(raw: dict | None) -> dict:
             "base_url": "",
             "has_api_key": False,
             "source": "server",
+            "has_saved_config": False,
         }
+    provider = str(raw.get("provider", "deepseek"))
+    model = str(raw.get("model", "") or "")
     try:
         plain_key = llm_settings_service.read_api_key(raw)
+        key_unreadable = False
     except llm_settings_service.LLMConfigError:
         plain_key = ""
+        key_unreadable = True
+    requires_key = llm_settings_service.provider_requires_key(provider)
+    reason = None
+    if provider not in _KNOWN_PROVIDER_IDS:
+        reason = "unknown_provider"
+    elif not model:
+        reason = "missing_model"
+    elif key_unreadable:
+        reason = "key_unreadable"
+    elif requires_key and not plain_key:
+        reason = "missing_key"
     return {
-        "provider": raw.get("provider", "deepseek"),
-        "model": raw.get("model", ""),
+        "provider": provider,
+        "model": model,
         "api_key": llm_settings_service.mask_api_key(plain_key),
         "base_url": raw.get("base_url", "") or "",
         "has_api_key": bool(plain_key),
-        "source": "user",
+        "source": "server" if reason else "user",
+        "has_saved_config": True,
+        "fallback_reason": reason,
     }
 
 
@@ -194,16 +217,25 @@ async def update_providers(
     submitted = (body.api_key or "").strip()
     preserve_existing = not submitted or llm_settings_service.is_masked_placeholder(submitted)
     stored_provider = raw_existing.get("provider") if isinstance(raw_existing, dict) else None
+    stored_base = ""
+    if isinstance(raw_existing, dict):
+        stored_base = str(raw_existing.get("base_url") or "")
+        if not stored_base and stored_provider:
+            stored_base = llm_settings_service.provider_default_base_url(str(stored_provider))
+    effective_base = base_url or llm_settings_service.provider_default_base_url(provider)
+    base_changed = effective_base.rstrip("/") != stored_base.rstrip("/")
     if (
         preserve_existing
+        and stored_provider
         and llm_settings_service.provider_requires_key(provider)
-        and provider != stored_provider
+        and (provider != stored_provider or base_changed)
     ):
-        # 切换 provider 后旧 key 必然无效：掩码/空值不得把旧 provider 的 key
-        # 静默复用到新 provider（否则用户会收到上游 401 却不知原因）。
+        # 切换 provider 或 Base URL 后旧 key 必然无效：掩码/空值不得把旧 key
+        # 静默复用到新目标（否则用户会收到上游 401 却不知原因；也防止把 key
+        # 带到攻击者指定的 Base URL）。
         raise HTTPException(
             status_code=400,
-            detail="切换提供商后请重新填写 API Key",
+            detail="切换提供商或 Base URL 后请重新填写 API Key",
         )
     api_key = existing_key if preserve_existing else submitted
     if llm_settings_service.provider_requires_key(provider) and not api_key:

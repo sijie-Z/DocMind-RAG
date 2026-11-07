@@ -129,6 +129,7 @@ export default {
     aiProviderKeyRequired: '请填写 API Key，或选择「使用服务端默认」',
     aiProviderSourceUser: '当前生效来源：你的个人配置',
     aiProviderSourceServer: '当前生效来源：服务端默认',
+    aiProviderFallbackHint: '已保存的个人配置当前不可用，正在使用服务端默认；请检查 API Key / Base URL 后重新保存，或切换为服务端默认。',
     providerLoadFailed: 'AI Provider 配置加载失败，当前显示默认或上次成功加载的配置。',
   },
   users: {

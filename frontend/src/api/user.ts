@@ -317,6 +317,10 @@ export interface ProviderCurrent {
   base_url?: string
   has_api_key?: boolean
   source?: 'user' | 'server'
+  /** 是否存有个人配置（即使当前回退服务端默认，也可用于提示/恢复表单）。 */
+  has_saved_config?: boolean
+  /** 保存了但不可解析时的原因：unknown_provider/missing_model/key_unreadable/missing_key。 */
+  fallback_reason?: string | null
 }
 
 export interface ProvidersResponse {

@@ -125,6 +125,7 @@ export default {
     aiProviderKeyRequired: 'Please enter an API key, or choose "Use server default"',
     aiProviderSourceUser: 'Active source: your personal configuration',
     aiProviderSourceServer: 'Active source: server default',
+    aiProviderFallbackHint: 'Your saved personal configuration is currently unusable; the server default is in effect. Check the API key / base URL and save again, or switch to the server default.',
     providerLoadFailed: 'Failed to load AI provider configuration. Showing the default or last successfully loaded settings.',
   },
   users: {

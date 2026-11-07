@@ -708,3 +708,128 @@ def test_server_default_model_matches_settings():
     """未启用本地模型时，服务端默认模型与全局配置一致（行为不变锚点）。"""
     with patch.object(settings, "ENABLE_LOCAL_LLM", False):
         assert llm_settings_service.server_default_model() == settings.DEEPSEEK_MODEL
+
+
+class TestSecurityHardening:
+    async def test_legacy_masked_key_falls_back_and_is_reported(self, db):
+        """旧 UI 落库的掩码不是密钥：运行时回退，GET 也如实报 server。"""
+        db.add(
+            UserSettings(
+                user_id=USER.id,
+                preferences={
+                    "ai_provider": {
+                        "provider": "deepseek",
+                        "model": "deepseek-chat",
+                        "api_key": "masked...value",
+                    }
+                },
+            )
+        )
+        await db.commit()
+        resolution = await resolve_for_user(db, USER)
+        assert resolution.source == "server"
+        payload = await user_settings_ep.get_providers(current_user=USER, db=db)
+        current = payload["current"]
+        assert current["source"] == "server"
+        assert current["has_saved_config"] is True
+        assert current["fallback_reason"] == "missing_key"
+        assert current["has_api_key"] is False
+
+    async def test_same_provider_base_url_change_requires_new_key(self, db):
+        """同 provider 改 Base URL 也必须重填 key，防止把密钥带到新目标。"""
+        from fastapi import HTTPException
+
+        await user_settings_ep.update_providers(
+            body=ProviderSettingsUpdate(provider="deepseek", model="deepseek-chat", api_key=SECRET),
+            current_user=USER,
+            db=db,
+        )
+        with pytest.raises(HTTPException) as exc_info:
+            await user_settings_ep.update_providers(
+                body=ProviderSettingsUpdate(
+                    provider="deepseek",
+                    model="deepseek-chat",
+                    api_key=mask_api_key(SECRET),
+                    base_url="http://127.0.0.1:9999/v1",
+                ),
+                current_user=USER,
+                db=db,
+            )
+        assert exc_info.value.status_code == 400
+        assert "Base URL" in str(exc_info.value.detail)
+
+        await user_settings_ep.update_providers(
+            body=ProviderSettingsUpdate(
+                provider="deepseek",
+                model="deepseek-chat",
+                api_key="new-value-12345678",
+                base_url="http://127.0.0.1:9999/v1",
+            ),
+            current_user=USER,
+            db=db,
+        )
+        resolution = await resolve_for_user(db, USER)
+        assert resolution.base_url == "http://127.0.0.1:9999/v1"
+        assert resolution.client.api_key == "new-value-12345678"
+
+    @pytest.mark.parametrize(
+        "url",
+        [
+            "http://169.254.169.254/v1",
+            "http://[::ffff:169.254.169.254]/v1",
+            "http://100.100.100.200/v1",
+            "http://[fd00:ec2::254]/v1",
+            "http://2852039166/v1",
+        ],
+    )
+    def test_metadata_targets_rejected(self, url):
+        with pytest.raises(LLMConfigError):
+            llm_settings_service._normalize_base_url(url)
+
+    def test_localhost_base_url_allowed_for_ollama(self):
+        assert (
+            llm_settings_service._normalize_base_url("http://localhost:11434/v1")
+            == "http://localhost:11434/v1"
+        )
+
+    async def test_llm_status_reports_user_source(self, db):
+        from app.api.v1.endpoints import monitoring
+
+        await user_settings_ep.update_providers(
+            body=ProviderSettingsUpdate(provider="ollama", model="llama3"),
+            current_user=USER,
+            db=db,
+        )
+        payload = await monitoring.get_llm_status(current_user=USER, db=db)
+        assert payload["data"]["source"] == "user"
+        assert payload["data"]["provider"] == "ollama"
+        assert payload["data"]["model"] == "llama3"
+        assert payload["data"]["configured"] is True
+
+
+async def test_context_summary_uses_personal_model(monkeypatch):
+    """Agent 上下文摘要必须使用个人 provider 的模型名，而非固定 DEEPSEEK_MODEL。"""
+    from app.agent.context import ContextEngine
+
+    calls: list[dict] = []
+
+    class FakeCompletions:
+        async def create(self, **kwargs):
+            calls.append(kwargs)
+            return SimpleNamespace(
+                choices=[SimpleNamespace(message=SimpleNamespace(content="summary"))]
+            )
+
+    class ChatProxy:
+        completions = FakeCompletions()
+
+    class FakeClient:
+        chat = ChatProxy()
+
+    monkeypatch.setattr("app.agent.usage.record_llm_usage", lambda *a, **k: None)
+    monkeypatch.setattr("app.agent.usage.record_llm_call_error", lambda *a, **k: None)
+    engine = ContextEngine(max_context_tokens=100, tail_window=2)
+    engine.set_llm_client(FakeClient(), "custom-model")
+    summary = await engine._summarize_with_llm([{"role": "user", "content": "hi"}], 100)
+    assert summary == "summary"
+    assert calls and calls[0]["model"] == "custom-model"

@@ -89,6 +89,7 @@ export default {
     aiProviderKeyRequired: 'API Key を入力するか、「サーバーデフォルトを使用」を選択してください',
     aiProviderSourceUser: '現在の適用元：個人設定',
     aiProviderSourceServer: '現在の適用元：サーバーデフォルト',
+    aiProviderFallbackHint: '保存済みの個人設定は現在利用できません。サーバーデフォルトを使用しています。API キー / Base URL を確認して再保存するか、サーバーデフォルトに切り替えてください。',
     providerLoadFailed: 'AI Provider 設定の読み込みに失敗しました。デフォルトまたは前回正常に読み込まれた設定を表示しています。',
     validation: {
       nicknameLength: 'ニックネームは2〜50文字以内で入力してください',

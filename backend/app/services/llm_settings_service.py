@@ -20,14 +20,16 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import ipaddress
 import logging
+import socket
 from collections import OrderedDict
 from dataclasses import dataclass
 from functools import lru_cache
 from typing import Any
 from urllib.parse import urlparse
 
-from openai import AsyncOpenAI
+from openai import AsyncOpenAI, DefaultAsyncHttpxClient
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -78,8 +80,57 @@ AVAILABLE_PROVIDERS: list[dict[str, Any]] = [
 
 _PROVIDERS_BY_ID = {p["id"]: p for p in AVAILABLE_PROVIDERS}
 
-# SSRF 纵深防御：拒绝常见云元数据端点（完整内网隔离由部署网络策略承担）。
-_BLOCKED_HOSTS = {"169.254.169.254", "metadata.google.internal", "metadata"}
+# SSRF 纵深防御：拒绝云元数据/链路本地地址（含 IPv4-mapped/数字型/DNS 别名），
+# 并关闭 OpenAI 客户端重定向——302 到 IMDS 是最常见的绕过方式。
+# 私网/本机地址保留（Ollama 自建场景），完整内网隔离由部署网络策略承担。
+_BLOCKED_HOSTNAMES = {"metadata.google.internal", "metadata"}
+_BLOCKED_NETS = (ipaddress.ip_network("169.254.0.0/16"),)
+_BLOCKED_IPS = {
+    ipaddress.ip_address("169.254.169.254"),
+    ipaddress.ip_address("100.100.100.200"),
+    ipaddress.ip_address("fd00:ec2::254"),
+}
+
+
+def _blocked_ip(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
+    if isinstance(ip, ipaddress.IPv6Address) and ip.ipv4_mapped is not None:
+        ip = ip.ipv4_mapped
+    return (
+        ip in _BLOCKED_IPS
+        or ip.is_link_local
+        or (ip.version == 4 and any(ip in net for net in _BLOCKED_NETS))
+    )
+
+
+def _check_host(host: str, port: int | None) -> None:
+    """解析主机并拒绝元数据/链路本地目标；私网与 loopback 保留。"""
+    host = host.rstrip(".").lower()
+    if not host or host in _BLOCKED_HOSTNAMES:
+        raise LLMConfigError("Base URL 指向不允许的主机")
+    try:
+        literal = ipaddress.ip_address(host)
+    except ValueError:
+        literal = None
+    if literal is not None:
+        if _blocked_ip(literal):
+            raise LLMConfigError("Base URL 指向不允许的地址")
+        return
+    try:
+        infos = socket.getaddrinfo(host, port or 443, type=socket.SOCK_STREAM)
+    except OSError as exc:
+        raise LLMConfigError("Base URL 主机无法解析") from exc
+    resolved: list[ipaddress.IPv4Address | ipaddress.IPv6Address] = []
+    for info in infos:
+        raw = str(info[4][0]).split("%", 1)[0]
+        try:
+            resolved.append(ipaddress.ip_address(raw))
+        except ValueError:
+            continue
+    if not resolved:
+        raise LLMConfigError("Base URL 主机无法解析")
+    if any(_blocked_ip(ip) for ip in resolved):
+        raise LLMConfigError("Base URL 指向不允许的地址")
+
 
 _KEY_PREFIX = "fernet:v1:"
 _MAX_CACHED_CLIENTS = 64
@@ -127,12 +178,18 @@ def decrypt_api_key(stored: str) -> str:
 
 
 def read_api_key(config: dict[str, Any]) -> str:
-    """读取用户配置中的 API key（新密文字段优先，兼容历史明文 ``api_key``）。"""
+    """读取用户配置中的 API key（新密文字段优先，兼容历史明文 ``api_key``）。
+
+    旧 UI 曾把 GET 返回的掩码（``sk-a...zzzz``/``********``）随 preferences
+    落库；掩码不是密钥，必须视为未配置，让 resolver 回退服务端默认。
+    """
     encrypted = config.get("api_key_encrypted")
     if isinstance(encrypted, str) and encrypted:
         return decrypt_api_key(encrypted)
     legacy = config.get("api_key")
     if isinstance(legacy, str) and legacy:
+        if is_masked_placeholder(legacy):
+            return ""
         return legacy
     return ""
 
@@ -163,13 +220,12 @@ def _normalize_base_url(raw: str | None) -> str:
     parsed = urlparse(url)
     if parsed.scheme not in ("http", "https") or not parsed.netloc:
         raise LLMConfigError("Base URL 必须包含 http(s) 协议与主机名")
-    host = (parsed.hostname or "").lower()
-    if host in _BLOCKED_HOSTS:
-        raise LLMConfigError("Base URL 指向不允许的主机")
+    host = parsed.hostname or ""
     if parsed.username or parsed.password:
         raise LLMConfigError("Base URL 不得包含用户名/密码")
     if parsed.query or parsed.fragment:
         raise LLMConfigError("Base URL 不得包含查询参数或锚点")
+    _check_host(host, parsed.port)
     return url.rstrip("/")
 
 
@@ -214,10 +270,12 @@ def clear_client_cache() -> None:
 
 
 def _new_client(provider: str, base_url: str, api_key: str) -> AsyncOpenAI:
+    # 关闭重定向：允许的 host 302 到云元数据端点是 SSRF 常见绕过。
+    http_client = DefaultAsyncHttpxClient(follow_redirects=False)
     if provider == "ollama":
         # Ollama 的 OpenAI 兼容端点不校验 key，但 SDK 要求非空字符串。
-        return AsyncOpenAI(api_key=api_key or "ollama", base_url=base_url)
-    return AsyncOpenAI(api_key=api_key, base_url=base_url)
+        return AsyncOpenAI(api_key=api_key or "ollama", base_url=base_url, http_client=http_client)
+    return AsyncOpenAI(api_key=api_key, base_url=base_url, http_client=http_client)
 
 
 def _cached_client(provider: str, base_url: str, cache_id: str, api_key: str) -> AsyncOpenAI:
@@ -326,6 +384,10 @@ async def resolve_for_user(
             uid,
             type(exc).__name__,
         )
+        try:
+            await db.rollback()
+        except Exception:  # noqa: BLE001 - 回滚失败也不能阻断聊天
+            pass
         return _server_default_resolution()
 
     if saved:

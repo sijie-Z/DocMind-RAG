@@ -24,6 +24,7 @@ import naive, { NMessageProvider, NDialogProvider } from 'naive-ui'
 
 import { useProfilePage } from '../composables/useProfilePage'
 import ProfilePage from '../index.vue'
+import { getUserSettingsProviders } from '@/api/user'
 import zh from '@/locales/zh'
 import en from '@/locales/en'
 import ja from '@/locales/ja'
@@ -57,6 +58,7 @@ vi.mock('@/api/user', async (importOriginal) => {
         success: true,
         providers: [
           { id: 'deepseek', name: 'DeepSeek', base_url: 'https://api.deepseek.com/v1', models: ['deepseek-chat'], requires_key: true },
+          { id: 'custom', name: '自定义 (OpenAI 兼容)', base_url: '', models: [], requires_key: true },
         ],
         current: {
           provider: 'deepseek', model: 'deepseek-chat', api_key: 'sk-a...zzzz',
@@ -202,6 +204,67 @@ describe('AI 模型设置 · 保存路径', () => {
     capturedApi.onProviderChange('deepseek')
     expect(capturedApi.providerForm.api_key).toBe('sk-a...zzzz')
     expect(capturedApi.providerForm.hasApiKey).toBe(true)
+  })
+
+  it('切回已保存的 custom provider 恢复 model/base_url/掩码', async () => {
+    vi.mocked(getUserSettingsProviders).mockResolvedValueOnce({
+      data: {
+        success: true,
+        providers: [
+          { id: 'deepseek', name: 'DeepSeek', base_url: 'https://api.deepseek.com/v1', models: ['deepseek-chat'], requires_key: true },
+          { id: 'custom', name: '自定义 (OpenAI 兼容)', base_url: '', models: [], requires_key: true },
+        ],
+        current: {
+          provider: 'custom', model: 'my-model', api_key: 'sk-a...zzzz',
+          base_url: 'http://localhost:9999/v1', has_api_key: true, source: 'user',
+          has_saved_config: true,
+        },
+      },
+    } as never)
+    mountHarness()
+    await flushPromises()
+    await flushPromises()
+
+    expect(capturedApi.providerForm.model).toBe('my-model')
+    expect(capturedApi.providerForm.base_url).toBe('http://localhost:9999/v1')
+
+    capturedApi.onProviderChange('deepseek')
+    expect(capturedApi.providerForm.model).toBe('deepseek-chat')
+    expect(capturedApi.providerForm.api_key).toBe('')
+
+    capturedApi.onProviderChange('custom')
+    expect(capturedApi.providerForm.model).toBe('my-model')
+    expect(capturedApi.providerForm.base_url).toBe('http://localhost:9999/v1')
+    expect(capturedApi.providerForm.api_key).toBe('sk-a...zzzz')
+  })
+
+  it('保存了但不可用：提示回退且不勾选服务端默认', async () => {
+    const fallbackPayload = {
+      success: true,
+      providers: [
+        { id: 'deepseek', name: 'DeepSeek', base_url: 'https://api.deepseek.com/v1', models: ['deepseek-chat'], requires_key: true },
+      ],
+      current: {
+        provider: 'deepseek', model: 'deepseek-chat', api_key: '',
+        base_url: '', has_api_key: false, source: 'server',
+        has_saved_config: true, fallback_reason: 'missing_key',
+      },
+    }
+    vi.mocked(getUserSettingsProviders).mockResolvedValueOnce({ data: fallbackPayload } as never)
+    mountHarness()
+    await flushPromises()
+    await flushPromises()
+
+    expect(capturedApi.providerForm.source).toBe('server')
+    expect(capturedApi.providerForm.useServerDefault).toBe(false)
+    expect(capturedApi.providerForm.hasSavedConfig).toBe(true)
+
+    vi.mocked(getUserSettingsProviders).mockResolvedValueOnce({ data: fallbackPayload } as never)
+    const wrapper = mountPage()
+    await flushPromises()
+    await flushPromises()
+    await openPreferencesTab(wrapper)
+    expect(wrapper.find('[data-testid="provider-fallback-hint"]').exists()).toBe(true)
   })
 
   it('「使用服务端默认」提交 use_server_default=true', async () => {

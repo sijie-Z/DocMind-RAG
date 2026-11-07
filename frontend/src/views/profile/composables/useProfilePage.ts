@@ -430,6 +430,8 @@ const providerForm = reactive({
   useServerDefault: false,
   source: 'server' as 'user' | 'server',
   hasApiKey: false,
+  // 是否存有个人配置（即使当前回退服务端默认也保留，供提示与表单恢复）。
+  hasSavedConfig: false,
 })
 
 interface ProviderDef { id: string; name: string; base_url: string; models: string[]; requires_key: boolean }
@@ -442,21 +444,25 @@ const currentProviderNeedsKey = computed(() => currentProvider.value?.requires_k
 // key 静默复用到新 provider（后端同时强制要求重新填写）。
 const savedProvider = ref('')
 const savedMaskedKey = ref('')
+const savedModel = ref('')
+const savedBaseUrl = ref('')
 
 /** 掩码占位（sk-a...zzzz / ********）：保存时不得当作新 key 回写。 */
 const isMaskedApiKey = (value: string) => value.includes('...') || value.includes('*')
 
 const onProviderChange = (pid: string) => {
   const p = providers.value.find(x => x.id === pid)
-  if (p) {
-    providerForm.model = p.models[0] || ''
-    providerForm.base_url = p.base_url || ''
-  }
   if (pid === savedProvider.value) {
-    // 切回已保存的 provider：恢复掩码与已存 key 标记，保存时后端保留真 key。
+    // 切回已保存的 provider：恢复已存的 model/base URL/掩码 key，避免用户重填。
+    providerForm.model = savedModel.value || p?.models[0] || ''
+    providerForm.base_url = savedBaseUrl.value || p?.base_url || ''
     providerForm.api_key = savedMaskedKey.value
     providerForm.hasApiKey = Boolean(savedMaskedKey.value)
   } else {
+    if (p) {
+      providerForm.model = p.models[0] || ''
+      providerForm.base_url = p.base_url || ''
+    }
     providerForm.api_key = ''
     providerForm.hasApiKey = false
   }
@@ -484,9 +490,15 @@ const loadProviders = async () => {
       providerForm.base_url = cur.base_url || ''
       providerForm.source = cur.source === 'user' ? 'user' : 'server'
       providerForm.hasApiKey = Boolean(cur.has_api_key)
-      providerForm.useServerDefault = providerForm.source === 'server'
-      savedProvider.value = providerForm.source === 'user' ? cur.provider : ''
-      savedMaskedKey.value = providerForm.source === 'user' ? (cur.api_key || '') : ''
+      const hasSaved = Boolean(cur.has_saved_config) || providerForm.source === 'user'
+      providerForm.hasSavedConfig = hasSaved
+      // 保存过但当前不可解析（source=server + has_saved_config）时不要勾选
+      // 「使用服务端默认」——保留表单让用户修正 Key/Base URL。
+      providerForm.useServerDefault = providerForm.source === 'server' && !hasSaved
+      savedProvider.value = hasSaved ? cur.provider : ''
+      savedMaskedKey.value = hasSaved ? (cur.api_key || '') : ''
+      savedModel.value = hasSaved ? (cur.model || '') : ''
+      savedBaseUrl.value = hasSaved ? (cur.base_url || '') : ''
     }
     providersLoadError.value = null
   } catch (error) {

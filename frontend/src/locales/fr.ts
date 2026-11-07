@@ -89,6 +89,7 @@ export default {
     aiProviderKeyRequired: "Veuillez saisir une clé API ou choisir « Utiliser le serveur par défaut »",
     aiProviderSourceUser: 'Source active : votre configuration personnelle',
     aiProviderSourceServer: 'Source active : serveur par défaut',
+    aiProviderFallbackHint: "Votre configuration personnelle enregistrée est actuellement inutilisable ; le serveur utilise la configuration par défaut. Vérifiez la clé API / l'URL de base et réenregistrez, ou passez au défaut du serveur.",
     providerLoadFailed: "Échec du chargement de la configuration des fournisseurs IA. Les paramètres par défaut ou les derniers paramètres chargés sont affichés.",
     validation: {
       nicknameLength: 'Le pseudo doit contenir entre 2 et 50 caractères',
