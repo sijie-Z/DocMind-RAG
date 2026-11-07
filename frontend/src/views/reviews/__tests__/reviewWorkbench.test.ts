@@ -988,8 +988,77 @@ describe('证据分析定位', () => {
     expect(rows).toHaveLength(2)
     expect(rows[0].text()).toContain('2.1 合同签订后')
     expect(rows[0].find('[data-testid="evidence-primary"]').text()).toContain('分析定位')
+    expect(rows[0].find('[data-testid="evidence-primary"]').attributes('title')).toContain(
+      '分析层抽取'
+    )
     expect(rows[1].text()).toContain('第二条 付款方式')
     expect(rows[1].find('[data-testid="evidence-primary"]').exists()).toBe(false)
+  })
+
+  it('base/revised 各自按自己的 facts.chunk_id 置顶与标注', async () => {
+    const baseHeading = {
+      ...headingRow,
+      id: 'ev-b0',
+      side: 'base',
+      chunk_id_at_capture: 'b-0',
+      quote: 'base heading'
+    }
+    const baseBody = {
+      ...bodyRow,
+      id: 'ev-b1',
+      side: 'base',
+      chunk_id_at_capture: 'b-1',
+      quote: 'base body 30 日'
+    }
+    const revisedHeading = {
+      ...headingRow,
+      id: 'ev-r0',
+      side: 'revised',
+      document_id: 'r1',
+      chunk_id_at_capture: 'r-0',
+      quote: 'revised heading'
+    }
+    const revisedBody = {
+      ...bodyRow,
+      id: 'ev-r1',
+      side: 'revised',
+      document_id: 'r1',
+      chunk_id_at_capture: 'r-1',
+      quote: 'revised body 60 日'
+    }
+    api.get.mockResolvedValue({
+      data: {
+        data: makeDetail({
+          items: [
+            {
+              ...baseItem,
+              facts: {
+                base: { status: 'identified', value: 30, unit: 'day', chunk_id: 'b-1' },
+                revised: { status: 'identified', value: 60, unit: 'day', chunk_id: 'r-1' },
+                policy: { status: 'not_found' }
+              },
+              evidence: {
+                ...baseItem.evidence,
+                base: [baseHeading, baseBody],
+                revised: [revisedHeading, revisedBody]
+              }
+            }
+          ]
+        })
+      }
+    } as never)
+    const wrapper = mountDetail()
+    await flushPromises()
+
+    const baseRows = wrapper.findAll('[data-testid="review-evidence-row-base"]')
+    expect(baseRows[0].text()).toContain('base body')
+    expect(baseRows[0].find('[data-testid="evidence-primary"]').exists()).toBe(true)
+    expect(baseRows[1].find('[data-testid="evidence-primary"]').exists()).toBe(false)
+
+    const revisedRows = wrapper.findAll('[data-testid="review-evidence-row-revised"]')
+    expect(revisedRows[0].text()).toContain('revised body')
+    expect(revisedRows[0].find('[data-testid="evidence-primary"]').exists()).toBe(true)
+    expect(revisedRows[1].find('[data-testid="evidence-primary"]').exists()).toBe(false)
   })
 
   it('缺少分析定位时保持服务端顺序且不标注', async () => {

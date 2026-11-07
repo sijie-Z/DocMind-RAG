@@ -1712,7 +1712,7 @@ export default {
     exportSha: '快照哈希',
     blockedHint: '案件处于阻断状态：请先修复文档或版本身份后再建案。',
     notAnalyzedHint: '尚未执行分析：先运行「执行分析」再逐项决策。',
-    selectHint: '点击下方「选为证据」可将其标记为该核验项的人工证据；证据来自 parser 原文快照。「查看原文」会在新标签页打开并定位到证据分块。',
+    selectHint: '点击下方「选为证据」可将其标记为该核验项的人工证据；证据来自 parser 原文快照。「查看原文」会在新标签页打开并定位到证据分块。标有「分析定位」的候选是分析层抽取该事实时实际定位的分块，建议优先核对。',
     diffTextSameHint: '文本事实一致；差异来自正文或条号变化。',
     downloadLatest: '下载最新 JSON',
     createCase: '新建核验',
