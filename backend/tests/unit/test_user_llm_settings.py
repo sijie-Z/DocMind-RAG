@@ -86,7 +86,9 @@ class TestKeyCrypto:
 
     def test_encrypted_field_wins_over_legacy(self):
         token = encrypt_api_key("sk-new-key-abcdefgh")
-        assert read_api_key({"api_key_encrypted": token, "api_key": "sk-old"}) == "sk-new-key-abcdefgh"
+        assert (
+            read_api_key({"api_key_encrypted": token, "api_key": "sk-old"}) == "sk-new-key-abcdefgh"
+        )
 
     def test_mask(self):
         assert mask_api_key("") == ""
@@ -171,9 +173,7 @@ class TestResolve:
         db.add(
             UserSettings(
                 user_id=USER.id,
-                preferences={
-                    "ai_provider": {"provider": "deepseek", "model": "deepseek-chat"}
-                },
+                preferences={"ai_provider": {"provider": "deepseek", "model": "deepseek-chat"}},
             )
         )
         await db.commit()
@@ -253,12 +253,8 @@ class TestProviderApi:
         assert payload["current"]["api_key"] == ""
 
     async def test_put_saves_encrypted_and_never_returns_plaintext(self, db):
-        body = ProviderSettingsUpdate(
-            provider="deepseek", model="deepseek-chat", api_key=SECRET
-        )
-        payload = await user_settings_ep.update_providers(
-            body=body, current_user=USER, db=db
-        )
+        body = ProviderSettingsUpdate(provider="deepseek", model="deepseek-chat", api_key=SECRET)
+        payload = await user_settings_ep.update_providers(body=body, current_user=USER, db=db)
         assert payload["current"]["source"] == "user"
         assert SECRET not in str(payload)
 
@@ -304,6 +300,70 @@ class TestProviderApi:
         )
         resolution = await resolve_for_user(db, USER)
         assert resolution.client.api_key == SECRET
+
+    async def test_provider_switch_without_new_key_rejected(self, db):
+        """切换 provider 时掩码/空 key 不得复用旧 provider 的 key。"""
+        from fastapi import HTTPException
+
+        await user_settings_ep.update_providers(
+            body=ProviderSettingsUpdate(provider="deepseek", model="deepseek-chat", api_key=SECRET),
+            current_user=USER,
+            db=db,
+        )
+        with pytest.raises(HTTPException) as exc_info:
+            await user_settings_ep.update_providers(
+                body=ProviderSettingsUpdate(
+                    provider="openai", model="gpt-4o", api_key=mask_api_key(SECRET)
+                ),
+                current_user=USER,
+                db=db,
+            )
+        assert exc_info.value.status_code == 400
+        assert "重新填写" in str(exc_info.value.detail)
+        resolution = await resolve_for_user(db, USER)
+        assert resolution.provider == "deepseek", "拒绝后不得改动原配置"
+
+    async def test_provider_switch_with_new_key_succeeds(self, db):
+        await user_settings_ep.update_providers(
+            body=ProviderSettingsUpdate(provider="deepseek", model="deepseek-chat", api_key=SECRET),
+            current_user=USER,
+            db=db,
+        )
+        await user_settings_ep.update_providers(
+            body=ProviderSettingsUpdate(
+                provider="openai", model="gpt-4o", api_key="sk-openai-12345678"
+            ),
+            current_user=USER,
+            db=db,
+        )
+        resolution = await resolve_for_user(db, USER)
+        assert resolution.source == "user"
+        assert resolution.provider == "openai"
+        assert resolution.model == "gpt-4o"
+        assert resolution.client.api_key == "sk-openai-12345678"
+
+    async def test_switch_to_keyless_provider_clears_stored_key(self, db):
+        """切到 Ollama（无需 key）时不再保留上一 provider 的密钥。"""
+        await user_settings_ep.update_providers(
+            body=ProviderSettingsUpdate(provider="deepseek", model="deepseek-chat", api_key=SECRET),
+            current_user=USER,
+            db=db,
+        )
+        await user_settings_ep.update_providers(
+            body=ProviderSettingsUpdate(provider="ollama", model="llama3"),
+            current_user=USER,
+            db=db,
+        )
+        row = (
+            await db.execute(select(UserSettings).where(UserSettings.user_id == USER.id))
+        ).scalar_one()
+        stored = row.preferences["ai_provider"]
+        assert stored["provider"] == "ollama"
+        assert "api_key_encrypted" not in stored
+        assert "api_key" not in stored
+        resolution = await resolve_for_user(db, USER)
+        assert resolution.source == "user"
+        assert resolution.provider == "ollama"
 
     async def test_use_server_default_clears_config(self, db):
         await user_settings_ep.update_providers(

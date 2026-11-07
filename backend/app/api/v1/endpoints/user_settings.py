@@ -84,9 +84,7 @@ async def update_user_settings(
         # 通用通道携带的 ai_provider 一律丢弃；已存的加密配置无条件保留，
         # 避免 preferences 整包替换把个人模型配置静默清掉。
         incoming.pop("ai_provider", None)
-        existing_prefs = (
-            settings.preferences if isinstance(settings.preferences, dict) else {}
-        )
+        existing_prefs = settings.preferences if isinstance(settings.preferences, dict) else {}
         if "ai_provider" in existing_prefs:
             incoming["ai_provider"] = existing_prefs["ai_provider"]
         update_data["preferences"] = incoming
@@ -193,11 +191,20 @@ async def update_providers(
             existing_key = ""
 
     submitted = (body.api_key or "").strip()
-    api_key = (
-        existing_key
-        if (not submitted or llm_settings_service.is_masked_placeholder(submitted))
-        else submitted
-    )
+    preserve_existing = not submitted or llm_settings_service.is_masked_placeholder(submitted)
+    stored_provider = raw_existing.get("provider") if isinstance(raw_existing, dict) else None
+    if (
+        preserve_existing
+        and llm_settings_service.provider_requires_key(provider)
+        and provider != stored_provider
+    ):
+        # 切换 provider 后旧 key 必然无效：掩码/空值不得把旧 provider 的 key
+        # 静默复用到新 provider（否则用户会收到上游 401 却不知原因）。
+        raise HTTPException(
+            status_code=400,
+            detail="切换提供商后请重新填写 API Key",
+        )
+    api_key = existing_key if preserve_existing else submitted
     if llm_settings_service.provider_requires_key(provider) and not api_key:
         raise HTTPException(
             status_code=400,
@@ -207,9 +214,10 @@ async def update_providers(
     stored: dict = {"provider": provider, "model": model}
     if base_url:
         stored["base_url"] = base_url
-    if api_key:
+    if llm_settings_service.provider_requires_key(provider) and api_key:
         # 明文 key 绝不落库；新密文字段优先于历史明文。
         stored["api_key_encrypted"] = llm_settings_service.encrypt_api_key(api_key)
+    # 不需要 key 的 provider（如 Ollama）不保留任何历史密钥。
     prefs["ai_provider"] = stored
     settings_obj.preferences = prefs
     await db.commit()

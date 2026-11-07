@@ -438,6 +438,11 @@ const currentProvider = computed(() => providers.value.find(p => p.id === provid
 const currentModelOptions = computed(() => (currentProvider.value?.models || []).map(m => ({ label: m, value: m })))
 const currentProviderNeedsKey = computed(() => currentProvider.value?.requires_key ?? true)
 
+// 已保存的个人 provider 与其掩码 key：切换 provider 时不得把旧 provider 的
+// key 静默复用到新 provider（后端同时强制要求重新填写）。
+const savedProvider = ref('')
+const savedMaskedKey = ref('')
+
 /** 掩码占位（sk-a...zzzz / ********）：保存时不得当作新 key 回写。 */
 const isMaskedApiKey = (value: string) => value.includes('...') || value.includes('*')
 
@@ -446,6 +451,14 @@ const onProviderChange = (pid: string) => {
   if (p) {
     providerForm.model = p.models[0] || ''
     providerForm.base_url = p.base_url || ''
+  }
+  if (pid === savedProvider.value) {
+    // 切回已保存的 provider：恢复掩码与已存 key 标记，保存时后端保留真 key。
+    providerForm.api_key = savedMaskedKey.value
+    providerForm.hasApiKey = Boolean(savedMaskedKey.value)
+  } else {
+    providerForm.api_key = ''
+    providerForm.hasApiKey = false
   }
   providerForm.useServerDefault = false
 }
@@ -472,6 +485,8 @@ const loadProviders = async () => {
       providerForm.source = cur.source === 'user' ? 'user' : 'server'
       providerForm.hasApiKey = Boolean(cur.has_api_key)
       providerForm.useServerDefault = providerForm.source === 'server'
+      savedProvider.value = providerForm.source === 'user' ? cur.provider : ''
+      savedMaskedKey.value = providerForm.source === 'user' ? (cur.api_key || '') : ''
     }
     providersLoadError.value = null
   } catch (error) {

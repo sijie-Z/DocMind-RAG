@@ -183,6 +183,27 @@ describe('AI 模型设置 · 保存路径', () => {
     expect(payload.api_key).toBe('sk-new-key-987654321')
   })
 
+  it('切换 provider 清空旧 key 掩码；切回已保存 provider 恢复掩码', async () => {
+    mountHarness()
+    await flushPromises()
+    await flushPromises()
+
+    expect(capturedApi.providerForm.api_key).toBe('sk-a...zzzz')
+    capturedApi.onProviderChange('openai')
+    expect(capturedApi.providerForm.api_key, '切换 provider 不得复用旧 key 掩码').toBe('')
+    expect(capturedApi.providerForm.hasApiKey).toBe(false)
+
+    // 新 provider 未填 key：保存被拦截，不得把空 key 发给后端
+    capturedApi.providerForm.provider = 'openai'
+    capturedApi.providerForm.model = 'gpt-4o'
+    await capturedApi.handleSaveProviders()
+    expect(updateProvidersMock).not.toHaveBeenCalled()
+
+    capturedApi.onProviderChange('deepseek')
+    expect(capturedApi.providerForm.api_key).toBe('sk-a...zzzz')
+    expect(capturedApi.providerForm.hasApiKey).toBe(true)
+  })
+
   it('「使用服务端默认」提交 use_server_default=true', async () => {
     mountHarness()
     await flushPromises()
