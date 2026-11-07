@@ -145,7 +145,7 @@ const uploadSourceText = computed(() => {
   .knowledge-detail-modal .n-button {
     min-height: 44px;
   }
-  .knowledge-detail-modal .n-card-header__close {
+  .knowledge-detail-modal .n-base-close.n-card-header__close {
     width: 44px;
     height: 44px;
   }

@@ -147,15 +147,22 @@ export interface DocumentChunkPreview {
 }
 
 /** 按引用分块取回原文（与全文预览同口径；仅用于已校验归属的文档）。 */
+export interface ChunkRequestOptions extends SilentRequestOptions {
+  /** 覆盖请求层自动重试预算（主动重试时用 1，避免一次点击等 4 轮退避）。 */
+  maxRetries?: number
+}
+
 export const getDocumentChunk = async (
   documentId: string,
   chunkId: string,
-  options?: SilentRequestOptions
+  options?: ChunkRequestOptions
 ): Promise<AxiosResponse<{ data: DocumentChunkPreview }>> => {
-  return request.get(`/documents/${encodeURIComponent(documentId)}/chunk`, {
+  const config: Record<string, unknown> = {
     params: { chunk_id: chunkId },
     ...(options?.silent ? SILENT_HEADERS : {})
-  })
+  }
+  if (options?.maxRetries !== undefined) config.__maxRetries = options.maxRetries
+  return request.get(`/documents/${encodeURIComponent(documentId)}/chunk`, config as never)
 }
 
 export const getDocumentDownloadUrl = async (

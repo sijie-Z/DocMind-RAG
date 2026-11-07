@@ -695,10 +695,6 @@ onMounted(async () => {
   .search-layout { flex-direction: column; gap: 1rem; }
   .search-filter { width: 100%; flex: none; overflow: visible; padding-right: 0; }
   .search-results { min-height: 0; }
-  .search-filter :deep(.n-base-selection) { --n-height: 44px !important; }
-  .search-filter :deep(.n-radio) { min-height: 44px; align-items: center; }
-  .search-filter :deep(.n-switch) { min-height: 44px; display: inline-flex; align-items: center; }
-  .search-filter :deep(.n-button) { min-height: 44px; }
   .suggestion-item { min-height: 44px; }
 }
 </style>
@@ -709,7 +705,7 @@ onMounted(async () => {
   .search-result-detail-modal .n-button {
     min-height: 44px;
   }
-  .search-result-detail-modal .n-card-header__close {
+  .search-result-detail-modal .n-base-close.n-card-header__close {
     width: 44px;
     height: 44px;
   }

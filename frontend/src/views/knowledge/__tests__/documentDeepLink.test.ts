@@ -128,7 +128,8 @@ beforeAll(() => {
 })
 
 beforeEach(() => {
-  vi.clearAllMocks()
+  // reset 而非 clear：清掉未消费的 mockResolvedValueOnce 队列，避免用例失败后级联。
+  vi.resetAllMocks()
   mockedDetail.mockResolvedValue(ok(DOC))
   mockedContent.mockResolvedValue(ok(CONTENT))
   mockedChunk.mockResolvedValue(ok(CHUNK))
@@ -196,8 +197,52 @@ describe('文档深链页 · 定位与降级', () => {
     await nextTick()
 
     expect(mockedChunk).toHaveBeenCalledTimes(2)
+    expect(mockedChunk).toHaveBeenLastCalledWith('doc-1', 'chunk-1', {
+      silent: true,
+      maxRetries: 1
+    })
     expect(wrapper.find('[data-testid="document-focus"]').text()).toBe('第二条 付款 30 日')
     expect(wrapper.find('[data-testid="document-chunk-retry"]').exists()).toBe(false)
+  })
+
+  it('手动重试在途时按钮保持挂载（loading 态），完成后按结果收起', async () => {
+    mockedChunk.mockRejectedValueOnce(new Error('network'))
+    const retry = deferred<unknown>()
+    mockedChunk.mockReturnValueOnce(retry.promise as never)
+    const { wrapper } = await mountPage('/knowledge/doc-1?chunk=chunk-1')
+
+    await wrapper.find('[data-testid="document-chunk-retry"]').trigger('click')
+    await nextTick()
+    const button = wrapper.find('[data-testid="document-chunk-retry"]')
+    expect(button.exists()).toBe(true)
+    expect(button.classes().join(' ')).toContain('n-button--loading')
+
+    retry.resolve(ok(CHUNK))
+    await flushPromises()
+    await nextTick()
+    expect(wrapper.find('[data-testid="document-focus"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="document-chunk-retry"]').exists()).toBe(false)
+  })
+
+  it('分块 403：提示无权查看且不提供重试', async () => {
+    mockedChunk.mockRejectedValueOnce({ response: { status: 403 } })
+    const { wrapper } = await mountPage('/knowledge/doc-1?chunk=chunk-1')
+
+    expect(wrapper.find('[data-testid="document-focus-miss"]').text()).toContain('无权查看')
+    expect(wrapper.find('[data-testid="document-chunk-retry"]').exists()).toBe(false)
+  })
+
+  it.each([422, 500])('分块 %s：4xx 不重试，5xx 可重试', async (status) => {
+    mockedChunk.mockRejectedValueOnce({ response: { status } })
+    const { wrapper } = await mountPage('/knowledge/doc-1?chunk=chunk-1')
+
+    const retry = wrapper.find('[data-testid="document-chunk-retry"]')
+    if (status >= 500) {
+      expect(retry.exists()).toBe(true)
+    } else {
+      expect(retry.exists()).toBe(false)
+      expect(wrapper.find('[data-testid="document-focus-miss"]').text()).toContain('未能定位')
+    }
   })
 
   it('截断文档中分块未命中：文案不得声称「已显示全文」', async () => {

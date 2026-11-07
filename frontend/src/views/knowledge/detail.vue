@@ -165,18 +165,20 @@
             <div v-else class="flex flex-wrap items-center gap-2">
               <p
                 data-testid="document-focus-miss"
-                class="text-sm text-amber-700 dark:text-amber-400"
+                class="text-sm"
+                :class="chunkLoading || chunkPending
+                  ? 'text-slate-600 dark:text-slate-300'
+                  : 'text-amber-700 dark:text-amber-400'"
               >
                 {{ focusMissText }}
               </p>
               <n-button
-                v-if="chunkErrorKind === 'failed'"
+                v-if="chunkErrorKind === 'failed' || chunkRetrying"
                 size="small"
                 secondary
                 data-testid="document-chunk-retry"
                 :loading="chunkLoading"
-                :disabled="chunkLoading"
-                @click="loadChunk"
+                @click="retryChunk"
               >
                 {{ t('common.retry') }}
               </n-button>
@@ -297,8 +299,10 @@ const suggestedTags = ref<string[]>([])
 const chunkTotal = ref<number | null>(null)
 const chunk = ref<DocumentChunkPreview | null>(null)
 const chunkLoading = ref(false)
-// 分块失败类型：404/403/400 为「不存在/无权」不可重试；网络/5xx 可重试。
-const chunkErrorKind = ref<'missing' | 'failed' | null>(null)
+// 分块失败类型：401/403 无权；其余 4xx（除 408/429）不存在；网络/5xx 可重试。
+const chunkErrorKind = ref<'missing' | 'forbidden' | 'failed' | null>(null)
+// 手动重试期间保持按钮挂载（loading 态），避免点击后焦点丢失。
+const chunkRetrying = ref(false)
 // 已完成的 chunk 请求键：路由切到同一文档的新 chunk 时，旧高亮/旧「已定位」
 // 不得在新请求在途期间继续展示或播报。
 const chunkLoadedKey = ref('')
@@ -342,6 +346,7 @@ const focusMeta = computed(() => {
 const focusMissText = computed(() => {
   if (chunkLoading.value || chunkPending.value) return t('knowledge.documentDetail.focusLoading')
   if (chunkErrorKind.value === 'failed') return t('knowledge.documentDetail.chunkLoadFailed')
+  if (chunkErrorKind.value === 'forbidden') return t('knowledge.documentDetail.chunkForbidden')
   if (!content.value) return t('knowledge.documentDetail.focusMissEmpty')
   if (truncated.value) return t('knowledge.documentDetail.focusMissTruncated')
   return t('knowledge.documentDetail.focusMiss')
@@ -385,7 +390,7 @@ const emptyContentHint = computed(() => {
 
 const contentEl = ref<HTMLElement | null>(null)
 
-const loadChunk = async () => {
+const loadChunk = async (manual = false) => {
   const rawId = chunkId.value
   const docId = documentId.value
   const key = `${docId}|${rawId}`
@@ -395,6 +400,7 @@ const loadChunk = async () => {
     chunkLoading.value = false
     chunkLoadedKey.value = key
     chunkErrorKind.value = null
+    chunkRetrying.value = false
     return
   }
   // 文档尚未就绪时由 loadDocument 末尾统一取块，避免双请求。
@@ -407,7 +413,10 @@ const loadChunk = async () => {
   inFlightChunkKey = key
   chunkLoading.value = true
   try {
-    const res = await getDocumentChunk(docId, rawId, { silent: true })
+    const res = await getDocumentChunk(docId, rawId, {
+      silent: true,
+      ...(manual ? { maxRetries: 1 } : {})
+    })
     if (seq !== chunkSeq) return
     const data = apiUnwrap<DocumentChunkPreview>(res)
     chunk.value = data?.text ? data : null
@@ -417,11 +426,23 @@ const loadChunk = async () => {
     chunk.value = null
     chunkLoadedKey.value = key
     const status = (error as { response?: { status?: number } })?.response?.status
-    chunkErrorKind.value = status === 404 || status === 403 || status === 400 ? 'missing' : 'failed'
+    if (status === 401 || status === 403) {
+      chunkErrorKind.value = 'forbidden'
+    } else {
+      const nonRetryable =
+        typeof status === 'number' && status >= 400 && status < 500 && status !== 408 && status !== 429
+      chunkErrorKind.value = nonRetryable ? 'missing' : 'failed'
+    }
   } finally {
     if (inFlightChunkKey === key) inFlightChunkKey = ''
     if (seq === chunkSeq) chunkLoading.value = false
+    chunkRetrying.value = false
   }
+}
+
+const retryChunk = () => {
+  chunkRetrying.value = true
+  void loadChunk(true)
 }
 
 const loadDocument = async () => {
@@ -432,6 +453,7 @@ const loadDocument = async () => {
   chunkLoading.value = false
   chunkLoadedKey.value = ''
   chunkErrorKind.value = null
+  chunkRetrying.value = false
   // 旧文档的在途 chunk 请求必须失效；清空键让新文档可以重新发起请求
   // （A→B→A 快速往返时不能因旧键仍占用而被永久跳过）。
   inFlightChunkKey = ''
@@ -568,7 +590,7 @@ const handleDownload = async () => {
 .document-content {
   text-wrap: pretty;
 }
-@media (max-width: 1023.98px) {
+@media (max-width: 1024px) {
   .document-page :deep(.n-button) {
     min-height: 44px;
   }
