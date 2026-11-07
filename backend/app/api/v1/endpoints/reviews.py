@@ -355,7 +355,14 @@ async def download_review_export(
         await export_service.audit_download(db, case, export, user_id=current_user.id)
         stem = f"review-{case.id[:8]}-{export.id[:8]}"
         if format == "markdown":
-            content = export_service.render_markdown(export.payload)
+            content = export_service.render_markdown(
+                export.payload,
+                export_meta={
+                    "export_id": export.id,
+                    "created_at": export.created_at,
+                    "payload_sha256": export.payload_sha256,
+                },
+            )
             media_type = "text/markdown; charset=utf-8"
             filename = f"{stem}.md"
         else:

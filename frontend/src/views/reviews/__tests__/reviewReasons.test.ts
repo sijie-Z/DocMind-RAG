@@ -28,7 +28,8 @@ describe('核验原因码本地化', () => {
     ['undecided', '存在未决核验项'],
     ['not_analyzed', '尚未执行分析'],
     ['unit_unclear', '单位无法判定'],
-    ['multiple_durations', '多个期限候选']
+    ['multiple_durations', '多个期限候选'],
+    ['reference_unresolved', '引用的条款无法定位']
   ]
 
   it.each(CASES)('%s → 业务文案且不出现原始码', (code, expected) => {

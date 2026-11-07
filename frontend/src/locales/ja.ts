@@ -1626,6 +1626,7 @@ export default {
     exportBlockedDetail: '未決項目: {items}',
     ambiguousUnit: '単位を判定できません（暦日/営業日）',
     ambiguousMultiple: '同一項目に複数の期限候補があります',
+    ambiguousReference: '参照条項を特定できません',
     candidatesLabel: '候補',
     exportSha: 'スナップショットハッシュ',
     blockedHint: '案件はブロックされています。ドキュメントまたはバージョン情報を修正してから案件を作り直してください。',

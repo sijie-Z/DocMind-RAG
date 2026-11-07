@@ -27,7 +27,8 @@ const REASON_KEYS: Record<string, string> = {
   undecided: 'reviews.reasonUndecided',
   not_analyzed: 'reviews.reasonNotAnalyzed',
   unit_unclear: 'reviews.ambiguousUnit',
-  multiple_durations: 'reviews.ambiguousMultiple'
+  multiple_durations: 'reviews.ambiguousMultiple',
+  reference_unresolved: 'reviews.ambiguousReference'
 }
 
 const SIDE_KEYS: Record<string, string> = {

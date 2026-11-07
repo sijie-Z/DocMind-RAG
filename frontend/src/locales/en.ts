@@ -1697,6 +1697,7 @@ export default {
     exportBlockedDetail: 'Blocking items: {items}',
     ambiguousUnit: 'Unit cannot be determined (calendar/business days)',
     ambiguousMultiple: 'Multiple duration candidates for this item',
+    ambiguousReference: 'Referenced clause could not be located',
     candidatesLabel: 'Candidates',
     exportSha: 'Snapshot hash',
     blockedHint: 'This case is blocked: fix the documents or version identity and create a new case.',

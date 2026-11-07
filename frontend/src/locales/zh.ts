@@ -1705,6 +1705,7 @@ export default {
     exportBlockedDetail: '未决项：{items}',
     ambiguousUnit: '单位无法判定（自然日/工作日）',
     ambiguousMultiple: '同一核验项出现多个期限候选',
+    ambiguousReference: '引用的条款无法定位',
     candidatesLabel: '候选',
     exportSha: '快照哈希',
     blockedHint: '案件处于阻断状态：请先修复文档或版本身份后再建案。',

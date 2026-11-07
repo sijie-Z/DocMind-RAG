@@ -1627,6 +1627,7 @@ export default {
     exportBlockedDetail: 'Éléments bloquants : {items}',
     ambiguousUnit: 'Unité indéterminable (jours calendaires/ouvrés)',
     ambiguousMultiple: 'Plusieurs durées candidates pour cet élément',
+    ambiguousReference: 'Clause référencée introuvable',
     candidatesLabel: 'Candidats',
     exportSha: "Empreinte de l'instantané",
     blockedHint: "Dossier bloqué : corrigez les documents ou l'identité de version puis recréez un dossier.",
