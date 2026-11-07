@@ -35,6 +35,8 @@ export default {
     retry: 'Réessayer',
     tryAgain: 'Veuillez réessayer plus tard',
     noDescription: 'Aucune description',
+    none: 'Aucune',
+    close: 'Fermer',
     weekdays: { '0': 'dim.', '1': 'lun.', '2': 'mar.', '3': 'mer.', '4': 'jeu.', '5': 'ven.', '6': 'sam.' },
   },
   profile: {
@@ -343,6 +345,15 @@ export default {
   },
   knowledge: {
     subtitle: 'Téléchargez et gérez vos documents de connaissances d\'entreprise',
+    viewDetail: 'Voir les détails',
+    uploadSource: 'Source du téléversement',
+    fileSize: 'Taille du fichier',
+    processingStatus: 'Statut de traitement',
+    previewLoading: 'Chargement de l\'aperçu...',
+    fileDescription: 'Description du fichier',
+    documentPreviewTitle: 'Aperçu du document',
+    parseErrorTitle: 'Détails de l\'erreur d\'analyse',
+    parseErrorRawHint: 'Erreur d\'analyse brute :',
     documentDetail: {
       back: 'Retour à la base de connaissances',
       titleFallback: 'Détails du document',

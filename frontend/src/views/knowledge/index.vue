@@ -289,7 +289,7 @@
             <!-- 列表模式 -->
             <div v-else class="w-full min-w-0 overflow-x-auto rounded-xl border border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-800">
                <table class="w-full text-left text-sm min-w-[600px]">
-                  <thead class="bg-gray-50 dark:bg-gray-900/50 text-gray-500 border-b border-gray-200 dark:border-gray-700">
+                  <thead class="bg-gray-50 dark:bg-gray-900/50 text-gray-500 dark:text-gray-400 border-b border-gray-200 dark:border-gray-700">
                     <tr>
                       <th class="p-4 w-12"><n-checkbox :checked="isAllSelected" @update:checked="toggleSelectAll" /></th>
                       <th class="p-4 font-medium">{{ t('knowledge.table.name') }}</th>
@@ -323,8 +323,8 @@
                             <n-tag v-for="tag in item.tags.slice(0, 2)" :key="tag" size="tiny" :bordered="false" class="bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300">#{{ tag }}</n-tag>
                           </div>
                        </td>
-                       <td class="p-4 text-gray-500">{{ formatFileSize(item.file_size) }}</td>
-                       <td class="p-4 hidden sm:table-cell text-gray-500">{{ formatDate(item.created_at) }}</td>
+                       <td class="p-4 text-gray-500 dark:text-gray-400">{{ formatFileSize(item.file_size) }}</td>
+                       <td class="p-4 hidden sm:table-cell text-gray-500 dark:text-gray-400">{{ formatUploadedAt(item.created_at) }}</td>
                        <td class="p-4">
                           <div class="space-y-1">
                             <n-tag 
@@ -418,7 +418,7 @@
           :get-status-type="getStatusType"
           :get-status-label="getStatusLabel"
           :format-file-size="formatFileSize"
-          :format-date="formatDate"
+          :format-date-time="formatUploadedAt"
           @open-document="openDocumentPage"
         />
 
@@ -463,7 +463,7 @@ import {
   rebuildKnowledgeBase
 } from '@/api/knowledge'
 import type { KnowledgeBase, KnowledgeBaseListResponse, DocumentDetail, DocumentContent } from '@/api/knowledge'
-import { formatDate } from '@/utils/format'
+import { formatDateTime } from '@/utils/format'
 import { apiUnwrap } from '@/utils/apiUnwrap'
 import { getErrorMessage } from '@/utils/apiError'
 import { getRagMetrics, type RagMetrics } from '@/api/rag'
@@ -482,7 +482,7 @@ interface UploadForm {
 const message = useDedupedMessage()
 const dialog = useDialog()
 const router = useRouter()
-const { t } = useI18n()
+const { t, locale } = useI18n()
 const userStore = useUserStore()
 const loading = ref(false)
 const loadError = ref(false)
@@ -862,7 +862,7 @@ const viewKnowledge = async (item: KnowledgeBase) => {
   detailLoading.value = true
   currentDoc.value = {
     ...item,
-    upload_source: '知识库上传'
+    upload_source: item.upload_source || ''
   } as KnowledgeBase
   showDetailModal.value = true
   try {
@@ -878,7 +878,8 @@ const viewKnowledge = async (item: KnowledgeBase) => {
       ...item,
       ...detail,
       tags: item.tags || detail.keywords || [],
-      upload_source: detail.upload_source || (String(detail.description || '').includes('来自聊天') ? '聊天上传' : '知识库上传'),
+      upload_source: detail.upload_source || '',
+      upload_source_code: detail.upload_source_code || item.upload_source_code,
       summary: content.summary || detail.description || '',
       suggested_tags: content.suggested_tags || [],
       preview_content: (content.content || '').slice(0, 1500),
@@ -952,6 +953,9 @@ const formatFileSize = (bytes: number | null | undefined): string => {
   const i = Math.floor(Math.log(safe) / Math.log(k))
   return parseFloat((safe / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i]
 }
+
+// 知识库是审计/管理列表：绝对时间 + 跟随界面语言（相对时间不会自动刷新）。
+const formatUploadedAt = (value?: string): string => formatDateTime(value, locale.value)
 
 // 幽灵「降级索引」标识已整体移除（B17）：后端不存在任何"降级为关键词索引"的
 // 字段或 parse_error 哨兵（models/document.py 无 vector_index_status 列；

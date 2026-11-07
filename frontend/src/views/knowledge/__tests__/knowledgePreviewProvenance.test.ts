@@ -7,9 +7,11 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils'
 import { nextTick } from 'vue'
+import type { Plugin } from 'vue'
 import naive from 'naive-ui'
 import { createI18n } from 'vue-i18n'
 import zh from '@/locales/zh'
+import en from '@/locales/en'
 import type { KnowledgeBase } from '@/api/knowledge'
 import KnowledgeDetailModals from '../components/KnowledgeDetailModals.vue'
 
@@ -39,7 +41,7 @@ function makeDoc(extra: Partial<KnowledgeBase> = {}): KnowledgeBase {
   }
 }
 
-async function mountModals(doc: KnowledgeBase) {
+async function mountModals(doc: KnowledgeBase, i18nInstance: Plugin = i18n) {
   const wrapper = mount(KnowledgeDetailModals, {
     props: {
       showDetail: true,
@@ -51,10 +53,10 @@ async function mountModals(doc: KnowledgeBase) {
       getStatusType: () => 'success' as const,
       getStatusLabel: () => '已完成',
       formatFileSize: () => '1 KB',
-      formatDate: () => '2026-10-01',
+      formatDateTime: () => '2026-10-01',
     },
     global: {
-      plugins: [naive, i18n],
+      plugins: [naive, i18nInstance],
       stubs: { teleport: true },
     },
   })
@@ -92,5 +94,29 @@ describe('KnowledgeDetailModals 原文口径提示', () => {
     )
 
     expect(wrapper.find('[data-testid="knowledge-preview-truncated"]').text()).toContain('已截断')
+  })
+})
+
+describe('KnowledgeDetailModals 国际化', () => {
+  it('英文界面标签与来源不再回落中文', async () => {
+    const enI18n = createI18n({
+      legacy: false,
+      locale: 'en',
+      missingWarn: false,
+      fallbackWarn: false,
+      messages: { en },
+    })
+    const wrapper = await mountModals(
+      makeDoc({ upload_source_code: 'knowledge' }),
+      enI18n
+    )
+
+    const text = wrapper.text()
+    expect(text).toContain('File Description')
+    expect(text).toContain('Knowledge base upload')
+    expect(text).toContain('Close')
+    expect(text).not.toContain('文件大小')
+    expect(text).not.toContain('上传来源')
+    expect(text).not.toContain('关闭')
   })
 })

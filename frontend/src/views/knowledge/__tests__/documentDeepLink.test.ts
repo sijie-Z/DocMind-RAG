@@ -142,6 +142,8 @@ describe('文档深链页 · 定位与降级', () => {
     expect(mockedChunk).toHaveBeenCalledWith('doc-1', 'chunk-1', { silent: true })
 
     expect(wrapper.find('[data-testid="document-title"]').text()).toContain('软件采购合同')
+    // 可分享页的书签名应体现文档名，而不是全站通用标题。
+    expect(document.title).toContain('软件采购合同')
     const mark = wrapper.find('[data-testid="document-focus"]')
     expect(mark.exists()).toBe(true)
     expect(mark.text()).toBe('第二条 付款 30 日')
@@ -190,6 +192,8 @@ describe('文档深链页 · 定位与降级', () => {
 
     expect(wrapper.find('[data-testid="document-error"]').text()).toContain('无权访问该文档')
     expect(wrapper.text()).not.toContain('第三条 验收')
+    // 异步失败不得保留上一篇文档名。
+    expect(document.title).not.toContain('软件采购合同')
   })
 
   it('404：显示不存在或已删除', async () => {

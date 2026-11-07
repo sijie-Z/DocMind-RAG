@@ -13,6 +13,7 @@ export interface KnowledgeBase {
   description?: string
   keywords?: string[]
   upload_source?: string
+  upload_source_code?: 'chat' | 'knowledge'
   summary?: string
   suggested_tags?: string[]
   preview_content?: string
