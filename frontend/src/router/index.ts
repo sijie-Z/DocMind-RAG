@@ -5,7 +5,7 @@ import { useUserStore } from '@/stores/user'
 import { getToken, isTokenExpired, removeToken } from '@/utils/auth'
 import { silentRefreshAccessToken } from '@/utils/request'
 import { startRouteProgress, finishRouteProgress } from '@/utils/routeProgress'
-import { setPageTitleKey } from '@/locales'
+import { applyRoutePageTitle } from './pageTitle'
 
 /** 路由 meta 扩展（T9 定位三件套）：生效侧栏高亮键 */
 declare module 'vue-router' {
@@ -504,15 +504,10 @@ router.beforeEach(async (to, from, next) => {
 })
 
 // 全局顶部进度条收尾：导航完成/失败/中断都要复位，避免长驻。
-// 同时按 meta.title 设置页面标题（切语言时由 locales 重新解析）。
-// 同一页面仅 query 变化（如清除 chunk 定位）不重置页面级标题。
-router.afterEach((to, from) => {
+// 标题只在导航真正落地时更新；被取消的导航不得覆盖当前页。
+router.afterEach((to, from, failure) => {
   finishRouteProgress()
-  const samePage =
-    to.name === from.name && JSON.stringify(to.params) === JSON.stringify(from.params)
-  if (samePage) return
-  const title = to.meta?.title
-  setPageTitleKey(typeof title === 'string' ? title : null)
+  applyRoutePageTitle(to, from, failure)
 })
 router.onError(() => {
   finishRouteProgress()

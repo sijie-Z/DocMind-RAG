@@ -97,6 +97,15 @@ describe('KnowledgeDetailModals 原文口径提示', () => {
   })
 })
 
+describe('KnowledgeDetailModals 上传来源映射', () => {
+  it('chat code 映射为聊天上传（不显示知识库上传）', async () => {
+    const wrapper = await mountModals(makeDoc({ upload_source_code: 'chat' }))
+    const text = wrapper.text()
+    expect(text).toContain('聊天上传')
+    expect(text).not.toContain('知识库上传')
+  })
+})
+
 describe('KnowledgeDetailModals 国际化', () => {
   it('英文界面标签与来源不再回落中文', async () => {
     const enI18n = createI18n({

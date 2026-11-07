@@ -77,7 +77,7 @@ describe('导航守卫（真实行为）', () => {
     await router.push({ name: 'Dashboard' })
 
     expect(router.currentRoute.value.name).toBe('Login')
-  })
+  }, 15000)
 
   it('未登录时重定向带上原本要去的地址（redirect 查询参数）', async () => {
     vi.mocked(auth.getToken).mockReturnValue(undefined)

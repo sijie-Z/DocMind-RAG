@@ -3,7 +3,7 @@
  * 必须跟随，否则屏幕阅读器与浏览器翻译始终按中文处理。
  */
 import { afterEach, describe, expect, it } from 'vitest'
-import { setLanguage } from '@/locales'
+import { setLanguage, setPageTitleKey } from '@/locales'
 
 describe('document locale', () => {
   afterEach(async () => {
@@ -22,5 +22,13 @@ describe('document locale', () => {
     await setLanguage('zh')
     expect(document.documentElement.lang).toBe('zh-CN')
     expect(document.title).toContain('文档问答与合同核验平台')
+  })
+
+  it('切语言时路由级标题按新语言重新解析', async () => {
+    setPageTitleKey('router.welcome')
+    await setLanguage('en')
+    expect(document.title).toContain('Welcome')
+    expect(document.title).not.toContain('欢迎')
+    setPageTitleKey(null)
   })
 })
