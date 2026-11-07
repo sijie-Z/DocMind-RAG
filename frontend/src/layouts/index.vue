@@ -21,27 +21,52 @@
         mobileMenuOpen ? 'max-md:translate-x-0' : 'max-md:-translate-x-full',
       ]"
     >
-      <!-- Logo：DocMind 图标 + 名称（T9 起可点回仪表盘/首页） -->
+      <!-- Logo：DocMind 图标 + 名称（T9 起可点回仪表盘/首页）。
+           折叠按钮并入品牌头部右侧（44px 触控，桌面端）；折叠态让位于居中的
+           展开按钮，移动端由右侧关闭按钮承接——底部不再保留独立折叠栏。 -->
       <div
-        class="h-16 flex shrink-0 items-center px-4 border-b border-gray-100 dark:border-gray-800/50 bg-white/50 dark:bg-gray-900/50 backdrop-blur-sm overflow-hidden whitespace-nowrap cursor-pointer transition-opacity hover:opacity-80"
-        role="link"
-        tabindex="0"
-        @click="router.push({ name: 'Dashboard' })"
-        @keydown.enter="router.push({ name: 'Dashboard' })"
+        class="h-16 flex shrink-0 items-center gap-2 px-3 border-b border-gray-100 dark:border-gray-800/50 bg-white/50 dark:bg-gray-900/50 overflow-hidden whitespace-nowrap"
       >
-        <div class="flex items-center space-x-3 min-w-0">
+        <div
+          v-if="!appStore.sidebarCollapsed"
+          class="flex min-w-0 flex-1 items-center space-x-3 cursor-pointer rounded-lg transition-opacity hover:opacity-80"
+          role="link"
+          tabindex="0"
+          @click="router.push({ name: 'Dashboard' })"
+          @keydown.enter="router.push({ name: 'Dashboard' })"
+        >
           <div class="flex-shrink-0 w-9 h-9 rounded-xl bg-blue-700 text-white ring-1 ring-blue-800/20 shadow-sm flex items-center justify-center">
             <DocMindMark :size="26" />
           </div>
-          <span v-if="!appStore.sidebarCollapsed" class="text-lg font-extrabold tracking-tight text-slate-900 dark:text-white">
+          <span class="text-lg font-extrabold tracking-tight text-slate-900 dark:text-white">
             DocMind
           </span>
         </div>
         <button
+          v-else
+          type="button"
+          data-testid="sidebar-expand-toggle"
+          class="mx-auto hidden h-11 w-11 shrink-0 items-center justify-center rounded-lg border-0 bg-transparent text-gray-500 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-800 md:flex"
+          :aria-label="t('layout.expandSidebar')"
+          @click="appStore.toggleSidebar"
+        >
+          <n-icon size="18"><ChevronForwardOutline /></n-icon>
+        </button>
+        <button
+          v-if="!appStore.sidebarCollapsed"
+          type="button"
+          data-testid="sidebar-collapse-toggle"
+          class="ml-auto hidden h-11 w-11 shrink-0 items-center justify-center rounded-lg border-0 bg-transparent text-gray-500 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-800 md:flex"
+          :aria-label="t('layout.collapseSidebar')"
+          @click="appStore.toggleSidebar"
+        >
+          <n-icon size="18"><ChevronBackOutline /></n-icon>
+        </button>
+        <button
           ref="drawerCloseRef"
           type="button"
           data-testid="mobile-drawer-close"
-          class="ml-auto flex h-11 w-11 shrink-0 items-center justify-center rounded-lg text-gray-500 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-800 md:hidden"
+          class="ml-auto flex h-11 w-11 shrink-0 items-center justify-center rounded-lg border-0 bg-transparent text-gray-500 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-800 md:hidden"
           :aria-label="t('layout.closeMenu')"
           @click.stop="closeMobileMenu"
         >
@@ -66,23 +91,6 @@
         />
       </nav>
       
-      <!-- 底部折叠按钮（桌面端） -->
-      <div class="shrink-0 p-4 border-t border-gray-100 dark:border-gray-800 justify-center hidden md:flex">
-        <n-button
-          quaternary
-          circle
-          :aria-label="appStore.sidebarCollapsed ? t('layout.expandSidebar') : t('layout.collapseSidebar')"
-          @click="appStore.toggleSidebar"
-        >
-          <template #icon>
-            <n-icon size="20">
-              <ChevronBackOutline v-if="!appStore.sidebarCollapsed" />
-              <ChevronForwardOutline v-else />
-            </n-icon>
-          </template>
-        </n-button>
-      </div>
-
       <!-- 语言和主题切换 -->
       <div class="shrink-0 px-4 py-2 border-t border-gray-100 dark:border-gray-800 flex items-center justify-center gap-2">
         <n-tooltip :trigger="'hover'">
