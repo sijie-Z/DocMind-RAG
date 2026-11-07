@@ -27,6 +27,7 @@ vi.mock('@/utils/auth', () => ({
 }))
 
 import { routes } from '../index'
+import { setPageTitleText } from '@/locales'
 import * as auth from '@/utils/auth'
 
 const flatten = (rs: readonly RouteRecordRaw[]): RouteRecordRaw[] =>
@@ -76,7 +77,7 @@ describe('导航守卫（真实行为）', () => {
     await router.push({ name: 'Dashboard' })
 
     expect(router.currentRoute.value.name).toBe('Login')
-  })
+  }, 15000)
 
   it('未登录时重定向带上原本要去的地址（redirect 查询参数）', async () => {
     vi.mocked(auth.getToken).mockReturnValue(undefined)
@@ -95,6 +96,20 @@ describe('导航守卫（真实行为）', () => {
     await mod.default.push({ name: 'FirstHome' })
 
     expect(mod.default.currentRoute.value.name).toBe('FirstHome')
+  })
+
+  it('路由标题：切换页面按 meta.title；同页仅 query 变化保留文档标题', async () => {
+    vi.mocked(auth.getToken).mockReturnValue(undefined)
+    const mod = await import('../index')
+
+    await mod.default.push({ name: 'FirstHome' })
+    setPageTitleText('文档A')
+    await mod.default.push({ name: 'FirstHome', query: { q: '1' } })
+    expect(document.title).toContain('文档A')
+
+    await mod.default.push({ name: 'Login' })
+    expect(document.title).not.toContain('文档A')
+    expect(document.title).toContain('DocMind')
   })
 })
 

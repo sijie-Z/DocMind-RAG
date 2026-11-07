@@ -45,6 +45,36 @@ const LOCALE_TAGS: Record<LanguageCode, string> = {
 }
 
 /**
+ * 当前页面标题：路由 meta 的 i18n 键，或具体页面文本（如文档名）。
+ * 切语言时键会重新解析；文本型标题（文件名）保持不变。
+ */
+let pageTitleKey: string | null = null
+let pageTitleText: string | null = null
+
+function computeDocumentTitle(): string {
+  const translate = i18n.global.t as (key: string) => string
+  const brand = translate('app.documentTitle')
+  const safeBrand = brand && brand !== 'app.documentTitle' ? brand : 'DocMind'
+  const resolved = pageTitleText || (pageTitleKey ? translate(pageTitleKey) : '')
+  if (!resolved || resolved === pageTitleKey) return safeBrand
+  return `${resolved} - DocMind`
+}
+
+/** 路由级标题（meta.title 键）；切语言时重新解析。 */
+export function setPageTitleKey(key?: string | null): void {
+  pageTitleKey = key || null
+  pageTitleText = null
+  if (typeof document !== 'undefined') document.title = computeDocumentTitle()
+}
+
+/** 具体页面标题（如文档文件名）；为空时回退品牌标题。 */
+export function setPageTitleText(text?: string | null): void {
+  pageTitleText = text || null
+  pageTitleKey = null
+  if (typeof document !== 'undefined') document.title = computeDocumentTitle()
+}
+
+/**
  * 同步 <html lang>、document.title 与 meta description。
  * 屏幕阅读器与浏览器翻译依赖 lang；标题/描述跟随界面语言，避免英文界面仍是中文标题。
  */
@@ -52,8 +82,7 @@ function applyDocumentLocale(code: LanguageCode): void {
   if (typeof document === 'undefined') return
   document.documentElement.lang = LOCALE_TAGS[code]
   const translate = i18n.global.t as (key: string) => string
-  const title = translate('app.documentTitle')
-  if (title && title !== 'app.documentTitle') document.title = title
+  document.title = computeDocumentTitle()
   const description = translate('app.metaDescription')
   if (description && description !== 'app.metaDescription') {
     document.querySelector('meta[name="description"]')?.setAttribute('content', description)

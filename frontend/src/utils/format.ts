@@ -67,6 +67,30 @@ export const truncateText = (text: string, maxLength: number): string => {
   return text.substring(0, maxLength) + '...'
 }
 
+/**
+ * 绝对日期时间（跟随界面语言）。用于审计/管理列表：相对时间不会自动刷新，
+ * 且共享的 formatDate 文案固定中文，英文/日文界面会回退。
+ */
+export const formatDateTime = (
+  dateString: string | Date | undefined | null,
+  locale = 'zh'
+): string => {
+  if (!dateString) return '-'
+  const date = typeof dateString === 'string' ? new Date(dateString) : dateString
+  if (Number.isNaN(date.getTime())) return '-'
+  try {
+    return new Intl.DateTimeFormat(locale, {
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit'
+    }).format(date)
+  } catch {
+    return date.toLocaleString()
+  }
+}
+
 export const copyToClipboard = async (text: string): Promise<boolean> => {
   try {
     await navigator.clipboard.writeText(text)
