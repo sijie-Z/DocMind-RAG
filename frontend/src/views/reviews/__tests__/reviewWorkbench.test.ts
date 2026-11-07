@@ -27,11 +27,21 @@ import ReviewDetail from '../detail.vue'
 import { reviewsApi } from '@/api/reviews'
 import zh from '@/locales/zh'
 
-const routerMocks = vi.hoisted(() => ({ replace: vi.fn(), push: vi.fn() }))
+const routerMocks = vi.hoisted(() => ({
+  replace: vi.fn(),
+  push: vi.fn(),
+  resolve: vi.fn((target: { params: { documentId: string }; query: { chunk: string } }) => ({
+    href: `/knowledge/${target.params.documentId}?chunk=${target.query.chunk}`
+  }))
+}))
 
 vi.mock('vue-router', () => ({
   useRoute: () => ({ params: { id: 'case-1' }, query: {} }),
-  useRouter: () => ({ push: routerMocks.push, replace: routerMocks.replace })
+  useRouter: () => ({
+    push: routerMocks.push,
+    replace: routerMocks.replace,
+    resolve: routerMocks.resolve
+  })
 }))
 
 vi.mock('@/api/reviews', () => ({
@@ -73,7 +83,7 @@ function makeDetail(overrides: Record<string, unknown> = {}) {
         readiness: { status: 'reviewable', blocking_reasons: [], warnings: [] }
       },
       base: {
-        document_id: 'b1',
+        document_id: 'b1-current',
         filename: 'contract-v1.pdf',
         doc_role: 'contract',
         version_label: 'V1',
@@ -121,7 +131,7 @@ function makeDetail(overrides: Record<string, unknown> = {}) {
               side: 'base',
               role: 'candidate',
               selected: false,
-              document_id: 'b1',
+              document_id: 'b1-captured',
               doc_role: 'contract',
               document_sha256: 'b'.repeat(64),
               chunk_id_at_capture: 'chunk-1',
@@ -785,5 +795,126 @@ describe('归档出口（Batch 7）', () => {
     await wrapper.find('[data-testid="review-versions-toggle"]').trigger('click')
     await flushPromises()
     expect(wrapper.text()).toContain('contract-v1.pdf')
+  })
+})
+
+describe('证据行 → 原文深链', () => {
+  it('证据链接指向捕获时的文档与分块，并在新标签页打开', async () => {
+    api.get.mockResolvedValue({ data: { data: makeDetail() } } as never)
+    const wrapper = mountDetail()
+    await flushPromises()
+
+    const link = wrapper.find('[data-testid="evidence-open-original"]')
+    expect(link.exists()).toBe(true)
+    expect(link.attributes('href')).toBe('/knowledge/b1-captured?chunk=chunk-1')
+    // 锁死「用证据行捕获时的 document_id，而不是侧文档当前 id」。
+    expect(routerMocks.resolve).toHaveBeenCalledWith({
+      name: 'KnowledgeDocument',
+      params: { documentId: 'b1-captured' },
+      query: { chunk: 'chunk-1' }
+    })
+    expect(link.attributes('rel')).toContain('noreferrer')
+    expect(link.attributes('target')).toBe('_blank')
+    expect(link.attributes('rel')).toContain('noopener')
+    expect(link.text()).toContain('查看原文')
+    // 深链只生成链接，不改变「reviews 页不拉文档正文」的契约。
+    const calls = JSON.stringify([api.get.mock.calls, api.exports.mock.calls])
+    expect(calls).not.toContain('/content')
+  })
+
+  it('stale 证据：改称「查看当前原文」并提示快照已变化', async () => {
+    const detail = makeDetail()
+    detail.items[0].evidence.base[0].stale = true
+    api.get.mockResolvedValue({ data: { data: detail } } as never)
+    const wrapper = mountDetail()
+    await flushPromises()
+
+    const link = wrapper.find('[data-testid="evidence-open-original"]')
+    expect(link.text()).toContain('查看当前原文')
+    expect(link.attributes('title')).toContain('证据快照已变化')
+  })
+
+  it('文档缺失：不渲染链接，显示原文不可用', async () => {
+    const detail = makeDetail()
+    detail.documents.base.missing = true
+    api.get.mockResolvedValue({ data: { data: detail } } as never)
+    const wrapper = mountDetail()
+    await flushPromises()
+
+    expect(wrapper.find('[data-testid="evidence-open-original"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="evidence-open-unavailable"]').text()).toContain('原文不可用')
+    expect(wrapper.find('[data-testid="evidence-open-unavailable"]').attributes('title')).toContain(
+      '文档已删除或不可读'
+    )
+  })
+})
+
+describe('证据行 → 原文深链（三侧与缺锚点）', () => {
+  it('base/revised/policy 各自使用捕获时的 document_id 与 chunk id', async () => {
+    const detail = makeDetail()
+    const baseRow = detail.items[0].evidence.base[0]
+    detail.items[0].evidence.revised = [{
+      ...baseRow,
+      id: 'ev-r',
+      side: 'revised',
+      document_id: 'r1-captured',
+      chunk_id_at_capture: 'chunk-r'
+    }] as never
+    detail.items[0].evidence.policy = [{
+      ...baseRow,
+      id: 'ev-p',
+      side: 'policy',
+      document_id: 'p1-captured',
+      chunk_id_at_capture: 'chunk-p'
+    }] as never
+    api.get.mockResolvedValue({ data: { data: detail } } as never)
+    const wrapper = mountDetail()
+    await flushPromises()
+
+    const hrefs = wrapper
+      .findAll('[data-testid="evidence-open-original"]')
+      .map((link) => link.attributes('href'))
+    expect(hrefs).toEqual([
+      '/knowledge/b1-captured?chunk=chunk-1',
+      '/knowledge/r1-captured?chunk=chunk-r',
+      '/knowledge/p1-captured?chunk=chunk-p'
+    ])
+  })
+
+  it('chunk 锚点缺失：显示「无法定位原文」，不误报整篇原文不可用', async () => {
+    const detail = makeDetail()
+    detail.items[0].evidence.base[0].chunk_id_at_capture = ''
+    api.get.mockResolvedValue({ data: { data: detail } } as never)
+    const wrapper = mountDetail()
+    await flushPromises()
+
+    expect(wrapper.find('[data-testid="evidence-open-original"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="evidence-open-unavailable"]').text()).toContain('无法定位原文')
+  })
+})
+
+describe('证据行 → 原文深链（单侧文档缺失）', () => {
+  it('revised 缺失时只禁用 revised 行，base 链接仍可用', async () => {
+    const detail = makeDetail()
+    const baseRow = detail.items[0].evidence.base[0]
+    detail.items[0].evidence.revised = [{
+      ...baseRow,
+      id: 'ev-r',
+      side: 'revised',
+      document_id: 'r1-captured',
+      chunk_id_at_capture: 'chunk-r'
+    }] as never
+    detail.documents.revised.missing = true
+    api.get.mockResolvedValue({ data: { data: detail } } as never)
+    const wrapper = mountDetail()
+    await flushPromises()
+
+    const links = wrapper.findAll('[data-testid="evidence-open-original"]')
+    expect(links).toHaveLength(1)
+    expect(links[0].attributes('href')).toBe('/knowledge/b1-captured?chunk=chunk-1')
+
+    const unavailable = wrapper.find('[data-testid="evidence-open-unavailable"]')
+    expect(unavailable.text()).toContain('原文不可用')
+    expect(unavailable.attributes('title')).toContain('文档已删除或不可读')
   })
 })
