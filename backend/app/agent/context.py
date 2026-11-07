@@ -65,10 +65,16 @@ class ContextEngine:
         self.tail_window = tail_window
         self.compression_ratio = compression_ratio
         self._llm_client = None  # set via set_llm_client() for intelligent summarization
+        self._llm_model: str | None = None
 
-    def set_llm_client(self, client) -> None:
-        """Set the LLM client for intelligent message summarization."""
+    def set_llm_client(self, client, model: str | None = None) -> None:
+        """Set the LLM client/model for intelligent message summarization.
+
+        个人模型设置生效时，摘要也必须使用同一 provider 的模型名；否则非
+        DeepSeek provider 会收到 ``deepseek-v4-flash`` 并恒失败。
+        """
         self._llm_client = client
+        self._llm_model = model
 
     def fit(
         self,
@@ -247,9 +253,9 @@ class ContextEngine:
             from app.core.config import settings
 
             call_attempted = True
-            model_name = settings.DEEPSEEK_MODEL
+            model_name = self._llm_model or settings.DEEPSEEK_MODEL
             resp = await self._llm_client.chat.completions.create(
-                model=settings.DEEPSEEK_MODEL,
+                model=model_name,
                 messages=llm_messages,
                 temperature=0.0,
                 max_tokens=min(300, max_chars // 2),

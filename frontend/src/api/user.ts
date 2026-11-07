@@ -315,6 +315,12 @@ export interface ProviderCurrent {
   model: string
   api_key?: string
   base_url?: string
+  has_api_key?: boolean
+  source?: 'user' | 'server'
+  /** 是否存有个人配置（即使当前回退服务端默认，也可用于提示/恢复表单）。 */
+  has_saved_config?: boolean
+  /** 保存了但不可解析时的原因：unknown_provider/missing_model/key_unreadable/missing_key。 */
+  fallback_reason?: string | null
 }
 
 export interface ProvidersResponse {
@@ -323,10 +329,26 @@ export interface ProvidersResponse {
   current?: ProviderCurrent | null
 }
 
+/** PUT /user/settings/providers 载荷（api_key 留空/掩码占位 = 保留已存 key）。 */
+export interface ProviderSettingsPayload {
+  provider?: string
+  model?: string
+  api_key?: string
+  base_url?: string
+  use_server_default?: boolean
+}
+
 /**
  * GET /user/settings/providers（request baseURL=/api/v1 → 完整路径
  * /api/v1/user/settings/providers）。统一客户端负责鉴权头、401 刷新与错误提示。
  */
 export const getUserSettingsProviders = async (): Promise<AxiosResponse<ProvidersResponse>> => {
   return request.get('/user/settings/providers')
+}
+
+/** PUT /user/settings/providers — 保存个人 AI 模型配置（保存后立即生效）。 */
+export const updateUserSettingsProviders = async (
+  data: ProviderSettingsPayload,
+): Promise<AxiosResponse<ProvidersResponse>> => {
+  return request.put('/user/settings/providers', data)
 }

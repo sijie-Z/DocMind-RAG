@@ -219,7 +219,7 @@ DocMind/
 │   │   ├── api/v1/
 │   │   │   ├── router.py            # 主路由（注册 29 个模块）
 │   │   │   └── endpoints/           # 端点实现（29 个文件）
-│   │   ├── services/                # 业务服务层（31 个服务）
+│   │   ├── services/                # 业务服务层（32 个服务）
 │   │   ├── models/                  # ORM 模型（21 个模型文件）
 │   │   ├── core/                    # 配置 / DB / Redis / ES / MinIO / Kafka / JWT
 │   │   └── worker/                  # Kafka 消费者（解析 → 分块 → 嵌入 → 索引）

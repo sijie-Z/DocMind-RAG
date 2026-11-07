@@ -1,17 +1,19 @@
 /**
- * W2-T7 项 1：个人设置 LLM Provider 诚实化（第三轮终检 §2.4「配置了却没反应」）。
+ * 个人设置「AI 模型设置」真实生效（替代 W2-T7 的「实验功能·暂不生效」标注）。
  *
- * 现状（修前）：① settingsChanged 只看语言/主题 → 改 provider 字段保存按钮不亮；
- * ② 保存时把 providerForm 整体塞进 preferences.ai_provider 落库，但后端全局
- *    无任何服务消费该字段（推理只走 .env 全局 DeepSeek）——纯陷阱配置；
- * ③ GET /settings/providers 返回的 api_key 是掩码值，若随保存回写还会覆盖真 key。
- * 决策（接线成本评估：rag_service 全局单例被 agent/core_tools/memory/delegation/
- * workflow 等 8+ 模块消费，真接线远超半天且涉 SSRF/明文密钥评审）→ 按任务书兜底
- * 走「实验功能·暂不生效」诚实标注 + 禁用保存路径。
+ * 本批要求：选择 provider/model/API key/base_url 后 Chat（RAG）与 Agent 的真实
+ * LLM 调用使用该配置。前端职责：
+ * - 控件启用（不再 disabled）、警告移除；
+ * - 保存走 PUT /user/settings/providers（独立于语言/主题保存）；
+ * - GET 回读的掩码 key 绝不作为新 key 回写（掩码时提交空串，后端保留真实 key）；
+ * - 「使用服务端默认」提交 use_server_default=true；
+ * - 保存后展示实际生效来源；四语词条齐备。
  *
  * 变异点：
- * - 保存 payload 重新带上 preferences.ai_provider → 用例 1 红；
- * - 删掉实验标注/不置 disabled → 用例 2/3 红。
+ * - 控件重新 disabled → 用例 1 红；
+ * - 保存仍把掩码 key 回写 → 用例 2 红；
+ * - use_server_default 未提交 → 用例 3 红；
+ * - 任一语缺词条 → 用例 4 红。
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
@@ -22,7 +24,13 @@ import naive, { NMessageProvider, NDialogProvider } from 'naive-ui'
 
 import { useProfilePage } from '../composables/useProfilePage'
 import ProfilePage from '../index.vue'
+import { getUserSettingsProviders } from '@/api/user'
 import zh from '@/locales/zh'
+import en from '@/locales/en'
+import ja from '@/locales/ja'
+import fr from '@/locales/fr'
+
+const { updateProvidersMock } = vi.hoisted(() => ({ updateProvidersMock: vi.fn() }))
 
 vi.mock('@/api/user', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/api/user')>()
@@ -45,17 +53,20 @@ vi.mock('@/api/user', async (importOriginal) => {
     updatePassword: vi.fn(),
     uploadAvatar: vi.fn(),
     revokeMySession: vi.fn(),
-    // T10：providers 加载改走统一客户端，此处隔离真实 axios（原 fetch stub 已失效）
     getUserSettingsProviders: vi.fn().mockResolvedValue({
       data: {
         success: true,
         providers: [
           { id: 'deepseek', name: 'DeepSeek', base_url: 'https://api.deepseek.com/v1', models: ['deepseek-chat'], requires_key: true },
+          { id: 'custom', name: '自定义 (OpenAI 兼容)', base_url: '', models: [], requires_key: true },
         ],
-        current: { provider: 'deepseek', model: 'deepseek-chat', api_key: 'sk-a...zzzz', base_url: '' },
+        current: {
+          provider: 'deepseek', model: 'deepseek-chat', api_key: 'sk-a...zzzz',
+          base_url: '', has_api_key: true, source: 'user',
+        },
       },
     }),
-    getAuditLogs: vi.fn().mockResolvedValue({ data: { success: true, data: { items: [], total: 0 } } }),
+    updateUserSettingsProviders: updateProvidersMock,
   }
 })
 vi.mock('vue-router', () => ({ useRouter: () => ({ push: vi.fn() }) }))
@@ -67,16 +78,6 @@ vi.mock('@/utils/echarts', () => ({
 }))
 
 const i18n = createI18n({ legacy: false, locale: 'zh', messages: { zh } })
-
-const fetchMock = vi.fn().mockResolvedValue({
-  ok: true,
-  json: async () => ({
-    providers: [
-      { id: 'deepseek', name: 'DeepSeek', base_url: 'https://api.deepseek.com/v1', models: ['deepseek-chat'], requires_key: true },
-    ],
-    current: { provider: 'deepseek', model: 'deepseek-chat', api_key: 'sk-a...zzzz', base_url: '' },
-  }),
-})
 
 let capturedApi: ReturnType<typeof useProfilePage>
 
@@ -96,70 +97,230 @@ function mountHarness() {
   return mount(Host, { global: { plugins: [pinia, i18n, naive] } })
 }
 
+function mountPage() {
+  const pinia = createPinia()
+  setActivePinia(pinia)
+  const Host = defineComponent({
+    render: () =>
+      h(NDialogProvider, null, { default: () => h(NMessageProvider, null, { default: () => h(ProfilePage) }) }),
+  })
+  return mount(Host, { global: { plugins: [pinia, i18n, naive] } })
+}
+
+async function openPreferencesTab(wrapper: ReturnType<typeof mountPage>) {
+  const tab = wrapper.findAll('.n-tabs-tab').find(t => t.text().includes('偏好设置'))
+  expect(tab, '「偏好设置」tab 应在屏（provider 区块宿主）').toBeTruthy()
+  await tab!.trigger('click')
+  await flushPromises()
+}
+
 beforeEach(() => {
-  vi.stubGlobal('fetch', fetchMock)
-  fetchMock.mockClear()
-})
-
-describe('W2-T7 · LLM Provider 保存路径（掩码密钥不得回写）', () => {
-  it('保存不再携带 ai_provider preferences（后端零消费 + 掩码回写风险一并拆除）', async () => {
-    mountHarness()
-    const spy = vi.spyOn(capturedApi.userStore, 'updateSettings').mockResolvedValue({ success: true } as never)
-    capturedApi.providerForm.api_key = 'sk-secret-123456'
-    capturedApi.providerForm.provider = 'deepseek'
-
-    await capturedApi.handleSaveSettings()
-
-    expect(spy).toHaveBeenCalledTimes(1)
-    const payload = spy.mock.calls[0][0] as Record<string, unknown>
-    expect(payload, `保存载荷不得再含 preferences（修前含 ai_provider）: ${JSON.stringify(payload)}`)
-      .not.toHaveProperty('preferences')
-    expect(payload).toHaveProperty('language')
-    expect(payload).toHaveProperty('theme')
+  updateProvidersMock.mockReset()
+  updateProvidersMock.mockResolvedValue({
+    data: {
+      success: true,
+      current: {
+        provider: 'deepseek', model: 'deepseek-chat', api_key: 'sk-a...zzzz',
+        base_url: '', has_api_key: true, source: 'user',
+      },
+    },
   })
 })
 
-describe('W2-T7 · LLM Provider 区块诚实标注 + 禁用（页面）', () => {
-  function mountPage() {
-    const pinia = createPinia()
-    setActivePinia(pinia)
-    const Host = defineComponent({
-      render: () =>
-        h(NDialogProvider, null, { default: () => h(NMessageProvider, null, { default: () => h(ProfilePage) }) }),
-    })
-    return mount(Host, { global: { plugins: [pinia, i18n, naive] } })
-  }
-
-  // n-tabs 懒渲染：provider 区块在「偏好设置」tab 内，先切换再断言
-  async function openPreferencesTab(wrapper: ReturnType<typeof mountPage>) {
-    const tab = wrapper.findAll('.n-tabs-tab').find(t => t.text().includes('偏好设置'))
-    expect(tab, '「偏好设置」tab 应在屏（provider 区块宿主）').toBeTruthy()
-    await tab!.trigger('click')
-    await flushPromises()
-  }
-
-  it('实验标注在屏：区块明示「暂不生效」', async () => {
+describe('AI 模型设置 · 页面启用（警告移除 + 控件可编辑）', () => {
+  it('不再出现「实验功能·暂不生效」警告', async () => {
     const wrapper = mountPage()
     await flushPromises()
     await flushPromises()
     await openPreferencesTab(wrapper)
 
     const text = wrapper.text()
-    expect(text).toContain('实验功能')
-    expect(text).toContain('暂不生效')
+    expect(text).not.toContain('实验功能')
+    expect(text).not.toContain('暂不生效')
+    expect(text).toContain('AI 模型设置')
   })
 
-  it('provider 表单控件全部 disabled（修复"能改但改了没用"的陷阱感）', async () => {
+  it('provider/model/API Key 控件可用（不再 disabled），并有保存按钮', async () => {
     const wrapper = mountPage()
     await flushPromises()
     await flushPromises()
     await openPreferencesTab(wrapper)
 
-    // 两个 n-select（provider/model）禁用：naive 内部渲染 n-base-selection--disabled
-    expect(wrapper.findAll('.n-base-selection--disabled').length).toBeGreaterThanOrEqual(2)
-    // API Key 输入（placeholder=sk-...，全页唯一）禁用
+    // source=user 时不应有禁用态 select
+    expect(wrapper.findAll('.n-base-selection--disabled').length).toBe(0)
     const pwd = wrapper.find('input[placeholder="sk-..."]')
     expect(pwd.exists()).toBe(true)
-    expect(pwd.attributes('disabled')).toBeDefined()
+    expect(pwd.attributes('disabled')).toBeUndefined()
+    expect(wrapper.text()).toContain('保存模型设置')
   })
+})
+
+describe('AI 模型设置 · 保存路径', () => {
+  it('保存调用 PUT providers，掩码 key 提交空串（不得回写覆盖真实 key）', async () => {
+    mountHarness()
+    await flushPromises()
+    await flushPromises()
+
+    expect(capturedApi.providerForm.api_key).toBe('sk-a...zzzz')
+    await capturedApi.handleSaveProviders()
+
+    expect(updateProvidersMock).toHaveBeenCalledTimes(1)
+    const payload = updateProvidersMock.mock.calls[0][0] as Record<string, unknown>
+    expect(payload.provider).toBe('deepseek')
+    expect(payload.model).toBe('deepseek-chat')
+    expect(payload.api_key, '掩码 key 不得作为新 key 回写').toBe('')
+    expect(payload).not.toHaveProperty('use_server_default')
+    expect(capturedApi.providerSaveSuccess.value).toBe(true)
+  })
+
+  it('输入新 key 时按明文提交（由后端加密落库）', async () => {
+    mountHarness()
+    await flushPromises()
+    await flushPromises()
+
+    capturedApi.providerForm.api_key = 'sk-new-key-987654321'
+    await capturedApi.handleSaveProviders()
+
+    const payload = updateProvidersMock.mock.calls[0][0] as Record<string, unknown>
+    expect(payload.api_key).toBe('sk-new-key-987654321')
+  })
+
+  it('切换 provider 清空旧 key 掩码；切回已保存 provider 恢复掩码', async () => {
+    mountHarness()
+    await flushPromises()
+    await flushPromises()
+
+    expect(capturedApi.providerForm.api_key).toBe('sk-a...zzzz')
+    capturedApi.onProviderChange('openai')
+    expect(capturedApi.providerForm.api_key, '切换 provider 不得复用旧 key 掩码').toBe('')
+    expect(capturedApi.providerForm.hasApiKey).toBe(false)
+
+    // 新 provider 未填 key：保存被拦截，不得把空 key 发给后端
+    capturedApi.providerForm.provider = 'openai'
+    capturedApi.providerForm.model = 'gpt-4o'
+    await capturedApi.handleSaveProviders()
+    expect(updateProvidersMock).not.toHaveBeenCalled()
+
+    capturedApi.onProviderChange('deepseek')
+    expect(capturedApi.providerForm.api_key).toBe('sk-a...zzzz')
+    expect(capturedApi.providerForm.hasApiKey).toBe(true)
+  })
+
+  it('切回已保存的 custom provider 恢复 model/base_url/掩码', async () => {
+    vi.mocked(getUserSettingsProviders).mockResolvedValueOnce({
+      data: {
+        success: true,
+        providers: [
+          { id: 'deepseek', name: 'DeepSeek', base_url: 'https://api.deepseek.com/v1', models: ['deepseek-chat'], requires_key: true },
+          { id: 'custom', name: '自定义 (OpenAI 兼容)', base_url: '', models: [], requires_key: true },
+        ],
+        current: {
+          provider: 'custom', model: 'my-model', api_key: 'sk-a...zzzz',
+          base_url: 'http://localhost:9999/v1', has_api_key: true, source: 'user',
+          has_saved_config: true,
+        },
+      },
+    } as never)
+    mountHarness()
+    await flushPromises()
+    await flushPromises()
+
+    expect(capturedApi.providerForm.model).toBe('my-model')
+    expect(capturedApi.providerForm.base_url).toBe('http://localhost:9999/v1')
+
+    capturedApi.onProviderChange('deepseek')
+    expect(capturedApi.providerForm.model).toBe('deepseek-chat')
+    expect(capturedApi.providerForm.api_key).toBe('')
+
+    capturedApi.onProviderChange('custom')
+    expect(capturedApi.providerForm.model).toBe('my-model')
+    expect(capturedApi.providerForm.base_url).toBe('http://localhost:9999/v1')
+    expect(capturedApi.providerForm.api_key).toBe('sk-a...zzzz')
+  })
+
+  it('保存了但不可用：提示回退且不勾选服务端默认', async () => {
+    const fallbackPayload = {
+      success: true,
+      providers: [
+        { id: 'deepseek', name: 'DeepSeek', base_url: 'https://api.deepseek.com/v1', models: ['deepseek-chat'], requires_key: true },
+      ],
+      current: {
+        provider: 'deepseek', model: 'deepseek-chat', api_key: '',
+        base_url: '', has_api_key: false, source: 'server',
+        has_saved_config: true, fallback_reason: 'missing_key',
+      },
+    }
+    vi.mocked(getUserSettingsProviders).mockResolvedValueOnce({ data: fallbackPayload } as never)
+    mountHarness()
+    await flushPromises()
+    await flushPromises()
+
+    expect(capturedApi.providerForm.source).toBe('server')
+    expect(capturedApi.providerForm.useServerDefault).toBe(false)
+    expect(capturedApi.providerForm.hasSavedConfig).toBe(true)
+
+    vi.mocked(getUserSettingsProviders).mockResolvedValueOnce({ data: fallbackPayload } as never)
+    const wrapper = mountPage()
+    await flushPromises()
+    await flushPromises()
+    await openPreferencesTab(wrapper)
+    expect(wrapper.find('[data-testid="provider-fallback-hint"]').exists()).toBe(true)
+  })
+
+  it('「使用服务端默认」提交 use_server_default=true', async () => {
+    mountHarness()
+    await flushPromises()
+    await flushPromises()
+
+    capturedApi.providerForm.useServerDefault = true
+    await capturedApi.handleSaveProviders()
+
+    const payload = updateProvidersMock.mock.calls[0][0] as Record<string, unknown>
+    expect(payload).toEqual({ use_server_default: true })
+  })
+
+  it('保存失败时如实提示错误（不静默）', async () => {
+    updateProvidersMock.mockRejectedValueOnce(
+      Object.assign(new Error('bad request'), {
+        response: { data: { detail: '该提供商需要 API Key' } },
+      }),
+    )
+    mountHarness()
+    await flushPromises()
+    await flushPromises()
+
+    await capturedApi.handleSaveProviders()
+    expect(capturedApi.providerSaveSuccess.value).toBe(false)
+    expect(capturedApi.providerSaveMessage.value).toContain('API Key')
+  })
+})
+
+describe('AI 模型设置 · 四语词条齐备', () => {
+  const keys = [
+    'aiProviderTitle',
+    'aiProviderDesc',
+    'aiProviderUseServerDefault',
+    'aiProviderUseServerDefaultDesc',
+    'aiProviderProvider',
+    'aiProviderModel',
+    'aiProviderKeyHint',
+    'aiProviderSave',
+    'aiProviderSavedUser',
+    'aiProviderSavedServer',
+    'aiProviderSaveFailed',
+    'aiProviderModelRequired',
+    'aiProviderKeyRequired',
+    'aiProviderSourceUser',
+    'aiProviderSourceServer',
+  ] as const
+
+  for (const [name, messages] of Object.entries({ zh, en, ja, fr })) {
+    it(`${name} 含全部 AI 模型设置词条`, () => {
+      const profile = (messages as unknown as { profile: Record<string, string> }).profile
+      for (const key of keys) {
+        expect(profile[key], `${name} 缺少 profile.${key}`).toBeTruthy()
+        expect(profile[key]).not.toBe(`profile.${key}`)
+      }
+    })
+  }
 })

@@ -678,8 +678,13 @@ class RAGPipeline:
         enable_masking: bool = True,
         mask_mapping_sink: dict | None = None,
         model_override: str | None = None,
+        client_override: AsyncOpenAI | None = None,
     ) -> AsyncGenerator[str, None]:
         """Stream LLM response with context compression and optional PII masking.
+
+        ``client_override``：个人设置解析出的 per-user 客户端（Chat/RAG 消费点）。
+        为 None 时保持既有行为（全局 ``self.openai_client``）。embedding/rerank/
+        查询分解仍走全局配置——只覆盖答案生成。
 
         PII 掩码链路（安全加固）：
         1. 检索上下文与用户 query 在进入 prompt 前统一掩码（编号全局唯一）；
@@ -687,7 +692,8 @@ class RAGPipeline:
         3. 结束时把 context/query 的占位符映射写入 mask_mapping_sink（引用传递），
            调用方可据此还原"引用型"占位符；模型自行新生成的 PII 占位符不还原。
         """
-        if not self.openai_client:
+        llm_client = client_override or self.openai_client
+        if not llm_client:
             # 配置缺失 = 生成能力不可用，不是回答内容。此前 yield "LLM未配置"
             # 会被上层当成正文逐字累加、落库并写记忆；改为抛出显式异常，
             # 由聊天管线以 error 事件返回（不进入内容累加与落库路径）。
@@ -811,7 +817,7 @@ class RAGPipeline:
                 settings.LOCAL_LLM_MODEL if settings.ENABLE_LOCAL_LLM else settings.DEEPSEEK_MODEL
             )
             stream = await create_chat_completion(
-                self.openai_client,
+                llm_client,
                 # issue #467：连接阶段短超时（默认 1.5s）独立于流式读预算——
                 # LLM 端点不可达时不再等满 AI_STREAM_TIMEOUT（120s）或 SDK 重试。
                 # 读阶段仍沿用 AI_STREAM_TIMEOUT；流内容迭代不在本函数内重试。
@@ -867,5 +873,9 @@ class RAGPipeline:
 
         except Exception as e:
             LLM_REQUEST_ERRORS.inc()
-            logger.error(f"LLM streaming failed: {e}", exc_info=True)
+            if client_override is not None:
+                # 个人设置密钥不得写日志：异常文本可能回显 key 片段，只记录异常类型。
+                logger.error("LLM streaming failed (user provider): %s", type(e).__name__)
+            else:
+                logger.error(f"LLM streaming failed: {e}", exc_info=True)
             yield "系统处理异常，请重试"

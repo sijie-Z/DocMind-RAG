@@ -35,3 +35,18 @@ class UserSettingsResponse(UserSettingsBase):
     user_id: int
     created_at: datetime | None = None
     updated_at: datetime | None = None
+
+
+class ProviderSettingsUpdate(BaseModel):
+    """个人 AI Provider 设置更新模型。
+
+    - ``use_server_default=True``：清除个人配置，回退服务端默认（其余字段忽略）；
+    - ``api_key`` 留空或回传掩码占位值时保留已存 key（掩码回写保护）；
+    - ``base_url`` 留空时使用 provider 内置地址（custom 必填）。
+    """
+
+    provider: str | None = None
+    model: str | None = None
+    api_key: str | None = None
+    base_url: str | None = None
+    use_server_default: bool = False

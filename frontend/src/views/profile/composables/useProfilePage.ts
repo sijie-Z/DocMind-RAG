@@ -27,7 +27,7 @@ import {
   PhonePortraitOutline,
   TabletPortraitOutline,
 } from '@vicons/ionicons5'
-import { getUserProfile, getUserStats, updateUserProfile, updatePassword, uploadAvatar, getUserActivities, getMySessions, revokeMySession, getMyActivityLogs, getUserSettingsProviders } from '@/api/user'
+import { getUserProfile, getUserStats, updateUserProfile, updatePassword, uploadAvatar, getUserActivities, getMySessions, revokeMySession, getMyActivityLogs, getUserSettingsProviders, updateUserSettingsProviders } from '@/api/user'
 import type { Activity, UserSession, UserAuditLog } from '@/api/user'
 import { formatDate } from '@/utils/format'
 import { LANGUAGES, isLanguageCode } from '@/utils/languages'
@@ -419,9 +419,20 @@ const savingSettings = ref(false)
 const settingsSaveMessage = ref('')
 const settingsSaveSuccess = ref(false)
 
-// AI Provider form
+// AI Provider form（本批：真实生效——保存后 Chat/Agent 的 LLM 调用使用该配置）
 const providers = ref<ProviderDef[]>([])
-const providerForm = reactive({ provider: 'deepseek', model: 'deepseek-v4-flash', api_key: '', base_url: '' })
+const providerForm = reactive({
+  provider: 'deepseek',
+  model: 'deepseek-v4-flash',
+  api_key: '',
+  base_url: '',
+  // 「使用服务端默认」：source=server 时初始化勾选；保存时清除个人配置。
+  useServerDefault: false,
+  source: 'server' as 'user' | 'server',
+  hasApiKey: false,
+  // 是否存有个人配置（即使当前回退服务端默认也保留，供提示与表单恢复）。
+  hasSavedConfig: false,
+})
 
 interface ProviderDef { id: string; name: string; base_url: string; models: string[]; requires_key: boolean }
 const providerOptions = computed(() => providers.value.map(p => ({ label: p.name, value: p.id })))
@@ -429,12 +440,33 @@ const currentProvider = computed(() => providers.value.find(p => p.id === provid
 const currentModelOptions = computed(() => (currentProvider.value?.models || []).map(m => ({ label: m, value: m })))
 const currentProviderNeedsKey = computed(() => currentProvider.value?.requires_key ?? true)
 
+// 已保存的个人 provider 与其掩码 key：切换 provider 时不得把旧 provider 的
+// key 静默复用到新 provider（后端同时强制要求重新填写）。
+const savedProvider = ref('')
+const savedMaskedKey = ref('')
+const savedModel = ref('')
+const savedBaseUrl = ref('')
+
+/** 掩码占位（sk-a...zzzz / ********）：保存时不得当作新 key 回写。 */
+const isMaskedApiKey = (value: string) => value.includes('...') || value.includes('*')
+
 const onProviderChange = (pid: string) => {
   const p = providers.value.find(x => x.id === pid)
-  if (p) {
-    providerForm.model = p.models[0] || ''
-    providerForm.base_url = p.base_url || ''
+  if (pid === savedProvider.value) {
+    // 切回已保存的 provider：恢复已存的 model/base URL/掩码 key，避免用户重填。
+    providerForm.model = savedModel.value || p?.models[0] || ''
+    providerForm.base_url = savedBaseUrl.value || p?.base_url || ''
+    providerForm.api_key = savedMaskedKey.value
+    providerForm.hasApiKey = Boolean(savedMaskedKey.value)
+  } else {
+    if (p) {
+      providerForm.model = p.models[0] || ''
+      providerForm.base_url = p.base_url || ''
+    }
+    providerForm.api_key = ''
+    providerForm.hasApiKey = false
   }
+  providerForm.useServerDefault = false
 }
 
 // Provider 配置加载错误态（通知 store 同款：失败可判别；状态只在成功路径复位）
@@ -453,14 +485,75 @@ const loadProviders = async () => {
     if (cur) {
       providerForm.provider = cur.provider
       providerForm.model = cur.model
+      // 后端只回掩码；输入框展示掩码，保存时后端识别占位并保留真实 key。
       providerForm.api_key = cur.api_key || ''
       providerForm.base_url = cur.base_url || ''
+      providerForm.source = cur.source === 'user' ? 'user' : 'server'
+      providerForm.hasApiKey = Boolean(cur.has_api_key)
+      const hasSaved = Boolean(cur.has_saved_config) || providerForm.source === 'user'
+      providerForm.hasSavedConfig = hasSaved
+      // 保存过但当前不可解析（source=server + has_saved_config）时不要勾选
+      // 「使用服务端默认」——保留表单让用户修正 Key/Base URL。
+      providerForm.useServerDefault = providerForm.source === 'server' && !hasSaved
+      savedProvider.value = hasSaved ? cur.provider : ''
+      savedMaskedKey.value = hasSaved ? (cur.api_key || '') : ''
+      savedModel.value = hasSaved ? (cur.model || '') : ''
+      savedBaseUrl.value = hasSaved ? (cur.base_url || '') : ''
     }
     providersLoadError.value = null
   } catch (error) {
     // 失败保留上一次成功值（不清空 providers/providerForm），错误态显式上报——
     // 否则加载失败与"确实没有可选项"不可区分（与通知 store 的 lastError 同口径）。
     providersLoadError.value = error instanceof Error ? error.message : String(error)
+  }
+}
+
+// AI 模型设置保存（独立于语言/主题，避免把 provider 配置混入 preferences 覆盖）
+const savingProviders = ref(false)
+const providerSaveMessage = ref('')
+const providerSaveSuccess = ref(false)
+
+const handleSaveProviders = async () => {
+  savingProviders.value = true
+  providerSaveMessage.value = ''
+  providerSaveSuccess.value = false
+  try {
+    if (providerForm.useServerDefault) {
+      await updateUserSettingsProviders({ use_server_default: true })
+      providerSaveMessage.value = t('profile.aiProviderSavedServer')
+      providerSaveSuccess.value = true
+    } else {
+      if (!providerForm.model.trim()) {
+        providerSaveMessage.value = t('profile.aiProviderModelRequired')
+        providerSaveSuccess.value = false
+        return
+      }
+      if (
+        currentProviderNeedsKey.value
+        && !providerForm.api_key.trim()
+        && !providerForm.hasApiKey
+      ) {
+        providerSaveMessage.value = t('profile.aiProviderKeyRequired')
+        providerSaveSuccess.value = false
+        return
+      }
+      await updateUserSettingsProviders({
+        provider: providerForm.provider,
+        model: providerForm.model,
+        // 掩码/空值：后端保留已存 key（掩码回写保护）。绝不把掩码当新 key。
+        api_key: isMaskedApiKey(providerForm.api_key) ? '' : providerForm.api_key,
+        base_url: providerForm.base_url,
+      })
+      providerSaveMessage.value = t('profile.aiProviderSavedUser')
+      providerSaveSuccess.value = true
+    }
+    await loadProviders()
+  } catch (error) {
+    providerSaveMessage.value = getResponseDetail(error) || t('profile.aiProviderSaveFailed')
+    providerSaveSuccess.value = false
+  } finally {
+    savingProviders.value = false
+    setTimeout(() => { providerSaveMessage.value = '' }, 4000)
   }
 }
 
@@ -483,10 +576,8 @@ const handleSaveSettings = async () => {
       })
     }
     // Save to backend
-    // W2-T7：不再携带 preferences.ai_provider——后端全局无任何服务消费该字段
-    // （推理只走 .env 全局 DeepSeek），且 GET /settings/providers 回读的 api_key
-    // 是掩码值，随保存回写会覆盖真实 key。provider 区块已按「实验功能·暂不生效」
-    // 标注并禁用（见 profile/index.vue），保存仅剩语言/主题两个真实生效字段。
+    // 本批：AI Provider 配置不再随语言/主题保存（避免掩码 key 回写风险），
+    // 改由独立的 PUT /user/settings/providers 保存（handleSaveProviders）。
     const result = await userStore.updateSettings({
       language: settingsForm.language,
       theme: settingsForm.theme,
@@ -939,6 +1030,8 @@ onUnmounted(() => {
   providers, providerForm, providerOptions, currentProvider,
   currentModelOptions, currentProviderNeedsKey, providersLoadError,
   onProviderChange, loadProviders, settingsChanged, handleSaveSettings,
+  savingProviders, providerSaveMessage, providerSaveSuccess, handleSaveProviders,
+  isMaskedApiKey,
   updatingProfile, updatingPassword,
   storageChartRef, activityChartRef, initCharts, handleResize,
   editFormRef, passwordFormRef, editForm, passwordForm,
