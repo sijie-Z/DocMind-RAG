@@ -224,7 +224,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { NAlert, NButton, NEmpty, NIcon, NResult, NSkeleton, NTag } from 'naive-ui'
@@ -472,6 +472,12 @@ watch(locale, () => {
   setPageTitleText(
     detail.value.title || detail.value.filename || t('knowledge.documentDetail.titleFallback')
   )
+})
+
+// 直接卸载（非路由切换）时让在途详情/分块响应失效，避免回写标题或状态。
+onBeforeUnmount(() => {
+  documentSeq += 1
+  chunkSeq += 1
 })
 
 watch(

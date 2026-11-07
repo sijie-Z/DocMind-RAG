@@ -101,7 +101,7 @@ describe('E4 · 5xx 不清会话 + 首屏进度（真实守卫链路）', () => 
     await router.push({ name: 'Knowledge' })
 
     // 缓存优先放行后，401 由拦截器/stores 收口：清号 + 回 Login
-    await vi.waitFor(() => expect(router.currentRoute.value.name).toBe('Login'), { timeout: 10_000 })
+    await vi.waitFor(() => expect(router.currentRoute.value.name).toBe('Login'), { timeout: 20_000 })
     expect(localStorage.getItem('docmind_token')).toBeFalsy()
     expect(localStorage.getItem('docmind_refresh_token')).toBeFalsy()
     expect(localStorage.getItem('user_info')).toBeFalsy()

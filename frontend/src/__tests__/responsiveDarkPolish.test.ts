@@ -210,3 +210,24 @@ describe('E16-H5 · firsthome 暗色适配', () => {
     expect(gradient, '暗色渐变应为亮蓝系').toMatch(/#(?:60a5fa|93c5fd|bfdbfe)/i)
   })
 })
+
+
+describe('触控与证据网格断点（UI 收口批）', () => {
+  it('检索结果操作在 ≤1024 为 44×44，弹窗按钮同样 44px', () => {
+    const search = read('src/views/search.vue')
+    expect(search).toContain('@media (max-width: 1024px)')
+    expect(search).toContain('.result-action.n-button { min-height: 44px; min-width: 44px; }')
+    expect(search).toContain('.search-result-detail-modal .n-button')
+  })
+
+  it('核验证据 768 单列、1024 起两列（不再用 md 断点堆叠控件）', () => {
+    const reviews = read('src/views/reviews/detail.vue')
+    expect(reviews).toContain('lg:grid-cols-2 xl:grid-cols-3')
+    expect(reviews).not.toContain('md:grid-cols-2 xl:grid-cols-3')
+  })
+
+  it('知识库详情/解析错误弹窗 ≤1024 按钮 44px', () => {
+    const modal = read('src/views/knowledge/components/KnowledgeDetailModals.vue')
+    expect(modal).toMatch(/@media \(max-width: 1024px\)/)
+  })
+})

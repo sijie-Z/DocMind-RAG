@@ -15,6 +15,7 @@ import type { Plugin } from 'vue'
 import zh from '@/locales/zh'
 import en from '@/locales/en'
 import Detail from '../detail.vue'
+import { setPageTitleText } from '@/locales'
 import {
   getDocumentChunk,
   getDocumentContent,
@@ -187,6 +188,8 @@ describe('文档深链页 · 定位与降级', () => {
   })
 
   it('403：显示无权访问，不泄露文档内容', async () => {
+    // 先种下旧文档标题，确保断言不依赖前一个用例的残留状态。
+    setPageTitleText('软件采购合同')
     mockedDetail.mockRejectedValueOnce({ response: { status: 403 } })
     const { wrapper } = await mountPage('/knowledge/doc-1')
 
