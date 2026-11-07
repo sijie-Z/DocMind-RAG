@@ -519,6 +519,10 @@ async def test_decision_export_and_download_flow(factory):
         assert "text/markdown" in markdown.headers["content-type"]
         assert "# 核验单" in markdown.text
         assert "本核验单仅覆盖本次选定的条款与文档版本" in markdown.text
+        # 报告自证审计身份：导出编号/生成时间/快照哈希必须进入正文。
+        assert "导出编号：" in markdown.text
+        assert "生成时间：" in markdown.text and "UTC" in markdown.text
+        assert "快照哈希：" in markdown.text
 
         detail = await ac.get(f"/api/v1/reviews/{case['id']}")
         assert detail.json()["data"]["status"] == "completed"

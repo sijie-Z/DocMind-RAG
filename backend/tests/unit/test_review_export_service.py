@@ -596,7 +596,7 @@ def test_markdown_ambiguous_facts_and_unknown_codes_are_explicit():
                 },
             },
             {
-                "item_key": "custom_item",
+                "item_key": "custom_item\n## 注入|x",
                 "change_type": "modified_v2",
                 "status": "mystery",
                 "facts": {
@@ -618,12 +618,31 @@ def test_markdown_ambiguous_facts_and_unknown_codes_are_explicit():
                 "facts": None,
                 "evidence": {"base": [], "revised": [], "policy": []},
             },
+            {
+                "item_key": "start_condition",
+                "change_type": "modified",
+                "status": "verified",
+                "facts": {
+                    "base": {
+                        "status": "ambiguous",
+                        "reason": "reference_unresolved",
+                        "clause_no": [],
+                        "section_no": [],
+                        "page_number": None,
+                    }
+                },
+                "evidence": {
+                    "base": [{}],
+                    "revised": [],
+                    "policy": [],
+                },
+            },
         ],
         coverage={
-            "checklist_items": ["payment_term", "custom_item"],
+            "checklist_items": ["payment_term", "custom_item\n## 注入|x"],
             "unidentified_items": ["exception"],
             "needs_human_items": ["payment_term"],
-            "items_without_selected_evidence": ["custom_item"],
+            "items_without_selected_evidence": ["custom_item\n## 注入|x"],
         },
     )
     markdown = svc.render_markdown(payload)
@@ -632,13 +651,97 @@ def test_markdown_ambiguous_facts_and_unknown_codes_are_explicit():
     assert "候选：10个工作日 / 30日" in markdown
     assert "第 2.1 节" in markdown
     assert "快照已过期" in markdown
-    assert "未识别" in markdown
+    assert "- 合同修订版：未识别" in markdown, "not_found 必须在事实行如实标注"
+    assert "引用的条款无法定位" in markdown, "生产路径原因码必须本地化"
+    assert "reference_unresolved" not in markdown
     assert "some_new_code" in markdown, "未知原因码必须透传"
     assert "custom_item" in markdown, "未知核验项不得丢弃"
     assert "mystery" in markdown, "未知状态不得丢弃"
-    # 文档内容里的换行不得注入新行/新章节。
+    assert "mystery 1" in markdown, "未知状态也要计入汇总"
+    # 文档内容/未知键里的换行与 Markdown 结构不得注入新行/新章节。
     assert "\nz" not in markdown
+    assert "\n## 注入" not in markdown
     assert "x|y z" in markdown
+    # 字段缺失的证据行不得崩溃，定位如实标注。
+    assert "定位未记录：" in markdown
     # 无文本事实的旧快照/未识别项仍可渲染决策，不伪造事实段。
     assert "### 例外/暂缓/另有约定（未识别）" in markdown
-    assert "- 固定核验项：付款期限、custom_item" in markdown
+    assert "- 固定核验项：付款期限、custom_item ## 注入|x" in markdown
+
+
+def test_markdown_handles_missing_coverage_and_disclaimer():
+    """旧快照字段缺失时不得崩溃；免责声明回退到常量。"""
+    payload = _synthetic_payload([])
+    payload.pop("coverage")
+    payload.pop("disclaimer")
+    markdown = svc.render_markdown(payload)
+    assert "## 覆盖范围" in markdown
+    assert "- 固定核验项：无" in markdown
+    assert "不构成法律意见" in markdown
+
+
+def test_markdown_fact_comparison_ignores_candidate_order():
+    """候选/词元顺序不同（集合相同）不得被当作事实变化。"""
+    payload = _synthetic_payload(
+        [
+            {
+                "item_key": "start_condition",
+                "change_type": "modified",
+                "status": "verified",
+                "facts": {
+                    "base": {"status": "identified", "events": ["验收合格", "收到发票"]},
+                    "revised": {"status": "identified", "events": ["收到发票", "验收合格"]},
+                },
+                "evidence": {"base": [], "revised": [], "policy": []},
+            }
+        ]
+    )
+    markdown = svc.render_markdown(payload)
+    assert "文本事实一致；差异来自正文或条号变化" in markdown
+
+
+def test_markdown_export_meta_and_utc_times():
+    """导出元数据进入报告；决策时间显式 UTC，带偏移时正确换算。"""
+    payload = _synthetic_payload(
+        [
+            {
+                "item_key": "payment_term",
+                "change_type": "unchanged",
+                "status": "verified",
+                "decided_by": 7,
+                "decided_at": "2026-11-07T23:43:30+08:00",
+                "decision_note": None,
+                "facts": {},
+                "evidence": {"base": [], "revised": [], "policy": []},
+            }
+        ]
+    )
+    markdown = svc.render_markdown(
+        payload,
+        export_meta={
+            "export_id": "exp-123",
+            "created_at": "2026-11-07T15:44:00",
+            "payload_sha256": "a" * 64,
+        },
+    )
+    assert "导出编号：exp-123" in markdown
+    assert "生成时间：2026-11-07 15:44:00 UTC" in markdown
+    assert f"快照哈希：{'a' * 64}" in markdown
+    assert "2026-11-07 15:43:30 UTC" in markdown
+    assert "T15:43:30" not in markdown
+
+    naive_payload = _synthetic_payload(
+        [
+            {
+                "item_key": "payment_term",
+                "change_type": "unchanged",
+                "status": "verified",
+                "decided_at": "2026-11-07T15:43:30",
+                "facts": {},
+                "evidence": {"base": [], "revised": [], "policy": []},
+            }
+        ]
+    )
+    naive_markdown = svc.render_markdown(naive_payload)
+    assert "2026-11-07 15:43:30 UTC" in naive_markdown
+    assert "导出编号" not in naive_markdown

@@ -84,6 +84,7 @@ FACT_STATUS_LABELS = {"identified": "已识别", "ambiguous": "存疑", "not_fou
 FACT_REASON_LABELS = {
     "unit_unclear": "单位无法判定（自然日/工作日）",
     "multiple_durations": "同一核验项出现多个期限候选",
+    "reference_unresolved": "引用的条款无法定位",
 }
 UNIT_LABELS = {"day": "自然日", "workday": "工作日", "month": "个月"}
 
@@ -387,14 +388,29 @@ async def audit_download(
 
 
 def _cell(value: Any) -> str:
-    """表格单元转义：竖线破坏列、换行破坏行。"""
-    text = "" if value is None else str(value)
-    return text.replace("|", "\\|").replace("\n", " ")
+    """表格单元转义：先折叠空白（含 \\r/\\t），再转义竖线，避免破坏行列。"""
+    return _flatten(value).replace("|", "\\|")
 
 
 def _flatten(value: Any) -> str:
     text = "" if value is None else str(value)
     return " ".join(text.split())
+
+
+def _format_time(value: Any) -> str:
+    """时间统一为显式 UTC；数据库读回的 naive 时间是 UTC，不能裸输出误导为本地时间。"""
+    text = _flatten(value)
+    if not text:
+        return ""
+    try:
+        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        return text
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=UTC)
+    else:
+        parsed = parsed.astimezone(UTC)
+    return parsed.strftime("%Y-%m-%d %H:%M:%S UTC")
 
 
 def _label(mapping: dict[str, str], value: Any) -> str:
@@ -456,7 +472,7 @@ def _fact_values(fact: dict[str, Any]) -> str:
     for key, label in (
         ("events", "起算事件"),
         ("terms", "命中词"),
-        ("cross_refs", "引用条款"),
+        ("cross_refs", "交叉引用"),
     ):
         values = fact.get(key)
         if isinstance(values, list) and values:
@@ -482,6 +498,37 @@ def _fact_text(fact: Any) -> str:
     return _label(FACT_STATUS_LABELS, status) or "—"
 
 
+def _fact_signature(fact: Any) -> tuple[str, tuple[str, ...], str] | None:
+    """事实的集合语义签名：候选/词元/引用顺序不同不算事实变化。"""
+    if not isinstance(fact, dict):
+        return None
+    values: list[str] = []
+    candidates = fact.get("candidates")
+    if isinstance(candidates, list):
+        for candidate in candidates:
+            if isinstance(candidate, dict):
+                raw = candidate.get("raw")
+                if raw:
+                    values.append(_flatten(raw))
+                elif candidate.get("value") is not None:
+                    unit = _unit_text(candidate.get("unit_raw"), candidate.get("unit"))
+                    values.append(_flatten(f"{candidate.get('value')} {unit}"))
+            elif candidate is not None:
+                values.append(_flatten(candidate))
+    if fact.get("value") is not None:
+        unit = _unit_text(fact.get("unit_raw"), fact.get("unit"))
+        values.append(_flatten(f"{fact.get('value')} {unit}"))
+    for key in ("events", "terms", "cross_refs"):
+        raw_values = fact.get(key)
+        if isinstance(raw_values, list):
+            values.extend(_flatten(value) for value in raw_values if value is not None)
+    return (
+        str(fact.get("status") or ""),
+        tuple(sorted(values)),
+        _flatten(fact.get("reason") or ""),
+    )
+
+
 def _fact_locator(fact: Any) -> str:
     if not isinstance(fact, dict):
         return ""
@@ -502,15 +549,27 @@ def _status_summary(items: list[dict[str, Any]]) -> str:
     )
 
 
-def render_markdown(payload: dict[str, Any]) -> str:
+def render_markdown(payload: dict[str, Any], *, export_meta: dict[str, Any] | None = None) -> str:
     """把导出 payload 渲染为可交付的 Markdown 报告。
 
     内容只来自快照：事实歧义列出候选与原因，未识别如实标注，不引入第二套真源。
+    ``export_meta`` 只含快照行元数据（导出编号/生成时间/哈希），不参与 payload 哈希。
     """
     case = payload["case"]
+    documents = payload.get("documents") or {}
     items = payload.get("items") or []
     lines = [f"# 核验单：{_flatten(case.get('title'))}", ""]
     lines.append(f"- 案件：{_flatten(case.get('id'))}")
+    if export_meta:
+        meta_parts: list[str] = []
+        if export_meta.get("export_id"):
+            meta_parts.append(f"导出编号：{_flatten(export_meta['export_id'])}")
+        if export_meta.get("created_at"):
+            meta_parts.append(f"生成时间：{_format_time(export_meta['created_at'])}")
+        if export_meta.get("payload_sha256"):
+            meta_parts.append(f"快照哈希：{_flatten(export_meta['payload_sha256'])}")
+        if meta_parts:
+            lines.append("- " + " · ".join(meta_parts))
     lines.append(f"- 清单版本：{_flatten(case.get('checklist_version'))}")
     lines.append(f"- 源文档在建案后发生变化：{'是' if payload.get('source_stale') else '否'}")
     summary = _status_summary(items)
@@ -521,7 +580,7 @@ def render_markdown(payload: dict[str, Any]) -> str:
     lines.append("| 侧 | 文件 | 版本 | 内容哈希 |")
     lines.append("| --- | --- | --- | --- |")
     for side in REVIEW_SIDES:
-        entry = payload["documents"].get(side) or {}
+        entry = documents.get(side) or {}
         lines.append(
             f"| {_cell(_label(SIDE_LABELS, side))} | {_cell(entry.get('filename') or '')} | "
             f"{_cell(entry.get('version_label') or '')} | {_cell(entry.get('content_sha256') or '')} |"
@@ -537,7 +596,7 @@ def render_markdown(payload: dict[str, Any]) -> str:
             f"{_cell(_label(CHANGE_TYPE_LABELS, item.get('change_type')))} | "
             f"{_cell(_label(ITEM_STATUS_LABELS, item.get('status')))} | "
             f"{_cell(f'#{decided_by}' if decided_by is not None else '')} | "
-            f"{_cell(item.get('decided_at') or '')} | {_cell(item.get('decision_note') or '')} |"
+            f"{_cell(_format_time(item.get('decided_at')))} | {_cell(item.get('decision_note') or '')} |"
         )
     lines.append("")
     lines.append("## 逐项核验")
@@ -550,7 +609,7 @@ def render_markdown(payload: dict[str, Any]) -> str:
         if decided_by is not None:
             lines.append(f"- 决策人：#{_flatten(decided_by)}")
         if item.get("decided_at"):
-            lines.append(f"- 决策时间：{_flatten(item.get('decided_at'))}")
+            lines.append(f"- 决策时间：{_format_time(item.get('decided_at'))}")
         note = item.get("decision_note")
         if note and str(note).strip():
             lines.append(f"- 说明：{_flatten(note)}")
@@ -569,11 +628,12 @@ def render_markdown(payload: dict[str, Any]) -> str:
             lines.extend(fact_lines)
         base_fact = facts.get("base") if isinstance(facts, dict) else None
         revised_fact = facts.get("revised") if isinstance(facts, dict) else None
+        base_signature = _fact_signature(base_fact)
+        revised_signature = _fact_signature(revised_fact)
         if (
             item.get("change_type") in ("modified", "renumbered")
-            and isinstance(base_fact, dict)
-            and isinstance(revised_fact, dict)
-            and _fact_text(base_fact) == _fact_text(revised_fact)
+            and base_signature is not None
+            and base_signature == revised_signature
         ):
             # 与工作台口径一致：差异来自正文/条号时，不拿相同的提取值硬造对比。
             lines.append("")
@@ -583,8 +643,9 @@ def render_markdown(payload: dict[str, Any]) -> str:
     for item in items:
         lines.append(f"### {_flatten(_label(ITEM_LABELS, item.get('item_key')))}")
         has_evidence = False
+        evidence = item.get("evidence") or {}
         for side in REVIEW_SIDES:
-            for row in item["evidence"].get(side) or []:
+            for row in evidence.get(side) or []:
                 has_evidence = True
                 locator = _locator_text(
                     row.get("clause_no"), row.get("section_no"), row.get("page_number")
@@ -615,5 +676,5 @@ def render_markdown(payload: dict[str, Any]) -> str:
         )
         lines.append(f"- 分析扫描截断：{'是' if truncated else '否'}")
     lines.append("")
-    lines.append(f"> {payload['disclaimer']}")
+    lines.append(f"> {payload.get('disclaimer') or DISCLAIMER}")
     return "\n".join(lines) + "\n"
