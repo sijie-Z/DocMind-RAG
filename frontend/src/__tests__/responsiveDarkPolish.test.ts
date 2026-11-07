@@ -217,7 +217,9 @@ describe('触控与证据网格断点（UI 收口批）', () => {
     const search = read('src/views/search.vue')
     expect(search).toContain('@media (max-width: 1024px)')
     expect(search).toContain('.result-action.n-button { min-height: 44px; min-width: 44px; }')
+    expect(search).toContain('.search-filter :deep(.n-base-selection) { --n-height: 44px !important; }')
     expect(search).toContain('.search-result-detail-modal .n-button')
+    expect(search).toContain('.search-result-detail-modal .n-card-header__close')
   })
 
   it('核验证据 768 单列、1024 起两列（不再用 md 断点堆叠控件）', () => {
@@ -228,6 +230,9 @@ describe('触控与证据网格断点（UI 收口批）', () => {
 
   it('知识库详情/解析错误弹窗 ≤1024 按钮 44px', () => {
     const modal = read('src/views/knowledge/components/KnowledgeDetailModals.vue')
-    expect(modal).toMatch(/@media \(max-width: 1024px\)/)
+    expect(modal).toContain('@media (max-width: 1024px)')
+    expect(modal).toContain('.knowledge-detail-modal .n-button {')
+    expect(modal).toContain('min-height: 44px;')
+    expect(modal).toContain('.knowledge-detail-modal .n-card-header__close')
   })
 })

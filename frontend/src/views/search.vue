@@ -679,9 +679,13 @@ onMounted(async () => {
   .search-results-scroll { overflow: visible; }
 }
 
-/* 平板（含触控）也需要 44px：结果卡操作是 size=tiny，仅在手机断点放大不够。 */
+/* 平板（含触控）也需要 44px：结果卡与筛选控件不能只在手机断点放大。 */
 @media (max-width: 1024px) {
   .result-action.n-button { min-height: 44px; min-width: 44px; }
+  .search-filter :deep(.n-base-selection) { --n-height: 44px !important; }
+  .search-filter :deep(.n-radio) { min-height: 44px; align-items: center; }
+  .search-filter :deep(.n-switch) { min-height: 44px; display: inline-flex; align-items: center; }
+  .search-filter :deep(.n-button) { min-height: 44px; }
 }
 
 @media (max-width: 767px) {
@@ -693,10 +697,9 @@ onMounted(async () => {
   .search-results { min-height: 0; }
   .search-filter :deep(.n-base-selection) { --n-height: 44px !important; }
   .search-filter :deep(.n-radio) { min-height: 44px; align-items: center; }
-  .search-filter :deep(.n-switch) { padding: 11px 0; }
+  .search-filter :deep(.n-switch) { min-height: 44px; display: inline-flex; align-items: center; }
   .search-filter :deep(.n-button) { min-height: 44px; }
   .suggestion-item { min-height: 44px; }
-  .result-action.n-button { min-height: 44px; }
 }
 </style>
 
@@ -705,6 +708,10 @@ onMounted(async () => {
 @media (max-width: 1024px) {
   .search-result-detail-modal .n-button {
     min-height: 44px;
+  }
+  .search-result-detail-modal .n-card-header__close {
+    width: 44px;
+    height: 44px;
   }
 }
 </style>

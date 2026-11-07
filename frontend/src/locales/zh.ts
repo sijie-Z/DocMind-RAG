@@ -406,6 +406,7 @@ export default {
       focusMiss: '未能定位到引用分块，已显示全文。',
       focusMissTruncated: '未能在已加载内容中定位到该分块；文档较长，请下载原文查看完整内容。',
       focusMissEmpty: '文档暂无可预览正文，无法定位引用分块。',
+      chunkLoadFailed: '引用分块加载失败，可重试。',
       viewFullText: '查看全文',
       copyLink: '复制链接',
       linkCopied: '链接已复制，可直接分享',

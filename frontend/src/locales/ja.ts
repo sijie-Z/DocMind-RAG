@@ -370,6 +370,7 @@ export default {
       focusMiss: '引用チャンクを特定できませんでした。全文を表示します。',
       focusMissTruncated: '読み込んだ内容から引用チャンクを特定できませんでした。ドキュメントが長いため、原文をダウンロードして全文を確認してください。',
       focusMissEmpty: '表示できる本文がないため、引用チャンクを特定できません。',
+      chunkLoadFailed: '引用チャンクの読み込みに失敗しました。再試行できます。',
       viewFullText: '全文を表示',
       copyLink: 'リンクをコピー',
       linkCopied: 'リンクをコピーしました',

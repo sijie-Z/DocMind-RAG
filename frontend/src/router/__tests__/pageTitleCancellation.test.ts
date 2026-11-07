@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { createMemoryHistory, createRouter } from 'vue-router'
 import { applyRoutePageTitle } from '../pageTitle'
@@ -41,5 +43,13 @@ describe('路由标题决策', () => {
     const route = { name: 'Doc', params: { id: '1' }, meta: { title: 'router.login' } }
     applyRoutePageTitle(route, route)
     expect(document.title).toContain('文档A')
+  })
+})
+
+
+describe('路由接线', () => {
+  it('afterEach 必须把 failure 传给标题决策', () => {
+    const source = readFileSync(resolve(process.cwd(), 'src/router/index.ts'), 'utf-8')
+    expect(source).toContain('applyRoutePageTitle(to, from, failure)')
   })
 })
