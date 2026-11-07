@@ -20,6 +20,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import { defineComponent, h, nextTick } from 'vue'
 import { createI18n } from 'vue-i18n'
+import { createKnowledgeTestRouter } from '@/test-utils/knowledgeRouter'
 import { createPinia, setActivePinia } from 'pinia'
 import {
   NMessageProvider, NDialogProvider, NCheckbox, NTooltip,
@@ -117,6 +118,7 @@ const i18n = createI18n({ legacy: false, locale: 'zh', messages: { zh } })
 function mountView() {
   const pinia = createPinia()
   setActivePinia(pinia)
+  const router = createKnowledgeTestRouter()
   const user = useUserStore()
   user.userInfo = {
     id: 1, username: 'tester', email: 't@t', isAdmin: false,
@@ -132,7 +134,7 @@ function mountView() {
 
   return mount(Host, {
     global: {
-      plugins: [pinia, i18n],
+      plugins: [pinia, i18n, router],
       components: { NCheckbox, NTooltip },
       stubs: {
         KnowledgeUploadPanel: PanelStub,

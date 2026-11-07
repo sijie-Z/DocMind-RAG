@@ -158,8 +158,8 @@
               class="group cursor-pointer rounded-lg border border-slate-200 bg-white p-4 transition-colors hover:border-blue-300 dark:border-slate-700 dark:bg-slate-900 dark:hover:border-blue-500/50"
               :data-testid="`search-result-${index}`"
               @click="showResultDetail(result)"
-              @keydown.enter.prevent="showResultDetail(result)"
-              @keydown.space.prevent="showResultDetail(result)"
+              @keydown.enter="handleCardActivate($event, result)"
+              @keydown.space="handleCardActivate($event, result)"
             >
               <div class="mb-2 flex items-start justify-between gap-3">
                 <div class="flex min-w-0 items-start gap-3">
@@ -213,6 +213,17 @@
                   <n-button size="tiny" secondary round type="primary" class="result-action" @click.stop="askAI(result)">
                     <template #icon><n-icon><ChatbubblesOutline /></n-icon></template>
                     {{ t('search.askAI', '问问 AI') }}
+                  </n-button>
+                  <n-button
+                    size="tiny"
+                    secondary
+                    round
+                    class="result-action"
+                    data-testid="search-open-original"
+                    @click.stop="openOriginal(result)"
+                  >
+                    <template #icon><n-icon><DocumentTextOutline /></n-icon></template>
+                    {{ t('search.openOriginal') }}
                   </n-button>
                 </div>
                 <n-button
@@ -366,6 +377,7 @@ import { useI18n } from 'vue-i18n'
 import { useUserStore } from '@/stores/user'
 import { DebugPanel } from '@/views/chat/components'
 import type { RetrievalDebugData } from '@/types/chat'
+import { buildDocumentRoute } from './search/documentLink'
 
 const { t } = useI18n()
 const userStore = useUserStore()
@@ -588,6 +600,21 @@ const clearFilters = () => {
 }
 
 const showResultDetail = (r: SearchResult) => { selectedResult.value = r; showDetailModal.value = true }
+
+// 卡片整体可键盘打开，但内部按钮（问问 AI/打开文档页/复制）必须保留自己的
+// 键盘激活：只有事件目标就是卡片时才拦截，否则让按钮的 Enter/Space 正常生效。
+const handleCardActivate = (event: KeyboardEvent, r: SearchResult) => {
+  if (event.target !== event.currentTarget) return
+  event.preventDefault()
+  showResultDetail(r)
+}
+
+// 检索命中 → 文档独立页并定位分块；链接可分享，不再止步于页内弹窗。
+const openOriginal = (r: SearchResult) => {
+  const target = buildDocumentRoute(r)
+  if (!target) return
+  void router.push(target)
+}
 
 const askAI = (r: SearchResult) => {
   const filename = filenameOf(r)

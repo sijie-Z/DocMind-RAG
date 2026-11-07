@@ -11,6 +11,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import { defineComponent, h, nextTick } from 'vue'
 import { createI18n } from 'vue-i18n'
+import { createKnowledgeTestRouter } from '@/test-utils/knowledgeRouter'
 import { createPinia, setActivePinia } from 'pinia'
 import { NMessageProvider, NDialogProvider, NCheckbox, NTooltip } from 'naive-ui'
 
@@ -99,6 +100,7 @@ const Host = defineComponent({
 function mountView() {
   const pinia = createPinia()
   setActivePinia(pinia)
+  const router = createKnowledgeTestRouter()
   const user = useUserStore()
   user.userInfo = {
     id: 1, username: 'tester', email: 't@t', isAdmin: false,
@@ -107,7 +109,7 @@ function mountView() {
 
   const wrapper = mount(Host, {
     global: {
-      plugins: [pinia, i18n],
+      plugins: [pinia, i18n, router],
       // n-checkbox / n-tooltip 生产由 app.use(naive) 全局注册；测试里注册真组件
       // （n-tooltip 的 #trigger 槽装着卡片「查看」按钮，缺失则点击链断裂）
       components: { NCheckbox, NTooltip },
@@ -399,5 +401,23 @@ describe('KnowledgeView · 预览原文口径接线（PR4）', () => {
     await nextTick()
 
     expect(wrapper.find('.detail-stub').text()).toContain('truncated')
+  })
+})
+
+describe('KnowledgeView · 文档深链入口', () => {
+  it('文档标题是指向 /knowledge/:id 的链接（网格与列表共用路由名）', async () => {
+    mockedGetKnowledgeBases.mockResolvedValue(listResponse([REAL_DOC]) as never)
+    const wrapper = mountView()
+    await flushPromises()
+    await nextTick()
+
+    const link = wrapper.findAll('a').find((a) => a.text().includes('architecture.md'))
+    expect(link, '文档标题应为链接').toBeTruthy()
+    expect(link!.attributes('href')).toBe('/knowledge/doc-1')
+    // 链接必须自带墨色与去下划线：否则深色模式会落回 UA 默认的浅紫蓝链接色。
+    const classes = link!.attributes('class') || ''
+    expect(classes).toContain('text-gray-900')
+    expect(classes).toContain('dark:text-gray-100')
+    expect(classes).toContain('no-underline')
   })
 })

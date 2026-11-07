@@ -62,6 +62,9 @@ export interface DocumentDetail {
   description?: string
   keywords?: string[]
   upload_source?: string
+  /** 稳定来源代码（chat / knowledge）；新客户端据此映射 i18n，避免比较中文文案。 */
+  upload_source_code?: 'chat' | 'knowledge'
+  chunk_count?: number
 }
 
 export interface DocumentContent {
@@ -114,21 +117,21 @@ export const getKnowledgeBases = async (params?: {
 }
 
 export const getKnowledgeBase = async (id: string): Promise<AxiosResponse<{ data: KnowledgeBase }>> => {
-  return request.get(`/documents/${id}`)
+  return request.get(`/documents/${encodeURIComponent(id)}`)
 }
 
 export const getDocumentDetail = async (
   id: string,
   options?: SilentRequestOptions
 ): Promise<AxiosResponse<{ data: DocumentDetail }>> => {
-  return request.get(`/documents/${id}`, options?.silent ? SILENT_HEADERS : undefined)
+  return request.get(`/documents/${encodeURIComponent(id)}`, options?.silent ? SILENT_HEADERS : undefined)
 }
 
 export const getDocumentContent = async (
   id: string,
   options?: SilentRequestOptions
 ): Promise<AxiosResponse<{ data: DocumentContent }>> => {
-  return request.get(`/documents/${id}/content`, options?.silent ? SILENT_HEADERS : undefined)
+  return request.get(`/documents/${encodeURIComponent(id)}/content`, options?.silent ? SILENT_HEADERS : undefined)
 }
 
 export interface DocumentChunkPreview {
@@ -148,7 +151,7 @@ export const getDocumentChunk = async (
   chunkId: string,
   options?: SilentRequestOptions
 ): Promise<AxiosResponse<{ data: DocumentChunkPreview }>> => {
-  return request.get(`/documents/${documentId}/chunk`, {
+  return request.get(`/documents/${encodeURIComponent(documentId)}/chunk`, {
     params: { chunk_id: chunkId },
     ...(options?.silent ? SILENT_HEADERS : {})
   })
@@ -158,7 +161,7 @@ export const getDocumentDownloadUrl = async (
   id: string,
   options?: SilentRequestOptions
 ): Promise<AxiosResponse<{ data: DocumentDownloadUrl }>> => {
-  return request.get(`/documents/${id}/download-url`, options?.silent ? SILENT_HEADERS : undefined)
+  return request.get(`/documents/${encodeURIComponent(id)}/download-url`, options?.silent ? SILENT_HEADERS : undefined)
 }
 
 export const uploadKnowledgeBase = async (

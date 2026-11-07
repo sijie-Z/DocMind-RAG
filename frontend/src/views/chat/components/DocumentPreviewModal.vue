@@ -84,7 +84,10 @@
     </div>
 
     <template #footer>
-      <div class="flex justify-end gap-3">
+      <div class="flex flex-wrap justify-end gap-3">
+        <n-button secondary data-testid="open-in-document-page" :disabled="!doc?.id" @click="$emit('openInPage')">
+          {{ t('chat.openInPage') }}
+        </n-button>
         <n-button @click="show = false">{{ t('common.close') }}</n-button>
         <n-button
           type="primary"
@@ -105,6 +108,7 @@
 import { computed, nextTick, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { DocumentContent } from '@/api/knowledge'
+import { splitFocusText } from '@/utils/focusText'
 
 const { t } = useI18n()
 
@@ -139,6 +143,7 @@ const props = defineProps<{
 const emit = defineEmits<{
   'update:show': [value: boolean]
   download: [id?: string]
+  openInPage: []
 }>()
 
 const show = computed({
@@ -159,19 +164,7 @@ interface ContentSegment {
   focus: boolean
 }
 
-const contentSegments = computed<ContentSegment[]>(() => {
-  const text = props.content || ''
-  const raw = props.focusText || ''
-  // 优先按原文匹配；服务端若返回带首尾空白的块文本，再退一步用 trim 后的形态。
-  const needle = [raw, raw.trim()].find((candidate) => candidate && text.includes(candidate)) || ''
-  if (!needle) return [{ text, focus: false }]
-  const index = text.indexOf(needle)
-  return [
-    { text: text.slice(0, index), focus: false },
-    { text: text.slice(index, index + needle.length), focus: true },
-    { text: text.slice(index + needle.length), focus: false }
-  ].filter((segment) => segment.text.length > 0)
-})
+const contentSegments = computed<ContentSegment[]>(() => splitFocusText(props.content, props.focusText))
 
 watch(
   [() => props.show, () => props.content, () => props.focusText, () => props.loading],

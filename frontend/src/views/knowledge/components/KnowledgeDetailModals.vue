@@ -4,7 +4,7 @@
       :show="showDetail"
       @update:show="emit('update:showDetail', $event)"
       preset="card"
-      class="max-w-2xl rounded-3xl shadow-2xl"
+      class="knowledge-detail-modal max-w-2xl rounded-3xl shadow-2xl"
       :title="t('knowledge.viewDetail') || '文档详情'"
     >
       <div v-if="currentDoc" class="space-y-6">
@@ -70,7 +70,16 @@
         </div>
 
         <div class="flex justify-end gap-3 pt-4">
-          <n-button type="primary" round @click="emit('update:showDetail', false)">关闭</n-button>
+          <n-button
+            type="primary"
+            round
+            :disabled="!currentDoc?.id"
+            data-testid="knowledge-open-document-page"
+            @click="emit('openDocument', currentDoc?.id)"
+          >
+            {{ t('knowledge.documentDetail.openFromPreview') }}
+          </n-button>
+          <n-button round @click="emit('update:showDetail', false)">关闭</n-button>
         </div>
       </div>
     </n-modal>
@@ -114,8 +123,18 @@ const props = defineProps<{
 const emit = defineEmits<{
   'update:showDetail': [value: boolean]
   'update:showError': [value: boolean]
+  openDocument: [id?: string]
 }>()
 
 const { t } = useI18n()
 void props
 </script>
+
+<style>
+/* 弹窗 teleport 到 body 后 scoped 选择器失效：用弹窗根类约束触控高度。 */
+@media (max-width: 1023.98px) {
+  .knowledge-detail-modal .n-button {
+    min-height: 44px;
+  }
+}
+</style>
