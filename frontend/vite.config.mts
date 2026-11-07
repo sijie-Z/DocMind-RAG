@@ -42,12 +42,12 @@ export default defineConfig({
     backendPortPlugin(),
     VitePWA({
       registerType: 'autoUpdate',
-      includeAssets: ['favicon.ico', 'apple-touch-icon.png', 'mask-icon.svg'],
+      includeAssets: ['favicon.svg', 'apple-touch-icon.png'],
       manifest: {
         name: 'DocMind 智能知识库',
         short_name: 'DocMind',
         description: '企业级 RAG 知识库系统，支持文档解析、智能问答、语义检索',
-        theme_color: '#3b82f6',
+        theme_color: '#1d4ed8',
         background_color: '#ffffff',
         display: 'standalone',
         scope: '/',
@@ -56,18 +56,20 @@ export default defineConfig({
           {
             src: 'pwa-192x192.svg',
             sizes: '192x192',
-            type: 'image/svg+xml'
-          },
-          {
-            src: 'pwa-512x512.svg',
-            sizes: '512x512',
-            type: 'image/svg+xml'
+            type: 'image/svg+xml',
+            purpose: 'any'
           },
           {
             src: 'pwa-512x512.svg',
             sizes: '512x512',
             type: 'image/svg+xml',
-            purpose: 'any maskable'
+            purpose: 'any'
+          },
+          {
+            src: 'pwa-maskable-512x512.svg',
+            sizes: '512x512',
+            type: 'image/svg+xml',
+            purpose: 'maskable'
           }
         ]
       },

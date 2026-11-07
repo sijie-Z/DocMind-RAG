@@ -1,6 +1,7 @@
 <template>
-  <!-- DocMind 品牌标识：文档（知识载体）+ 校验透镜（检索与核验）。
-       单一图形在侧栏、登录页与 favicon/PWA 图标复用，避免字母块拼贴。 -->
+  <!-- DocMind 品牌标识：折页 M + 证据菱形。
+       M 的两道折线像折起的纸页，谷底压接的实心菱形代表被钉住、可核验的证据；
+       单色 currentColor，可复用于侧栏、登录页与 favicon/PWA。 -->
   <svg
     :width="size"
     :height="size"
@@ -13,22 +14,13 @@
     focusable="false"
   >
     <path
-      d="M6.5 2.5h5l3 3V13a2 2 0 0 1-2 2H6.5a2 2 0 0 1-2-2V4.5a2 2 0 0 1 2-2Z"
+      d="M3.6 19.4V6.9L12 13.2 20.4 6.9v12.5"
       stroke="currentColor"
-      stroke-width="1.8"
-      stroke-linejoin="round"
-    />
-    <path d="M11.5 2.5v3h3" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" />
-    <path d="M7 8.2h4.4M7 11.2h2.8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" />
-    <circle cx="17.1" cy="17.1" r="3.35" stroke="currentColor" stroke-width="1.8" />
-    <path
-      d="m15.65 17.15 1.05 1.05 2-2.25"
-      stroke="currentColor"
-      stroke-width="1.8"
+      stroke-width="2.1"
       stroke-linecap="round"
       stroke-linejoin="round"
     />
-    <path d="m19.5 19.5 1.8 1.8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" />
+    <path d="M12 12.8l2.4 2.4-2.4 2.4-2.4-2.4z" fill="currentColor" />
   </svg>
 </template>
 
