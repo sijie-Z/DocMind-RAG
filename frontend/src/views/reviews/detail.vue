@@ -375,23 +375,48 @@
                             {{ t('reviews.evidenceSelected') }}
                           </n-tag>
                         </div>
-                        <n-button
-                          size="tiny"
-                          tertiary
-                          class="evidence-select"
-                          :type="row.selected ? 'success' : 'primary'"
-                          :aria-pressed="row.selected"
-                          :aria-label="`${row.selected ? t('reviews.evidenceDeselect') : t('reviews.evidenceSelect')} · ${docLabel(row.side)}`"
-                          :loading="evidenceBusy === row.id"
-                          :disabled="!canSelectEvidence || !!evidenceBusy"
-                          @click="toggleEvidence(item, row)"
-                        >
-                          {{
-                            row.selected
-                              ? t('reviews.evidenceDeselect')
-                              : t('reviews.evidenceSelect')
-                          }}
-                        </n-button>
+                        <div class="mt-2 flex flex-wrap items-center gap-2">
+                          <a
+                            v-if="evidenceHref(row)"
+                            :href="evidenceHref(row)"
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            data-testid="evidence-open-original"
+                            class="evidence-open-original inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-blue-600 no-underline transition-colors hover:bg-blue-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600 dark:text-blue-400 dark:hover:bg-blue-500/10"
+                            :aria-label="evidenceAriaLabel(row)"
+                            :title="evidenceLinkHint(row)"
+                          >
+                            <n-icon size="14" aria-hidden="true"><OpenOutline /></n-icon>
+                            {{ evidenceLinkLabel(row) }}
+                          </a>
+                          <span
+                            v-else
+                            class="text-xs text-slate-600 dark:text-slate-400"
+                            data-testid="evidence-open-unavailable"
+                            :title="evidenceUnavailableHint(row)"
+                          >
+                            {{ docOf(row.side)?.missing
+                              ? t('reviews.evidenceOpenUnavailable')
+                              : t('reviews.evidenceOpenNoChunk') }}
+                          </span>
+                          <n-button
+                            size="tiny"
+                            tertiary
+                            class="evidence-select"
+                            :type="row.selected ? 'success' : 'primary'"
+                            :aria-pressed="row.selected"
+                            :aria-label="`${row.selected ? t('reviews.evidenceDeselect') : t('reviews.evidenceSelect')} · ${docLabel(row.side)}`"
+                            :loading="evidenceBusy === row.id"
+                            :disabled="!canSelectEvidence || !!evidenceBusy"
+                            @click="toggleEvidence(item, row)"
+                          >
+                            {{
+                              row.selected
+                                ? t('reviews.evidenceDeselect')
+                                : t('reviews.evidenceSelect')
+                            }}
+                          </n-button>
+                        </div>
                       </div>
                     </template>
                     <div v-else class="text-xs text-gray-500 dark:text-gray-400">{{ t('reviews.evidenceEmpty') }}</div>
@@ -498,7 +523,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } 
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useMessage } from 'naive-ui'
-import { ArrowBackOutline, ChevronDownOutline, ChevronUpOutline, RefreshOutline } from '@vicons/ionicons5'
+import { ArrowBackOutline, ChevronDownOutline, ChevronUpOutline, OpenOutline, RefreshOutline } from '@vicons/ionicons5'
 import {
   reviewsApi,
   type ReviewCaseDetail,
@@ -513,6 +538,7 @@ import {
 import { apiUnwrap } from '@/utils/apiUnwrap'
 import { getErrorMessage } from '@/utils/apiError'
 import { reasonLabel, reasonsLabel } from './reviewReasons'
+import { buildEvidenceLinkTarget } from './evidenceLink'
 
 const SIDES: ReviewSide[] = ['policy', 'base', 'revised']
 
@@ -814,6 +840,33 @@ function itemLabel(key: string) {
 }
 function docOf(side: ReviewSide) {
   return detail.value?.documents?.[side]
+}
+
+// 证据 → 当前文档深链（新标签页打开，避免丢失未保存的决策草稿）。
+function evidenceHref(row: ReviewEvidenceRow): string {
+  const target = buildEvidenceLinkTarget(row, docOf(row.side))
+  return target ? router.resolve(target).href : ''
+}
+function evidenceLinkLabel(row: ReviewEvidenceRow): string {
+  return row.stale ? t('reviews.evidenceOpenCurrent') : t('reviews.evidenceOpenOriginal')
+}
+function evidenceLinkHint(row: ReviewEvidenceRow): string {
+  return row.stale ? t('reviews.evidenceOpenStaleHint') : t('reviews.evidenceOpenOriginalHint')
+}
+function evidenceAriaLabel(row: ReviewEvidenceRow): string {
+  const parts = [evidenceLinkLabel(row), docLabel(row.side)]
+  if (row.clause_no?.length) {
+    parts.push(t('reviews.evidenceClause', { clause: row.clause_no.join(',') }))
+  } else if (row.page_number) {
+    parts.push(t('reviews.evidencePage', { page: row.page_number }))
+  }
+  parts.push(t('reviews.evidenceOpenNewTab'))
+  return parts.join(' · ')
+}
+function evidenceUnavailableHint(row: ReviewEvidenceRow): string {
+  return docOf(row.side)?.missing
+    ? t('reviews.evidenceOpenUnavailableHint')
+    : t('reviews.evidenceOpenNoChunkHint')
 }
 function decisionOf(item: ReviewItem) {
   if (!decisions[item.id]) {
@@ -1162,6 +1215,9 @@ onBeforeUnmount(() => {
 .evidence-select.n-button {
   min-height: 32px;
 }
+.evidence-open-original {
+  min-height: 32px;
+}
 [data-item-heading]:focus {
   outline: 2px solid #2563eb;
   outline-offset: 4px;
@@ -1194,6 +1250,11 @@ onBeforeUnmount(() => {
   }
   .evidence-select.n-button {
     min-height: 44px;
+  }
+  .evidence-open-original {
+    min-height: 44px;
+    padding-left: 12px;
+    padding-right: 12px;
   }
   .review-decision-save.n-button {
     min-height: 44px;
