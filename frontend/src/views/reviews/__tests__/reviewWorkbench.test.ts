@@ -27,9 +27,11 @@ import ReviewDetail from '../detail.vue'
 import { reviewsApi } from '@/api/reviews'
 import zh from '@/locales/zh'
 
+const routerMocks = vi.hoisted(() => ({ replace: vi.fn(), push: vi.fn() }))
+
 vi.mock('vue-router', () => ({
-  useRoute: () => ({ params: { id: 'case-1' } }),
-  useRouter: () => ({ push: vi.fn() })
+  useRoute: () => ({ params: { id: 'case-1' }, query: {} }),
+  useRouter: () => ({ push: routerMocks.push, replace: routerMocks.replace })
 }))
 
 vi.mock('@/api/reviews', () => ({
@@ -101,8 +103,8 @@ function makeDetail(overrides: Record<string, unknown> = {}) {
         change_type: 'modified',
         status: 'pending',
         facts: {
-          base: { status: 'identified', value: 30, unit: 'day' },
-          revised: { status: 'identified', value: 60, unit: 'day' },
+          base: { status: 'identified', value: 30, unit: 'day', clause_no: [8], section_no: ['2.1'] },
+          revised: { status: 'identified', value: 60, unit: 'day', clause_no: [9] },
           policy: { status: 'not_found' }
         },
         decided_by: null,
@@ -146,7 +148,7 @@ function makeDetail(overrides: Record<string, unknown> = {}) {
   }
 }
 
-function mountDetail() {
+function mountDetail(options: { attachTo?: boolean } = {}) {
   const i18n = createI18n({ legacy: false, locale: 'zh', messages: { zh } })
   return mount(
     {
@@ -154,6 +156,7 @@ function mountDetail() {
       template: '<n-message-provider><ReviewDetail /></n-message-provider>'
     },
     {
+      attachTo: options.attachTo ? document.body : undefined,
       global: {
         plugins: [i18n],
         // 生产由 app.use(naive) 全局注册；测试里注册本页用到的真组件。
@@ -318,6 +321,156 @@ describe('合同核验工作台 · 证据选择', () => {
 
 
 describe('合同核验工作台 · 导出与草稿', () => {
+  it('差异条展示基准→修订，条款定位来自文本事实', async () => {
+    api.get.mockResolvedValue({ data: { data: makeDetail() } } as never)
+    const wrapper = mountDetail()
+    await flushPromises()
+
+    const diff = wrapper.find('[data-testid="item-diff"]')
+    expect(diff.exists()).toBe(true)
+    expect(diff.text()).toContain('30 自然日')
+    expect(diff.text()).toContain('60 自然日')
+    expect(diff.text()).toContain('→')
+    const locator = wrapper.find('[data-testid="item-locator"]')
+    expect(locator.text()).toContain('第 8 条')
+    expect(locator.text()).toContain('第 2.1 节')
+    expect(locator.text()).toContain('第 9 条')
+  })
+
+  it('未保存备注会禁用导出并提示先保存', async () => {
+    const base = makeDetail()
+    api.get.mockResolvedValue({
+      data: {
+        data: makeDetail({
+          items: [{ ...base.items[0], status: 'verified', decision_note: 'ok' }]
+        })
+      }
+    } as never)
+    const wrapper = mountDetail()
+    await flushPromises()
+
+    const findExport = () =>
+      wrapper.findAll('button').find((button) => button.text().includes('导出核验单'))
+    expect(findExport()?.attributes('disabled')).toBeUndefined()
+
+    await wrapper.find('.review-decision-note input').setValue('改了备注但没保存')
+    await flushPromises()
+
+    expect(findExport()?.attributes('disabled')).toBeDefined()
+    expect(wrapper.text()).toContain('有未保存的决策')
+  })
+
+  it('刷新保留未保存草稿（备注不丢）', async () => {
+    api.get.mockResolvedValue({ data: { data: makeDetail() } } as never)
+    const wrapper = mountDetail()
+    await flushPromises()
+
+    const input = wrapper.find('.review-decision-note input')
+    await input.setValue('待确认的备注')
+    const refresh = wrapper.findAll('button').find((button) => button.text().includes('重试'))
+    expect(refresh).toBeTruthy()
+    await refresh!.trigger('click')
+    await flushPromises()
+
+    expect(
+      (wrapper.find('.review-decision-note input').element as HTMLInputElement).value
+    ).toBe('待确认的备注')
+    expect(api.get).toHaveBeenCalledTimes(2)
+  })
+
+  it('后台刷新：用户改过的草稿保留，未编辑项采纳服务端新备注', async () => {
+    const base = makeDetail()
+    const firstDetail = makeDetail({
+      items: [
+        { ...base.items[0], status: 'pending', decision_note: null },
+        { ...base.items[0], id: 'item-2', item_key: 'start_condition', ordinal: 2 }
+      ]
+    })
+    const refreshed = makeDetail({
+      items: [
+        { ...base.items[0], status: 'pending', decision_note: null },
+        {
+          ...base.items[0],
+          id: 'item-2',
+          item_key: 'start_condition',
+          ordinal: 2,
+          decision_note: '其他评审的备注'
+        }
+      ]
+    })
+    api.get.mockResolvedValueOnce({ data: { data: firstDetail } } as never)
+    api.get.mockResolvedValueOnce({ data: { data: refreshed } } as never)
+    api.selectEvidence.mockResolvedValue({ data: { success: true } } as never)
+
+    const wrapper = mountDetail()
+    await flushPromises()
+
+    await wrapper
+      .find('[data-testid="review-item-payment_term"] .review-decision-note input')
+      .setValue('我的草稿')
+    await wrapper
+      .findAll('button')
+      .find((button) => button.text().includes('选为证据'))!
+      .trigger('click')
+    await flushPromises()
+
+    expect(
+      (
+        wrapper.find(
+          '[data-testid="review-item-payment_term"] .review-decision-note input'
+        ).element as HTMLInputElement
+      ).value
+    ).toBe('我的草稿')
+    expect(
+      (
+        wrapper.find(
+          '[data-testid="review-item-start_condition"] .review-decision-note input'
+        ).element as HTMLInputElement
+      ).value
+    ).toBe('其他评审的备注')
+  })
+
+  it('横幅「下一项未决策」跳过已决策项并切到未决策筛选', async () => {
+    const base = makeDetail()
+    api.get.mockResolvedValue({
+      data: {
+        data: makeDetail({
+          items: [
+            { ...base.items[0], status: 'verified', decision_note: 'ok' },
+            { ...base.items[0], id: 'item-2', item_key: 'start_condition', ordinal: 2 }
+          ]
+        })
+      }
+    } as never)
+    const scrollSpy = vi.fn()
+    Object.defineProperty(Element.prototype, 'scrollIntoView', {
+      configurable: true,
+      writable: true,
+      value: scrollSpy
+    })
+    const wrapper = mountDetail({ attachTo: true })
+    await flushPromises()
+
+    const next = wrapper.find('[data-testid="review-next-pending"]')
+    expect(next.exists()).toBe(true)
+    await next.trigger('click')
+    await flushPromises()
+
+    // 点击后切到「未决策」筛选：对应 chip 的 aria-pressed 变为 true。
+    const pendingChip = wrapper
+      .findAll('button')
+      .find((button) => button.text().includes('未决策'))
+    expect(pendingChip?.attributes('aria-pressed')).toBe('true')
+    // 跳到下一项（第 2 项）并聚焦标题，而不是只切筛选。
+    expect(scrollSpy).toHaveBeenCalled()
+    const heading = wrapper.find(
+      '[data-testid="review-item-start_condition"] [data-item-heading]'
+    )
+    expect(heading.exists()).toBe(true)
+    expect(document.activeElement).toBe(heading.element)
+    wrapper.unmount()
+  })
+
   it('全部决策后导出触发 exportCase；409 时展示未决项（不静默）', async () => {
     const base = makeDetail()
     const detail = makeDetail({
@@ -572,7 +725,7 @@ describe('归档出口（Batch 7）', () => {
 
     const decidedChip = wrapper
       .findAll('button')
-      .find((button) => button.text().includes('已确认'))
+      .find((button) => button.text().includes('已决策'))
     expect(decidedChip).toBeTruthy()
     await decidedChip!.trigger('click')
     const items = wrapper.findAll('[data-testid^="review-item-"]')

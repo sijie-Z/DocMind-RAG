@@ -24,12 +24,13 @@
             </div>
           </div>
         </div>
-        <div class="flex flex-wrap gap-2">
-          <n-button :loading="loading" quaternary @click="load(false)">
+        <div class="review-top-actions flex flex-wrap gap-2">
+          <n-button :loading="loading" quaternary @click="load(true)">
             <template #icon><n-icon><RefreshOutline /></n-icon></template>
             {{ t('reviews.retry') }}
           </n-button>
           <n-button
+            v-if="!analyzedAll || !canAnalyze"
             type="primary"
             :loading="analyzing"
             :disabled="!canAnalyze"
@@ -38,6 +39,7 @@
             {{ analyzing ? t('reviews.analyzing') : t('reviews.analyze') }}
           </n-button>
           <n-button
+            v-if="!analyzedAll"
             type="primary"
             secondary
             :loading="exporting"
@@ -85,12 +87,12 @@
 
           <!-- 结论横幅：结论 + 真实进度 + 计数筛选（数据全部来自 items 状态） -->
           <section
-            class="sticky top-0 z-20 -mx-4 mb-4 border-b border-slate-200 bg-gray-50 px-4 py-3 dark:border-slate-800 dark:bg-gray-950 md:-mx-6 md:px-6"
+            class="review-conclusion sticky top-0 z-20 -mx-4 mb-4 border-b border-slate-200 bg-gray-50 px-4 py-3 dark:border-slate-800 dark:bg-gray-950 md:-mx-6 md:px-6"
             data-testid="review-conclusion"
           >
             <div class="flex flex-wrap items-center gap-2">
               <n-tag :type="conclusion.tag" size="medium">{{ conclusion.title }}</n-tag>
-              <span class="line-clamp-2 text-sm text-slate-600 dark:text-slate-300">{{ conclusion.hint }}</span>
+              <span class="line-clamp-1 text-sm text-slate-600 dark:text-slate-300 md:line-clamp-2">{{ conclusion.hint }}</span>
               <span v-if="detail.archived_at" class="text-xs text-slate-500 dark:text-slate-400">
                 {{ t('reviews.summaryArchivedHint') }}
               </span>
@@ -99,7 +101,7 @@
               <span class="tabular-nums">
                 {{ t('reviews.summaryProgress', { done: itemStats.decided, total: itemStats.total }) }}
               </span>
-              <div class="w-32">
+              <div class="review-progress w-32">
                 <n-progress
                   type="line"
                   :percentage="decisionProgress"
@@ -110,11 +112,11 @@
               <span class="tabular-nums">
                 {{ t('reviews.summaryChanged', { count: itemStats.changed }) }}
               </span>
-              <div class="flex flex-wrap gap-1">
+              <div class="review-filter-chips flex flex-wrap gap-1">
                 <n-button
                   v-for="chip in itemFilterChips"
                   :key="chip.value"
-                  size="tiny"
+                  size="small"
                   class="review-chip"
                   :type="itemFilter === chip.value ? 'primary' : 'default'"
                   :secondary="itemFilter !== chip.value"
@@ -124,6 +126,43 @@
                   {{ chip.label }} {{ chip.count }}
                 </n-button>
               </div>
+            </div>
+            <div class="mt-2 flex flex-wrap items-center gap-2" data-testid="review-primary-actions">
+              <n-button
+                v-if="nextPendingCount > 0 && detail.status !== 'blocked' && !detail.archived_at"
+                size="small"
+                type="primary"
+                data-testid="review-next-pending"
+                @click="goNextPending"
+              >
+                {{ t('reviews.nextPending') }} · {{ nextPendingCount }}
+              </n-button>
+              <n-button
+                v-if="analyzedAll"
+                size="small"
+                type="primary"
+                secondary
+                data-testid="review-export"
+                :loading="exporting"
+                :disabled="!canExport"
+                @click="runExport"
+              >
+                {{ exporting ? t('reviews.exporting') : t('reviews.export') }}
+              </n-button>
+              <n-button v-if="exports.length" size="small" data-testid="review-latest-download" @click="downloadExport(exports[0].id, 'json')">
+                {{ t('reviews.downloadLatest') }}
+              </n-button>
+              <n-tag v-if="detail.stale_evidence_count" type="warning" size="small">
+                {{ t('reviews.staleCount', { count: detail.stale_evidence_count }) }}
+              </n-tag>
+              <span
+                v-if="hasUnsavedDrafts"
+                role="status"
+                aria-live="polite"
+                class="text-xs text-amber-700 dark:text-amber-400"
+              >
+                {{ t('reviews.unsavedDraftsHint') }}
+              </span>
             </div>
           </section>
 
@@ -234,13 +273,15 @@
               v-for="item in filteredItems"
               :id="`review-item-${item.item_key}`"
               :key="item.id"
-              class="rounded-xl border border-gray-200 bg-white/80 p-4 dark:border-gray-800 dark:bg-gray-900/60"
+              class="scroll-mt-44 rounded-xl border border-gray-200 bg-white/80 p-4 dark:border-gray-800 dark:bg-gray-900/60 md:scroll-mt-32"
               :data-testid="`review-item-${item.item_key}`"
             >
               <div class="flex flex-wrap items-center gap-2">
-                <span class="text-base font-semibold text-gray-800 dark:text-gray-100">
-                  {{ itemLabel(item.item_key) }}
-                </span>
+                <span
+                  class="text-base font-semibold text-gray-800 dark:text-gray-100"
+                  tabindex="-1"
+                  data-item-heading
+                >{{ itemLabel(item.item_key) }}</span>
                 <n-tag v-if="item.change_type" :type="changeTagType[item.change_type]" size="small">
                   {{ changeLabel[item.change_type] }}
                 </n-tag>
@@ -248,6 +289,21 @@
                 <n-tag :type="itemStatusTagType[item.status]" size="small">
                   {{ itemStatusLabel[item.status] }}
                 </n-tag>
+                <n-tag v-if="item.selected_evidence_count" type="success" size="small">
+                  {{ t('reviews.evidenceSelectedCount', { count: item.selected_evidence_count }) }}
+                </n-tag>
+              </div>
+              <div
+                v-if="factLocator(item, 'base') || factLocator(item, 'revised')"
+                class="mt-1 flex flex-wrap gap-x-3 text-xs text-slate-500 dark:text-slate-400"
+                data-testid="item-locator"
+              >
+                <span v-if="factLocator(item, 'base')">
+                  {{ t('reviews.baseVersion') }} {{ factLocator(item, 'base') }}
+                </span>
+                <span v-if="factLocator(item, 'revised')">
+                  {{ t('reviews.revisedVersion') }} {{ factLocator(item, 'revised') }}
+                </span>
               </div>
 
               <!-- 文本事实 -->
@@ -259,12 +315,32 @@
                 </div>
               </div>
 
+              <!-- 差异条：基准 → 修订（无法判定时不猜） -->
+              <div
+                v-if="diffSummary(item)"
+                data-testid="item-diff"
+                class="mt-2 rounded-md border border-amber-200 bg-amber-50 px-2 py-1.5 text-xs leading-relaxed text-amber-900 dark:border-amber-800/60 dark:bg-amber-900/10 dark:text-amber-200 xl:line-clamp-2"
+                :title="diffSummary(item)"
+              >
+                <span class="font-semibold">
+                  {{ item.change_type ? changeLabel[item.change_type] : '' }}:
+                </span>
+                {{ diffSummary(item) }}
+              </div>
+              <div
+                v-else-if="item.change_type === 'modified' || item.change_type === 'renumbered'"
+                data-testid="item-diff-same"
+                class="mt-2 text-xs text-slate-500 dark:text-slate-400"
+              >
+                {{ t('reviews.diffTextSameHint') }}
+              </div>
+
               <!-- 证据快照 -->
               <div class="mt-3">
                 <div class="mb-1 text-xs font-medium text-gray-500 dark:text-gray-400">{{ t('reviews.evidenceTitle') }}</div>
                 <div class="mb-1 text-xs text-gray-500 dark:text-gray-400">{{ t('reviews.selectHint') }}</div>
-                <div class="grid gap-3 md:grid-cols-3">
-                  <div v-for="side in SIDES" :key="side" class="rounded-lg bg-gray-50 p-2 dark:bg-gray-800/50">
+                <div class="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                  <div v-for="side in EVIDENCE_SIDES" :key="side" class="rounded-lg bg-gray-50 p-2 dark:bg-gray-800/50">
                     <div class="mb-1 text-xs font-medium text-gray-500 dark:text-gray-400">
                       {{ docLabel(side) }}
                     </div>
@@ -300,11 +376,14 @@
                           </n-tag>
                         </div>
                         <n-button
-                          text
                           size="tiny"
-                          type="primary"
-                          class="mt-1"
-                          :disabled="!canSelectEvidence"
+                          tertiary
+                          class="evidence-select"
+                          :type="row.selected ? 'success' : 'primary'"
+                          :aria-pressed="row.selected"
+                          :aria-label="`${row.selected ? t('reviews.evidenceDeselect') : t('reviews.evidenceSelect')} · ${docLabel(row.side)}`"
+                          :loading="evidenceBusy === row.id"
+                          :disabled="!canSelectEvidence || !!evidenceBusy"
                           @click="toggleEvidence(item, row)"
                         >
                           {{
@@ -337,6 +416,8 @@
                   v-model:value="decisionOf(item).status"
                   size="small"
                   class="review-decision-group"
+                  role="radiogroup"
+                  :aria-label="t('reviews.decisionTitle')"
                   :disabled="detail.status === 'blocked' || !!detail.archived_at || !item.change_type"
                 >
                   <n-radio-button value="verified">{{ t('reviews.statusVerified') }}</n-radio-button>
@@ -350,14 +431,16 @@
                 <n-input
                   v-model:value="decisionOf(item).note"
                   size="small"
-                  class="flex-1"
+                  class="review-decision-note flex-1"
                   :placeholder="t('reviews.decisionNote')"
+                  :input-props="{ 'aria-label': t('reviews.decisionNote') }"
                   :maxlength="2000"
                   :disabled="detail.status === 'blocked' || !!detail.archived_at"
                 />
                 <n-button
                   size="small"
                   type="primary"
+                  class="review-decision-save"
                   :disabled="detail.status === 'blocked' || !!detail.archived_at || !item.change_type || !canSaveDecision(item)"
                   :loading="decidingItem === item.id"
                   @click="saveDecision(item)"
@@ -411,7 +494,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useMessage } from 'naive-ui'
@@ -447,8 +530,19 @@ const analyzing = ref(false)
 const exporting = ref(false)
 const archiving = ref(false)
 const decidingItem = ref('')
+const evidenceBusy = ref('')
 const versionsOpen = ref(false)
-const itemFilter = ref<'all' | 'changed' | 'pending' | 'decided'>('all')
+const ITEM_FILTERS = ['all', 'changed', 'pending', 'decided'] as const
+type ItemFilter = (typeof ITEM_FILTERS)[number]
+function filterFromRoute(): ItemFilter {
+  const raw = (route.query || {}).filter
+  return typeof raw === 'string' && (ITEM_FILTERS as readonly string[]).includes(raw)
+    ? (raw as ItemFilter)
+    : 'all'
+}
+const itemFilter = ref<ItemFilter>(filterFromRoute())
+let loadSeq = 0
+let foregroundSeq = 0
 
 const itemStats = computed(() => {
   const items = detail.value?.items ?? []
@@ -657,10 +751,45 @@ const canAnalyze = computed(
 const canExport = computed(() => {
   const current = detail.value
   if (!current || current.archived_at || current.status === 'blocked' || !analyzed.value) return false
+  if (hasUnsavedDrafts.value) return false
   return current.items.every((item) =>
     ['verified', 'needs_human', 'not_applicable'].includes(item.status)
   )
 })
+
+const hasUnsavedDrafts = computed(() => {
+  const items = detail.value?.items ?? []
+  return items.some((item) => {
+    const draft = decisions[item.id]
+    if (!draft || !draft.status) return false
+    return (
+      draft.status !== item.status ||
+      (draft.note || '').trim() !== (item.decision_note || '').trim()
+    )
+  })
+})
+
+const DECIDED_STATUSES = ['verified', 'needs_human', 'not_applicable']
+const nextPendingCount = computed(
+  () =>
+    (detail.value?.items ?? []).filter(
+      (item) => item.change_type !== null && !DECIDED_STATUSES.includes(item.status)
+    ).length
+)
+
+/** 滚到下一条待决策项，并把焦点移到标题（粘性横幅之外仍是键盘可达的）。 */
+function goNextPending() {
+  const next = (detail.value?.items ?? []).find(
+    (item) => item.change_type !== null && !DECIDED_STATUSES.includes(item.status)
+  )
+  if (!next) return
+  itemFilter.value = 'pending'
+  void nextTick(() => {
+    const element = document.getElementById(`review-item-${next.item_key}`)
+    element?.scrollIntoView?.({ block: 'start', behavior: 'smooth' })
+    element?.querySelector<HTMLElement>('[data-item-heading]')?.focus({ preventScroll: true })
+  })
+}
 
 // 静态键映射：动态模板键无法通过 tUsageKeysDefined 门禁（前缀不是对象节点）。
 const DOC_LABELS: Record<ReviewSide, string> = {
@@ -674,6 +803,9 @@ const ITEM_LABELS: Record<string, string> = {
   acceptance_invoice: 'reviews.itemAcceptanceInvoice',
   exception: 'reviews.itemException'
 }
+// 证据对比顺序：基准 ↔ 修订优先（核心对比），制度/模板整段引文放最后，
+// 避免两栏布局下 policy+base 占一行、真正要对比的修订版被推到下一行。
+const EVIDENCE_SIDES: ReviewSide[] = ['base', 'revised', 'policy']
 function docLabel(side: ReviewSide) {
   return t(DOC_LABELS[side])
 }
@@ -718,96 +850,161 @@ function unitLabel(unit?: string | null) {
   // 契约外/缺失单位不得渲染成确定的「自然日」。
   return unit ? String(unit) : t('reviews.factsNone')
 }
-function factLines(item: ReviewItem): Array<{ side: ReviewSide; text: string }> {
+function factText(item: ReviewItem, side: ReviewSide): string {
   const facts = (item.facts || {}) as Record<string, unknown>
-  const lines: Array<{ side: ReviewSide; text: string }> = []
-  for (const side of SIDES) {
-    const fact = facts[side] as Record<string, unknown> | undefined
-    if (!fact || typeof fact !== 'object') continue
-    const status = String(fact.status || '')
-    if (status === 'identified') {
-      const parts: string[] = []
-      if (fact.value !== undefined && fact.value !== null) {
-        parts.push(t('reviews.factsValue', { value: fact.value, unit: unitLabel(fact.unit as string) }))
-      }
-      if (Array.isArray(fact.events) && fact.events.length) {
-        parts.push(`${t('reviews.eventsLabel')}: ${fact.events.join(', ')}`)
-      }
-      if (Array.isArray(fact.terms) && fact.terms.length) {
-        parts.push(`${t('reviews.termsLabel')}: ${fact.terms.join(', ')}`)
-      }
-      if (Array.isArray(fact.cross_refs) && fact.cross_refs.length) {
-        parts.push(`${t('reviews.crossRefsLabel')}: ${fact.cross_refs.join(', ')}`)
-      }
-      lines.push({ side, text: parts.join(' · ') || t('reviews.factsNone') })
-    } else if (status === 'ambiguous') {
-      // 组合码（unit_unclear+multiple_durations）与未知码统一走原因码注册表。
-      const reasonText = fact.reason ? reasonLabel(t, String(fact.reason)) : ''
-      const candidates = Array.isArray(fact.candidates)
-        ? (
-            fact.candidates as Array<{
-              value?: number
-              unit?: string | null
-              unit_raw?: string | null
-              raw?: string | null
-            }>
-          )
-            .map((candidate) =>
-              candidate.raw
-                ? String(candidate.raw)
-                : `${candidate.value} ${
-                    candidate.unit ? unitLabel(candidate.unit) : candidate.unit_raw || ''
-                  }`
-            )
-            .join(' / ')
-        : ''
-      lines.push({
-        side,
-        text:
-          (reasonText || t('reviews.notFound')) +
-          (candidates ? ` · ${t('reviews.candidatesLabel')}: ${candidates}` : '')
-      })
-    } else {
-      lines.push({ side, text: t('reviews.notFound') })
+  const fact = facts[side] as Record<string, unknown> | undefined
+  if (!fact || typeof fact !== 'object') return '—'
+  const status = String(fact.status || '')
+  if (status === 'identified') {
+    const parts: string[] = []
+    if (fact.value !== undefined && fact.value !== null) {
+      parts.push(t('reviews.factsValue', { value: fact.value, unit: unitLabel(fact.unit as string) }))
     }
+    if (Array.isArray(fact.events) && fact.events.length) {
+      parts.push(`${t('reviews.eventsLabel')}: ${fact.events.join(', ')}`)
+    }
+    if (Array.isArray(fact.terms) && fact.terms.length) {
+      parts.push(`${t('reviews.termsLabel')}: ${fact.terms.join(', ')}`)
+    }
+    if (Array.isArray(fact.cross_refs) && fact.cross_refs.length) {
+      parts.push(`${t('reviews.crossRefsLabel')}: ${fact.cross_refs.join(', ')}`)
+    }
+    return parts.join(' · ') || t('reviews.factsNone')
   }
-  return lines
+  if (status === 'ambiguous') {
+    // 组合码（unit_unclear+multiple_durations）与未知码统一走原因码注册表。
+    const reasonText = fact.reason ? reasonLabel(t, String(fact.reason)) : ''
+    const candidates = Array.isArray(fact.candidates)
+      ? (
+          fact.candidates as Array<{
+            value?: number
+            unit?: string | null
+            unit_raw?: string | null
+            raw?: string | null
+          }>
+        )
+          .map((candidate) =>
+            candidate.raw
+              ? String(candidate.raw)
+              : `${candidate.value} ${
+                  candidate.unit ? unitLabel(candidate.unit) : candidate.unit_raw || ''
+                }`
+          )
+          .join(' / ')
+      : ''
+    return (
+      (reasonText || t('reviews.notFound')) +
+      (candidates ? ` · ${t('reviews.candidatesLabel')}: ${candidates}` : '')
+    )
+  }
+  return t('reviews.notFound')
 }
 
-async function load(keepDrafts = false) {
+function factLines(item: ReviewItem): Array<{ side: ReviewSide; text: string }> {
+  const facts = (item.facts || {}) as Record<string, unknown>
+  return SIDES.filter((side) => {
+    const fact = facts[side]
+    return !!fact && typeof fact === 'object'
+  }).map((side) => ({ side, text: factText(item, side) }))
+}
+
+/** modified/added/removed/renumbered 的基准→修订差异条；文本事实相同则不硬造箭头。 */
+function diffSummary(item: ReviewItem): string {
+  const type = item.change_type
+  if (!type || type === 'unchanged' || type === 'unidentified') return ''
+  const base = factText(item, 'base')
+  const revised = factText(item, 'revised')
+  if (type === 'added') return base === '—' && revised === '—' ? '' : `— → ${revised}`
+  if (type === 'removed') return base === '—' && revised === '—' ? '' : `${base} → —`
+  // 文本事实相同（差异来自正文哈希/条号）时不展示 `A → A` 的误导性对比。
+  if (base === revised) return ''
+  return `${base} → ${revised}`
+}
+
+/** 文本事实里的条款/页码定位（不依赖证据行是否为空）。 */
+function factLocator(item: ReviewItem, side: ReviewSide): string {
+  const facts = (item.facts || {}) as Record<string, unknown>
+  const fact = facts[side] as Record<string, unknown> | undefined
+  if (!fact || typeof fact !== 'object') return ''
+  const parts: string[] = []
+  if (Array.isArray(fact.clause_no) && fact.clause_no.length) {
+    parts.push(t('reviews.evidenceClause', { clause: fact.clause_no.join(',') }))
+  }
+  if (Array.isArray(fact.section_no) && fact.section_no.length) {
+    parts.push(t('reviews.evidenceSection', { section: fact.section_no.join(',') }))
+  }
+  if (fact.page_number) {
+    parts.push(t('reviews.evidencePage', { page: fact.page_number }))
+  }
+  return parts.join(' · ')
+}
+
+async function load(
+  keepDrafts = false,
+  options: { background?: boolean; includeExports?: boolean } = {}
+) {
   if (!caseId.value) return
-  loading.value = true
-  loadError.value = false
+  const seq = ++loadSeq
+  const background = options.background === true
+  const includeExports = options.includeExports !== false
+  // 前后台各用独立令牌：后台请求不得让前台 spinner 永久卡住。
+  const foregroundToken = background ? null : ++foregroundSeq
+  if (!background) {
+    loading.value = true
+    loadError.value = false
+  }
   try {
     const data = apiUnwrap<ReviewCaseDetail>(await reviewsApi.get(caseId.value))
+    if (seq !== loadSeq) return
+    // 脏合并：只有用户真的改过的草稿才保留；未被编辑的项采纳服务端最新值
+    // （其他评审的决策/备注会收敛进来，不会被 keepDrafts 整表冻结）。
+    const previousById = new Map((detail.value?.items ?? []).map((item) => [item.id, item]))
     detail.value = data
+    loadError.value = false
     for (const item of data.items) {
+      const previous = previousById.get(item.id)
+      const draft = decisions[item.id]
+      const previousDecided = previous &&
+        (previous.status === 'verified' ||
+          previous.status === 'needs_human' ||
+          previous.status === 'not_applicable')
+        ? previous.status
+        : null
+      const draftDirty =
+        !!previous &&
+        !!draft &&
+        (draft.status !== previousDecided ||
+          (draft.note || '').trim() !== (previous.decision_note || '').trim())
+      if (keepDrafts && draftDirty) continue
       const decided =
         item.status === 'verified' ||
         item.status === 'needs_human' ||
         item.status === 'not_applicable'
-      if (keepDrafts && decisions[item.id]) continue
       decisions[item.id] = {
         status: decided ? (item.status as ReviewDecisionStatus) : null,
         note: item.decision_note || ''
       }
     }
   } catch {
-    loadError.value = true
+    // 后台刷新失败不把整页打成错误态；保留当前内容与已有错误提示。
+    if (seq === loadSeq && !background) loadError.value = true
   } finally {
-    loading.value = false
+    if (foregroundToken !== null && foregroundToken === foregroundSeq) loading.value = false
   }
+  if (!includeExports) return
   try {
     const listed = apiUnwrap<{ items: ReviewExportSummary[] }>(
       await reviewsApi.exports(caseId.value)
     )
-    exports.value = listed?.items ?? []
+    if (seq === loadSeq) exports.value = listed?.items ?? []
   } catch {
     // 导出历史失败不影响案件主体；保持旧列表。
   }
 }
 
 async function toggleEvidence(item: ReviewItem, row: ReviewEvidenceRow) {
+  if (evidenceBusy.value) return
+  evidenceBusy.value = row.id
   try {
     await reviewsApi.selectEvidence(caseId.value, item.id, {
       side: row.side,
@@ -815,9 +1012,12 @@ async function toggleEvidence(item: ReviewItem, row: ReviewEvidenceRow) {
       role: 'main',
       selected: !row.selected
     })
-    await load(true)
+    // 后台刷新：不闪全页 spinner，也不重复拉导出历史。
+    await load(true, { background: true, includeExports: false })
   } catch {
     message.error(t('reviews.evidenceFailed'))
+  } finally {
+    evidenceBusy.value = ''
   }
 }
 
@@ -831,7 +1031,7 @@ async function saveDecision(item: ReviewItem) {
       note: decision.note || null
     })
     message.success(t('reviews.decisionSaved'))
-    await load(true)
+    await load(true, { background: true, includeExports: false })
   } catch {
     message.error(t('reviews.decisionFailed'))
   } finally {
@@ -877,7 +1077,7 @@ async function runExport() {
   try {
     await reviewsApi.exportCase(caseId.value)
     message.success(t('reviews.exportDone'))
-    await load(true)
+    await load(true, { background: true, includeExports: true })
   } catch (error) {
     const response = (error as { response?: { status?: number; data?: unknown } })?.response
     if (response?.status === 409) {
@@ -924,11 +1124,60 @@ async function downloadExport(exportId: string, format: 'json' | 'markdown') {
   }
 }
 
-onMounted(load)
+watch(itemFilter, (value) => {
+  const query = { ...((route.query || {}) as Record<string, string>) }
+  if (value === 'all') delete query.filter
+  else query.filter = value
+  void router.replace({ query })
+})
+
+watch(
+  () => (route.query || {}).filter,
+  (value) => {
+    const next =
+      typeof value === 'string' && (ITEM_FILTERS as readonly string[]).includes(value)
+        ? (value as ItemFilter)
+        : 'all'
+    if (next !== itemFilter.value) itemFilter.value = next
+  }
+)
+
+function handleBeforeUnload(event: BeforeUnloadEvent) {
+  if (!hasUnsavedDrafts.value) return
+  event.preventDefault()
+  event.returnValue = ''
+}
+
+onMounted(() => {
+  window.addEventListener('beforeunload', handleBeforeUnload)
+  void load()
+})
+
+onBeforeUnmount(() => {
+  window.removeEventListener('beforeunload', handleBeforeUnload)
+})
 </script>
 
 <style scoped>
-@media (max-width: 1023.98px) {
+.evidence-select.n-button {
+  min-height: 32px;
+}
+[data-item-heading]:focus {
+  outline: 2px solid #2563eb;
+  outline-offset: 4px;
+  border-radius: 4px;
+}
+@media (max-width: 1024px) {
+  .review-top-actions .n-button,
+  [data-testid="review-primary-actions"] .n-button {
+    min-height: 44px;
+  }
+  .review-decision-note :deep(.n-input__input-el) {
+    font-size: 16px;
+  }
+  .review-decision-note.n-input {
+    --n-height: 44px !important;
+  }
   .review-chip.n-button {
     height: 44px !important;
     padding-left: 12px;
@@ -943,9 +1192,32 @@ onMounted(load)
     height: 44px !important;
     line-height: 44px;
   }
+  .evidence-select.n-button {
+    min-height: 44px;
+  }
+  .review-decision-save.n-button {
+    min-height: 44px;
+  }
   .review-export-empty :deep(.n-empty__description) {
     color: #6b7280;
   }
+}
+@media (max-width: 767.98px) {
+  .review-conclusion {
+    padding-top: 8px;
+    padding-bottom: 8px;
+  }
+  .review-progress {
+    display: none;
+  }
+  .review-filter-chips {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    padding-bottom: 2px;
+  }
+}
+.dark .review-export-empty :deep(.n-empty__description) {
+  color: #9ca3af;
 }
 .review-export-empty :deep(.n-empty__description) {
   color: #6b7280;
