@@ -140,12 +140,15 @@ def _scope_segment(scope: str | None) -> str:
     """把回答缓存的 LLM 作用域（user/provider/model）收敛为 Redis key 片段。
 
     个人模型设置上线后，同组织的不同用户/模型不能互相命中回答缓存；
-    这里只保留安全字符并限制长度，避免作用域值污染 key 结构。
+    这里只保留安全字符并限制长度，避免作用域值污染 key 结构。尾部追加
+    scope 原文短哈希，避免「model/one」与「model_one」等在清洗/截断后碰撞。
     """
     text = (scope or "").strip()
     if not text:
         return ""
-    return re.sub(r"[^A-Za-z0-9_.:-]", "_", text)[:120]
+    safe = re.sub(r"[^A-Za-z0-9_.:-]", "_", text)[:96]
+    digest = hashlib.sha256(text.encode()).hexdigest()[:12]
+    return f"{safe}:{digest}"
 
 
 def _normalize_query_text(query: str) -> str:
@@ -656,7 +659,7 @@ class SemanticCache:
             for cache_key in candidates:
                 if isinstance(cache_key, bytes):
                     cache_key = cache_key.decode()
-                if org_prefix not in cache_key:
+                if not cache_key.startswith(f"{self.prefix}{org_prefix}"):
                     continue
                 raw = await rc.get(cache_key)
                 if not raw:

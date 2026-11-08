@@ -104,7 +104,7 @@ class _FakeRedis:
     async def scan_iter(self, match: str = "*", count: int = 100):
         import fnmatch
 
-        for key in list(self.values):
+        for key in set(self.values) | set(self.members):
             if fnmatch.fnmatch(key, match):
                 yield key
 
@@ -655,7 +655,14 @@ def _drain(queue: asyncio.Queue) -> list:
     return events
 
 
-async def _run_chat(session, fake_rag, sem_cache, user_content: str, debug: bool = True) -> list:
+async def _run_chat(
+    session,
+    fake_rag,
+    sem_cache,
+    user_content: str,
+    debug: bool = True,
+    cache_scope: str | None = None,
+) -> list:
     from app.services.chat_service import run_rag_pipeline
 
     queue: asyncio.Queue = asyncio.Queue()
@@ -679,6 +686,7 @@ async def _run_chat(session, fake_rag, sem_cache, user_content: str, debug: bool
             privacy_mode=False,
             event_queue=queue,
             debug=debug,
+            cache_scope=cache_scope,
         )
     return _drain(queue)
 
@@ -812,6 +820,21 @@ class TestAnswerCacheConsumer:
 # ── 纯函数锚点（防止等价判定被悄悄放宽）────────────────────────────
 
 
+class _RecordingScopeCache:
+    enabled = True
+
+    def __init__(self):
+        self.get_scopes: list = []
+        self.set_scopes: list = []
+
+    async def get(self, *_args, **kwargs):
+        self.get_scopes.append(kwargs.get("scope"))
+        return
+
+    async def set(self, *_args, **kwargs):
+        self.set_scopes.append(kwargs.get("scope"))
+
+
 class TestAnswerCacheScope:
     """个人模型上线后，回答缓存必须按用户/provider/model 分域。"""
 
@@ -838,6 +861,44 @@ class TestAnswerCacheScope:
         await cache.set("q", _VEC_A, "A", organization_id=1, scope="user:1:deepseek:m")
         await cache.clear_for_org(1)
         assert not any("org:1:" in key for key in fake.values)
+        assert not any("user:1:deepseek:m" in key for key in fake.members), "作用域索引也必须清理"
+
+    @pytest.mark.asyncio
+    async def test_run_pipeline_passes_scope_to_answer_cache(self, monkeypatch):
+        """chat_service 必须把端点作用域透传给回答缓存的 get/set。"""
+        _enable(monkeypatch, answer=True, retrieval=False)
+        rec = _RecordingScopeCache()
+        fake_rag = _fake_rag_stack(_VEC_A, AsyncMock(return_value=([], None)), {})
+        await _run_chat(
+            _mock_chat_session(),
+            fake_rag,
+            rec,
+            "q",
+            cache_scope="user:7:deepseek:m",
+        )
+        assert rec.get_scopes == ["user:7:deepseek:m"]
+        assert all(scope == "user:7:deepseek:m" for scope in rec.set_scopes)
+
+    def test_scope_segment_sanitizes_and_avoids_collisions(self):
+        from app.rag.cache import _scope_segment
+
+        a = _scope_segment("user:1:model/one")
+        b = _scope_segment("user:1:model_one")
+        assert a != b, "清洗后碰撞必须由哈希后缀区分"
+        evil = _scope_segment("user:1:*?[]:org:2:")
+        assert "*" not in evil and "?" not in evil and "[" not in evil
+        assert len(evil) <= 120
+
+    def test_server_scope_uses_org_default_model(self):
+        from app.services.chat_service import _effective_answer_cache_scope
+
+        assert (
+            _effective_answer_cache_scope("server:global-model", "org-model") == "server:org-model"
+        )
+        assert (
+            _effective_answer_cache_scope("user:1:deepseek:m", "org-model") == "user:1:deepseek:m"
+        )
+        assert _effective_answer_cache_scope("server:global-model", None) == "server:global-model"
 
 
 def test_cosine_anchor_matches_triage_repro():
