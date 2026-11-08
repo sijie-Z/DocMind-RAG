@@ -18,14 +18,20 @@ vi.mock('@/api/auth', () => ({
   loginWithJson: vi.fn(),
   register: vi.fn(),
   getUserProfile: vi.fn(),
+  logout: vi.fn().mockResolvedValue({}),
 }))
 vi.mock('@/api/user', () => ({
   getUserSettings: vi.fn(() => Promise.resolve({ data: {} })),
   updateUserSettings: vi.fn(() => Promise.resolve({ data: {} })),
   updateUserProfile: vi.fn(() => Promise.resolve({ data: {} })),
 }))
+vi.mock('@/utils/request', () => ({
+  clearDefaultAuth: vi.fn(),
+}))
+
 vi.mock('@/utils/auth', () => ({
   getToken: vi.fn(() => ''),
+  getRefreshToken: vi.fn(() => ''),
   setToken: vi.fn(),
   setRefreshToken: vi.fn(),
   removeToken: vi.fn(),
@@ -33,6 +39,7 @@ vi.mock('@/utils/auth', () => ({
 
 import { useUserStore } from '@/stores/user'
 import { loginWithJson, getUserProfile } from '@/api/auth'
+import { getUserSettings } from '@/api/user'
 import { getToken } from '@/utils/auth'
 import type { UserInfo } from '@/types/user'
 
@@ -126,5 +133,81 @@ describe('useUserStore · isAdmin 组合判定', () => {
 
     expect(store.userInfo?.is_superuser).toBe(true)
     expect(store.isAdmin).toBe(true)
+  })
+})
+
+describe('useUserStore · fetchSettings 并发单飞', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    localStorage.clear()
+    vi.clearAllMocks()
+  })
+
+  it('同时调用只发一次请求；settle 后再调用会重新拉取（不缓存结果）', async () => {
+    let resolveRequest!: (value: unknown) => void
+    const deferred = new Promise((resolve) => {
+      resolveRequest = resolve
+    })
+    vi.mocked(getUserSettings).mockReturnValueOnce(deferred as never)
+
+    const store = useUserStore()
+    const first = store.fetchSettings()
+    const second = store.fetchSettings()
+    expect(getUserSettings).toHaveBeenCalledTimes(1)
+
+    resolveRequest({ data: { data: { theme: 'dark' } } })
+    await Promise.all([first, second])
+    expect(store.settings.theme).toBe('dark')
+
+    vi.mocked(getUserSettings).mockResolvedValueOnce({ data: { data: {} } } as never)
+    await store.fetchSettings()
+    expect(getUserSettings).toHaveBeenCalledTimes(2)
+  })
+
+  it('身份切换后在途的旧设置响应被丢弃（不得写进新会话）', async () => {
+    let resolveRequest!: (value: unknown) => void
+    const deferred = new Promise((resolve) => {
+      resolveRequest = resolve
+    })
+    vi.mocked(getUserSettings).mockReturnValueOnce(deferred as never)
+
+    const store = useUserStore()
+    store.userInfo = makeInfo({ id: 7 })
+    const pending = store.fetchSettings()
+
+    vi.mocked(loginWithJson).mockResolvedValueOnce({
+      data: { data: { access_token: 'token-2', user_info: makeInfo({ id: 99 }) } },
+    } as never)
+    await store.login({ username: 'other', password: 'x' })
+
+    resolveRequest({ data: { data: { theme: 'dark' } } })
+    await pending
+    expect(store.settings.theme).not.toBe('dark')
+  })
+
+  it('登出后在途设置请求失效：新会话重新拉取，旧账号响应被丢弃', async () => {
+    let resolveRequest!: (value: unknown) => void
+    const deferred = new Promise((resolve) => {
+      resolveRequest = resolve
+    })
+    vi.mocked(getUserSettings).mockReturnValueOnce(deferred as never)
+
+    const store = useUserStore()
+    store.userInfo = makeInfo({ id: 7 })
+    store.token = 'tok'
+    const pending = store.fetchSettings()
+
+    await store.logout({ navigate: false })
+
+    vi.mocked(getUserSettings).mockResolvedValueOnce({
+      data: { data: { theme: 'dark' } },
+    } as never)
+    expect(await store.fetchSettings()).toBe(true)
+    expect(getUserSettings).toHaveBeenCalledTimes(2)
+    expect(store.settings.theme).toBe('dark')
+
+    resolveRequest({ data: { data: { theme: 'light' } } })
+    await pending
+    expect(store.settings.theme).toBe('dark')
   })
 })

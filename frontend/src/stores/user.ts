@@ -44,6 +44,8 @@ export const useUserStore = defineStore('user', () => {
   const myOrganizations = ref<Array<{ id: number; name: string }>>([])
   let organizationsRequest: Promise<Array<{ id: number; name: string }>> | null = null
   let organizationsRequestSeq = 0
+  let settingsRequest: Promise<boolean> | null = null
+  let settingsRequestSeq = 0
   let authScopeVersion = 0
 
   const resetAgentAndChat = () => {
@@ -56,6 +58,10 @@ export const useUserStore = defineStore('user', () => {
     organizationsRequestSeq += 1
   }
 
+  const invalidateSettingsRequest = () => {
+    settingsRequest = null
+    settingsRequestSeq += 1
+  }
   const clearIdentityScopedStorage = () => {
     localStorage.removeItem('user_info')
     localStorage.removeItem('activeSystemPrompt')
@@ -78,6 +84,7 @@ export const useUserStore = defineStore('user', () => {
         // 支持不经过空用户态的直接换账号：旧账号的异步组织请求一并失效。
         authScopeVersion += 1
         invalidateOrganizationsRequest()
+        invalidateSettingsRequest()
         myOrganizations.value = []
         resetAgentAndChat()
         clearIdentityScopedStorage()
@@ -90,7 +97,8 @@ export const useUserStore = defineStore('user', () => {
             ? JSON.parse(info.preferences)
             : info.preferences
           if (prefs?.theme) {
-            useAppStore().setTheme(prefs.theme)
+            // 服务端水合：只应用主题，不回写 /users/me（避免登录首屏无谓 PUT）。
+            useAppStore().setTheme(prefs.theme, { persist: false })
           }
         } catch { /* non-critical */ }
       }
@@ -230,8 +238,8 @@ export const useUserStore = defineStore('user', () => {
         await getUserInfo()
       }
 
-      // Auto-fetch user settings after login
-      fetchSettings()
+      // 用户设置由登录后的布局挂载统一拉取（fetchSettings 单飞）——登录页
+      // 不重复发 GET /user/settings，避免首屏两个同源请求。
 
       return { success: true }
     } catch (error: unknown) {
@@ -328,6 +336,7 @@ export const useUserStore = defineStore('user', () => {
   const clearAuthState = () => {
     authScopeVersion += 1
     invalidateOrganizationsRequest()
+    invalidateSettingsRequest()
     resetAgentAndChat()
     userInfo.value = null
     token.value = ''
@@ -386,27 +395,44 @@ export const useUserStore = defineStore('user', () => {
 
   // --- User Settings Actions ---
 
-  const fetchSettings = async () => {
-    try {
-      const response = await getUserSettings()
-      const resData = response.data as unknown as Record<string, unknown>
-      const data = (resData.data && typeof resData.data === 'object')
-        ? resData.data as UserSettings
-        : resData as unknown as UserSettings
-      if (data.language) {
-        settings.value.language = data.language
-        localStorage.setItem('language', data.language)
+  // 单飞：布局挂载与其它调用方并发时只发一次 GET /user/settings；
+  // 不缓存结果（settle 后置空），后续显式调用仍会重新拉取。
+  // 返回是否成功应用（false = 失败或身份已变被丢弃），调用方据此决定
+  // 是否把 settings 快照应用到 UI（失败时沿用本地/登录 payload 的值）。
+  const fetchSettings = (): Promise<boolean> => {
+    if (settingsRequest) return settingsRequest
+    const seq = settingsRequestSeq
+    const request = (async (): Promise<boolean> => {
+      try {
+        const response = await getUserSettings()
+        // 身份已切换/登出：旧账号的响应不得写进新会话。
+        if (seq !== settingsRequestSeq) return false
+        const resData = response.data as unknown as Record<string, unknown>
+        const data = (resData.data && typeof resData.data === 'object')
+          ? resData.data as UserSettings
+          : resData as unknown as UserSettings
+        if (data.language) {
+          settings.value.language = data.language
+          localStorage.setItem('language', data.language)
+        }
+        if (data.theme) {
+          settings.value.theme = data.theme
+          localStorage.setItem('theme', data.theme)
+        }
+        if (data.preferences) {
+          settings.value.preferences = data.preferences
+        }
+        return true
+      } catch {
+        // Non-critical — use local settings
+        return false
       }
-      if (data.theme) {
-        settings.value.theme = data.theme
-        localStorage.setItem('theme', data.theme)
-      }
-      if (data.preferences) {
-        settings.value.preferences = data.preferences
-      }
-    } catch {
-      // Non-critical — use local settings
-    }
+    })()
+    settingsRequest = request
+    void request.finally(() => {
+      if (settingsRequest === request) settingsRequest = null
+    })
+    return request
   }
 
   const updateSettings = async (data: { language?: string; theme?: string; preferences?: Record<string, unknown> }) => {

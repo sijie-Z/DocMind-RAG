@@ -35,10 +35,24 @@ export const useAppStore = defineStore('app', () => {
   const theme = computed(() => isDark.value ? 'dark' : 'light')
   
   // 方法
-  const setTheme = (mode: ThemeMode) => {
+  const setTheme = (mode: ThemeMode, options: { persist?: boolean } = {}) => {
+    const changed = themeMode.value !== mode
     themeMode.value = mode
     localStorage.setItem('theme', mode)
     applyTheme()
+
+    // 同值重设不产生写请求；从服务端水合（persist: false）只应用不回声——
+    // 否则每次登录/刷新都会把刚从后端读到的主题再 PUT 回 /users/me。
+    if (options.persist === false) {
+      // 水合是服务端最新值：撤销尚未发出的显式写，避免随后把已被覆盖的
+      // 选择写回后端（UI 与服务端偏好分叉）。
+      if (themeSyncTimer) {
+        clearTimeout(themeSyncTimer)
+        themeSyncTimer = null
+      }
+      return
+    }
+    if (!changed) return
 
     // 如果已登录，防抖同步到后端
     const userStore = useUserStore()

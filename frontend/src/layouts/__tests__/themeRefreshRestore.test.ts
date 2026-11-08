@@ -49,7 +49,7 @@ vi.mock('@/api/user', () => ({
 import Layouts from '../index.vue'
 import { useAppStore } from '@/stores/app'
 import { useUserStore } from '@/stores/user'
-import { getUserSettings } from '@/api/user'
+import { getUserSettings, updateUserProfile } from '@/api/user'
 
 const i18n = createI18n({
   legacy: false,
@@ -153,6 +153,8 @@ describe('P2-A2 · layouts 刷新模拟：主题不被后端覆写', () => {
     // （pristine 树同样复现，非 T5 命名波引入）；waitFor 只等既有结果，不改断言语义
     await vi.waitFor(() => expect(appStore.themeMode).toBe('dark'), { timeout: 3000 })
     expect(localStorage.getItem('theme')).toBe('dark')
+    // 服务端水合不得回声写回 /users/me（修前每次登录/刷新都会 PUT 一次）
+    expect(updateUserProfile).not.toHaveBeenCalled()
   })
 
   it('评审 P3 反例（f4）：本地损坏值 banana + 后端 dark → 挂载后落到 dark 且本地值愈合', async () => {
@@ -167,5 +169,7 @@ describe('P2-A2 · layouts 刷新模拟：主题不被后端覆写', () => {
     await vi.waitFor(() => expect(appStore.themeMode).toBe('dark'), { timeout: 3000 })
     expect(localStorage.getItem('theme')).toBe('dark')
     expect(document.documentElement.classList.contains('dark')).toBe(true)
+    await new Promise((resolve) => setTimeout(resolve, 600))
+    expect(updateUserProfile).not.toHaveBeenCalled()
   })
 })
