@@ -57,8 +57,12 @@ vi.mock('@/api/user', async (importOriginal) => {
       data: {
         success: true,
         providers: [
-          { id: 'deepseek', name: 'DeepSeek', base_url: 'https://api.deepseek.com/v1', models: ['deepseek-chat'], requires_key: true },
-          { id: 'custom', name: '自定义 (OpenAI 兼容)', base_url: '', models: [], requires_key: true },
+          { id: 'deepseek', name: 'DeepSeek-backend', base_url: 'https://api.deepseek.com/v1', models: ['deepseek-chat'], requires_key: true },
+          { id: 'ollama', name: 'Ollama-backend (本地)', base_url: 'http://localhost:11434/v1', models: ['llama3'], requires_key: false },
+          { id: 'openai', name: 'OpenAI-backend', base_url: 'https://api.openai.com/v1', models: ['gpt-4o'], requires_key: true },
+          { id: 'zhipu', name: '智谱后端', base_url: 'https://open.bigmodel.cn/api/paas/v4', models: ['glm-4-flash'], requires_key: true },
+          { id: 'custom', name: 'Custom-backend (OpenAI compatible)', base_url: '', models: [], requires_key: true },
+          { id: 'azure', name: 'Azure OpenAI (backend)', base_url: '', models: [], requires_key: true },
         ],
         current: {
           provider: 'deepseek', model: 'deepseek-chat', api_key: 'sk-a...zzzz',
@@ -78,10 +82,11 @@ vi.mock('@/utils/echarts', () => ({
 }))
 
 const i18n = createI18n({ legacy: false, locale: 'zh', messages: { zh } })
+const i18nEn = createI18n({ legacy: false, locale: 'en', messages: { en } })
 
 let capturedApi: ReturnType<typeof useProfilePage>
 
-function mountHarness() {
+function mountHarness(localeI18n = i18n) {
   const pinia = createPinia()
   setActivePinia(pinia)
   const Harness = defineComponent({
@@ -94,7 +99,7 @@ function mountHarness() {
     render: () =>
       h(NDialogProvider, null, { default: () => h(NMessageProvider, null, { default: () => h(Harness) }) }),
   })
-  return mount(Host, { global: { plugins: [pinia, i18n, naive] } })
+  return mount(Host, { global: { plugins: [pinia, localeI18n, naive] } })
 }
 
 function mountPage() {
@@ -211,8 +216,12 @@ describe('AI 模型设置 · 保存路径', () => {
       data: {
         success: true,
         providers: [
-          { id: 'deepseek', name: 'DeepSeek', base_url: 'https://api.deepseek.com/v1', models: ['deepseek-chat'], requires_key: true },
-          { id: 'custom', name: '自定义 (OpenAI 兼容)', base_url: '', models: [], requires_key: true },
+          { id: 'deepseek', name: 'DeepSeek-backend', base_url: 'https://api.deepseek.com/v1', models: ['deepseek-chat'], requires_key: true },
+          { id: 'ollama', name: 'Ollama-backend (本地)', base_url: 'http://localhost:11434/v1', models: ['llama3'], requires_key: false },
+          { id: 'openai', name: 'OpenAI-backend', base_url: 'https://api.openai.com/v1', models: ['gpt-4o'], requires_key: true },
+          { id: 'zhipu', name: '智谱后端', base_url: 'https://open.bigmodel.cn/api/paas/v4', models: ['glm-4-flash'], requires_key: true },
+          { id: 'custom', name: 'Custom-backend (OpenAI compatible)', base_url: '', models: [], requires_key: true },
+          { id: 'azure', name: 'Azure OpenAI (backend)', base_url: '', models: [], requires_key: true },
         ],
         current: {
           provider: 'custom', model: 'my-model', api_key: 'sk-a...zzzz',
@@ -302,6 +311,11 @@ describe('AI 模型设置 · 四语词条齐备', () => {
     'aiProviderUseServerDefault',
     'aiProviderUseServerDefaultDesc',
     'aiProviderProvider',
+    'providerDeepseek',
+    'providerOllama',
+    'providerOpenai',
+    'providerZhipu',
+    'providerCustom',
     'aiProviderModel',
     'aiProviderKeyHint',
     'aiProviderSave',
@@ -323,4 +337,32 @@ describe('AI 模型设置 · 四语词条齐备', () => {
       }
     })
   }
+
+  it('provider 名称按当前语言本地化（zh），未知 id 回退后端 name', async () => {
+    mountHarness()
+    await flushPromises()
+    await flushPromises()
+    const labels = capturedApi.providerOptions.value
+    const labelOf = (id: string) => labels.find((option) => option.value === id)?.label
+    expect(labelOf('deepseek')).toBe('DeepSeek')
+    expect(labelOf('ollama')).toBe('Ollama（本地）')
+    expect(labelOf('openai')).toBe('OpenAI')
+    expect(labelOf('zhipu')).toBe('智谱 GLM')
+    expect(labelOf('custom')).toBe('自定义（OpenAI 兼容）')
+    expect(labelOf('azure')).toBe('Azure OpenAI (backend)')
+  })
+
+  it('provider 名称在 en 下本地化，未知 id 回退后端 name', async () => {
+    mountHarness(i18nEn as unknown as typeof i18n)
+    await flushPromises()
+    await flushPromises()
+    const labels = capturedApi.providerOptions.value
+    const labelOf = (id: string) => labels.find((option) => option.value === id)?.label
+    expect(labelOf('deepseek')).toBe('DeepSeek')
+    expect(labelOf('ollama')).toBe('Ollama (local)')
+    expect(labelOf('openai')).toBe('OpenAI')
+    expect(labelOf('zhipu')).toBe('Zhipu GLM')
+    expect(labelOf('custom')).toBe('Custom (OpenAI-compatible)')
+    expect(labelOf('azure')).toBe('Azure OpenAI (backend)')
+  })
 })

@@ -51,6 +51,11 @@ from app.rag.source_provenance import filter_original_results, original_text_of
 logger = logging.getLogger(__name__)
 
 
+USER_LLM_REQUEST_FAILED_MESSAGE = (
+    "个人模型调用失败。请在个人设置的 AI 模型设置中检查 API Key / Base URL，或稍后重试。"
+)
+
+
 def no_context_system_prompt(intent_guidance: str = "请基于通用知识作答。") -> str:
     """无检索上下文时的通用知识提示词（chat_stream 与 #209 闸门降级共用）。
 
@@ -876,6 +881,8 @@ class RAGPipeline:
             if client_override is not None:
                 # 个人设置密钥不得写日志：异常文本可能回显 key 片段，只记录异常类型。
                 logger.error("LLM streaming failed (user provider): %s", type(e).__name__)
+                # 个人 provider 失败给出可操作文案（检查 Key/Base URL），不泄露上游文本。
+                yield USER_LLM_REQUEST_FAILED_MESSAGE
             else:
                 logger.error(f"LLM streaming failed: {e}", exc_info=True)
-            yield "系统处理异常，请重试"
+                yield "系统处理异常，请重试"
