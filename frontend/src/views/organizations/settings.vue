@@ -163,6 +163,7 @@ import type {
   OrganizationSettingsUpdatePayload,
   OrganizationSettingsUsage,
 } from '@/api/organization'
+import { providerLabelKey } from '@/utils/providerLabels'
 
 const { t } = useI18n()
 const message = useDedupedMessage()
@@ -199,14 +200,18 @@ const form = reactive<{
 // 组织覆盖」——来源列会因此从 default 漂移成 organization。
 const baseline = reactive({ ...form })
 
-const providerOptions = [
-  { label: 'DeepSeek', value: 'deepseek' },
-  { label: 'OpenAI', value: 'openai' },
-  { label: 'Qwen', value: 'qwen' },
-  { label: 'Zhipu', value: 'zhipu' },
-  { label: 'StepFun', value: 'step' },
-  { label: 'Local', value: 'local' },
-]
+// 组织级默认 provider 是「存储/展示」字段（不参与运行时选择）：
+// 选项沿用既有 id 集合，标签走四语映射；未知 id 原样显示。
+const ORG_PROVIDER_IDS = ['deepseek', 'openai', 'qwen', 'zhipu', 'step', 'local'] as const
+const providerLabel = (id: string): string => {
+  const key = providerLabelKey(id)
+  if (!key) return id
+  const label = t(key)
+  return label === key ? id : label
+}
+const providerOptions = computed(() =>
+  ORG_PROVIDER_IDS.map((id) => ({ label: providerLabel(id), value: id }))
+)
 
 const settingRows = computed(() => [
   { key: 'default_provider', label: t('orgSettings.settingNames.defaultProvider'), entry: settings.value.default_provider },
@@ -229,6 +234,10 @@ const formatValue = (key: string, entry?: EffectiveOrganizationSetting): string 
   if (Array.isArray(value)) {
     // 空数组 = 显式「不允许任何工具」，与未设置（null）必须区分展示。
     return value.length ? value.join(', ') : '[]'
+  }
+  if (key === 'default_provider' && typeof value === 'string') {
+    // 生效值表同样显示四语名称，而不是裸 id（unknown id 原样）。
+    return providerLabel(value)
   }
   return String(value)
 }

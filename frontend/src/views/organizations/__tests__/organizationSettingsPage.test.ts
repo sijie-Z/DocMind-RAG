@@ -124,6 +124,19 @@ describe('organization settings page', () => {
 
     const provider = wrapper.find('[data-testid="effective-default_provider"]')
     expect(provider.text()).toContain('需重启')
+    // 生效值显示四语名称而不是裸 id（providerDeepseek = 'DeepSeek'）
+    expect(provider.text()).toContain(zh.profile.providerDeepseek)
+  })
+
+  it('组织 provider 使用四语名称：qwen 显示 Qwen 而不是裸 id', async () => {
+    const localized = structuredClone(baseSettings)
+    localized.settings.default_provider.value = 'qwen'
+    mockedGet.mockResolvedValue({ data: localized } as never)
+
+    const wrapper = await mountPage()
+    const provider = wrapper.find('[data-testid="effective-default_provider"]')
+    expect(provider.text()).toContain(zh.profile.providerQwen)
+    wrapper.unmount()
   })
 
   it('切换组织后按新组织重新加载', async () => {
