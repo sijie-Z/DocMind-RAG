@@ -64,7 +64,7 @@ from app.rag.source_provenance import (
 from app.schemas.chat import ChatSessionCreate, ChatStreamRequest, FeedbackRequest
 from app.services.chat_service import RAGEvent, run_rag_pipeline
 from app.services.document_preview import TEXT_PROVENANCE_MIXED
-from app.services.llm_settings_service import resolve_for_user
+from app.services.llm_settings_service import cache_scope, resolve_for_user
 from app.services.rag_service import rag_service
 from app.services.session_service import (
     SessionAccessScope,
@@ -777,6 +777,7 @@ async def websocket_endpoint(
                     # 个人 AI 模型设置（本批）：WS 与 SSE 同源解析；未配置/无效
                     # 时 source=server，传 None 保持全局默认行为。
                     llm_resolution = await resolve_for_user(session, user_state)
+                    llm_cache_scope = cache_scope(llm_resolution, user_state.id)
 
                     # Use an asyncio.Queue to collect pipeline events
                     queue: asyncio.Queue = asyncio.Queue()
@@ -801,6 +802,7 @@ async def websocket_endpoint(
                             llm_model=(
                                 llm_resolution.model if llm_resolution.source == "user" else None
                             ),
+                            cache_scope=llm_cache_scope,
                         )
                     )
 
@@ -1505,6 +1507,7 @@ async def chat_stream_endpoint(
                 # 个人 AI 模型设置（本批）：Chat/RAG 答案生成使用 per-user
                 # provider/model/key；未配置或配置无效 → 服务端默认。
                 llm_resolution = await resolve_for_user(session, current_user)
+                llm_cache_scope = cache_scope(llm_resolution, current_user.id)
 
                 queue: asyncio.Queue = asyncio.Queue()
 
@@ -1528,6 +1531,7 @@ async def chat_stream_endpoint(
                         llm_model=(
                             llm_resolution.model if llm_resolution.source == "user" else None
                         ),
+                        cache_scope=llm_cache_scope,
                     )
                 )
 

@@ -876,3 +876,15 @@ async def test_context_summary_uses_personal_model(monkeypatch):
     summary = await engine._summarize_with_llm([{"role": "user", "content": "hi"}], 100)
     assert summary == "summary"
     assert calls and calls[0]["model"] == "custom-model"
+
+
+def test_cache_scope_identifies_llm_identity():
+    """回答缓存分域：个人配置按用户+provider+model，服务端按模型。"""
+    personal = llm_settings_service.LLMResolution(
+        client=object(), model="m", source="user", provider="openai"
+    )
+    assert llm_settings_service.cache_scope(personal, 7) == "user:7:openai:m"
+    server = llm_settings_service.LLMResolution(
+        client=None, model="deepseek-v4-flash", source="server"
+    )
+    assert llm_settings_service.cache_scope(server, 7) == "server:deepseek-v4-flash"

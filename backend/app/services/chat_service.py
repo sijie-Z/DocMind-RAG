@@ -483,6 +483,18 @@ async def get_system_prompt(
     return None
 
 
+def _effective_answer_cache_scope(scope: str | None, org_default_model: str | None) -> str:
+    """server 源的回答缓存作用域使用组织实际生效的默认模型。
+
+    端点只知道进程默认模型；组织管理员改组织默认模型后，若 scope 不变，
+    旧模型生成的答案仍会被命中。user 源保持端点给出的 user/provider/model。
+    """
+    text = scope or ""
+    if text.startswith("server:") and org_default_model:
+        return f"server:{org_default_model}"
+    return text
+
+
 async def run_rag_pipeline(
     *,
     session: AsyncSession,
@@ -499,6 +511,7 @@ async def run_rag_pipeline(
     regenerate: bool = False,
     llm_client=None,
     llm_model: str | None = None,
+    cache_scope: str | None = None,
 ) -> None:
     """RAG pipeline core logic; pushes events into ``event_queue``.
 
@@ -559,6 +572,11 @@ async def run_rag_pipeline(
     # 未设置覆盖时各字段回退既有默认：聊天检索 8（文档绑定）/ 5（通用）、
     # 隐私开关保持请求值、模型沿用进程级 Settings——不改变既有默认语义。
     org_policy = await organization_settings_service.get_runtime_policy(session, search_org_id)
+    # 回答缓存 scope：server 源必须用组织实际生效的默认模型（否则管理员
+    # 改组织模型后仍会命中旧模型答案）；user 源由端点给出用户+provider+model。
+    answer_cache_scope = _effective_answer_cache_scope(
+        cache_scope, getattr(org_policy, "default_model", None)
+    )
     # 组织策略禁用隐私模式时，客户端 UI 已置灰；服务端仍强制关闭（纵深防御），
     # 不信任客户端可伪造的 privacyMode=true。
     privacy_mode = privacy_mode and org_policy.allow_privacy_mode
@@ -691,6 +709,7 @@ async def run_rag_pipeline(
                 search_org_id,
                 query=user_content,
                 hit_info=cache_meta,
+                scope=answer_cache_scope,
             )
             if cached_res and not _cached_answer_provenance_blocked(cached_res):
                 full_response = cached_res.get("answer", "")
@@ -1074,6 +1093,7 @@ async def run_rag_pipeline(
             answer=full_response,
             sources=sources_list,
             organization_id=search_org_id,
+            scope=answer_cache_scope,
         )
 
     try:

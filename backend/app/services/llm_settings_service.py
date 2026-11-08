@@ -363,6 +363,16 @@ def server_default_model() -> str:
     return settings.LOCAL_LLM_MODEL if settings.ENABLE_LOCAL_LLM else settings.DEEPSEEK_MODEL
 
 
+def cache_scope(resolution: LLMResolution, user_id: int | None = None) -> str:
+    """回答级语义缓存分域：个人配置按用户+provider+model，服务端按模型。
+
+    同组织的不同用户/模型不得互相命中缓存答案（个人模型上线后的正确性要求）。
+    """
+    if resolution.source == "user":
+        return f"user:{user_id}:{resolution.provider}:{resolution.model}"
+    return f"server:{resolution.model}"
+
+
 def _server_default_resolution() -> LLMResolution:
     from app.dependencies import _build_openai_client
 

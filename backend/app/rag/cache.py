@@ -136,6 +136,21 @@ def _key_digest(key: str) -> str:
     return f"{query_checksum:06x}{domain_checksum:06x}"
 
 
+def _scope_segment(scope: str | None) -> str:
+    """把回答缓存的 LLM 作用域（user/provider/model）收敛为 Redis key 片段。
+
+    个人模型设置上线后，同组织的不同用户/模型不能互相命中回答缓存；
+    这里只保留安全字符并限制长度，避免作用域值污染 key 结构。尾部追加
+    scope 原文短哈希，避免「model/one」与「model_one」等在清洗/截断后碰撞。
+    """
+    text = (scope or "").strip()
+    if not text:
+        return ""
+    safe = re.sub(r"[^A-Za-z0-9_.:-]", "_", text)[:96]
+    digest = hashlib.sha256(text.encode()).hexdigest()[:12]
+    return f"{safe}:{digest}"
+
+
 def _normalize_query_text(query: str) -> str:
     return unicodedata.normalize("NFKC", query or "").lower().strip()
 
@@ -565,6 +580,8 @@ class SemanticCache:
         organization_id: int,
         query: str | None = None,
         hit_info: dict[str, Any] | None = None,
+        *,
+        scope: str = "",
     ) -> dict[str, Any] | None:
         """Find the most similar cached entry **whose query is equivalent**.
 
@@ -616,8 +633,9 @@ class SemanticCache:
                 _reject("redis_unavailable")
                 return None
 
-            index_key = f"{self.index_key}:{org_id}"
-            org_prefix = f"org:{org_id}:"
+            scope_seg = _scope_segment(scope)
+            index_key = f"{self.index_key}:{org_id}" + (f":{scope_seg}" if scope_seg else "")
+            org_prefix = f"org:{org_id}:" + (f"{scope_seg}:" if scope_seg else "")
             query_score = self._quantize(query_embedding)
             candidates = await rc.zrangebyscore(
                 index_key,
@@ -641,7 +659,7 @@ class SemanticCache:
             for cache_key in candidates:
                 if isinstance(cache_key, bytes):
                     cache_key = cache_key.decode()
-                if org_prefix not in cache_key:
+                if not cache_key.startswith(f"{self.prefix}{org_prefix}"):
                     continue
                 raw = await rc.get(cache_key)
                 if not raw:
@@ -704,6 +722,7 @@ class SemanticCache:
         sources: list[dict] | None = None,
         *,
         organization_id: int,
+        scope: str = "",
     ) -> None:
         """Store a Q&A pair in the semantic cache.
 
@@ -721,8 +740,9 @@ class SemanticCache:
             if rc is None:
                 return
 
-            index_key = f"{self.index_key}:{org_id}"
-            org_prefix = f"org:{org_id}:"
+            scope_seg = _scope_segment(scope)
+            index_key = f"{self.index_key}:{org_id}" + (f":{scope_seg}" if scope_seg else "")
+            org_prefix = f"org:{org_id}:" + (f"{scope_seg}:" if scope_seg else "")
             cache_key = f"{self.prefix}{org_prefix}{self._hash_key(embedding)}"
             data = {
                 "query": query,
@@ -759,5 +779,8 @@ class SemanticCache:
                 async for key in rc.scan_iter(match=f"{cache_prefix}*", count=100):
                     await rc.delete(key)
                 await rc.delete(f"{index_key}:{organization_id}")
+                # 个人模型作用域会派生 {index}:{org}:{scope} 索引，一并清理。
+                async for key in rc.scan_iter(match=f"{index_key}:{organization_id}:*", count=100):
+                    await rc.delete(key)
         except Exception as e:
             logger.error(f"Semantic cache clear failed: {e}")
