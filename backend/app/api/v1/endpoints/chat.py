@@ -1278,6 +1278,8 @@ async def chat_stream_endpoint(
                     except Exception as hist_err:
                         logger.warning(f"加载 agent 会话历史失败（继续无历史对话）: {hist_err}")
                 last_event_type = ""
+                # done 事件盖的任务态：failed 的 run 不得把占位/半截回答落库。
+                terminal_task_state = ""
                 async for agent_event in agent_service.chat(
                     query=user_content,
                     history=agent_history,
@@ -1396,7 +1398,9 @@ async def chat_stream_endpoint(
                             },
                         )
                     elif agent_event.type == "done":
-                        pass
+                        # 末态 done 携带 task_state：failed 的 run 后续不得落库
+                        # （旧实现只看 last_event_type，会把失败占位当回答保存）。
+                        terminal_task_state = getattr(agent_event, "task_state", "")
                     elif agent_event.type == "error":
                         # W0-5：error 事件内容过白名单——无组织拒绝等既有诚实
                         # 文案放行；含原始异常/内部类名的内容降级为通用文案。
@@ -1447,7 +1451,7 @@ async def chat_stream_endpoint(
                 # 落库失败不静默（issue #301 批 D 口径）：warning 事件如实告知，
                 # 回答本身照常完成。
                 save_error: str | None = None
-                if last_event_type not in (
+                if terminal_task_state != "failed" and last_event_type not in (
                     "approval_required",
                     "run_cancelled",
                     "plan_approval_required",
