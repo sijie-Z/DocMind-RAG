@@ -27,7 +27,11 @@ from app.models.chat import (
 from app.models.prompt import PromptTemplate
 from app.rag.cache import SemanticCache
 from app.rag.errors import LLMNotConfiguredError, RetrievalUnavailableError
-from app.rag.pipeline import no_context_system_prompt
+from app.rag.pipeline import (
+    USER_LLM_REQUEST_FAILED_MESSAGE,
+    UserLLMRequestError,
+    no_context_system_prompt,
+)
 from app.rag.retriever import HybridRetriever
 from app.rag.source_provenance import (
     PARSER_ORIGINAL,
@@ -981,6 +985,7 @@ async def run_rag_pipeline(
             # pipeline 内部既有默认（进程级 Settings）。
             model_override=llm_model or org_policy.default_model,
             client_override=llm_client,
+            raise_user_errors=True,
         ):
             full_response += chunk
             _emit(
@@ -1002,6 +1007,18 @@ async def run_rag_pipeline(
                 type="error",
                 content=LLM_NOT_CONFIGURED_MESSAGE,
                 conversation_id=conversation_id,
+            )
+        )
+        return
+    except UserLLMRequestError:
+        # 个人模型上游失败：显式 error 事件 + 可本地化错误码；不累加正文、
+        # 不落库、不写记忆/缓存（修复「检查 Key」被存成助手回答）。
+        _emit(
+            RAGEvent(
+                type="error",
+                content=USER_LLM_REQUEST_FAILED_MESSAGE,
+                conversation_id=conversation_id,
+                debug_data={"error_code": "USER_LLM_REQUEST_FAILED"},
             )
         )
         return

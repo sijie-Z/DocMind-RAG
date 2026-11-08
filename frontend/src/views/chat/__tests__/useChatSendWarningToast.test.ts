@@ -16,12 +16,12 @@ import { createI18n } from 'vue-i18n'
 const { messageSpies, postMock, handlers } = vi.hoisted(() => ({
   messageSpies: { error: vi.fn(), info: vi.fn(), success: vi.fn(), warning: vi.fn() },
   postMock: vi.fn(),
-  handlers: new Map<string, (data: { type?: string; content?: string }) => void>(),
+  handlers: new Map<string, (data: { type?: string; content?: string; code?: string }) => void>(),
 }))
 
 vi.mock('@/utils/sseService', () => ({
   sseService: {
-    on: vi.fn((event: string, handler: (data: { type?: string; content?: string }) => void) => {
+    on: vi.fn((event: string, handler: (data: { type?: string; content?: string; code?: string }) => void) => {
       handlers.set(event, handler)
     }),
     off: vi.fn(),
@@ -45,6 +45,7 @@ const i18n = createI18n({
         analyzeFiles: '分析文件',
         sseError: 'SSE错误',
         sseWarning: 'SSE警告', // 测试用占位值；真实四语文案见 locales/{zh,en,ja,fr}.ts
+        userLlmRequestFailed: '个人模型配置错误提示',
         sendFailed: '发送失败',
         networkError: '网络错误',
         waitForUpload: '等待上传',
@@ -107,5 +108,29 @@ describe('useChatSend · warning 事件 → toast（ISS-3）', () => {
     handlers.get('warning')!({ type: 'warning' })
 
     expect(messageSpies.warning).toHaveBeenCalledWith('SSE警告')
+  })
+})
+
+describe('useChatSend · 个人模型错误码', () => {
+  it('code=USER_LLM_REQUEST_FAILED 时使用四语词条而非后端中文', async () => {
+    postMock.mockResolvedValueOnce(true)
+    await send()
+
+    handlers.get('error')!({
+      type: 'error',
+      code: 'USER_LLM_REQUEST_FAILED',
+      content: '后端中文文案',
+    })
+
+    expect(messageSpies.error).toHaveBeenCalledWith('个人模型配置错误提示')
+  })
+
+  it('普通 error 仍展示后端 content', async () => {
+    postMock.mockResolvedValueOnce(true)
+    await send()
+
+    handlers.get('error')!({ type: 'error', content: '普通错误' })
+
+    expect(messageSpies.error).toHaveBeenCalledWith('普通错误')
   })
 })

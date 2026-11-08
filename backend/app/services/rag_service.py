@@ -68,6 +68,7 @@ class RagServiceFacade:
         mask_mapping_sink: dict | None = None,
         model_override: str | None = None,
         client_override=None,
+        raise_user_errors: bool = False,
     ) -> AsyncGenerator[str, None]:
         async for chunk in self._pipeline.chat_stream(
             query,
@@ -79,6 +80,7 @@ class RagServiceFacade:
             mask_mapping_sink,
             model_override=model_override,
             client_override=client_override,
+            raise_user_errors=raise_user_errors,
         ):
             yield chunk
 

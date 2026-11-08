@@ -283,7 +283,11 @@ export function useChatSend(
       // E3：出错终止时冲刷挂起的一帧，已到达的部分内容不丢（与旧逐 chunk 落屏观感一致）
       activeStream?.flush()
       activeStream = null
-      message.error(data.content || t('chat.sseError'))
+      message.error(
+        data.code === 'USER_LLM_REQUEST_FAILED'
+          ? t('chat.userLlmRequestFailed')
+          : data.content || t('chat.sseError')
+      )
     }
 
     // ISS-3：后端 warning 事件（落库失败可见 / Agent 侧降级提示）此前被传输层

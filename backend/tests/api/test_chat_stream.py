@@ -31,6 +31,7 @@ from app.agent.service import agent_service
 from app.core.database import get_db
 from app.core.security import get_current_user
 from app.main import app
+from app.rag.pipeline import USER_LLM_REQUEST_FAILED_MESSAGE
 
 USER_ID = 1
 STREAM_URL = "/api/v1/chat/stream"
@@ -238,6 +239,35 @@ async def test_rag_stream_passes_personal_llm_resolution(client, monkeypatch):
     assert captured.get("llm_client") is personal_client
     assert captured.get("llm_model") == "personal-model"
     assert captured.get("cache_scope") == "user:1:deepseek:personal-model"
+
+
+@pytest.mark.asyncio
+async def test_rag_error_event_forwards_error_code(client, monkeypatch):
+    """个人模型失败的 error 帧必须带错误码（前端据此四语化）。"""
+    from app.services.chat_service import RAGEvent
+
+    monkeypatch.setattr(chat_api, "DEEP_ANALYSIS_GUARD_ENABLED", True)
+    monkeypatch.setattr(chat_api, "AsyncSessionLocal", lambda: _FakeSessionCtx())
+
+    async def _fake_rag(**kwargs):
+        await kwargs["event_queue"].put(
+            RAGEvent(
+                type="error",
+                content=USER_LLM_REQUEST_FAILED_MESSAGE,
+                debug_data={"error_code": "USER_LLM_REQUEST_FAILED"},
+            )
+        )
+
+    monkeypatch.setattr(chat_api, "run_rag_pipeline", _fake_rag)
+
+    resp = await client.post(STREAM_URL, json={"content": "个人模型错误"})
+
+    assert resp.status_code == 200
+    frames = _parse_frames(resp.text)
+    error_frames = [frame for frame in frames if frame["event"] == "error"]
+    assert error_frames, "应收到 error 帧"
+    assert error_frames[0]["data"]["code"] == "USER_LLM_REQUEST_FAILED"
+    assert error_frames[0]["data"]["content"] == USER_LLM_REQUEST_FAILED_MESSAGE
 
 
 @pytest.mark.asyncio

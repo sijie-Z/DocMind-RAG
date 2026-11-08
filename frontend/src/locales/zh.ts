@@ -281,6 +281,7 @@ export default {
     defaultTitle: '新对话',
     confirmDelete: '确认删除此对话吗？',
     sseError: 'SSE错误',
+    userLlmRequestFailed: '个人模型调用失败。请在个人设置的 AI 模型设置中检查 API Key / Base URL，或稍后重试。',
     sseWarning: '服务端提示，本轮回答可能不完整',
     feedbackLiked: '已点赞，感谢您的反馈！',
     feedbackDisliked: '已点踩，我们会继续优化。',

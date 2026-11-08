@@ -56,6 +56,10 @@ USER_LLM_REQUEST_FAILED_MESSAGE = (
 )
 
 
+class UserLLMRequestError(RuntimeError):
+    """个人模型上游失败；聊天层据此发 error 事件，不得把诊断当作回答落库。"""
+
+
 def no_context_system_prompt(intent_guidance: str = "请基于通用知识作答。") -> str:
     """无检索上下文时的通用知识提示词（chat_stream 与 #209 闸门降级共用）。
 
@@ -684,12 +688,15 @@ class RAGPipeline:
         mask_mapping_sink: dict | None = None,
         model_override: str | None = None,
         client_override: AsyncOpenAI | None = None,
+        raise_user_errors: bool = False,
     ) -> AsyncGenerator[str, None]:
         """Stream LLM response with context compression and optional PII masking.
 
         ``client_override``：个人设置解析出的 per-user 客户端（Chat/RAG 消费点）。
         为 None 时保持既有行为（全局 ``self.openai_client``）。embedding/rerank/
         查询分解仍走全局配置——只覆盖答案生成。
+        ``raise_user_errors=True``：个人模型失败时抛 ``UserLLMRequestError``，
+        由聊天层转为 error 事件（不累加正文、不落库）；直接调用方默认仍拿文案。
 
         PII 掩码链路（安全加固）：
         1. 检索上下文与用户 query 在进入 prompt 前统一掩码（编号全局唯一）；
@@ -881,7 +888,9 @@ class RAGPipeline:
             if client_override is not None:
                 # 个人设置密钥不得写日志：异常文本可能回显 key 片段，只记录异常类型。
                 logger.error("LLM streaming failed (user provider): %s", type(e).__name__)
-                # 个人 provider 失败给出可操作文案（检查 Key/Base URL），不泄露上游文本。
+                if raise_user_errors:
+                    raise UserLLMRequestError(USER_LLM_REQUEST_FAILED_MESSAGE) from e
+                # 直接调用方（非聊天链路）保留可操作文案，不泄露上游文本。
                 yield USER_LLM_REQUEST_FAILED_MESSAGE
             else:
                 logger.error(f"LLM streaming failed: {e}", exc_info=True)

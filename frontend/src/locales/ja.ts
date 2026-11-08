@@ -262,6 +262,7 @@ export default {
       policyDesc: 'テーマ別に原文を検索し出典を提示します'
     },
     sseError: 'SSEエラー',
+    userLlmRequestFailed: '個人モデルの呼び出しに失敗しました。個人設定の AI モデル設定で API キー / Base URL を確認するか、しばらくしてから再試行してください。',
     feedbackLiked: '高評価を受け付けました。フィードバックありがとうございます！',
     feedbackDisliked: '低評価を受け付けました。今後も改善に努めます。',
     feedbackRetryLater: 'フィードバックに失敗しました。しばらくして再試行してください',
