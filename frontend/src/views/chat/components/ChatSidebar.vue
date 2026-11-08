@@ -124,6 +124,7 @@
 import { useI18n } from 'vue-i18n'
 import type { Conversation } from '@/api/conversation'
 import { format } from 'date-fns'
+import { parseApiDate } from '@/utils/format'
 import { useAppVersion } from '@/composables/useAppVersion'
 import {
   AddOutline, RefreshOutline, ChatboxOutline, ChatboxEllipsesOutline, TrashOutline, CloseOutline
@@ -154,7 +155,8 @@ defineEmits<{
 
 const formatDate = (dateStr: string) => {
   if (!dateStr) return ''
-  try { return format(new Date(dateStr), 'MM-dd HH:mm') } catch { return dateStr }
+  const parsed = parseApiDate(dateStr)
+  return parsed ? format(parsed, 'MM-dd HH:mm') : dateStr
 }
 </script>
 

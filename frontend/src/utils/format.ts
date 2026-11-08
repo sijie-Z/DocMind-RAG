@@ -1,11 +1,30 @@
 import dayjs from 'dayjs'
 
+// 后端 MySQL DATETIME 以 UTC 存储，JSON 里是「无时区 ISO」（如 2026-11-08T19:15:33）。
+// ECMAScript 会把这类字符串按**本地时间**解析——UTC+8 下整体早 8 小时。
+// 仅当缺时区且带时间部分时补 Z；带 Z/offset 的字符串、纯日期（按规范即 UTC）不动。
+const NAIVE_ISO_WITH_TIME = /^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(?::\d{2}(?:\.\d{1,6})?)?$/
+
+export const parseApiDate = (value: string | Date | undefined | null): Date | null => {
+  if (!value) return null
+  if (value instanceof Date) {
+    return Number.isNaN(value.getTime()) ? null : value
+  }
+  const text = value.trim()
+  if (!text) return null
+  const normalized = NAIVE_ISO_WITH_TIME.test(text)
+    ? `${text.replace(' ', 'T')}Z`
+    : text
+  const date = new Date(normalized)
+  return Number.isNaN(date.getTime()) ? null : date
+}
+
 export const formatDate = (dateString: string | Date | undefined | null): string => {
   if (!dateString) return '-'
   
-  const date = typeof dateString === 'string' ? new Date(dateString) : dateString
+  const date = parseApiDate(dateString)
   
-  if (isNaN(date.getTime())) {
+  if (!date) {
     return '-'
   }
   
@@ -76,8 +95,8 @@ export const formatDateTime = (
   locale = 'zh'
 ): string => {
   if (!dateString) return '-'
-  const date = typeof dateString === 'string' ? new Date(dateString) : dateString
-  if (Number.isNaN(date.getTime())) return '-'
+  const date = parseApiDate(dateString)
+  if (!date) return '-'
   try {
     return new Intl.DateTimeFormat(locale, {
       year: 'numeric',

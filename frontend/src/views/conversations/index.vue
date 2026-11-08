@@ -121,6 +121,7 @@ import { useI18n } from 'vue-i18n'
 import { SearchOutline, RefreshOutline, ChatbubblesOutline, TrashOutline, AddOutline } from '@vicons/ionicons5'
 import { getConversations, deleteConversation, type ConversationListResponse } from '@/api/conversation'
 import { apiUnwrap } from '@/utils/apiUnwrap'
+import { parseApiDate } from '@/utils/format'
 import { useDialog } from 'naive-ui'
 import { useDedupedMessage } from '@/utils/message'
 import dayjs from 'dayjs'
@@ -210,9 +211,8 @@ const deleteItem = (item: Conversation) => {
 
 // updated_at 后端可为空串（chat.py:191）；空串/非法值返回 ''，由模板 v-if 决定不渲染
 const formatDate = (date: string) => {
-  if (!date) return ''
-  const d = dayjs(date)
-  return d.isValid() ? d.format('MM-DD HH:mm') : ''
+  const parsed = parseApiDate(date)
+  return parsed ? dayjs(parsed).format('MM-DD HH:mm') : ''
 }
 
 onMounted(() => {

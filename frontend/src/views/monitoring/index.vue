@@ -203,6 +203,7 @@ import { getAuditLogs, type AuditLogEntry } from '@/api/user'
 import { RefreshOutline, PulseOutline, GitNetworkOutline, BookOutline, WarningOutline } from '@vicons/ionicons5'
 import echarts from '@/utils/echarts'
 import { getMonitoringDashboard, getMonitoringAlerts, getMetrics, getNotificationStatus, type TrendPoint, type NotificationServiceStatus } from '@/api/monitoring'
+import { parseApiDate } from '@/utils/format'
 import { apiUnwrap } from '@/utils/apiUnwrap'
 import { getErrorMessage } from '@/utils/apiError'
 import { filterPointsByTimeRange } from './timeRange'
@@ -362,7 +363,7 @@ const auditColumns = [
     key: 'created_at',
     width: 180,
     render(row: AuditLogEntry) {
-      return new Date(row.created_at).toLocaleString()
+      return parseApiDate(row.created_at)?.toLocaleString() ?? '-'
     }
   }
 ]

@@ -83,8 +83,10 @@ describe('conversations 页 · 时间与搜索（B31/B30 前端侧）', () => {
     expect(text).toContain('会话二')
     // A_sweep 实锤：修复前 3/3 行渲染 "Invalid Date"
     expect(text).not.toContain('Invalid Date')
-    // 正常值行仍渲染 MM-DD HH:mm
-    expect(text).toContain('10-10 05:00')
+    // 正常值行仍渲染 MM-DD HH:mm。后端时间是无时区 UTC，具体钟点随本地时区
+    // 变化（UTC 与 UTC+8 不同）；这里只锁格式与非 Invalid Date，换算语义由
+    // utils/__tests__/format.test.ts 的 parseApiDate 用例覆盖。
+    expect(text).toMatch(/10-10 \d{2}:\d{2}/)
     // 空串行不渲染时间（不含任何 "10-09" 形式时间）
     expect(text).not.toContain('10-09 13:49')
   })
