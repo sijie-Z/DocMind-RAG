@@ -60,10 +60,11 @@ const i18n = createI18n({
 })
 
 let send!: () => Promise<void>
+let messages!: { value: any[] }
 
 const Host = defineComponent({
   setup() {
-    const messages = ref([])
+    messages = ref<any[]>([])
     const attachedFiles = ref([])
     const attachedFileIds = ref<string[]>([])
     const isLoading = ref(false)
@@ -132,5 +133,27 @@ describe('useChatSend · 个人模型错误码', () => {
     handlers.get('error')!({ type: 'error', content: '普通错误' })
 
     expect(messageSpies.error).toHaveBeenCalledWith('普通错误')
+  })
+
+  it('正文到达前失败：移除空的 assistant 占位气泡（否则刷新后凭空消失）', async () => {
+    postMock.mockResolvedValueOnce(true)
+    await send()
+
+    expect(messages.value.map(m => m.messageType)).toEqual(['user', 'assistant'])
+
+    handlers.get('error')!({ type: 'error', code: 'USER_LLM_REQUEST_FAILED', content: '后端中文文案' })
+
+    expect(messages.value.map(m => m.messageType)).toEqual(['user'])
+  })
+
+  it('已有部分正文后失败：保留已到达内容，不误删气泡', async () => {
+    postMock.mockResolvedValueOnce(true)
+    await send()
+
+    handlers.get('chunk')!({ type: 'chunk', content: '已到达的部分' })
+    handlers.get('error')!({ type: 'error', content: '普通错误' })
+
+    expect(messages.value.map(m => m.messageType)).toEqual(['user', 'assistant'])
+    expect(messages.value[1].content).toBe('已到达的部分')
   })
 })

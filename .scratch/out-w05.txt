@@ -1,0 +1,25 @@
+.........................                                                [100%]
+============================== warnings summary ===============================
+tests/unit/test_w0_5_sse_error_mapping.py::TestAgentChatEndpointRedaction::test_agent_chat_error_event_is_mapped
+tests/unit/test_w0_5_sse_error_mapping.py::TestDiagnosticRedaction::test_run_report_traceback_path_sql_and_failure_lines_are_redacted
+  D:\Desktop\MyProjects\AI_projects\_orchestrate\_venv-win\Lib\site-packages\_pytest\unraisableexception.py:67: PytestUnraisableExceptionWarning: Exception ignored in: <function Connection.__del__ at 0x000001FBB6E591C0>
+  
+  Traceback (most recent call last):
+    File "D:\Desktop\MyProjects\AI_projects\_orchestrate\_venv-win\Lib\site-packages\aiomysql\connection.py", line 1131, in __del__
+      self.close()
+    File "D:\Desktop\MyProjects\AI_projects\_orchestrate\_venv-win\Lib\site-packages\aiomysql\connection.py", line 339, in close
+      self._writer.transport.close()
+    File "D:\Programming\Python 3.12.8\Lib\asyncio\proactor_events.py", line 109, in close
+      self._loop.call_soon(self._call_connection_lost, None)
+    File "D:\Programming\Python 3.12.8\Lib\asyncio\base_events.py", line 794, in call_soon
+      self._check_closed()
+    File "D:\Programming\Python 3.12.8\Lib\asyncio\base_events.py", line 540, in _check_closed
+      raise RuntimeError('Event loop is closed')
+  RuntimeError: Event loop is closed
+  
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+    warnings.warn(pytest.PytestUnraisableExceptionWarning(msg))
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+25 passed, 2 warnings in 13.14s
