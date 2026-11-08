@@ -154,6 +154,36 @@ async def test_guard_off_keeps_legacy_agent_branch_for_rollback(client, monkeypa
     assert "legacy-chunk" in resp.text
 
 
+@pytest.mark.asyncio
+async def test_legacy_agent_failed_done_is_not_persisted(client, monkeypatch):
+    """回滚阀分支：done(task_state=failed) 不得把占位/半截回答落库。"""
+    monkeypatch.setattr(chat_api, "DEEP_ANALYSIS_GUARD_ENABLED", False)
+    saved: dict = {}
+
+    async def _save(*_args, **_kwargs):
+        saved["called"] = True
+        return "msg-1"
+
+    monkeypatch.setattr(chat_api, "save_session_interaction", _save)
+
+    async def _fake_agent_chat(**_kwargs):
+        yield AgentEvent(type="chunk", content="[该步骤因 API 连接问题未能完成，已跳过]")
+        yield AgentEvent(type="done", content="", task_state="failed")
+
+    monkeypatch.setattr(agent_service, "chat", _fake_agent_chat)
+
+    resp = await client.post(
+        STREAM_URL,
+        json={"content": "旧客户端", "useAgent": True, "conversationId": "conv-failed"},
+    )
+
+    assert resp.status_code == 200
+    # 只抑制持久化，流式输出不变（占位 chunk 仍到达客户端）
+    assert "event: chunk" in resp.text
+    assert "该步骤因 API 连接问题未能完成" in resp.text
+    assert "called" not in saved, "失败 run 的占位回答不得落库"
+
+
 async def _noop_save(*_args, **_kwargs):
     return None
 
