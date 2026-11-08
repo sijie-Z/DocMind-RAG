@@ -236,3 +236,205 @@ describe('T1 · 通知 store 错误态', () => {
     expect(store.unreadCount).toBe(3)
   })
 })
+
+// ── 在途竞态：迟到的旧快照不得回弹已读、复活已删、覆盖实时推送 ─────────────
+
+function deferred<T>() {
+  let resolve!: (value: T) => void
+  let reject!: (reason?: unknown) => void
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res
+    reject = rej
+  })
+  return { promise, resolve, reject }
+}
+
+describe('通知 store · 在途响应按世代丢弃', () => {
+  beforeEach(() => {
+    vi.useFakeTimers()
+  })
+
+  afterEach(() => {
+    // 清掉防抖对账定时器，避免跨用例落地
+    useNotificationStore().resetForIdentityChange()
+    vi.useRealTimers()
+  })
+
+  it('标记全部已读后的强制刷新：旧快照被丢弃，计数不反弹', async () => {
+    const store = useNotificationStore()
+    seedSuccess()
+    await store.bootstrapBadge()
+    await store.loadHeaderItems()
+    expect(store.unreadCount).toBe(5)
+
+    const staleBadge = deferred<{ data: { count: number } }>()
+    const staleList = deferred<{ data: { items: ReturnType<typeof notif>[]; total: number } }>()
+    mockedCount.mockReturnValueOnce(staleBadge.promise as never)
+    mockedList.mockReturnValueOnce(staleList.promise as never)
+
+    const inFlightBadge = store.bootstrapBadge()
+    const inFlightList = store.loadHeaderItems()
+
+    // 用户执行「全部已读」成功，随后强制刷新
+    mockedCount.mockResolvedValueOnce({ data: { count: 0 } } as never)
+    mockedList.mockResolvedValueOnce({
+      data: { items: [notif(2, true), notif(1, true)], total: 2 },
+    } as never)
+    const forced = store.refresh({ force: true })
+
+    // 强制刷新先落地：服务端真值立即可见，不等待旧请求
+    await forced
+    expect(store.unreadCount).toBe(0)
+    expect(store.headerItems.every((n) => n.is_read)).toBe(true)
+
+    // 旧请求此时才返回（仍是未读快照）：必须被丢弃
+    staleBadge.resolve({ data: { count: 5 } })
+    staleList.resolve({ data: { items: [notif(2), notif(1)], total: 2 } })
+    await Promise.all([inFlightBadge, inFlightList])
+
+    expect(store.unreadCount).toBe(0)
+    expect(store.headerItems.every((n) => n.is_read)).toBe(true)
+    // 初始 + 在途旧请求 + 强制刷新各一次：强制刷新必须新发请求而非复用旧引用
+    expect(mockedCount).toHaveBeenCalledTimes(3)
+    expect(mockedList).toHaveBeenCalledTimes(3)
+  })
+
+  it('实时推送后，迟到的未读数快照不得覆盖 +1，且事后对账收敛', async () => {
+    const store = useNotificationStore()
+    seedSuccess()
+    await store.bootstrapBadge()
+    expect(store.unreadCount).toBe(5)
+
+    const staleBadge = deferred<{ data: { count: number } }>()
+    mockedCount.mockReturnValueOnce(staleBadge.promise as never)
+    const inFlight = store.bootstrapBadge()
+
+    store.applyRealtime(realtimePayload(100))
+    expect(store.unreadCount).toBe(6)
+
+    staleBadge.resolve({ data: { count: 5 } })
+    await inFlight
+    expect(store.unreadCount).toBe(6)
+    expect(store.headerItems.some((n) => n.id === 100)).toBe(true)
+
+    // 防抖对账：服务端真值（与本地推算不同）覆盖，删除对账逻辑即红
+    mockedCount.mockResolvedValueOnce({ data: { count: 7 } } as never)
+    await vi.advanceTimersByTimeAsync(300)
+    expect(store.unreadCount).toBe(7)
+    expect(mockedCount).toHaveBeenCalledTimes(3)
+  })
+
+  it('已读单条后，迟到的未读快照不得把计数加回去，且事后对账收敛', async () => {
+    const store = useNotificationStore()
+    seedSuccess()
+    await store.bootstrapBadge()
+    await store.loadHeaderItems()
+
+    const staleBadge = deferred<{ data: { count: number } }>()
+    mockedCount.mockReturnValueOnce(staleBadge.promise as never)
+    const inFlight = store.bootstrapBadge()
+
+    store.consumeRead(1)
+    expect(store.unreadCount).toBe(4)
+
+    staleBadge.resolve({ data: { count: 5 } })
+    await inFlight
+    expect(store.unreadCount).toBe(4)
+    expect(store.headerItems.find((n) => n.id === 1)?.is_read).toBe(true)
+
+    mockedCount.mockResolvedValueOnce({ data: { count: 3 } } as never)
+    mockedList.mockResolvedValueOnce({
+      data: { items: [notif(2), notif(1, true)], total: 2 },
+    } as never)
+    await vi.advanceTimersByTimeAsync(300)
+    expect(store.unreadCount).toBe(3)
+    expect(mockedCount).toHaveBeenCalledTimes(3)
+  })
+
+  it('删除后强制刷新：迟到的旧列表不得让已删行复活', async () => {
+    const store = useNotificationStore()
+    seedSuccess()
+    await store.bootstrapBadge()
+    await store.loadHeaderItems()
+
+    const staleList = deferred<{ data: { items: ReturnType<typeof notif>[]; total: number } }>()
+    mockedList.mockReturnValueOnce(staleList.promise as never)
+    const inFlight = store.loadHeaderItems()
+
+    // 删除成功后本地先移除，再强制刷新
+    store.headerItems = store.headerItems.filter((n) => n.id !== 1)
+    mockedCount.mockResolvedValueOnce({ data: { count: 4 } } as never)
+    mockedList.mockResolvedValueOnce({
+      data: { items: [notif(2)], total: 1 },
+    } as never)
+    const forced = store.refresh({ force: true })
+
+    staleList.resolve({ data: { items: [notif(2), notif(1)], total: 2 } })
+    await Promise.all([inFlight, forced])
+
+    expect(store.headerItems.map((n) => n.id)).toEqual([2])
+  })
+
+  it('迟到的失败响应不得在新请求成功后再点亮错误横幅', async () => {
+    const store = useNotificationStore()
+    seedSuccess()
+    await store.bootstrapBadge()
+    expect(store.lastError).toBeNull()
+
+    const staleBadge = deferred<{ data: { count: number } }>()
+    mockedCount.mockReturnValueOnce(staleBadge.promise as never)
+    const inFlight = store.bootstrapBadge()
+
+    mockedCount.mockResolvedValueOnce({ data: { count: 0 } } as never)
+    mockedList.mockResolvedValueOnce({ data: { items: [], total: 0 } } as never)
+    await store.refresh({ force: true })
+    expect(store.lastError).toBeNull()
+
+    staleBadge.reject(new Error('stale network error'))
+    await inFlight
+    expect(store.lastError).toBeNull()
+  })
+
+  it('列表请求被作废时 headerLoading 必须收口', async () => {
+    const store = useNotificationStore()
+    seedSuccess()
+    const staleList = deferred<{ data: { items: ReturnType<typeof notif>[]; total: number } }>()
+    mockedList.mockReturnValueOnce(staleList.promise as never)
+
+    const inFlight = store.loadHeaderItems()
+    expect(store.headerLoading).toBe(true)
+
+    store.applyRealtime(realtimePayload(101))
+    expect(store.headerLoading).toBe(false)
+
+    staleList.resolve({ data: { items: [], total: 0 } })
+    await inFlight
+    expect(store.headerLoading).toBe(false)
+  })
+
+  it('旧请求的 finally 不得清掉新请求的 loading 与引用', async () => {
+    const store = useNotificationStore()
+    seedSuccess()
+
+    const oldList = deferred<{ data: { items: ReturnType<typeof notif>[]; total: number } }>()
+    const newList = deferred<{ data: { items: ReturnType<typeof notif>[]; total: number } }>()
+    mockedList.mockReturnValueOnce(oldList.promise as never)
+    const first = store.loadHeaderItems()
+    expect(store.headerLoading).toBe(true)
+
+    mockedCount.mockResolvedValueOnce({ data: { count: 1 } } as never)
+    mockedList.mockReturnValueOnce(newList.promise as never)
+    const forced = store.refresh({ force: true })
+    expect(store.headerLoading).toBe(true)
+
+    // 旧请求此时返回：世代不匹配 → 丢弃响应；且不得把新请求的 loading 关掉
+    oldList.resolve({ data: { items: [], total: 0 } })
+    await first
+    expect(store.headerLoading).toBe(true)
+
+    newList.resolve({ data: { items: [notif(2)], total: 1 } })
+    await forced
+    expect(store.headerLoading).toBe(false)
+    expect(store.headerItems.map((n) => n.id)).toEqual([2])
+  })
+})

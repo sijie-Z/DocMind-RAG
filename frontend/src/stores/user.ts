@@ -7,6 +7,7 @@ import type { AxiosError } from 'axios'
 import { useAppStore } from './app'
 import { useAgentStore } from './agent'
 import { useChatStore } from './chat'
+import { useNotificationStore } from './notification'
 import { getUserSettings, updateUserSettings, getMyOrganizations, switchOrganization as switchOrganizationApi, type UserSettings } from '@/api/user'
 
 function _extractErrorMessage(error: unknown, fallback: string): string {
@@ -53,6 +54,12 @@ export const useUserStore = defineStore('user', () => {
     useChatStore().resetForIdentityChange()
   }
 
+  // 通知是用户级数据（后端按 user_id 过滤，无组织维度）：只有真正的账号切换/
+  // 登出才清；切换组织不得清空铃铛。
+  const resetNotifications = () => {
+    useNotificationStore().resetForIdentityChange()
+  }
+
   const invalidateOrganizationsRequest = () => {
     organizationsRequest = null
     organizationsRequestSeq += 1
@@ -87,6 +94,7 @@ export const useUserStore = defineStore('user', () => {
         invalidateSettingsRequest()
         myOrganizations.value = []
         resetAgentAndChat()
+        resetNotifications()
         clearIdentityScopedStorage()
       }
       userInfo.value = info
@@ -338,6 +346,7 @@ export const useUserStore = defineStore('user', () => {
     invalidateOrganizationsRequest()
     invalidateSettingsRequest()
     resetAgentAndChat()
+    resetNotifications()
     userInfo.value = null
     token.value = ''
     currentOrganizationId.value = null
