@@ -236,3 +236,90 @@ describe('T1 · 通知 store 错误态', () => {
     expect(store.unreadCount).toBe(3)
   })
 })
+
+// ── 在途竞态：迟到的旧快照不得回弹已读、复活已删、覆盖实时推送 ─────────────
+
+function deferred<T>() {
+  let resolve!: (value: T) => void
+  const promise = new Promise<T>((res) => {
+    resolve = res
+  })
+  return { promise, resolve }
+}
+
+describe('通知 store · 在途响应按世代丢弃', () => {
+  it('标记全部已读后的强制刷新：旧列表/旧未读快照被丢弃，计数不反弹', async () => {
+    const store = useNotificationStore()
+    seedSuccess()
+    await store.bootstrapBadge()
+    await store.loadHeaderItems()
+    expect(store.unreadCount).toBe(5)
+
+    const staleBadge = deferred<{ data: { count: number } }>()
+    const staleList = deferred<{ data: { items: ReturnType<typeof notif>[]; total: number } }>()
+    mockedCount.mockReturnValueOnce(staleBadge.promise as never)
+    mockedList.mockReturnValueOnce(staleList.promise as never)
+
+    const inFlightBadge = store.bootstrapBadge()
+    const inFlightList = store.loadHeaderItems()
+
+    // 用户执行「全部已读」成功，随后强制刷新
+    mockedCount.mockResolvedValueOnce({ data: { count: 0 } } as never)
+    mockedList.mockResolvedValueOnce({
+      data: { items: [notif(2, true), notif(1, true)], total: 2 },
+    } as never)
+    const forced = store.refresh({ force: true })
+
+    // 旧请求此时才返回（仍是未读快照）
+    staleBadge.resolve({ data: { count: 5 } })
+    staleList.resolve({ data: { items: [notif(2), notif(1)], total: 2 } })
+
+    await Promise.all([inFlightBadge, inFlightList, forced])
+
+    expect(store.unreadCount).toBe(0)
+    expect(store.headerItems.every((n) => n.is_read)).toBe(true)
+    // 初始 + 在途旧请求 + 强制刷新各一次：强制刷新必须新发请求而非复用旧引用
+    expect(mockedCount).toHaveBeenCalledTimes(3)
+    expect(mockedList).toHaveBeenCalledTimes(3)
+  })
+
+  it('实时推送后，迟到的未读数快照不得覆盖 +1', async () => {
+    const store = useNotificationStore()
+    seedSuccess()
+    await store.bootstrapBadge()
+    expect(store.unreadCount).toBe(5)
+
+    const staleBadge = deferred<{ data: { count: number } }>()
+    mockedCount.mockReturnValueOnce(staleBadge.promise as never)
+    const inFlight = store.bootstrapBadge()
+
+    store.applyRealtime(realtimePayload(100))
+    expect(store.unreadCount).toBe(6)
+
+    staleBadge.resolve({ data: { count: 5 } })
+    await inFlight
+
+    expect(store.unreadCount).toBe(6)
+    expect(store.headerItems.some((n) => n.id === 100)).toBe(true)
+  })
+
+  it('已读单条后，迟到的未读快照不得把计数加回去', async () => {
+    const store = useNotificationStore()
+    seedSuccess()
+    await store.bootstrapBadge()
+    await store.loadHeaderItems()
+
+    const staleBadge = deferred<{ data: { count: number } }>()
+    mockedCount.mockReturnValueOnce(staleBadge.promise as never)
+    const inFlight = store.bootstrapBadge()
+
+    store.consumeRead(1)
+    expect(store.unreadCount).toBe(4)
+
+    staleBadge.resolve({ data: { count: 5 } })
+    await inFlight
+
+    expect(store.unreadCount).toBe(4)
+    expect(store.headerItems.find((n) => n.id === 1)?.is_read).toBe(true)
+  })
+})

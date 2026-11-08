@@ -553,7 +553,7 @@ const handleNotificationClick = async (notification: Notification) => {
 const handleMarkAllRead = async () => {
   try {
     await markAllAsRead()
-    await notificationStore.refresh()
+    await notificationStore.refresh({ force: true })
   } catch {
     // Failed to mark all as read
   }
@@ -564,7 +564,7 @@ const notificationRetrying = ref(false)
 const handleNotificationRetry = async () => {
   notificationRetrying.value = true
   try {
-    await notificationStore.refresh()
+    await notificationStore.refresh({ force: true })
   } finally {
     notificationRetrying.value = false
   }
@@ -580,7 +580,7 @@ const handleDeleteNotification = async (notificationId: number) => {
   try {
     await deleteNotification(notificationId)
     notificationStore.headerItems = notificationStore.headerItems.filter((n) => n.id !== notificationId)
-    await notificationStore.refresh()
+    await notificationStore.refresh({ force: true })
   } catch {
     // Failed to delete notification
   }
