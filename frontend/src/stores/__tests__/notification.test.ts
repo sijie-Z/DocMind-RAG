@@ -317,10 +317,11 @@ describe('通知 store · 在途响应按世代丢弃', () => {
     expect(store.unreadCount).toBe(6)
     expect(store.headerItems.some((n) => n.id === 100)).toBe(true)
 
-    // 防抖对账：服务端真值（含推送）覆盖本地推算
-    mockedCount.mockResolvedValueOnce({ data: { count: 6 } } as never)
+    // 防抖对账：服务端真值（与本地推算不同）覆盖，删除对账逻辑即红
+    mockedCount.mockResolvedValueOnce({ data: { count: 7 } } as never)
     await vi.advanceTimersByTimeAsync(300)
-    expect(store.unreadCount).toBe(6)
+    expect(store.unreadCount).toBe(7)
+    expect(mockedCount).toHaveBeenCalledTimes(3)
   })
 
   it('已读单条后，迟到的未读快照不得把计数加回去，且事后对账收敛', async () => {
@@ -341,12 +342,13 @@ describe('通知 store · 在途响应按世代丢弃', () => {
     expect(store.unreadCount).toBe(4)
     expect(store.headerItems.find((n) => n.id === 1)?.is_read).toBe(true)
 
-    mockedCount.mockResolvedValueOnce({ data: { count: 4 } } as never)
+    mockedCount.mockResolvedValueOnce({ data: { count: 3 } } as never)
     mockedList.mockResolvedValueOnce({
       data: { items: [notif(2), notif(1, true)], total: 2 },
     } as never)
     await vi.advanceTimersByTimeAsync(300)
-    expect(store.unreadCount).toBe(4)
+    expect(store.unreadCount).toBe(3)
+    expect(mockedCount).toHaveBeenCalledTimes(3)
   })
 
   it('删除后强制刷新：迟到的旧列表不得让已删行复活', async () => {
