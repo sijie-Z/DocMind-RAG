@@ -66,7 +66,11 @@ export function useChatConnection(
     wsService.on('error', (data: WebSocketMessage) => {
       if (!ownsGeneration()) return
       connectionStatus.value = 'error'
-      if (data.content) message.error(data.content)
+      if (data.code === 'USER_LLM_REQUEST_FAILED') {
+        message.error(t('chat.userLlmRequestFailed'))
+      } else if (data.content) {
+        message.error(data.content)
+      }
       isLoading.value = false
     })
 

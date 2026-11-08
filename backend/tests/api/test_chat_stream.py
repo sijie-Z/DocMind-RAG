@@ -21,6 +21,7 @@ import sys
 from pathlib import Path
 from types import SimpleNamespace
 from typing import get_args
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from httpx import ASGITransport, AsyncClient
@@ -268,6 +269,84 @@ async def test_rag_error_event_forwards_error_code(client, monkeypatch):
     assert error_frames, "应收到 error 帧"
     assert error_frames[0]["data"]["code"] == "USER_LLM_REQUEST_FAILED"
     assert error_frames[0]["data"]["content"] == USER_LLM_REQUEST_FAILED_MESSAGE
+
+
+@pytest.fixture
+def ws_test_client():
+    """与模块内 async ``client`` 区分：WebSocket 用例需要同步 TestClient。"""
+    from fastapi.testclient import TestClient
+
+    return TestClient(app)
+
+
+def test_websocket_rag_error_forwards_error_code(ws_test_client, monkeypatch):
+    """WS 传送带同样要带 code：前端按码四语化，不能只发中文 content。"""
+    from app.services.auth_service import auth_service
+    from app.services.chat_service import RAGEvent
+
+    monkeypatch.setattr(
+        "app.core.ws_auth.auth_service.is_token_blacklisted",
+        AsyncMock(return_value=False),
+    )
+    token = auth_service.create_access_token(
+        {"sub": "ws-llm-err", "user_id": 1, "role": "user", "organization_id": 1}
+    )
+
+    handshake_db = MagicMock()
+    handshake_result = MagicMock()
+    handshake_result.first = MagicMock(
+        return_value=SimpleNamespace(id=1, is_active=True, organization_id=1)
+    )
+    handshake_db.execute = AsyncMock(return_value=handshake_result)
+    handshake_db.close = AsyncMock()
+
+    async def _override_get_db():
+        yield handshake_db
+
+    class _Ctx:
+        async def __aenter__(self):
+            return MagicMock()
+
+        async def __aexit__(self, *exc):
+            return False
+
+    async def _resolve(_db, _user):
+        return SimpleNamespace(source="server", client=None, model="server-model")
+
+    async def _fake_rag(**kwargs):
+        await kwargs["event_queue"].put(
+            RAGEvent(
+                type="error",
+                content=USER_LLM_REQUEST_FAILED_MESSAGE,
+                debug_data={"error_code": "USER_LLM_REQUEST_FAILED"},
+            )
+        )
+
+    app.dependency_overrides[get_db] = _override_get_db
+    try:
+        with (
+            patch(
+                "app.api.v1.endpoints.chat.load_active_ws_user",
+                new=AsyncMock(
+                    return_value=SimpleNamespace(id=1, is_active=True, organization_id=1)
+                ),
+            ),
+            patch("app.api.v1.endpoints.chat.AsyncSessionLocal", new=lambda: _Ctx()),
+            patch("app.api.v1.endpoints.chat.resolve_for_user", new=_resolve),
+            patch("app.api.v1.endpoints.chat.cache_scope", new=lambda *_a, **_k: None),
+            patch("app.api.v1.endpoints.chat.run_rag_pipeline", new=_fake_rag),
+            ws_test_client.websocket_connect(
+                "/api/v1/chat/ws", subprotocols=[f"auth.{token}"]
+            ) as ws,
+        ):
+            ws.send_json({"content": "个人模型错误"})
+            payload = ws.receive_json()
+    finally:
+        app.dependency_overrides.pop(get_db, None)
+
+    assert payload["type"] == "error", payload
+    assert payload["code"] == "USER_LLM_REQUEST_FAILED"
+    assert payload["content"] == USER_LLM_REQUEST_FAILED_MESSAGE
 
 
 @pytest.mark.asyncio

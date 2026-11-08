@@ -279,10 +279,17 @@ export function useChatSend(
       isRetrieving.value = false
       sseStatus.value = 'error'
       // 重新生成失败：删除新占位气泡，原回答恢复可见（服务端未改旧行）。
+      const wasRegenerate = activeRegenerate !== null
       cleanupActiveRegenerate(aiMsgId)
       // E3：出错终止时冲刷挂起的一帧，已到达的部分内容不丢（与旧逐 chunk 落屏观感一致）
       activeStream?.flush()
       activeStream = null
+      // 普通发送在收到任何正文前失败（如个人模型 401）：移除空占位气泡，
+      // 否则界面留下一个空回答，而服务端并未落库该轮回答，刷新即消失。
+      if (!wasRegenerate && !fullContent) {
+        const placeholderIdx = messages.value.findIndex(m => m.id === aiMsgId)
+        if (placeholderIdx >= 0) messages.value.splice(placeholderIdx, 1)
+      }
       message.error(
         data.code === 'USER_LLM_REQUEST_FAILED'
           ? t('chat.userLlmRequestFailed')
