@@ -75,8 +75,7 @@ export const useNotificationStore = defineStore('notification', () => {
     if (options.force) invalidate()
     if (badgePromise) return badgePromise
     const epoch = stateEpoch
-    let request!: Promise<void>
-    request = (async () => {
+    const request = (async () => {
       try {
         const countRes = await getUnreadCount()
         // 期间发生过已读/删除/推送/身份变化：旧快照不得写回。
@@ -86,12 +85,13 @@ export const useNotificationStore = defineStore('notification', () => {
         loadedOnce.value = true
       } catch (error) {
         if (epoch === stateEpoch) recordError('badge', error)
-      } finally {
-        // 只清自己：旧请求的 finally 不得把新请求的引用置空。
-        if (badgePromise === request) badgePromise = null
       }
     })()
     badgePromise = request
+    // 只清自己：旧请求的 finally 不得把新请求的引用置空。
+    void request.finally(() => {
+      if (badgePromise === request) badgePromise = null
+    })
     return request
   }
 
@@ -101,8 +101,7 @@ export const useNotificationStore = defineStore('notification', () => {
     if (headerPromise) return headerPromise
     const epoch = stateEpoch
     headerLoading.value = true
-    let request!: Promise<void>
-    request = (async () => {
+    const request = (async () => {
       try {
         const listRes = await getNotifications({ limit: 8 })
         if (epoch !== stateEpoch) return
@@ -111,14 +110,16 @@ export const useNotificationStore = defineStore('notification', () => {
         listError.value = null
       } catch (error) {
         if (epoch === stateEpoch) recordError('list', error)
-      } finally {
-        if (headerPromise === request) {
-          headerLoading.value = false
-          headerPromise = null
-        }
       }
     })()
     headerPromise = request
+    void request.finally(() => {
+      // 只清自己：旧请求收尾时不得关掉新请求的 loading 或引用。
+      if (headerPromise === request) {
+        headerLoading.value = false
+        headerPromise = null
+      }
+    })
     return request
   }
 
