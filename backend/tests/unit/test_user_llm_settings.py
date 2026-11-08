@@ -826,7 +826,7 @@ class TestAgentServiceWiring:
         assert captured["client"] is default_client
 
     async def test_agent_user_llm_failure_emits_code_and_no_done(self, monkeypatch):
-        """个人模型失败：service 以带码 error 事件收尾，不发 done（不落库）。"""
+        """个人模型失败：service 以带码 error 事件收尾且不发 done（端点统一补 failed/unssaved 的终态 done）。"""
         from app.agent.config import AgentConfig
         from app.agent.service import AgentService
         from app.core.llm_failures import (
@@ -862,7 +862,7 @@ class TestAgentServiceWiring:
         assert len(errors) == 1, "必须且只能发一个 error 事件"
         assert errors[0].code == USER_LLM_REQUEST_FAILED_CODE
         assert errors[0].content == USER_LLM_REQUEST_FAILED_MESSAGE
-        assert not any(event.type == "done" for event in events), "失败不得发 done"
+        assert not any(event.type == "done" for event in events), "service 层不得发完成信号（端点补 failed/unssaved）"
 
 
 def test_server_default_model_matches_settings():

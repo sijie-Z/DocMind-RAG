@@ -2318,6 +2318,13 @@ async function loadInit() {
   line-height: 18px;
 }
 
+/* 暗色：浅红字 + 稍深红底保证可读（#b91c1c 在深底约 2.6:1，不达 AA） */
+.dark .run-error-standalone {
+  color: #fca5a5;
+  background: rgba(239, 68, 68, 0.14);
+  border-color: rgba(239, 68, 68, 0.4);
+}
+
 .run-error-text {
   word-break: break-word;
   line-height: 18px;
