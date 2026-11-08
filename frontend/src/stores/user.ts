@@ -44,7 +44,7 @@ export const useUserStore = defineStore('user', () => {
   const myOrganizations = ref<Array<{ id: number; name: string }>>([])
   let organizationsRequest: Promise<Array<{ id: number; name: string }>> | null = null
   let organizationsRequestSeq = 0
-  let settingsRequest: Promise<void> | null = null
+  let settingsRequest: Promise<boolean> | null = null
   let settingsRequestSeq = 0
   let authScopeVersion = 0
 
@@ -62,7 +62,6 @@ export const useUserStore = defineStore('user', () => {
     settingsRequest = null
     settingsRequestSeq += 1
   }
-
   const clearIdentityScopedStorage = () => {
     localStorage.removeItem('user_info')
     localStorage.removeItem('activeSystemPrompt')
@@ -337,6 +336,7 @@ export const useUserStore = defineStore('user', () => {
   const clearAuthState = () => {
     authScopeVersion += 1
     invalidateOrganizationsRequest()
+    invalidateSettingsRequest()
     resetAgentAndChat()
     userInfo.value = null
     token.value = ''
@@ -397,14 +397,16 @@ export const useUserStore = defineStore('user', () => {
 
   // 单飞：布局挂载与其它调用方并发时只发一次 GET /user/settings；
   // 不缓存结果（settle 后置空），后续显式调用仍会重新拉取。
-  const fetchSettings = (): Promise<void> => {
+  // 返回是否成功应用（false = 失败或身份已变被丢弃），调用方据此决定
+  // 是否把 settings 快照应用到 UI（失败时沿用本地/登录 payload 的值）。
+  const fetchSettings = (): Promise<boolean> => {
     if (settingsRequest) return settingsRequest
     const seq = settingsRequestSeq
-    const request = (async () => {
+    const request = (async (): Promise<boolean> => {
       try {
         const response = await getUserSettings()
         // 身份已切换/登出：旧账号的响应不得写进新会话。
-        if (seq !== settingsRequestSeq) return
+        if (seq !== settingsRequestSeq) return false
         const resData = response.data as unknown as Record<string, unknown>
         const data = (resData.data && typeof resData.data === 'object')
           ? resData.data as UserSettings
@@ -420,8 +422,10 @@ export const useUserStore = defineStore('user', () => {
         if (data.preferences) {
           settings.value.preferences = data.preferences
         }
+        return true
       } catch {
         // Non-critical — use local settings
+        return false
       }
     })()
     settingsRequest = request

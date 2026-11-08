@@ -169,5 +169,7 @@ describe('P2-A2 · layouts 刷新模拟：主题不被后端覆写', () => {
     await vi.waitFor(() => expect(appStore.themeMode).toBe('dark'), { timeout: 3000 })
     expect(localStorage.getItem('theme')).toBe('dark')
     expect(document.documentElement.classList.contains('dark')).toBe(true)
+    await new Promise((resolve) => setTimeout(resolve, 600))
+    expect(updateUserProfile).not.toHaveBeenCalled()
   })
 })

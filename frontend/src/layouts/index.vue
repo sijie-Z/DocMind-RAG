@@ -616,7 +616,9 @@ onMounted(async () => {
     await notificationStore.bootstrapBadge()
     notificationSocket.connect()
     // Load user settings from backend
-    userStore.fetchSettings().then(() => {
+    userStore.fetchSettings().then((applied) => {
+      // 拉取失败或身份已变被丢弃：沿用登录 payload/本地值，不用陈旧快照覆盖。
+      if (!applied) return
       // Apply theme from settings（服务端水合：只应用，不回写 /users/me）
       const theme = userStore.settings.theme
       if (theme && ['light', 'dark', 'auto'].includes(theme)) {
