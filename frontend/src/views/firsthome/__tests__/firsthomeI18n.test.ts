@@ -85,4 +85,17 @@ describe('FirstHome 整页中文化纳入 i18n（四语）', () => {
     expect(frWrapper.text()).not.toMatch(CJK)
     expect(frWrapper.text()).toContain('chaque clause avec sa preuve')
   })
+
+  it('地标结构：正文位于 main，nav 与 footer 在其外', async () => {
+    const wrapper = await mountAt('zh')
+    wrappers.push(wrapper)
+
+    const main = wrapper.find('main#main-content')
+    expect(main.exists()).toBe(true)
+    expect(main.find('.hero').exists()).toBe(true)
+    expect(main.find('.facts').exists()).toBe(true)
+    expect(main.find('.cta').exists()).toBe(true)
+    expect(main.find('.nav').exists()).toBe(false)
+    expect(main.find('.footer').exists()).toBe(false)
+  })
 })
