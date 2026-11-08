@@ -812,6 +812,34 @@ class TestAnswerCacheConsumer:
 # ── 纯函数锚点（防止等价判定被悄悄放宽）────────────────────────────
 
 
+class TestAnswerCacheScope:
+    """个人模型上线后，回答缓存必须按用户/provider/model 分域。"""
+
+    @pytest.mark.asyncio
+    async def test_scope_isolates_answers(self, monkeypatch):
+        _enable(monkeypatch, answer=True, retrieval=False)
+        _fake_redis(monkeypatch)
+        cache = SemanticCache()
+
+        await cache.set("q", _VEC_A, "PERSONAL-A", organization_id=1, scope="user:1:deepseek:m")
+        same = await cache.get(_VEC_A, 1, query="q", scope="user:1:deepseek:m")
+        assert same is not None and same["answer"] == "PERSONAL-A"
+
+        # 同组织不同用户、不同 provider、未分域的历史条目都不得命中。
+        assert await cache.get(_VEC_A, 1, query="q", scope="user:2:deepseek:m") is None
+        assert await cache.get(_VEC_A, 1, query="q", scope="user:1:openai:m") is None
+        assert await cache.get(_VEC_A, 1, query="q") is None
+
+    @pytest.mark.asyncio
+    async def test_clear_for_org_removes_scoped_entries(self, monkeypatch):
+        _enable(monkeypatch, answer=True, retrieval=False)
+        fake = _fake_redis(monkeypatch)
+        cache = SemanticCache()
+        await cache.set("q", _VEC_A, "A", organization_id=1, scope="user:1:deepseek:m")
+        await cache.clear_for_org(1)
+        assert not any("org:1:" in key for key in fake.values)
+
+
 def test_cosine_anchor_matches_triage_repro():
     """三分类复现用的向量对余弦 ≈ 0.9817（阈值 0.92 内），作为判别前提锚点。"""
     cos = sum(a * b for a, b in zip(_VEC_A, _VEC_NEAR, strict=False)) / (

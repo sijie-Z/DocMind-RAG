@@ -208,7 +208,12 @@ async def test_rag_stream_passes_personal_llm_resolution(client, monkeypatch):
     personal_client = object()
 
     async def _resolve(_db, _user):
-        return SimpleNamespace(source="user", client=personal_client, model="personal-model")
+        return SimpleNamespace(
+            source="user",
+            client=personal_client,
+            model="personal-model",
+            provider="deepseek",
+        )
 
     monkeypatch.setattr(chat_api, "resolve_for_user", _resolve)
     captured: dict = {}
@@ -232,6 +237,7 @@ async def test_rag_stream_passes_personal_llm_resolution(client, monkeypatch):
     assert resp.status_code == 200
     assert captured.get("llm_client") is personal_client
     assert captured.get("llm_model") == "personal-model"
+    assert captured.get("cache_scope") == "user:1:deepseek:personal-model"
 
 
 @pytest.mark.asyncio
@@ -266,6 +272,7 @@ async def test_rag_stream_server_default_passes_none(client, monkeypatch):
     assert resp.status_code == 200
     assert captured.get("llm_client") is None
     assert captured.get("llm_model") is None
+    assert captured.get("cache_scope") == "server:server-model"
 
 
 class _FakeSessionCtx:

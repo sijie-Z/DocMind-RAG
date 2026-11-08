@@ -80,7 +80,7 @@ class DisabledCache:
 class HitCache:
     enabled = True
 
-    async def get(self, _vector, _org, *, query, hit_info):
+    async def get(self, _vector, _org, *, query, hit_info, **_kwargs):
         _ = query
         hit_info["cache_type"] = "semantic"
         return {

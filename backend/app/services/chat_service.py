@@ -499,6 +499,7 @@ async def run_rag_pipeline(
     regenerate: bool = False,
     llm_client=None,
     llm_model: str | None = None,
+    cache_scope: str | None = None,
 ) -> None:
     """RAG pipeline core logic; pushes events into ``event_queue``.
 
@@ -691,6 +692,7 @@ async def run_rag_pipeline(
                 search_org_id,
                 query=user_content,
                 hit_info=cache_meta,
+                scope=cache_scope or "",
             )
             if cached_res and not _cached_answer_provenance_blocked(cached_res):
                 full_response = cached_res.get("answer", "")
@@ -1074,6 +1076,7 @@ async def run_rag_pipeline(
             answer=full_response,
             sources=sources_list,
             organization_id=search_org_id,
+            scope=cache_scope or "",
         )
 
     try:
