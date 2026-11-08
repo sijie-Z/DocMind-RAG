@@ -49,6 +49,8 @@ jobs:
 
     env:
       DATABASE_URL: sqlite+aiosqlite:///test.db
+      # UTC 写入/本地展示的时区回归：固定非 UTC 时区才能让 naive/aware 混用暴露
+      TZ: Asia/Shanghai
 
     steps:
       - uses: actions/checkout@v7
@@ -418,6 +420,10 @@ jobs:
     name: Frontend Tests
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    env:
+      # 时区敏感回归：后端时间是无时区 UTC、前端按本地时区展示；
+      # 固定非 UTC 时区，parseApiDate 一类的偏移问题才能在 CI 被判别。
+      TZ: Asia/Shanghai
     strategy:
       matrix:
         node-version: [22]

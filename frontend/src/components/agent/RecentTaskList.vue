@@ -27,6 +27,7 @@
 
 <script setup lang="ts">
 import { useI18n } from 'vue-i18n'
+import { parseApiDate } from '@/utils/format'
 import type { AgentTaskListItem } from '@/types/agent'
 
 defineProps<{
@@ -56,9 +57,11 @@ function stateLabel(state: string): string {
 
 function fmtTime(iso: string): string {
   if (!iso) return ''
-  // ISO → MM-DD HH:mm（后端时间戳；解析失败原样透传）
-  const m = iso.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/)
-  return m ? `${m[2]}-${m[3]} ${m[4]}:${m[5]}` : iso
+  // 后端无时区 ISO 是 UTC：parseApiDate 后按本地时区显示 MM-DD HH:mm
+  const d = parseApiDate(iso)
+  if (!d) return iso
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`
 }
 </script>
 

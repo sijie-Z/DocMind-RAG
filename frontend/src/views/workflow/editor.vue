@@ -877,7 +877,7 @@
           </template>
           <div class="font-medium">{{ wf.name }}</div>
           <template #suffix>
-            <span class="text-xs text-gray-500">{{ wf.created_at ? new Date(wf.created_at).toLocaleString() : '' }}</span>
+            <span class="text-xs text-gray-500">{{ formatCreatedAt(wf.created_at) }}</span>
           </template>
         </n-list-item>
       </n-list>
@@ -928,6 +928,12 @@ import MemoryNode from './nodes/MemoryNode.vue'
 import CodeNode from './nodes/CodeNode.vue'
 import ApiNode from './nodes/ApiNode.vue'
 import TransformNode from './nodes/TransformNode.vue'
+import { parseApiDate } from '@/utils/format'
+
+function formatCreatedAt(value?: string | null): string {
+  const d = parseApiDate(value)
+  return d ? d.toLocaleString() : ''
+}
 
 const {
   NODE_ICON_MAP,

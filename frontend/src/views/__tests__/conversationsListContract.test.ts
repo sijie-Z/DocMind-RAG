@@ -83,10 +83,17 @@ describe('conversations 页 · 时间与搜索（B31/B30 前端侧）', () => {
     expect(text).toContain('会话二')
     // A_sweep 实锤：修复前 3/3 行渲染 "Invalid Date"
     expect(text).not.toContain('Invalid Date')
-    // 正常值行仍渲染 MM-DD HH:mm
-    expect(text).toContain('10-10 05:00')
-    // 空串行不渲染时间（不含任何 "10-09" 形式时间）
-    expect(text).not.toContain('10-09 13:49')
+    // 正常值行渲染为「UTC 时刻的本地时区表示」：按运行时时区计算期望值，
+    // 既跨时区可移植，也能在非 UTC 环境捕获「按本地时间解析 UTC 串」的回归。
+    const updated = new Date('2026-10-10T05:00:00Z')
+    const pad = (n: number) => String(n).padStart(2, '0')
+    const expectedClock = `${pad(updated.getMonth() + 1)}-${pad(updated.getDate())} ${pad(updated.getHours())}:${pad(updated.getMinutes())}`
+    expect(text).toContain(expectedClock)
+    // 空串行不回退到 created_at：把该时刻的本地表示算出来，断言不出现
+    //（跨时区可移植；负时区下写死 "10-09" 前缀会误判正确的 05:00Z 渲染）
+    const fallback = new Date('2026-10-09T13:49:00Z')
+    const forbiddenClock = `${pad(fallback.getMonth() + 1)}-${pad(fallback.getDate())} ${pad(fallback.getHours())}:${pad(fallback.getMinutes())}`
+    expect(text).not.toContain(forbiddenClock)
   })
 
   it('搜索参数名为 search，随输入透传（前端侧回归守卫）', async () => {

@@ -1,10 +1,11 @@
 """Agent memory system unit tests."""
 
 import asyncio
-from datetime import datetime, timedelta
+from datetime import timedelta
 
 import pytest
 
+from app.core.time_utils import utcnow
 from app.services.memory_service import (
     AgentMemorySystem,
     LongTermMemory,
@@ -50,7 +51,7 @@ class TestMemoryItem:
 
     def test_decay_score_aged(self):
         item = MemoryItem(content="old", importance=1.0)
-        item.created_at = datetime.now() - timedelta(hours=24)
+        item.created_at = utcnow() - timedelta(hours=24)
         score = item.get_decay_score(half_life_hours=24)
         assert 0.45 < score < 0.55  # ~0.5 after one half-life
 
@@ -161,12 +162,12 @@ class TestLongTermMemory:
     def test_get_by_time_range(self):
         ltm = LongTermMemory()
         old = MemoryItem(content="old")
-        old.created_at = datetime.now() - timedelta(days=10)
+        old.created_at = utcnow() - timedelta(days=10)
         ltm.add(old)
         ltm.add(MemoryItem(content="recent"))
         results = ltm.get_by_time_range(
-            datetime.now() - timedelta(days=1),
-            datetime.now() + timedelta(hours=1),
+            utcnow() - timedelta(days=1),
+            utcnow() + timedelta(hours=1),
         )
         assert len(results) == 1
         assert results[0].content == "recent"

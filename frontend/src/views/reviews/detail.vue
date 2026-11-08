@@ -557,6 +557,7 @@ import {
   type ReviewSide
 } from '@/api/reviews'
 import { apiUnwrap } from '@/utils/apiUnwrap'
+import { parseApiDate } from '@/utils/format'
 import { getErrorMessage } from '@/utils/apiError'
 import { reasonLabel, reasonsLabel } from './reviewReasons'
 import { buildEvidencePermalink, buildEvidenceLinkTarget } from './evidenceLink'
@@ -723,9 +724,8 @@ const dateFormatter = computed(
   () => new Intl.DateTimeFormat(locale.value, { dateStyle: 'medium', timeStyle: 'short' })
 )
 function formatDateTime(value?: string | null) {
-  if (!value) return '—'
-  const date = new Date(value)
-  return Number.isNaN(date.getTime()) ? '—' : dateFormatter.value.format(date)
+  const date = parseApiDate(value)
+  return date ? dateFormatter.value.format(date) : '—'
 }
 
 const decisions = reactive<

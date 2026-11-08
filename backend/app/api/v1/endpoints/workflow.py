@@ -5,7 +5,6 @@ Agent 工作流 API 端点
 import asyncio
 import json
 import logging
-from datetime import datetime
 from typing import Any
 
 from fastapi import APIRouter, Depends, Request
@@ -21,6 +20,7 @@ from app.core.security import (
     is_platform_admin,
     require_organization,
 )
+from app.core.time_utils import utcnow
 from app.exceptions import AppError, NotFoundError, ValidationError
 from app.models.user import User
 from app.models.workflow import NodeDefinition, Workflow, WorkflowExecution
@@ -192,7 +192,7 @@ async def update_workflow(
     for key, value in update_data.items():
         setattr(workflow, key, value)
 
-    workflow.updated_at = datetime.now()
+    workflow.updated_at = utcnow()
     await db.commit()
     await db.refresh(workflow)
 
@@ -285,7 +285,7 @@ async def execute_workflow(
             try:
                 execution.status = "failed"
                 execution.error_message = error_text
-                execution.completed_at = datetime.now()
+                execution.completed_at = utcnow()
                 await db.commit()
             except Exception as finalize_err:
                 logger.warning(f"执行记录（id={execution.id}）failed 收尾失败: {finalize_err}")
@@ -313,7 +313,7 @@ async def execute_workflow(
 
                 # 更新执行状态
                 execution.status = "running"
-                execution.started_at = datetime.now()
+                execution.started_at = utcnow()
                 await db.commit()
 
                 # 在后台执行工作流
@@ -348,7 +348,7 @@ async def execute_workflow(
                                 execution.error_message = (
                                     event_data.get("error") or "工作流节点执行失败"
                                 )
-                            execution.completed_at = datetime.now()
+                            execution.completed_at = utcnow()
                             execution.output_data = event_data
                             # mode="json"：node_results 含 datetime（started_at/completed_at），
                             # python 模式的 datetime 对象写不进 JSON 列（StatementError:
@@ -379,7 +379,7 @@ async def execute_workflow(
                             yield f"event: {event_type}\ndata: {json.dumps(event_data, ensure_ascii=False)}\n\n"
                     except TimeoutError:
                         # 发送心跳保持连接
-                        yield f"event: heartbeat\ndata: {json.dumps({'timestamp': datetime.now().isoformat()})}\n\n"
+                        yield f"event: heartbeat\ndata: {json.dumps({'timestamp': utcnow().isoformat()})}\n\n"
                     except Exception as e:
                         # #281：事件泵内异常（此前实测：node_complete 载荷含
                         # HumanMessage → json.dumps 抛 TypeError）只发 error 事件便
@@ -419,7 +419,7 @@ async def execute_workflow(
         engine = WorkflowEngine(config, organization_id=effective_org_id, user_id=current_user.id)
 
         execution.status = "running"
-        execution.started_at = datetime.now()
+        execution.started_at = utcnow()
         await db.commit()
 
         result = await engine.execute(input_data)
@@ -433,7 +433,7 @@ async def execute_workflow(
         else:
             execution.status = "failed"
             execution.error_message = result.get("error") or "工作流节点执行失败"
-        execution.completed_at = datetime.now()
+        execution.completed_at = utcnow()
         execution.output_data = result
         # mode="json"：node_results 含 datetime（started_at/completed_at），python
         # 模式的 datetime 对象写不进 JSON 列（StatementError: Object of type
@@ -454,7 +454,7 @@ async def execute_workflow(
     except Exception as e:
         execution.status = "failed"
         execution.error_message = str(e)
-        execution.completed_at = datetime.now()
+        execution.completed_at = utcnow()
         await db.commit()
 
         raise AppError(detail=str(e))
