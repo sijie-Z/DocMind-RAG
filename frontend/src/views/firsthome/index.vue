@@ -1040,6 +1040,6 @@ html.dark .btn-cta {
 /* 悬停保持 #2563eb（对 #111c2e >3:1），用内描边给出状态，不再压暗到 2.6:1 */
 html.dark .btn-cta:hover {
   background: #2563eb;
-  box-shadow: inset 0 0 0 1px rgba(191, 219, 254, 0.6);
+  box-shadow: inset 0 0 0 1px #bfdbfe;
 }
 </style>

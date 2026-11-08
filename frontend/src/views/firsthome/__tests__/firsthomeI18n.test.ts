@@ -90,10 +90,13 @@ describe('FirstHome 整页中文化纳入 i18n（四语）', () => {
     const wrapper = await mountAt('zh')
     wrappers.push(wrapper)
 
+    expect(wrapper.findAll('main')).toHaveLength(1)
     const main = wrapper.find('main#main-content')
     expect(main.exists()).toBe(true)
     expect(main.find('.hero').exists()).toBe(true)
     expect(main.find('.facts').exists()).toBe(true)
+    expect(main.find('.steps-grid').exists()).toBe(true)
+    expect(main.find('.features-grid').exists()).toBe(true)
     expect(main.find('.cta').exists()).toBe(true)
     expect(main.find('.nav').exists()).toBe(false)
     expect(main.find('.footer').exists()).toBe(false)
