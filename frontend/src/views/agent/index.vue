@@ -422,6 +422,7 @@
       <div class="right-panel" v-if="showConfig">
         <AgentConfigPanel
           :config="agentStore.config"
+          :enforced-tools="agentStore.enforcedDisabledTools"
           @apply="handleConfigApply"
         />
       </div>
@@ -518,6 +519,7 @@ import type {
   AgentSession,
   AgentSessionDetail,
   AgentConfig,
+  AgentConfigCapabilities,
   ToolInfo,
   PlanStep,
   PlanStepEdit,
@@ -1712,16 +1714,21 @@ async function handleNewSession() {
   }
 }
 
+let configSaveSeq = 0
 async function handleConfigApply(config: typeof agentStore.config) {
+  const seq = ++configSaveSeq
   const previous = JSON.parse(JSON.stringify(agentStore.config))
   agentStore.updateConfig(config)
   try {
     const res = await agentApi.updateConfig(config)
+    // 迟到响应不得覆盖更新的保存：只让最后一次落地
+    if (seq !== configSaveSeq) return
     // 以服务端合并后的配置为准（高危工具的强制禁单会回加）
     const saved = apiUnwrap<typeof agentStore.config>(res)
     if (saved && typeof saved === 'object') agentStore.updateConfig(saved)
   } catch {
-    // 保存失败不得伪装成功：回滚本地状态并如实提示
+    if (seq !== configSaveSeq) return
+    // 保存失败不得伪装成功：回滚本地状态并如实提示（请求已静默，不重复弹）
     agentStore.updateConfig(previous)
     message.error(t('agent.configSaveFailed'))
   }
@@ -1771,9 +1778,12 @@ async function loadInit() {
     if (Array.isArray(sessionsData?.sessions)) agentStore.setSessions(sessionsData.sessions)
     if (configData && typeof configData === 'object') agentStore.updateConfig(configData)
     // 服务端能力：终端默认关闭时不展示入口（此前点了才报 TERMINAL_ENABLED=false）
-    const caps = (configRes?.data as { capabilities?: { terminal_enabled?: unknown } } | undefined)
+    const caps = (configRes?.data as { capabilities?: AgentConfigCapabilities } | undefined)
       ?.capabilities
     agentStore.terminalEnabled = caps?.terminal_enabled === true
+    agentStore.enforcedDisabledTools = Array.isArray(caps?.enforced_disabled_tools)
+      ? caps.enforced_disabled_tools
+      : []
   } catch (e) {
     if (!agentStore.isIdentityEpochCurrent(requestEpoch)) return
     initError.value = true

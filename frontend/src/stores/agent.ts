@@ -60,6 +60,7 @@ export const useAgentStore = defineStore('agent', () => {
   const taskId = ref<string | null>(null)
   // 服务端能力（GET /agent/config capabilities）：终端关闭时不展示入口
   const terminalEnabled = ref(false)
+  const enforcedDisabledTools = ref<string[]>([])
   // 'idle' 仅是前端占位；其余与后端 TaskStatus 对齐（'failed' 由错误分支落）
   const taskState = ref<'idle' | AgentTaskState>('idle')
   const pendingApproval = ref<PendingApproval | null>(null)
@@ -418,6 +419,8 @@ export const useAgentStore = defineStore('agent', () => {
 
   /** 登出、换账号或组织切换成功后的完整用户作用域清理。 */
   function resetForIdentityChange() {
+    terminalEnabled.value = false
+    enforcedDisabledTools.value = []
     // 先换代次，再清态：abort 与清理过程中同步抵达的旧事件也会被拒绝。
     identityEpoch.value += 1
     clearMessages()
@@ -519,6 +522,7 @@ export const useAgentStore = defineStore('agent', () => {
     // State
     config,
     terminalEnabled,
+    enforcedDisabledTools,
     identityEpoch,
     sessions,
     currentSessionId,

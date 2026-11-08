@@ -1037,7 +1037,7 @@ export default {
     inputPlaceholder: '複雑なタスクを入力すると、ステップに分解して実行します…',
     serverDisabled: 'サーバー側で無効',
     serverDisabledHint: '高リスクツールはサーバーのセキュリティポリシーにより無効化されており、ここから有効化できません',
-    gatedTool: '条件付きで有効',
+    gatedTool: '条件付き',
     gatedToolHint: 'サーバー側のスイッチや実行条件を満たした場合のみ有効になります',
     configSaveFailed: '設定の保存に失敗しました。元の設定に戻しました',
     emptyTitle: 'ドキュメント・契約タスクワークベンチ',

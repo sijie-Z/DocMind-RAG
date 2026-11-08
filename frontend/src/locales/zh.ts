@@ -1115,7 +1115,7 @@ export default {
     inputPlaceholder: '输入复杂任务，自动拆解为步骤执行…',
     serverDisabled: '服务端禁用',
     serverDisabledHint: '高危工具由服务端安全策略强制禁用，无法在界面开启',
-    gatedTool: '按条件启用',
+    gatedTool: '按条件生效',
     gatedToolHint: '需服务端开关或运行条件满足时才会生效',
     configSaveFailed: '配置保存失败，已恢复原设置',
     emptyTitle: '文档与合同任务工作台',

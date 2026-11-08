@@ -339,6 +339,11 @@ export interface AgentConfig {
   approval_mode: ApprovalMode
 }
 
+export interface AgentConfigCapabilities {
+  terminal_enabled: boolean
+  enforced_disabled_tools: string[]
+}
+
 export interface ToolInfo {
   name: string
   description: string

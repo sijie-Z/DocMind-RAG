@@ -384,6 +384,6 @@ export const agentApi = {
   updateConfig(
     updates: Partial<AgentConfig>,
   ): Promise<AxiosResponse<ApiResponse<AgentConfig>>> {
-    return request.put('/agent/config', updates)
+    return request.put('/agent/config', updates, { headers: { 'X-Silent-Error': '1' } })
   },
 }
