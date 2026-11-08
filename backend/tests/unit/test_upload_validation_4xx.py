@@ -250,3 +250,64 @@ class TestDocumentUploadOversize:
         assert exc.value.status_code == 413
         assert exc.value.detail == {"max_body_bytes": 10, "received_bytes": 11}
         assert "文件过大" in exc.value.message
+
+
+class TestDocumentUploadEndpointLegacyFormats:
+    """产品实际使用的 /documents/upload 也必须在入口拒绝旧版 Office。"""
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("filename", ["legacy.doc", "legacy.xls"])
+    async def test_rejects_legacy_office_with_actionable_message(self, monkeypatch, filename):
+        from app.api.v1.endpoints import documents as doc_ep
+
+        monkeypatch.setattr(doc_ep, "require_organization", AsyncMock(return_value=1))
+        upload = _make_upload_file(filename, b"legacy-bytes")
+        with pytest.raises(ValidationError) as exc:
+            await doc_ep.upload_document(
+                file=upload,
+                title=None,
+                description=None,
+                tags=None,
+                db=_fake_db(),
+                current_user=MagicMock(),
+            )
+        assert exc.value.status_code == 400
+        assert "另存为" in exc.value.message
+        assert ".docx" in exc.value.message and ".xlsx" in exc.value.message
+
+    @pytest.mark.asyncio
+    async def test_rejects_unknown_extension(self, monkeypatch):
+        from app.api.v1.endpoints import documents as doc_ep
+
+        monkeypatch.setattr(doc_ep, "require_organization", AsyncMock(return_value=1))
+        upload = _make_upload_file("malware.exe", b"MZ")
+        with pytest.raises(ValidationError) as exc:
+            await doc_ep.upload_document(
+                file=upload,
+                title=None,
+                description=None,
+                tags=None,
+                db=_fake_db(),
+                current_user=MagicMock(),
+            )
+        assert exc.value.status_code == 400
+        assert "不支持的文件格式" in exc.value.message
+
+
+class TestChatParseUploadLegacyFormats:
+    """/chat/parse-upload 也必须在入口拒绝旧版格式（此前 500 后再回退）。"""
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("filename", ["legacy.doc", "legacy.xls"])
+    async def test_parse_upload_rejects_legacy_office(self, monkeypatch, filename):
+        from app.api.v1.endpoints import chat as chat_ep
+
+        async def _org(_user, _db):
+            return 1
+
+        monkeypatch.setattr(chat_ep, "require_organization", _org)
+        upload = _make_upload_file(filename, b"legacy-bytes")
+        with pytest.raises(ValidationError) as exc:
+            await chat_ep.chat_parse_upload(file=upload, db=_fake_db(), current_user=MagicMock())
+        assert exc.value.status_code == 400
+        assert "另存为" in exc.value.message

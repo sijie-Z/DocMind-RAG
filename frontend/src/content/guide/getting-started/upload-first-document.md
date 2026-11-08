@@ -12,13 +12,12 @@
 以解析器的实际支持列表为准：
 
 - 文档：PDF、Word（.docx）、Excel（.xlsx）、TXT、Markdown（.md）、CSV。
-- 图片：PNG、JPG、JPEG、WEBP、BMP。后端还支持 GIF，但文件选择器未列出；GIF 只识别第一帧。
+- 图片：PNG、JPG、JPEG、GIF、WEBP、BMP；GIF 只识别第一帧。
 
 需要注意：
 
-- 旧版 Word（.doc）不在解析器支持列表内，请先另存为 .docx。
-- .xls 虽在解析器映射中，但解析依赖只支持 .xlsx 的库，旧版二进制 .xls 很可能失败，建议另存为 .xlsx。
-- 暂不支持 .ppt / .pptx 演示文稿；上传后会在解析阶段失败。
+- 旧版 Word（.doc）与 Excel（.xls）不受支持：上传入口会直接拒绝，并提示另存为 .docx / .xlsx。
+- 暂不支持 .ppt / .pptx 演示文稿；上传入口会直接拒绝。
 - 图片只做 OCR 文字识别，不做图像内容理解；识别不到文字的图片会显式解析失败，而不是生成空文档。
 
 单个文件上限为 100MB，超过会直接拒绝。

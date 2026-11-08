@@ -91,6 +91,7 @@ import { NButton, } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
 import { formatDate } from '@/utils/format'
+import { notificationTargetLocation } from '@/utils/notificationTarget'
 import { useDedupedMessage } from '@/utils/message'
 import { getErrorMessage } from '@/utils/apiError'
 import PageBreadcrumb from '@/components/common/PageBreadcrumb.vue'
@@ -152,20 +153,7 @@ const rowClassName = (row: Notification) => {
 }
 
 const jumpToNotificationTarget = async (row: Notification) => {
-  if (row.target_route) {
-    await router.push({ name: row.target_route as any, query: row.target_id ? { id: row.target_id } : undefined })
-    return
-  }
-  if (row.type === 'knowledge' || row.type === 'document') {
-    await router.push({ name: 'Knowledge' })
-  } else if (row.type === 'chat') {
-    await router.push({ name: 'Chat' })
-  } else if (row.type === 'account' || row.type === 'security') {
-    await router.push({ name: 'Profile' })
-  } else if (row.type === 'agent') {
-    // 无 target_route 的旧 agent 通知兜底：仍落到 /agent
-    await router.push({ name: 'Agent' })
-  }
+  await router.push(notificationTargetLocation(row))
 }
 
 const columns = [

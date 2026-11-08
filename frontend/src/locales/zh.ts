@@ -779,7 +779,6 @@ export default {
     systemTitle: 'DocMind 知识库'
   },
   dashboard: {
-    metricNotAvailable: '指标未接入',
     adminSubtitle: '组织运行状况与 AI 资源用量',
     adminTitle: '管理概览',
     llmNoDailyTrend: '暂无按日数据',
@@ -851,6 +850,7 @@ export default {
     queries7d: '24 小时查询数',
     hits: '命中次数',
     avgDocs: '平均召回文档',
+    avgDocsNoData: '暂无检索数据',
     recentAuditLogs: '最近操作日志',
     manageUsers: '用户管理',
     manageKB: '知识库管理',

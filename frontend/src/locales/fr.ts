@@ -723,7 +723,6 @@ export default {
     systemTitle: 'DocMind Base de Connaissances'
   },
   dashboard: {
-    metricNotAvailable: 'Indicateur non connecté',
     adminSubtitle: 'Santé de l’organisation et usage des ressources IA',
     adminTitle: 'Vue d’ensemble admin',
     llmNoDailyTrend: 'Aucune donnée journalière',
@@ -795,6 +794,7 @@ export default {
     queries7d: 'Requêtes (24 h)',
     hits: 'Résultats',
     avgDocs: 'Docs moyens récupérés',
+    avgDocsNoData: "Aucune donnée de recherche pour l'instant",
     recentAuditLogs: 'Journaux d\'audit récents',
     manageUsers: 'Gérer utilisateurs',
     manageKB: 'Gérer base de connaissances',

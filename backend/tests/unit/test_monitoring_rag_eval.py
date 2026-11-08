@@ -7,6 +7,8 @@
 
 import asyncio
 
+import pytest
+
 from app.api.v1.endpoints import monitoring
 
 
@@ -48,3 +50,12 @@ def test_rag_eval_single_uses_defined_settings_field(monkeypatch):
         "客户端必须用真实存在的配置字段构造 base_url"
     )
     assert result["faithfulness"] == 0.9
+
+
+@pytest.mark.asyncio
+async def test_notification_status_reports_only_real_channel():
+    """监控状态不得把不存在的邮件通道报成 enabled。"""
+    from app.api.v1.endpoints.monitoring import get_notification_status
+
+    data = await get_notification_status()
+    assert data["enabled_channels"] == ["system"]
