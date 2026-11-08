@@ -10,7 +10,6 @@ import logging
 import uuid
 from collections.abc import Callable
 from contextlib import suppress
-from datetime import datetime
 
 from sqlalchemy import delete, select, update
 
@@ -22,6 +21,7 @@ from app.core.elasticsearch import (
     get_elasticsearch,
 )
 from app.core.log_safety import log_safe
+from app.core.time_utils import utcnow
 from app.models.document import Document, DocumentChunk, DocumentStatus
 from app.models.knowledge_job import KnowledgeJobStatus, KnowledgeProcessingJob
 from app.rag.source_provenance import PARSER_ORIGINAL
@@ -411,7 +411,7 @@ class DocumentProcessor:
             doc.parse_error = None
             if job:
                 job.status = KnowledgeJobStatus.PROCESSING
-                job.started_at = datetime.now()
+                job.started_at = utcnow()
             await session.commit()
             return doc
 
@@ -429,7 +429,7 @@ class DocumentProcessor:
                 .values(
                     status=KnowledgeJobStatus.FAILED,
                     error_message=error,
-                    finished_at=datetime.now(),
+                    finished_at=utcnow(),
                 )
                 .execution_options(synchronize_session=False)
             )
@@ -597,7 +597,7 @@ class DocumentProcessor:
         doc 条件更新与 job 终态在**同一事务**提交：避免「文档已 INDEXED、job 仍
         QUEUED」的中间态（单次 commit 保证两者要么都写、要么都不写）。
         """
-        now = datetime.now()
+        now = utcnow()
         async with AsyncSessionLocal() as session:
             result = await session.execute(
                 update(Document)
@@ -620,7 +620,7 @@ class DocumentProcessor:
                 if job:
                     job.status = KnowledgeJobStatus.SUCCESS
                     job.error_message = None
-                    job.finished_at = datetime.now()
+                    job.finished_at = utcnow()
             await session.commit()
             if not getattr(result, "rowcount", 0):
                 # SQLAlchemy 的 MySQL 方言启用 CLIENT.FOUND_ROWS，rowcount 为
@@ -674,7 +674,7 @@ class DocumentProcessor:
                     .values(
                         status=KnowledgeJobStatus.FAILED,
                         error_message=error,
-                        finished_at=datetime.now(),
+                        finished_at=utcnow(),
                     )
                     .execution_options(synchronize_session=False)
                 )

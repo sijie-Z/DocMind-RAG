@@ -151,6 +151,21 @@ describe('parseApiDate（后端 UTC 无时区字符串）', () => {
     expect(parseApiDate('2026-11-08')?.toISOString()).toBe('2026-11-08T00:00:00.000Z')
   })
 
+  it('秒可省略（后端仍可能给到分钟精度）', () => {
+    expect(parseApiDate('2026-11-08T19:15')?.toISOString()).toBe('2026-11-08T19:15:00.000Z')
+  })
+
+  it('Date 对象：有效原样返回，Invalid Date 返回 null', () => {
+    const d = new Date('2026-11-08T19:15:33Z')
+    expect(parseApiDate(d)).toBe(d)
+    expect(parseApiDate(new Date('nope'))).toBeNull()
+  })
+
+  it('空白字符串与数字字符串返回 null', () => {
+    expect(parseApiDate('   ')).toBeNull()
+    expect(parseApiDate('1759926405')).toBeNull()
+  })
+
   it('空值/非法值返回 null', () => {
     expect(parseApiDate(null)).toBeNull()
     expect(parseApiDate('')).toBeNull()

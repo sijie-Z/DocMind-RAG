@@ -3,6 +3,8 @@ import dayjs from 'dayjs'
 // 后端 MySQL DATETIME 以 UTC 存储，JSON 里是「无时区 ISO」（如 2026-11-08T19:15:33）。
 // ECMAScript 会把这类字符串按**本地时间**解析——UTC+8 下整体早 8 小时。
 // 仅当缺时区且带时间部分时补 Z；带 Z/offset 的字符串、纯日期（按规范即 UTC）不动。
+// 支持的格式：后端 Python isoformat() 的 T 分隔（秒/微秒可选）与空格分隔变体；
+// 小写 t/UTC 后缀等非后端产物交给原生解析（与既有行为一致）。
 const NAIVE_ISO_WITH_TIME = /^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(?::\d{2}(?:\.\d{1,6})?)?$/
 
 export const parseApiDate = (value: string | Date | undefined | null): Date | null => {
@@ -10,6 +12,7 @@ export const parseApiDate = (value: string | Date | undefined | null): Date | nu
   if (value instanceof Date) {
     return Number.isNaN(value.getTime()) ? null : value
   }
+  if (typeof value !== 'string') return null
   const text = value.trim()
   if (!text) return null
   const normalized = NAIVE_ISO_WITH_TIME.test(text)

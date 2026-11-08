@@ -193,6 +193,7 @@
 import { computed, h, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
+import { parseApiDate } from '@/utils/format'
 import { NButton, NInput, NPagination, NTag } from 'naive-ui'
 import { DocumentTextOutline, SearchOutline } from '@vicons/ionicons5'
 import { reviewsApi, type ReviewCaseStatus, type ReviewCaseSummary } from '@/api/reviews'
@@ -266,9 +267,8 @@ const dateFormatter = computed(
   () => new Intl.DateTimeFormat(locale.value, { dateStyle: 'medium', timeStyle: 'short' })
 )
 function formatDateTime(value?: string | null) {
-  if (!value) return '—'
-  const date = new Date(value)
-  return Number.isNaN(date.getTime()) ? '—' : dateFormatter.value.format(date)
+  const date = parseApiDate(value)
+  return date ? dateFormatter.value.format(date) : '—'
 }
 
 /** 已决策/总项数；没有核验项时显示 —，不伪装成 0/0 进度。 */

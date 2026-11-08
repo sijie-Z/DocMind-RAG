@@ -5,7 +5,7 @@ import hashlib
 import json
 import logging
 import uuid
-from datetime import datetime, timedelta
+from datetime import timedelta
 
 from fastapi import APIRouter, Depends, File, Form, Query, UploadFile, status
 from fastapi.responses import RedirectResponse
@@ -22,6 +22,7 @@ from app.core.security import (
     require_organization,
     require_scope,
 )
+from app.core.time_utils import utcnow
 from app.exceptions import (
     AppError,
     AuthorizationError,
@@ -302,7 +303,7 @@ async def upload_document(
                 logger.error(f"In-process processing setup failed: {proc_err}")
                 job.status = KnowledgeJobStatus.FAILED
                 job.error_message = f"本地处理任务启动失败: {str(proc_err)}"
-                job.finished_at = datetime.now()
+                job.finished_at = utcnow()
                 new_doc.status = DocumentStatus.FAILED
                 new_doc.parse_error = f"本地处理任务启动失败: {str(proc_err)}"
                 await db.commit()

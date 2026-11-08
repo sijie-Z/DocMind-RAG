@@ -83,12 +83,14 @@ describe('conversations 页 · 时间与搜索（B31/B30 前端侧）', () => {
     expect(text).toContain('会话二')
     // A_sweep 实锤：修复前 3/3 行渲染 "Invalid Date"
     expect(text).not.toContain('Invalid Date')
-    // 正常值行仍渲染 MM-DD HH:mm。后端时间是无时区 UTC，具体钟点随本地时区
-    // 变化（UTC 与 UTC+8 不同）；这里只锁格式与非 Invalid Date，换算语义由
-    // utils/__tests__/format.test.ts 的 parseApiDate 用例覆盖。
-    expect(text).toMatch(/10-10 \d{2}:\d{2}/)
-    // 空串行不渲染时间（不含任何 "10-09" 形式时间）
-    expect(text).not.toContain('10-09 13:49')
+    // 正常值行渲染为「UTC 时刻的本地时区表示」：按运行时时区计算期望值，
+    // 既跨时区可移植，也能在非 UTC 环境捕获「按本地时间解析 UTC 串」的回归。
+    const updated = new Date('2026-10-10T05:00:00Z')
+    const pad = (n: number) => String(n).padStart(2, '0')
+    const expectedClock = `${pad(updated.getMonth() + 1)}-${pad(updated.getDate())} ${pad(updated.getHours())}:${pad(updated.getMinutes())}`
+    expect(text).toContain(expectedClock)
+    // 空串行不渲染任何 "10-09" 形式时间（原断言写死本地钟点，UTC+8 下会漏判）
+    expect(text).not.toMatch(/10-09 \d{2}:\d{2}/)
   })
 
   it('搜索参数名为 search，随输入透传（前端侧回归守卫）', async () => {

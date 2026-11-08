@@ -15,6 +15,8 @@ from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.time_utils import utcnow
+
 logger = logging.getLogger(__name__)
 
 from app.core.config import settings
@@ -972,7 +974,7 @@ async def _session_week_over_week(db: AsyncSession, org_id: int | None) -> tuple
 
     from sqlalchemy import and_, case
 
-    now = datetime.now()
+    now = utcnow()
     this_start = now - timedelta(days=7)
     last_start = now - timedelta(days=14)
     week_q = select(
@@ -1039,7 +1041,7 @@ async def get_admin_summary(
         # 活跃用户（24小时内登录的）
         from datetime import timedelta
 
-        active_cutoff = datetime.now() - timedelta(hours=24)
+        active_cutoff = utcnow() - timedelta(hours=24)
         active_q = select(func.count(User.id)).where(User.last_login_at >= active_cutoff)
         if org_id:
             active_q = active_q.where(User.organization_id == org_id)

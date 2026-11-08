@@ -134,7 +134,7 @@
               </thead>
               <tbody>
                 <tr v-for="item in auditItems" :key="item.id">
-                  <td class="whitespace-nowrap">{{ item.created_at || '' }}</td>
+                  <td class="whitespace-nowrap">{{ item.created_at ? formatDateTime(item.created_at, locale) : '' }}</td>
                   <td>{{ item.username || item.user_id }}</td>
                   <td class="text-xs break-all">{{ item.detail || '' }}</td>
                 </tr>
@@ -165,8 +165,9 @@ import type {
   OrganizationSettingsUsage,
 } from '@/api/organization'
 import { providerLabelKey } from '@/utils/providerLabels'
+import { formatDateTime } from '@/utils/format'
 
-const { t } = useI18n()
+const { t, locale } = useI18n()
 const message = useDedupedMessage()
 const userStore = useUserStore()
 

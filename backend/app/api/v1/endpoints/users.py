@@ -28,6 +28,7 @@ from app.core.security import (
     permission_required,
     require_organization,
 )
+from app.core.time_utils import utcnow
 from app.exceptions import (
     AppError,
     AuthorizationError,
@@ -792,7 +793,7 @@ async def revoke_my_session(
 
     session_obj: Any = session
     session_obj.is_active = False
-    session_obj.revoked_at = datetime.now()
+    session_obj.revoked_at = utcnow()
 
     await _log_user_activity(
         db,
@@ -1004,7 +1005,7 @@ async def get_user_stats(
         storage_used = storage_result.scalar() or 0
 
         # 6. 获取最近7天的活动趋势 (保持不变)
-        seven_days_ago = datetime.now() - timedelta(days=7)
+        seven_days_ago = utcnow() - timedelta(days=7)
 
         doc_trend_query = (
             select(
@@ -1030,7 +1031,7 @@ async def get_user_stats(
 
         activity_trend = []
         for i in range(6, -1, -1):
-            day = (datetime.now() - timedelta(days=i)).date()
+            day = (utcnow() - timedelta(days=i)).date()
             count = doc_counts.get(day, 0) + chat_counts.get(day, 0)
             activity_trend.append(count)
 
