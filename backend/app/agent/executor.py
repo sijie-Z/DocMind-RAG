@@ -1880,9 +1880,7 @@ class Executor:
                     # 由 service 发带错误码的 error 事件；不写 tool_error、不产出
                     # 占位 chunk，也不进入重试/fallback（重试只会同样失败）。
                     if lf and step_span:
-                        step_span.end(
-                            output="llm_error: user_llm_request_failed", level="ERROR"
-                        )
+                        step_span.end(output="llm_error: user_llm_request_failed", level="ERROR")
                     raise UserLLMRequestError(USER_LLM_REQUEST_FAILED_MESSAGE) from None
                 _LLM_BREAKER.record_failure()  # 跨请求熔断计数（issue #242）
                 if lf and step_span:
@@ -1898,7 +1896,9 @@ class Executor:
                 return
 
             response = call.output
-            _LLM_BREAKER.record_success()  # 跨请求熔断：半开探测成功即闭合（issue #242）
+            if not user_llm:
+                # 用户模型成功不代表服务端模型恢复：不得提前闭合全局熔断器。
+                _LLM_BREAKER.record_success()  # 跨请求熔断：半开探测成功即闭合（issue #242）
             # issue #510：StepRunner 记录的本步墙钟 + 提示词摘要一并入 JSONL。
             step_tokens = record_llm_usage(
                 response,
@@ -2616,6 +2616,10 @@ class Executor:
                     latency_ms=(time.perf_counter() - synthesis_started) * 1000,
                     messages=messages,
                 )
+            if is_user_llm_client(self.client) and is_provider_call_error(e):
+                # 个人模型在合成阶段失败：不得用「找到以下信息：…」伪造成完成答案
+                # 落库（reviewer 实测：默认 legacy 模式下会以 COMPLETED 持久化）。
+                raise UserLLMRequestError(USER_LLM_REQUEST_FAILED_MESSAGE) from e
             # Fallback: return the first tool result summary
             first = tool_results[0]
             return f"找到以下信息：\n{first['result'][:500]}"

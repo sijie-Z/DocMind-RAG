@@ -384,9 +384,9 @@ class AgentService:
 
         active_client = llm_client or self.client
         if llm_client is not None:
-            # 防御性补标：正常路径由 llm_settings_service 建客户端时已标记；
-            # 这里兜住直接注入客户端的调用方（测试/后台）。
-            mark_user_llm_client(active_client)
+            # 只标记显式传入的 per-user 客户端：active_client 可能是进程级
+            # lru_cache 的服务端单例，误标会污染所有用户。
+            mark_user_llm_client(llm_client)
         if not active_client:
             # 文案必须命中 error_mapping 的安全白名单（否则对外被降级为通用文案）。
             err_event = AgentEvent(

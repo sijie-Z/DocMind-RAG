@@ -592,6 +592,50 @@ class TestExecutor:
                 pass
         assert str(exc_info.value) == USER_LLM_REQUEST_FAILED_MESSAGE
 
+    @pytest.mark.asyncio
+    async def test_synthesize_tool_results_user_client_failure_raises(self):
+        """工具结果合成阶段个人模型失败：不得返回「找到以下信息」伪造成完成答案。"""
+        from app.agent.config import AgentConfig
+        from app.agent.executor import Executor
+        from app.agent.memory_bridge import AgentMemoryBridge
+        from app.core.llm_failures import UserLLMRequestError, mark_user_llm_client
+
+        client = MagicMock()
+        client.chat.completions.create = AsyncMock(side_effect=TimeoutError("down"))
+        mark_user_llm_client(client)
+        executor = Executor(
+            client, AgentConfig(), AgentMemoryBridge(agent_id="t", organization_id=1, user_id=0)
+        )
+
+        with pytest.raises(UserLLMRequestError):
+            await executor._synthesize_tool_results(
+                step_description="查合同",
+                tool_results=[{"tool": "search", "result": "命中内容"}],
+                original_instruction="q",
+                ctx=None,
+            )
+
+    @pytest.mark.asyncio
+    async def test_synthesize_tool_results_server_client_failure_keeps_fallback(self):
+        """服务端默认模型失败保持既有降级（返回首条工具结果摘要）。"""
+        from app.agent.config import AgentConfig
+        from app.agent.executor import Executor
+        from app.agent.memory_bridge import AgentMemoryBridge
+
+        client = MagicMock()
+        client.chat.completions.create = AsyncMock(side_effect=TimeoutError("down"))
+        executor = Executor(
+            client, AgentConfig(), AgentMemoryBridge(agent_id="t", organization_id=1, user_id=0)
+        )
+
+        result = await executor._synthesize_tool_results(
+            step_description="查合同",
+            tool_results=[{"tool": "search", "result": "命中内容"}],
+            original_instruction="q",
+            ctx=None,
+        )
+        assert result.startswith("找到以下信息")
+
     def test_get_previous_results_empty(self):
         from app.agent.config import AgentConfig
         from app.agent.executor import Executor
