@@ -85,6 +85,8 @@ export interface AgentEvent {
   retry_hint?: string
   /** 失败分类（后端 events.py 的 error_type；command_error 携带命令错误码） */
   error_type?: string
+  /** 机器可读错误码（如 USER_LLM_REQUEST_FAILED）：前端据此本地化，非空才下发 */
+  code?: string
   // Meta
   iteration?: number
   timestamp?: number

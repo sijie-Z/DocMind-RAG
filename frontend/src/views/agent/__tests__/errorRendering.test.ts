@@ -163,4 +163,37 @@ describe('AgentView · error 渲染分支（#288 整次运行失败）', () => {
 
     expect(wrapper.find('.run-error-standalone').exists()).toBe(false)
   })
+
+  it('code=USER_LLM_REQUEST_FAILED → 展示四语词条，而不是后端中文原文', async () => {
+    const { wrapper } = await setupView([
+      {
+        type: 'error',
+        code: 'USER_LLM_REQUEST_FAILED',
+        content: '后端中文诊断（不应展示）',
+      },
+    ])
+
+    const box = wrapper.find('.run-error-standalone')
+    expect(box.exists()).toBe(true)
+    // zh 词条来自 locales/zh.ts::chat.userLlmRequestFailed
+    expect(box.text()).toContain(zh.chat.userLlmRequestFailed)
+    expect(box.text()).not.toContain('后端中文诊断')
+  })
+
+  it('store → 视图全链路：processEvent 保留 code，视图按码渲染四语', async () => {
+    const { pinia, store } = seedStore({ loading: true })
+    const wrapper = await mountView(pinia)
+
+    store.processEvent({
+      type: 'error',
+      code: 'USER_LLM_REQUEST_FAILED',
+      content: '后端中文诊断（不应展示）',
+    } as any)
+    await nextTick()
+
+    expect((store.messages[0] as any).events[0].code).toBe('USER_LLM_REQUEST_FAILED')
+    const box = wrapper.find('.run-error-standalone')
+    expect(box.text()).toContain(zh.chat.userLlmRequestFailed)
+    expect(box.text()).not.toContain('后端中文诊断')
+  })
 })

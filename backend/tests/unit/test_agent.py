@@ -4,6 +4,25 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+# ── Event wire contract ────────────────────────────────────────────────────
+
+
+def test_agent_event_code_survives_public_serialization():
+    """error 事件的机器码必须到达客户端（前端据此四语化）。"""
+    from app.agent.events import AgentEvent
+    from app.core.error_mapping import public_agent_event_data
+    from app.core.llm_failures import USER_LLM_REQUEST_FAILED_MESSAGE
+
+    event = AgentEvent(
+        type="error",
+        content=USER_LLM_REQUEST_FAILED_MESSAGE,
+        code="USER_LLM_REQUEST_FAILED",
+    )
+    data = public_agent_event_data(event)
+    assert data["code"] == "USER_LLM_REQUEST_FAILED"
+    assert data["content"] == USER_LLM_REQUEST_FAILED_MESSAGE, "白名单文案不得被清洗"
+
+
 # ── Tool Registry ──────────────────────────────────────────────────────────
 
 
@@ -365,6 +384,38 @@ class TestPlanner:
         planner = self._make_planner()
         assert planner._parse_plan("p1", {"goal": "x", "steps": []}) is None
 
+    @pytest.mark.asyncio
+    async def test_plan_user_client_failure_raises_instead_of_single_step_fallback(self):
+        """个人模型端点失败不得降级成单步计划继续跑（后续调用只会同样失败）。"""
+        from app.agent.config import AgentConfig
+        from app.agent.planner import Planner
+        from app.core.llm_failures import UserLLMRequestError, mark_user_llm_client
+
+        client = MagicMock()
+        client.chat.completions.create = AsyncMock(side_effect=TimeoutError("down"))
+        mark_user_llm_client(client)
+        planner = Planner(client, AgentConfig())
+
+        with pytest.raises(UserLLMRequestError):
+            # replan_feedback 强制走 LLM 规划路径（跳过规则模板）
+            async for _ in planner.plan("hello", replan_feedback="缺少证据"):
+                pass
+
+    @pytest.mark.asyncio
+    async def test_plan_server_client_failure_keeps_single_step_fallback(self):
+        """服务端默认模型失败保持既有降级：单步计划继续（行为不变锚点）。"""
+        from app.agent.config import AgentConfig
+        from app.agent.planner import Planner
+
+        client = MagicMock()
+        client.chat.completions.create = AsyncMock(side_effect=TimeoutError("down"))
+        planner = Planner(client, AgentConfig())
+
+        events = [event async for event in planner.plan("hello", replan_feedback="缺少证据")]
+        assert any(
+            event.type == "plan_complete" and "使用默认计划" in event.content for event in events
+        )
+
     def test_validate_dag_no_cycles(self):
         from app.agent.config import AgentConfig
         from app.agent.planner import Plan, Planner, PlanStep
@@ -503,6 +554,87 @@ class TestExecutor:
             events.append(event)
 
         assert any(e.type == "tool_error" for e in events)
+
+    @pytest.mark.asyncio
+    async def test_execute_step_once_user_client_failure_raises_actionable_error(self):
+        """个人模型端点失败：上抛 UserLLMRequestError，而不是 tool_error 降级。"""
+        from app.agent.config import AgentConfig
+        from app.agent.executor import Executor
+        from app.agent.memory_bridge import AgentMemoryBridge
+        from app.agent.planner import Plan, PlanStep
+        from app.core.llm_failures import (
+            USER_LLM_REQUEST_FAILED_MESSAGE,
+            UserLLMRequestError,
+            mark_user_llm_client,
+        )
+
+        mock_client = MagicMock()
+        mock_client.chat.completions.create = AsyncMock(side_effect=TimeoutError("down"))
+        mark_user_llm_client(mock_client)
+
+        memory = AgentMemoryBridge(agent_id="test", organization_id=1, user_id=0)
+        executor = Executor(mock_client, AgentConfig(), memory)
+        from app.core.llm_failures import is_user_llm_client as _is_user
+
+        assert _is_user(executor.client), "标记必须随客户端进入 Executor"
+        step = PlanStep(id="s1", description="test step")
+        plan = Plan(id="p1", goal="test", steps=[step])
+
+        with pytest.raises(UserLLMRequestError) as exc_info:
+            async for _ in executor._execute_step_once(
+                step=step,
+                plan=plan,
+                history=None,
+                organization_id=1,
+                user_id=0,
+                enable_thinking=True,
+            ):
+                pass
+        assert str(exc_info.value) == USER_LLM_REQUEST_FAILED_MESSAGE
+
+    @pytest.mark.asyncio
+    async def test_synthesize_tool_results_user_client_failure_raises(self):
+        """工具结果合成阶段个人模型失败：不得返回「找到以下信息」伪造成完成答案。"""
+        from app.agent.config import AgentConfig
+        from app.agent.executor import Executor
+        from app.agent.memory_bridge import AgentMemoryBridge
+        from app.core.llm_failures import UserLLMRequestError, mark_user_llm_client
+
+        client = MagicMock()
+        client.chat.completions.create = AsyncMock(side_effect=TimeoutError("down"))
+        mark_user_llm_client(client)
+        executor = Executor(
+            client, AgentConfig(), AgentMemoryBridge(agent_id="t", organization_id=1, user_id=0)
+        )
+
+        with pytest.raises(UserLLMRequestError):
+            await executor._synthesize_tool_results(
+                step_description="查合同",
+                tool_results=[{"tool": "search", "result": "命中内容"}],
+                original_instruction="q",
+                ctx=None,
+            )
+
+    @pytest.mark.asyncio
+    async def test_synthesize_tool_results_server_client_failure_keeps_fallback(self):
+        """服务端默认模型失败保持既有降级（返回首条工具结果摘要）。"""
+        from app.agent.config import AgentConfig
+        from app.agent.executor import Executor
+        from app.agent.memory_bridge import AgentMemoryBridge
+
+        client = MagicMock()
+        client.chat.completions.create = AsyncMock(side_effect=TimeoutError("down"))
+        executor = Executor(
+            client, AgentConfig(), AgentMemoryBridge(agent_id="t", organization_id=1, user_id=0)
+        )
+
+        result = await executor._synthesize_tool_results(
+            step_description="查合同",
+            tool_results=[{"tool": "search", "result": "命中内容"}],
+            original_instruction="q",
+            ctx=None,
+        )
+        assert result.startswith("找到以下信息")
 
     def test_get_previous_results_empty(self):
         from app.agent.config import AgentConfig

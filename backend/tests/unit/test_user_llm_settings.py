@@ -152,6 +152,10 @@ class TestResolve:
         assert resolution.model == "deepseek-chat"
         assert resolution.client.api_key == SECRET
         assert resolution.has_api_key is True
+        # 打标是 Agent 失败归因的前提：per-user 客户端必须被识别。
+        from app.core.llm_failures import is_user_llm_client
+
+        assert is_user_llm_client(resolution.client) is True
 
     async def test_legacy_plaintext_key_supported(self, db):
         db.add(
@@ -181,6 +185,9 @@ class TestResolve:
         await db.commit()
         resolution = await resolve_for_user(db, USER)
         assert resolution.source == "server"
+        from app.core.llm_failures import is_user_llm_client
+
+        assert is_user_llm_client(resolution.client) is False, "服务端默认客户端不得被打标"
 
     async def test_ollama_without_key_is_valid(self, db):
         db.add(
@@ -824,6 +831,47 @@ class TestAgentServiceWiring:
         ):
             pass
         assert captured["client"] is default_client
+
+    async def test_agent_user_llm_failure_emits_code_and_no_done(self, monkeypatch):
+        """个人模型失败：service 以带码 error 事件收尾且不发 done（端点统一补 failed/unssaved 的终态 done）。"""
+        from app.agent.config import AgentConfig
+        from app.agent.service import AgentService
+        from app.core.llm_failures import (
+            USER_LLM_REQUEST_FAILED_CODE,
+            USER_LLM_REQUEST_FAILED_MESSAGE,
+            UserLLMRequestError,
+        )
+
+        class FailingLoop:
+            def __init__(self, openai_client, config, organization_id, user_id):
+                pass
+
+            def _get_tools(self):
+                return []
+
+            async def run(self, *args, **kwargs):
+                raise UserLLMRequestError(USER_LLM_REQUEST_FAILED_MESSAGE)
+                yield None  # pragma: no cover - 保持 async generator
+
+        monkeypatch.setattr("app.agent.service.PERAgentLoop", FailingLoop)
+        service = AgentService(openai_client=object())
+        events = [
+            event
+            async for event in service.chat(
+                "hi",
+                organization_id=1,
+                user_id=1,
+                config=AgentConfig(enable_checkpoint=False),
+                llm_client=object(),
+            )
+        ]
+        errors = [event for event in events if event.type == "error"]
+        assert len(errors) == 1, "必须且只能发一个 error 事件"
+        assert errors[0].code == USER_LLM_REQUEST_FAILED_CODE
+        assert errors[0].content == USER_LLM_REQUEST_FAILED_MESSAGE
+        assert not any(event.type == "done" for event in events), (
+            "service 层不得发完成信号（端点补 failed/unssaved）"
+        )
 
 
 def test_server_default_model_matches_settings():

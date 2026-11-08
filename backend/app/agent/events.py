@@ -103,6 +103,9 @@ class AgentEvent:
     # Failure classification — read by Executor's retry loop to pick a RetryPolicy.
     # Distinct from `reflection_result`, which is a pass/retry/replan/escalate verdict.
     error_type: str = ""
+    # 机器可读的错误码（如 USER_LLM_REQUEST_FAILED）：前端据此本地化并给出
+    # 可操作指引；默认空串 → 既有事件载荷不变。
+    code: str = ""
 
     # Plan context
     plan_id: str = ""
@@ -220,6 +223,8 @@ class AgentEvent:
 
         if self.error_type:
             d["error_type"] = self.error_type
+        if self.code:
+            d["code"] = self.code
 
         if self.task_id:
             d["task_id"] = self.task_id

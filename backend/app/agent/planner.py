@@ -37,6 +37,12 @@ from app.agent.config import AgentConfig
 from app.agent.events import AgentEvent
 from app.agent.registry import canonical_tool_name, tool_registry
 from app.agent.usage import record_llm_call_error, record_llm_usage
+from app.core.llm_failures import (
+    USER_LLM_REQUEST_FAILED_MESSAGE,
+    UserLLMRequestError,
+    is_provider_call_error,
+    is_user_llm_client,
+)
 from app.core.prometheus import AGENT_PLANNING_LATENCY, AGENT_PLANNING_TOTAL
 
 logger = logging.getLogger(__name__)
@@ -555,6 +561,10 @@ class Planner:
             return
 
         except Exception as e:
+            if is_user_llm_client(self.client) and is_provider_call_error(e):
+                # 个人模型端点失败：不降级为「单步计划」继续执行（后续调用只会
+                # 同样失败），上抛由 service 发带码 error 事件并终止本次运行。
+                raise UserLLMRequestError(USER_LLM_REQUEST_FAILED_MESSAGE) from e
             logger.error(f"Planning failed: {e}", exc_info=True)
             # issue #510：失败调用同样留一行（error 字段，无 usage）；已成功
             # 记账后的下游解析/落盘异常不重复记（避免成功调用被记成失败）。
