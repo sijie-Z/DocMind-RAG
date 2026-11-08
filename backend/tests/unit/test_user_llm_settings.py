@@ -832,6 +832,88 @@ class TestAgentServiceWiring:
             pass
         assert captured["client"] is default_client
 
+    async def test_agent_resume_uses_per_user_client_and_overrides_snapshot_model(
+        self, monkeypatch
+    ):
+        """续跑：个人客户端/模型覆盖快照（个人设置 > 快照规则）。"""
+        from types import SimpleNamespace
+
+        from app.agent.service import AgentService
+
+        captured: dict = {}
+
+        class FakeLoop:
+            def __init__(self, openai_client, config, organization_id, user_id):
+                captured["client"] = openai_client
+                captured["model"] = config.model
+
+            def _get_tools(self):
+                return []
+
+            async def run(self, *args, **kwargs):
+                if False:  # pragma: no cover
+                    yield None
+
+        async def _load_for_resume(**_kwargs):
+            return (
+                SimpleNamespace(id="task-1", query="q", organization_id=1, user_id=1),
+                {"config": {"model": "snapshot-model"}},
+            )
+
+        monkeypatch.setattr("app.agent.service.PERAgentLoop", FakeLoop)
+        monkeypatch.setattr("app.agent.service.checkpoint.load_for_resume", _load_for_resume)
+        override = object()
+        service = AgentService(openai_client=object())
+        async for _ in service.resume_chat(
+            "task-1",
+            user_id=1,
+            claim=False,
+            llm_client=override,
+            llm_model="user-model",
+        ):
+            pass
+
+        assert captured["client"] is override
+        assert captured["model"] == "user-model", "个人模型必须覆盖快照里的 model"
+
+    async def test_agent_resume_without_override_keeps_server_client_and_snapshot_model(
+        self, monkeypatch
+    ):
+        """未配置个人模型：续跑保持服务端客户端 + 快照模型（行为不变锚点）。"""
+        from types import SimpleNamespace
+
+        from app.agent.service import AgentService
+
+        captured: dict = {}
+
+        class FakeLoop:
+            def __init__(self, openai_client, config, organization_id, user_id):
+                captured["client"] = openai_client
+                captured["model"] = config.model
+
+            def _get_tools(self):
+                return []
+
+            async def run(self, *args, **kwargs):
+                if False:  # pragma: no cover
+                    yield None
+
+        async def _load_for_resume(**_kwargs):
+            return (
+                SimpleNamespace(id="task-2", query="q", organization_id=1, user_id=1),
+                {"config": {"model": "snapshot-model"}},
+            )
+
+        monkeypatch.setattr("app.agent.service.PERAgentLoop", FakeLoop)
+        monkeypatch.setattr("app.agent.service.checkpoint.load_for_resume", _load_for_resume)
+        default_client = object()
+        service = AgentService(openai_client=default_client)
+        async for _ in service.resume_chat("task-2", user_id=1, claim=False):
+            pass
+
+        assert captured["client"] is default_client
+        assert captured["model"] == "snapshot-model"
+
     async def test_agent_user_llm_failure_emits_code_and_no_done(self, monkeypatch):
         """个人模型失败：service 以带码 error 事件收尾且不发 done（端点统一补 failed/unssaved 的终态 done）。"""
         from app.agent.config import AgentConfig

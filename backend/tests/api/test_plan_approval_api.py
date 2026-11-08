@@ -436,3 +436,37 @@ async def test_waiting_plan_approval_guard_rails(db_factory, fake_redis, monkeyp
             f"/api/v1/agent/tasks/{tid}/plan-approval", json={"decision": "approve"}
         )
         assert r6.status_code == 409
+
+
+@pytest.mark.asyncio
+async def test_plan_approval_passes_per_user_model(db_factory, fake_redis, monkeypatch, client):
+    """计划审批续跑必须透传个人模型（与 /chat、resume 同口径）。"""
+    _scripted_planner(monkeypatch, [["第一步：检索", "第二步：综合"]])
+    captured: dict = {}
+    personal_client = object()
+
+    spy = AsyncMock(return_value=ToolResult.ok(data="检索结果"))
+    with patch.object(tool_registry, "execute_detailed", new=spy):
+        tid, _ = await _chat_and_plan_pause(client, spy)
+
+        # 暂停之后再注入个人模型：首轮 chat 仍走服务端假客户端。
+        async def _resolve(_db, _user):
+            return SimpleNamespace(source="user", client=personal_client, model="user-model")
+
+        monkeypatch.setattr(agent_api, "resolve_for_user", _resolve)
+
+        original = agent_service.resume_chat
+
+        def _wrap(*args, **kwargs):
+            captured.update(kwargs)
+            return original(*args, **kwargs)
+
+        monkeypatch.setattr(agent_service, "resume_chat", _wrap)
+
+        r = await client.post(
+            f"/api/v1/agent/tasks/{tid}/plan-approval", json={"decision": "approve"}
+        )
+
+    assert r.status_code == 200
+    assert captured.get("llm_client") is personal_client
+    assert captured.get("llm_model") == "user-model"

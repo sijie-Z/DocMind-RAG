@@ -336,3 +336,38 @@ async def test_approval_409_when_not_waiting_approval(db_factory, fake_redis):
             assert r4.status_code == 404
     finally:
         app.dependency_overrides.pop(get_current_user, None)
+
+
+@pytest.mark.asyncio
+async def test_approval_passes_per_user_model(
+    db_factory, fake_redis, fake_danger_tool, client, monkeypatch
+):
+    """审批续跑必须透传个人模型（与 /chat、resume 同口径）。"""
+    captured: dict = {}
+    personal_client = object()
+
+    spy = AsyncMock(return_value=ToolResult.ok(data="假工具结果"))
+    with patch.object(tool_registry, "execute_detailed", new=spy):
+        task_id, _ = await _chat_and_pause(client, spy)
+
+        # 暂停之后再注入个人模型：首轮 chat 仍走服务端假客户端。
+        async def _resolve(_db, _user):
+            return SimpleNamespace(source="user", client=personal_client, model="user-model")
+
+        monkeypatch.setattr(agent_api, "resolve_for_user", _resolve)
+
+        original = agent_service.resume_chat
+
+        def _wrap(*args, **kwargs):
+            captured.update(kwargs)
+            return original(*args, **kwargs)
+
+        monkeypatch.setattr(agent_service, "resume_chat", _wrap)
+
+        r = await client.post(
+            f"/api/v1/agent/tasks/{task_id}/approval", json={"decision": "approve"}
+        )
+
+    assert r.status_code == 200
+    assert captured.get("llm_client") is personal_client
+    assert captured.get("llm_model") == "user-model"
