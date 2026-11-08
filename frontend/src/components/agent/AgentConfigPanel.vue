@@ -18,7 +18,7 @@
       <!-- Temperature -->
       <div class="config-section">
         <label class="config-label">
-          {{ t('agent.configPanel.temperature') }}: <span class="config-value">{{ localConfig.temperature }}</span>
+          {{ t('agent.configPanel.temperature') }} <span class="config-value">{{ localConfig.temperature }}</span>
         </label>
         <input
           type="range"

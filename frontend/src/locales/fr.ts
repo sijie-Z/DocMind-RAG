@@ -1060,7 +1060,7 @@ export default {
     configPanel: {
       title: 'Configuration de l\'Agent',
       model: 'Modèle',
-      temperature: 'Température',
+      temperature: 'Température :',
       planning: 'Planification',
       reflection: 'Réflexion',
       memory: 'Mémoire',
@@ -1071,8 +1071,8 @@ export default {
       styleCreative: 'Créatif',
       tools: 'Outils',
       defaultDisabled: 'Désactivé par défaut',
-      systemPrompt: 'Invite système',
-      systemPromptPlaceholder: 'Laisser vide pour utiliser l\'invite par défaut...',
+      systemPrompt: 'Prompt système',
+      systemPromptPlaceholder: 'Laisser vide pour utiliser le prompt par défaut...',
       apply: 'Appliquer la configuration',
     },
     input: {
@@ -1107,7 +1107,7 @@ export default {
       default: 'Réflexion...',
     },
     toolCard: {
-      retry: 'Nouvel essai {count}',
+      retry: 'Réessai {count}',
       args: 'Args :',
       collapse: 'Réduire',
       expandAll: 'Tout afficher',
@@ -1115,7 +1115,7 @@ export default {
     },
     approval: {
       title: 'Une approbation humaine est requise avant l\'exécution de l\'outil',
-      expired: 'Expiré',
+      expired: 'Expirée',
       tool: 'Outil',
       notePlaceholder: 'Instruction modifiée / note (facultatif) : injectée comme consigne humaine lors de l\'approbation ; conservée comme note en cas de refus',
       submitting: 'Envoi…',

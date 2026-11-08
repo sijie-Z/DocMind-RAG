@@ -1137,7 +1137,7 @@ export default {
     configPanel: {
       title: 'Agent 配置',
       model: '模型',
-      temperature: '温度',
+      temperature: '温度:',
       planning: '规划',
       reflection: '反思',
       memory: '记忆',

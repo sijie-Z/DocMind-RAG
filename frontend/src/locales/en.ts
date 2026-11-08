@@ -1130,7 +1130,7 @@ export default {
     configPanel: {
       title: 'Agent configuration',
       model: 'Model',
-      temperature: 'Temperature',
+      temperature: 'Temperature:',
       planning: 'Planning',
       reflection: 'Reflection',
       memory: 'Memory',
@@ -1139,7 +1139,7 @@ export default {
       styleBalanced: 'Balanced',
       stylePrecise: 'Precise',
       styleCreative: 'Creative',
-      tools: 'Tools',
+      tools: 'Tool toggles',
       defaultDisabled: 'Off by default',
       systemPrompt: 'System prompt',
       systemPromptPlaceholder: 'Leave empty to use the default prompt...',

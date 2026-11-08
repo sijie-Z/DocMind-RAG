@@ -1059,7 +1059,7 @@ export default {
     configPanel: {
       title: 'Agent 設定',
       model: 'モデル',
-      temperature: '温度',
+      temperature: '温度:',
       planning: '計画',
       reflection: '振り返り',
       memory: '記憶',

@@ -1,5 +1,5 @@
 {
-  "$comment": "F波 t() 使用键棘轮基线（存量“已使用但 zh 中枢未定义”键，只缩不涨）。当前容忍 7 个未定义键：chat.feedback.dislikeSuccess / failed / likeSuccess、common.deleteFailed、notifications.retry / subtitle、profile.loadFailed（notifications.retry/subtitle 为已上线页面缺键的存量待补，其余为未发货扩展件）。knowledge.graph.subtitle、notifications.loadFailed/empty 等已收敛项不再入单。新增未定义键会让 tUsageKeysDefined.test.ts 变红；收敛后重生成：UPDATE_T_USAGE_BASELINE=1 npx vitest run src/__tests__/tUsageKeysDefined.test.ts",
+  "$comment": "F波 t() 使用键棘轮基线（存量“已使用但 zh 中枢未定义”键，只缩不涨）。当前容忍键见 toleratedUndefinedKeys（已上线页面缺键的存量待补 + 未发货扩展件）；已收敛项不再入单。新增未定义键会让 tUsageKeysDefined.test.ts 变红；收敛后重生成：UPDATE_T_USAGE_BASELINE=1 npx vitest run src/__tests__/tUsageKeysDefined.test.ts",
   "toleratedUndefinedKeys": [
     "chat.feedback.dislikeSuccess",
     "chat.feedback.failed",
