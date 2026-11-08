@@ -36,6 +36,19 @@ def client():
     return TestClient(app)
 
 
+@pytest.fixture(autouse=True)
+def _resolve_for_user_server(monkeypatch):
+    """resume/审批端点会解析个人模型设置：默认替身为服务端模式（不连库）。"""
+    from types import SimpleNamespace
+
+    import app.api.v1.endpoints.agent as agent_api
+
+    async def _resolve(_db, _user):
+        return SimpleNamespace(source="server", client=None, model=None)
+
+    monkeypatch.setattr(agent_api, "resolve_for_user", _resolve)
+
+
 @pytest.fixture
 def auth():
     """登录态替身（依赖注入覆盖）；用完即撤，避免污染同进程其它 api 用例。"""
@@ -171,8 +184,23 @@ def test_resume_streams_sse_contract_and_passes_claim_false(client, auth, monkey
         calls["prepare"] = (task_id, user_id, organization_id)
         return _task(), {"session_id": "", "partial_output": ""}
 
-    async def _fake_resume(task_id, user_id, *, config=None, claim=True, request_id=None):
-        calls["resume"] = {"task_id": task_id, "claim": claim, "request_id": request_id}
+    async def _fake_resume(
+        task_id,
+        user_id,
+        *,
+        config=None,
+        claim=True,
+        request_id=None,
+        llm_client=None,
+        llm_model=None,
+    ):
+        calls["resume"] = {
+            "task_id": task_id,
+            "claim": claim,
+            "request_id": request_id,
+            "llm_client": llm_client,
+            "llm_model": llm_model,
+        }
         yield AgentEvent(type="thinking", content="继续执行", plan_step_id="s3")
         yield AgentEvent(type="chunk", content="后续产出")
         yield AgentEvent(type="done", task_id=task_id)
@@ -202,7 +230,47 @@ def test_resume_streams_sse_contract_and_passes_claim_false(client, auth, monkey
         "task_id": _TASK_ID,
         "claim": False,
         "request_id": request_id,
-    }, "resume_chat 必须收到本次请求的 request_id"
+        "llm_client": None,
+        "llm_model": None,
+    }, "resume_chat 必须收到本次请求的 request_id；未配置个人模型时保持服务端默认"
+
+
+def test_resume_passes_per_user_model_to_resume_chat(client, auth, monkeypatch):
+    """个人模型设置：续跑必须收到用户客户端与模型（个人 > 快照）。"""
+    from types import SimpleNamespace
+
+    import app.api.v1.endpoints.agent as agent_api
+
+    captured: dict = {}
+    personal_client = object()
+
+    async def _resolve(_db, _user):
+        return SimpleNamespace(source="user", client=personal_client, model="user-model")
+
+    async def _prepare(task_id, user_id, organization_id=None):
+        return _task(), {"session_id": "", "partial_output": ""}
+
+    async def _fake_resume(
+        task_id,
+        user_id,
+        *,
+        config=None,
+        claim=True,
+        request_id=None,
+        llm_client=None,
+        llm_model=None,
+    ):
+        captured.update(llm_client=llm_client, llm_model=llm_model)
+        yield AgentEvent(type="done", task_id=task_id)
+
+    monkeypatch.setattr(agent_api, "resolve_for_user", _resolve)
+    monkeypatch.setattr(agent_service, "prepare_resume", _prepare)
+    monkeypatch.setattr(agent_service, "resume_chat", _fake_resume)
+
+    r = client.post(f"/api/v1/agent/tasks/{_TASK_ID}/resume")
+
+    assert r.status_code == 200
+    assert captured == {"llm_client": personal_client, "llm_model": "user-model"}
 
 
 def test_resume_saves_session_interaction_with_prefix(client, auth, monkeypatch):
@@ -215,7 +283,16 @@ def test_resume_saves_session_interaction_with_prefix(client, auth, monkeypatch)
     async def _prepare(task_id, user_id, organization_id=None):
         return _task(), {"session_id": "sess-9", "partial_output": "前半"}
 
-    async def _fake_resume(task_id, user_id, *, config=None, claim=True, request_id=None):
+    async def _fake_resume(
+        task_id,
+        user_id,
+        *,
+        config=None,
+        claim=True,
+        request_id=None,
+        llm_client=None,
+        llm_model=None,
+    ):
         yield AgentEvent(type="chunk", content="后半")
         yield AgentEvent(type="done", task_id=task_id, task_state="completed")
 
@@ -530,7 +607,16 @@ def test_resume_stream_error_is_generic_detail_only_in_server_log(client, auth, 
     async def _prepare(task_id, user_id, organization_id=None):
         return _task(), {"session_id": "", "partial_output": ""}
 
-    async def _boom(task_id, user_id, *, config=None, claim=True, request_id=None):
+    async def _boom(
+        task_id,
+        user_id,
+        *,
+        config=None,
+        claim=True,
+        request_id=None,
+        llm_client=None,
+        llm_model=None,
+    ):
         raise RuntimeError("SECRET-TOKEN-xyz")
         yield  # pragma: no cover — 需要 async generator 形态
 

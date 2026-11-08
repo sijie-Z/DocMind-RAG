@@ -693,6 +693,8 @@ async def resume_agent_task(
     # final_answer 优先级由统一累加器处理；legacy partial 仅用于旧 v1。
     answers = FinalAnswerAccumulator(payload)
     fallback_config = await _fallback_resume_config(current_user.id)
+    # 个人 AI 模型设置（与 /agent/chat 同源）：续跑/审批续跑同样使用用户模型。
+    llm_resolution = await resolve_for_user(db, current_user)
 
     async def event_stream():
         assistant_message_id = None
@@ -707,6 +709,8 @@ async def resume_agent_task(
                 config=fallback_config,
                 claim=False,  # 已在上方 prepare_resume 认领（HTTP 409 语义在开流前）
                 request_id=resolve_request_id(request),  # issue #510：resume 请求编号
+                llm_client=(llm_resolution.client if llm_resolution.source == "user" else None),
+                llm_model=(llm_resolution.model if llm_resolution.source == "user" else None),
             ):
                 last_event_type = event.type
                 sse_data = public_agent_event_data(event)
@@ -876,6 +880,8 @@ async def decide_agent_task_approval(
     # final_answer 优先级由统一累加器处理；legacy partial 仅用于旧 v1。
     answers = FinalAnswerAccumulator(payload)
     fallback_config = await _fallback_resume_config(current_user.id)
+    # 个人 AI 模型设置（与 /agent/chat 同源）：续跑/审批续跑同样使用用户模型。
+    llm_resolution = await resolve_for_user(db, current_user)
     logger.info(
         "审批应答 (task=%s, decision=%s, tool=%s, by=%s)",
         log_safe(task_id),
@@ -896,6 +902,8 @@ async def decide_agent_task_approval(
                 config=fallback_config,
                 claim=False,  # 已在上方 apply_approval_decision 认领（HTTP 409 在开流前）
                 request_id=resolve_request_id(request),  # issue #510：审批续跑请求编号
+                llm_client=(llm_resolution.client if llm_resolution.source == "user" else None),
+                llm_model=(llm_resolution.model if llm_resolution.source == "user" else None),
             ):
                 last_event_type = event.type
                 sse_data = public_agent_event_data(event)
@@ -1113,6 +1121,8 @@ async def decide_agent_task_plan_approval(
     session_id = (payload or {}).get("session_id") or getattr(task, "session_id", None)
     answers = FinalAnswerAccumulator(payload)
     fallback_config = await _fallback_resume_config(current_user.id)
+    # 个人 AI 模型设置（与 /agent/chat 同源）：续跑/审批续跑同样使用用户模型。
+    llm_resolution = await resolve_for_user(db, current_user)
 
     async def event_stream():
         assistant_message_id = None
@@ -1126,6 +1136,8 @@ async def decide_agent_task_plan_approval(
                 config=fallback_config,
                 claim=False,  # 已在上方 apply_plan_approval_decision 认领（HTTP 409 在开流前）
                 request_id=resolve_request_id(request),  # issue #510：计划审批续跑请求编号
+                llm_client=(llm_resolution.client if llm_resolution.source == "user" else None),
+                llm_model=(llm_resolution.model if llm_resolution.source == "user" else None),
             ):
                 last_event_type = event.type
                 sse_data = public_agent_event_data(event)

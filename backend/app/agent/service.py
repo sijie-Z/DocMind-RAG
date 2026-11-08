@@ -625,6 +625,8 @@ class AgentService:
         claim: bool = True,
         document_context: str | None = None,
         request_id: str | None = None,
+        llm_client: AsyncOpenAI | None = None,
+        llm_model: str | None = None,
     ) -> AsyncGenerator[AgentEvent, None]:
         """从 checkpoint 恢复一个未终态任务（issue #201 最小版）。
 
@@ -644,10 +646,17 @@ class AgentService:
 
         request_id（issue #510 第二步）：本次 resume 请求的编号（与 X-Request-ID
         同源）。同一个 task_id 可由多个请求续跑，request_id 如实标识当前请求。
+
+        llm_client/llm_model：个人 AI 模型设置解析结果。续跑同样必须走用户的
+        模型——快照里的 config.model 可能来自旧选择或服务端默认；显式给出时
+        覆盖快照模型（个人设置 > 快照规则）。None = 服务端默认（行为不变）。
         """
         request_id = request_id or get_request_id()
 
-        if not self.client:
+        active_client = llm_client or self.client
+        if llm_client is not None:
+            mark_user_llm_client(llm_client)
+        if not active_client:
             err_event = AgentEvent(
                 type="error", content="LLM 未配置，请检查 DEEPSEEK_API_KEY 环境变量。"
             )
@@ -677,11 +686,16 @@ class AgentService:
             agent_config = config or AgentConfig()
             session_id = None
 
+        if llm_model:
+            # 个人模型优先于快照：快照记录的是上次 run 的起点规则，用户可能
+            # 已改选模型；不覆盖会把用户模型名发给服务端客户端（必失败）。
+            agent_config.model = llm_model
+
         if checkpoint.is_ready_final_snapshot(payload):
             _validate_ready_delivery(task, payload)
 
         agent = PERAgentLoop(
-            openai_client=self.client,
+            openai_client=active_client,
             config=agent_config,
             # 安全加固（issue #278/m3，#168/#268 禁模式）：如实传任务归属组织，
             # 绝不 `or 1` 兜底伪造——无组织如实为 None（下游按各自既有的
