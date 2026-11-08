@@ -25,6 +25,7 @@
                 <n-select
                   v-model:value="form.defaultProvider"
                   :options="providerOptions"
+                  :fallback-option="providerFallbackOption"
                   :placeholder="t('orgSettings.providerPlaceholder')"
                   clearable
                 />
@@ -212,6 +213,11 @@ const providerLabel = (id: string): string => {
 const providerOptions = computed(() =>
   ORG_PROVIDER_IDS.map((id) => ({ label: providerLabel(id), value: id }))
 )
+// 已存储但不在选项集内的 id（ollama/custom 等）：select 与生效值表用同一标签。
+const providerFallbackOption = (value: string) => ({
+  label: providerLabel(String(value)),
+  value,
+})
 
 const settingRows = computed(() => [
   { key: 'default_provider', label: t('orgSettings.settingNames.defaultProvider'), entry: settings.value.default_provider },

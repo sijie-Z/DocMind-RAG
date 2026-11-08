@@ -17,5 +17,6 @@ export const PROVIDER_LABEL_KEYS: Record<string, string> = {
 }
 
 export function providerLabelKey(id: string): string | undefined {
-  return PROVIDER_LABEL_KEYS[id]
+  // own-property：'__proto__' 之类的恶意存储值不得命中原型链。
+  return Object.hasOwn(PROVIDER_LABEL_KEYS, id) ? PROVIDER_LABEL_KEYS[id] : undefined
 }
