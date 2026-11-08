@@ -292,3 +292,22 @@ class TestDocumentUploadEndpointLegacyFormats:
             )
         assert exc.value.status_code == 400
         assert "不支持的文件格式" in exc.value.message
+
+
+class TestChatParseUploadLegacyFormats:
+    """/chat/parse-upload 也必须在入口拒绝旧版格式（此前 500 后再回退）。"""
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("filename", ["legacy.doc", "legacy.xls"])
+    async def test_parse_upload_rejects_legacy_office(self, monkeypatch, filename):
+        from app.api.v1.endpoints import chat as chat_ep
+
+        async def _org(_user, _db):
+            return 1
+
+        monkeypatch.setattr(chat_ep, "require_organization", _org)
+        upload = _make_upload_file(filename, b"legacy-bytes")
+        with pytest.raises(ValidationError) as exc:
+            await chat_ep.chat_parse_upload(file=upload, db=_fake_db(), current_user=MagicMock())
+        assert exc.value.status_code == 400
+        assert "另存为" in exc.value.message
