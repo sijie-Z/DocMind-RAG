@@ -4,7 +4,7 @@
       <n-button quaternary circle size="small" data-testid="chat-sidebar-toggle" :aria-label="sidebarOpen ? t('chat.closeSidebar') : t('chat.openSidebar')" @click="$emit('toggleSidebar')" class="mr-1">
         <template #icon>
           <n-icon size="20" class="text-gray-600 dark:text-gray-300">
-            <MenuOutline v-if="!sidebarOpen" />
+            <ChatbubblesOutline v-if="!sidebarOpen" />
             <CloseOutline v-else />
           </n-icon>
         </template>
@@ -70,7 +70,7 @@
 
 <script setup lang="ts">
 import { useI18n } from 'vue-i18n'
-import { MenuOutline, CloseOutline, TrashOutline, AttachOutline, DownloadOutline, BugOutline } from '@vicons/ionicons5'
+import { ChatbubblesOutline, CloseOutline, TrashOutline, AttachOutline, DownloadOutline, BugOutline } from '@vicons/ionicons5'
 import DocMindMark from '@/components/brand/DocMindMark.vue'
 
 const { t } = useI18n()
