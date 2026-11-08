@@ -472,7 +472,6 @@ watch(inputText, async () => {
   }
 })
 
-// 运行开始（转入 steering）时收起选择层与命令菜单
 // 聊天页接力：把用户已输入的提示词填进输入框（不自动发送，用户可补充）。
 watch(
   () => props.initialText,
