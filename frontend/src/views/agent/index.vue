@@ -489,6 +489,7 @@
       :steering="steerEnabled"
       :hint-override="planApprovalPending ? t('hitl.planPendingHint') : ''"
       :session-id="agentStore.currentSessionId"
+      :initial-text="initialPrompt"
       @send="handleSend"
       @stop="handleStop"
       @steer="handleSteer"
@@ -1625,6 +1626,23 @@ watch(
       // 深链被移除（浏览器后退等）→ 同步收起面板
       closeReplay()
     }
+  },
+  { immediate: true },
+)
+
+// 聊天页接力：?prompt= 填入 Agent 输入框（不自动发送）。消费后清掉参数，
+// 避免刷新/后退重复填充；其余 query（如回放 id）原样保留。
+const initialPrompt = ref('')
+watch(
+  () => route?.query?.prompt,
+  (prompt) => {
+    // 只在 Agent 路由上消费（离场过渡期间仍挂载的实例不得响应下一路由的参数）
+    if (route?.name !== 'Agent' || typeof prompt !== 'string') return
+    if (prompt.trim()) initialPrompt.value = prompt
+    if (!router || !route) return
+    const q: Record<string, any> = { ...(route.query || {}) }
+    delete q.prompt
+    router.replace({ query: q }).catch(() => {})
   },
   { immediate: true },
 )

@@ -19,7 +19,7 @@
               {{ ((doc.file_size as number) / 1024).toFixed(2) }} KB
             </n-tag>
           </div>
-          <div class="text-xs text-gray-400">{{ t('chat.uploadedAt') }}: {{ doc?.created_at ? new Date(doc.created_at).toLocaleString() : '-' }}</div>
+          <div class="text-xs text-gray-400">{{ t('chat.uploadedAt') }}: {{ doc?.created_at ? (parseApiDate(doc.created_at)?.toLocaleString() ?? '-') : '-' }}</div>
         </div>
 
         <div v-if="doc?.description" class="text-xs text-gray-600 dark:text-gray-400 italic">
@@ -109,6 +109,7 @@ import { computed, nextTick, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { DocumentContent } from '@/api/knowledge'
 import { splitFocusText } from '@/utils/focusText'
+import { parseApiDate } from '@/utils/format'
 
 const { t } = useI18n()
 

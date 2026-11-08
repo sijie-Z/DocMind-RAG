@@ -67,6 +67,7 @@ export default {
     preferences: '基本設定',
     language: '言語設定',
     languageBeta: 'ベータ版 — 一部のコンテンツは英語で表示されます',
+    languageSwitchFailed: '言語の切り替えに失敗しました。後でもう一度お試しください',
     theme: 'テーマ設定',
     editProfile: 'プロフィール編集',
     loadUserFailed: 'ユーザー情報の取得に失敗しました',

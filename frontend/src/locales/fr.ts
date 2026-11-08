@@ -67,6 +67,7 @@ export default {
     preferences: 'Préférences',
     language: 'Langue',
     languageBeta: 'Bêta — certains contenus s’affichent en anglais',
+    languageSwitchFailed: 'Échec du changement de langue, veuillez réessayer',
     theme: 'Thème',
     editProfile: 'Modifier le profil',
     loadUserFailed: 'Échec du chargement de l\'utilisateur',

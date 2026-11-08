@@ -245,6 +245,7 @@ import {
 import { getAgentMemory, recallMemory, clearMemory } from '@/api/memory'
 import { apiUnwrap } from '@/utils/apiUnwrap'
 import dayjs from 'dayjs'
+import { parseApiDate } from '@/utils/format'
 import { useI18n } from 'vue-i18n'
 import PageBreadcrumb from '@/components/common/PageBreadcrumb.vue'
 
@@ -408,7 +409,8 @@ const confirmClearAll = () => {
 }
 
 const formatTime = (time?: string) => {
-  return time ? dayjs(time).format('MM-DD HH:mm:ss') : '-'
+  const parsed = parseApiDate(time)
+  return parsed ? dayjs(parsed).format('MM-DD HH:mm:ss') : '-'
 }
 
 onMounted(() => {

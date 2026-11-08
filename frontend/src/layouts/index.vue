@@ -104,7 +104,7 @@
         </n-tooltip>
         <n-tooltip :trigger="'hover'">
           <template #trigger>
-            <n-popover trigger="click" placement="right">
+            <n-popover v-model:show="languageMenuOpen" trigger="click" placement="right">
               <template #trigger>
                 <n-button quaternary circle size="small" :aria-label="t('profile.language')">
                   <template #icon>
@@ -491,6 +491,7 @@ onUnmounted(() => {
 })
 
 // Language options：单一事实源 utils/languages.ts（beta 字段驱动徽标展示）
+const languageMenuOpen = ref(false)
 const languageOptions = LANGUAGES
 
 const currentLang = computed(() => locale.value)
@@ -501,8 +502,10 @@ const switchLanguage = async (lang: LanguageCode) => {
   try {
     await setLanguage(lang)
     userStore.updateSettings({ language: lang })
+    languageMenuOpen.value = false
   } catch {
-    // 词条包加载失败：保持当前语言
+    // 词条包加载失败：保持当前语言；弹层保持打开便于重试，并如实提示。
+    message.error(t('profile.languageSwitchFailed'))
   }
 }
 

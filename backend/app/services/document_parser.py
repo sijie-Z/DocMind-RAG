@@ -9,7 +9,6 @@ import os
 import re
 import uuid
 import zipfile
-from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -24,6 +23,7 @@ from sqlalchemy.orm import selectinload
 
 from app.core.config import settings
 from app.core.database import AsyncSessionLocal
+from app.core.time_utils import utcnow
 from app.models.document import Document, DocumentChunk, DocumentStatus
 from app.rag.source_provenance import LEGACY_UNVERIFIED, PARSER_ORIGINAL
 
@@ -762,7 +762,7 @@ class DocumentParser:
                     document.status = DocumentStatus.PARSED  # type: ignore
                     document.content_length = parse_result["content_length"]  # type: ignore
                     document.chunk_count = len(parse_result["chunks"])  # type: ignore
-                    document.parsed_at = datetime.now()  # type: ignore
+                    document.parsed_at = utcnow()  # type: ignore
 
                     # 保存文档分块（与 worker 写 DB 的口径一致：原文列 + 写入方
                     # provenance 标记；缺标记/空原文一律 legacy，不冒充原文）。

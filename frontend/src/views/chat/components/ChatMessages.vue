@@ -2,6 +2,7 @@
   <div
     ref="chatContainer"
     class="flex-1 overflow-y-auto px-4 pt-20 pb-40 scroll-smooth relative"
+    :style="isLoading ? 'padding-bottom: 216px' : undefined"
     @scroll="$emit('scroll')"
   >
     <div class="max-w-3xl mx-auto space-y-6">
