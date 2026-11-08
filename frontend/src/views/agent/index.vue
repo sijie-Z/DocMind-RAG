@@ -1636,8 +1636,9 @@ const initialPrompt = ref('')
 watch(
   () => route?.query?.prompt,
   (prompt) => {
-    if (typeof prompt !== 'string' || !prompt.trim()) return
-    initialPrompt.value = prompt
+    // 只在 Agent 路由上消费（离场过渡期间仍挂载的实例不得响应下一路由的参数）
+    if (route?.name !== 'Agent' || typeof prompt !== 'string') return
+    if (prompt.trim()) initialPrompt.value = prompt
     if (!router || !route) return
     const q: Record<string, any> = { ...(route.query || {}) }
     delete q.prompt

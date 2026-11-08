@@ -484,6 +484,7 @@ watch(
   { immediate: true },
 )
 
+// 运行开始（转入 steering）时收起选择层与命令菜单
 watch(() => props.steering, (v) => {
   if (v) {
     closePicker()

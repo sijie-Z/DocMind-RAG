@@ -47,8 +47,10 @@ describe('AgentInput · 初始提示词', () => {
     expect((wrapper.find('textarea').element as HTMLTextAreaElement).value).toBe('第二条')
   })
 
-  it('空 initialText 不覆盖用户已输入内容', async () => {
-    const wrapper = await mountInput('')
+  it('initialText 变为空时不覆盖用户已输入内容', async () => {
+    // 先以非空值挂载（真正触发 watcher），再改空：直接删掉 `if (!text) return`
+    // 守卫会让空串写入输入框，本用例即红。
+    const wrapper = await mountInput('初始接力文本')
     const textarea = wrapper.find('textarea').element as HTMLTextAreaElement
     textarea.value = '用户自己的草稿'
     textarea.dispatchEvent(new Event('input'))
