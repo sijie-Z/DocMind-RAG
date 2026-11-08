@@ -44,6 +44,7 @@ export const useUserStore = defineStore('user', () => {
   const myOrganizations = ref<Array<{ id: number; name: string }>>([])
   let organizationsRequest: Promise<Array<{ id: number; name: string }>> | null = null
   let organizationsRequestSeq = 0
+  let settingsRequest: Promise<void> | null = null
   let authScopeVersion = 0
 
   const resetAgentAndChat = () => {
@@ -90,7 +91,8 @@ export const useUserStore = defineStore('user', () => {
             ? JSON.parse(info.preferences)
             : info.preferences
           if (prefs?.theme) {
-            useAppStore().setTheme(prefs.theme)
+            // 服务端水合：只应用主题，不回写 /users/me（避免登录首屏无谓 PUT）。
+            useAppStore().setTheme(prefs.theme, { persist: false })
           }
         } catch { /* non-critical */ }
       }
@@ -230,8 +232,8 @@ export const useUserStore = defineStore('user', () => {
         await getUserInfo()
       }
 
-      // Auto-fetch user settings after login
-      fetchSettings()
+      // 用户设置由登录后的布局挂载统一拉取（fetchSettings 单飞）——登录页
+      // 不重复发 GET /user/settings，避免首屏两个同源请求。
 
       return { success: true }
     } catch (error: unknown) {
@@ -386,27 +388,37 @@ export const useUserStore = defineStore('user', () => {
 
   // --- User Settings Actions ---
 
-  const fetchSettings = async () => {
-    try {
-      const response = await getUserSettings()
-      const resData = response.data as unknown as Record<string, unknown>
-      const data = (resData.data && typeof resData.data === 'object')
-        ? resData.data as UserSettings
-        : resData as unknown as UserSettings
-      if (data.language) {
-        settings.value.language = data.language
-        localStorage.setItem('language', data.language)
+  // 单飞：布局挂载与其它调用方并发时只发一次 GET /user/settings；
+  // 不缓存结果（settle 后置空），后续显式调用仍会重新拉取。
+  const fetchSettings = (): Promise<void> => {
+    if (settingsRequest) return settingsRequest
+    const request = (async () => {
+      try {
+        const response = await getUserSettings()
+        const resData = response.data as unknown as Record<string, unknown>
+        const data = (resData.data && typeof resData.data === 'object')
+          ? resData.data as UserSettings
+          : resData as unknown as UserSettings
+        if (data.language) {
+          settings.value.language = data.language
+          localStorage.setItem('language', data.language)
+        }
+        if (data.theme) {
+          settings.value.theme = data.theme
+          localStorage.setItem('theme', data.theme)
+        }
+        if (data.preferences) {
+          settings.value.preferences = data.preferences
+        }
+      } catch {
+        // Non-critical — use local settings
       }
-      if (data.theme) {
-        settings.value.theme = data.theme
-        localStorage.setItem('theme', data.theme)
-      }
-      if (data.preferences) {
-        settings.value.preferences = data.preferences
-      }
-    } catch {
-      // Non-critical — use local settings
-    }
+    })()
+    settingsRequest = request
+    void request.finally(() => {
+      if (settingsRequest === request) settingsRequest = null
+    })
+    return request
   }
 
   const updateSettings = async (data: { language?: string; theme?: string; preferences?: Record<string, unknown> }) => {

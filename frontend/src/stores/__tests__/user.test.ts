@@ -33,6 +33,7 @@ vi.mock('@/utils/auth', () => ({
 
 import { useUserStore } from '@/stores/user'
 import { loginWithJson, getUserProfile } from '@/api/auth'
+import { getUserSettings } from '@/api/user'
 import { getToken } from '@/utils/auth'
 import type { UserInfo } from '@/types/user'
 
@@ -126,5 +127,34 @@ describe('useUserStore · isAdmin 组合判定', () => {
 
     expect(store.userInfo?.is_superuser).toBe(true)
     expect(store.isAdmin).toBe(true)
+  })
+})
+
+describe('useUserStore · fetchSettings 并发单飞', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    localStorage.clear()
+    vi.clearAllMocks()
+  })
+
+  it('同时调用只发一次请求；settle 后再调用会重新拉取（不缓存结果）', async () => {
+    let resolveRequest!: (value: unknown) => void
+    const deferred = new Promise((resolve) => {
+      resolveRequest = resolve
+    })
+    vi.mocked(getUserSettings).mockReturnValueOnce(deferred as never)
+
+    const store = useUserStore()
+    const first = store.fetchSettings()
+    const second = store.fetchSettings()
+    expect(getUserSettings).toHaveBeenCalledTimes(1)
+
+    resolveRequest({ data: { data: { theme: 'dark' } } })
+    await Promise.all([first, second])
+    expect(store.settings.theme).toBe('dark')
+
+    vi.mocked(getUserSettings).mockResolvedValueOnce({ data: { data: {} } } as never)
+    await store.fetchSettings()
+    expect(getUserSettings).toHaveBeenCalledTimes(2)
   })
 })

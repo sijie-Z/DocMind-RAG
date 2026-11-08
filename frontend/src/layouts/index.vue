@@ -617,10 +617,10 @@ onMounted(async () => {
     notificationSocket.connect()
     // Load user settings from backend
     userStore.fetchSettings().then(() => {
-      // Apply theme from settings
+      // Apply theme from settings（服务端水合：只应用，不回写 /users/me）
       const theme = userStore.settings.theme
       if (theme && ['light', 'dark', 'auto'].includes(theme)) {
-        appStore.setTheme(theme as 'light' | 'dark' | 'auto')
+        appStore.setTheme(theme as 'light' | 'dark' | 'auto', { persist: false })
       }
       // Apply language from settings（守卫：非法语码不注入 locale；
       // E5：非默认语言包为动态 chunk，异步就绪后再切，失败保持当前语言）
