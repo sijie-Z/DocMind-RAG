@@ -64,6 +64,9 @@ import Layouts from '../index.vue'
 import { useAppStore } from '@/stores/app'
 import { useUserStore } from '@/stores/user'
 import { getUserSettings } from '@/api/user'
+import { getNotifications } from '@/api/notification'
+
+const mockedList = vi.mocked(getNotifications)
 
 const i18n = createI18n({
   legacy: false,
@@ -135,5 +138,24 @@ describe('G2 · 侧栏分组标题折叠/截断策略', () => {
     expect(span.exists(), '标题应以单行 span 渲染').toBe(true)
     expect(span.classes()).toContain('truncate')
     expect(span.attributes('title')).toBe('Intelligence Workspace')
+  })
+
+  it('通知列表在打开弹层时懒加载，已加载后不重复请求', async () => {
+    const { wrapper } = await mountLayout(false)
+    expect(mockedList).not.toHaveBeenCalled()
+
+    const bell = wrapper.find('button[aria-label="Notifications"]')
+    expect(bell.exists(), '铃铛按钮应在屏').toBe(true)
+    await bell.trigger('click')
+    await flushPromises()
+    await flushPromises()
+    expect(mockedList, '打开弹层应加载一次列表').toHaveBeenCalledTimes(1)
+
+    // 关闭再打开：已加载（headerLoaded）后不再重复拉取。
+    await bell.trigger('click')
+    await flushPromises()
+    await bell.trigger('click')
+    await flushPromises()
+    expect(mockedList).toHaveBeenCalledTimes(1)
   })
 })

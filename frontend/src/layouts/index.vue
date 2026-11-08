@@ -241,7 +241,7 @@
                 </n-button>
               </n-badge>
             </template>
-            <div class="w-80">
+            <div class="w-80 max-md:w-64 max-w-[calc(100vw-2rem)]">
               <div class="flex items-center justify-between mb-2 px-4 pt-2">
                 <div class="text-sm font-medium cursor-pointer" @click="router.push({ name: 'Notifications' })">
                   {{ t('menu.notifications') }}

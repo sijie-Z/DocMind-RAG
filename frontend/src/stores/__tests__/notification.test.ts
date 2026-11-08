@@ -30,13 +30,15 @@ import { createPinia, setActivePinia } from 'pinia'
 vi.mock('@/api/notification', () => ({
   getNotifications: vi.fn(),
   getUnreadCount: vi.fn(),
+  getNotificationSummary: vi.fn(),
 }))
 
 import { useNotificationStore } from '@/stores/notification'
-import { getNotifications, getUnreadCount } from '@/api/notification'
+import { getNotifications, getUnreadCount, getNotificationSummary } from '@/api/notification'
 
 const mockedList = vi.mocked(getNotifications)
 const mockedCount = vi.mocked(getUnreadCount)
+const mockedSummary = vi.mocked(getNotificationSummary)
 
 const notif = (id: number, isRead = false) => ({
   id,
@@ -187,5 +189,50 @@ describe('T1 · 通知 store 错误态', () => {
     expect(mockedList).toHaveBeenCalledTimes(1)
     expect(store.headerLoaded).toBe(true)
     expect(store.headerLoading).toBe(false)
+    expect(mockedSummary).not.toHaveBeenCalled()
+  })
+
+  it('7. 未读数失败但列表成功：错误不被列表成功清掉', async () => {
+    const store = useNotificationStore()
+    mockedCount.mockRejectedValue(new Error('count down'))
+    mockedList.mockResolvedValue({
+      data: { items: [notif(1)], total: 1, unread_count: 1, skip: 0, limit: 8 },
+    } as any)
+
+    await store.refresh()
+
+    expect(store.unreadCount).toBe(0)
+    expect(store.headerLoaded).toBe(true)
+    expect(store.lastError).toBeTruthy()
+  })
+
+  it('8. 列表失败但未读数成功：错误不被计数成功清掉', async () => {
+    const store = useNotificationStore()
+    mockedCount.mockResolvedValue({ data: { count: 3 } } as any)
+    mockedList.mockRejectedValue(new Error('list down'))
+
+    await store.refresh()
+
+    expect(store.unreadCount).toBe(3)
+    expect(store.headerLoaded).toBe(false)
+    expect(store.lastError).toBeTruthy()
+  })
+
+  it('9. 并发 bootstrapBadge 共享在途请求，不重复打 unread-count', async () => {
+    const store = useNotificationStore()
+    let resolveCount: (value: unknown) => void = () => {}
+    mockedCount.mockReturnValue(
+      new Promise((resolve) => {
+        resolveCount = resolve
+      }) as any
+    )
+
+    const first = store.bootstrapBadge()
+    const second = store.bootstrapBadge()
+    expect(mockedCount).toHaveBeenCalledTimes(1)
+
+    resolveCount({ data: { count: 3 } })
+    await Promise.all([first, second])
+    expect(store.unreadCount).toBe(3)
   })
 })

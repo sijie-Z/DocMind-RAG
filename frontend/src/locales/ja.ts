@@ -1006,6 +1006,7 @@ export default {
   notifications: {
     markAllRead: 'すべて既読',
     loadFailed: '通知の読み込みに失敗しました',
+    retry: '再試行',
     empty: '通知はありません',
     deleteSuccess: '削除しました',
     deleteFailed: '削除に失敗しました',

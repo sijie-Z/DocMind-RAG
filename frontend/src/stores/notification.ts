@@ -1,5 +1,5 @@
+import { computed, ref } from 'vue'
 import { defineStore } from 'pinia'
-import { ref } from 'vue'
 import { getNotifications, getUnreadCount, type Notification } from '@/api/notification'
 import type { RealtimeNotificationPayload } from '@/utils/notificationSocket'
 
@@ -7,45 +7,61 @@ export const useNotificationStore = defineStore('notification', () => {
   const headerItems = ref<Notification[]>([])
   const unreadCount = ref(0)
   const latestRealtimeId = ref<number | null>(null)
-  // 错误态（第二轮 §7.2③）：失败可判别 + 是否至少成功加载过一次
-  const lastError = ref<string | null>(null)
+  // 两路错误分开维护：count 成功不得清掉列表错误，反之亦然。
+  const badgeError = ref<string | null>(null)
+  const listError = ref<string | null>(null)
+  const lastError = computed(() => badgeError.value || listError.value)
+  // 是否至少成功加载过一次未读数（实时推送不从 0 起跳的基线）
   const loadedOnce = ref(false)
   // 铃铛弹层列表按需加载：首屏只拉未读数（badge），打开弹层再拉列表。
   const headerLoaded = ref(false)
   const headerLoading = ref(false)
+  let badgePromise: Promise<void> | null = null
+  let headerPromise: Promise<void> | null = null
 
-  const recordError = (error: unknown) => {
-    // 失败保留上次成功值，不置空——否则失败与"真没通知"不可区分（铃铛假装"没有通知"）
-    lastError.value = error instanceof Error ? error.message : String(error)
-    console.warn('[notification] load failed:', error)
+  const recordError = (kind: 'badge' | 'list', error: unknown) => {
+    const message = error instanceof Error ? error.message : String(error)
+    if (kind === 'badge') badgeError.value = message
+    else listError.value = message
+    console.warn(`[notification] ${kind} load failed:`, error)
   }
 
-  /** 首屏只拉未读数；列表与 summary 不再阻塞仪表盘。 */
-  const bootstrapBadge = async () => {
-    try {
-      const countRes = await getUnreadCount()
-      unreadCount.value = countRes.data?.count || 0
-      lastError.value = null
-      loadedOnce.value = true
-    } catch (error) {
-      recordError(error)
-    }
+  /** 首屏只拉未读数；并发调用共享在途请求。 */
+  const bootstrapBadge = (): Promise<void> => {
+    if (badgePromise) return badgePromise
+    badgePromise = (async () => {
+      try {
+        const countRes = await getUnreadCount()
+        unreadCount.value = countRes.data?.count || 0
+        badgeError.value = null
+        loadedOnce.value = true
+      } catch (error) {
+        recordError('badge', error)
+      } finally {
+        badgePromise = null
+      }
+    })()
+    return badgePromise
   }
 
-  /** 打开弹层时加载最近 8 条；已加载过则不重复拉取（实时推送会维护列表）。 */
-  const loadHeaderItems = async () => {
-    if (headerLoading.value) return
+  /** 打开弹层时加载最近 8 条；并发/重复打开共享在途请求，不重复拉取。 */
+  const loadHeaderItems = (): Promise<void> => {
+    if (headerPromise) return headerPromise
     headerLoading.value = true
-    try {
-      const listRes = await getNotifications({ limit: 8 })
-      headerItems.value = listRes.data?.items || []
-      headerLoaded.value = true
-      lastError.value = null
-    } catch (error) {
-      recordError(error)
-    } finally {
-      headerLoading.value = false
-    }
+    headerPromise = (async () => {
+      try {
+        const listRes = await getNotifications({ limit: 8 })
+        headerItems.value = listRes.data?.items || []
+        headerLoaded.value = true
+        listError.value = null
+      } catch (error) {
+        recordError('list', error)
+      } finally {
+        headerLoading.value = false
+        headerPromise = null
+      }
+    })()
+    return headerPromise
   }
 
   /** 重试/标记全部已读/删除后同时刷新未读数与列表。 */

@@ -1077,6 +1077,7 @@ export default {
   notifications: {
     markAllRead: 'Mark all read',
     loadFailed: 'Failed to load notifications',
+    retry: 'Retry',
     empty: 'No notifications',
     deleteSuccess: 'Deleted',
     deleteFailed: 'Delete failed',

@@ -1007,6 +1007,7 @@ export default {
   notifications: {
     markAllRead: 'Tout marquer comme lu',
     loadFailed: 'Échec du chargement des notifications',
+    retry: 'Réessayer',
     empty: 'Aucune notification',
     deleteSuccess: 'Supprimé',
     deleteFailed: 'Échec de la suppression',
