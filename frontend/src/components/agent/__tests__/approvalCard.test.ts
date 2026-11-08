@@ -7,8 +7,15 @@
  * - expired/busy 不禁用按钮 → 对应用例红。
  */
 import { describe, it, expect } from 'vitest'
-import { mount } from '@vue/test-utils'
+import { mount as baseMount } from '@vue/test-utils'
+import { createI18n } from 'vue-i18n'
 import ApprovalCard from '../ApprovalCard.vue'
+import zh from '@/locales/zh'
+
+// 组件已接入 useI18n：挂载必须装 i18n 插件（zh 词条与断言一致）
+const i18n = createI18n({ legacy: false, locale: 'zh', messages: { zh } })
+const mount = (component: Parameters<typeof baseMount>[0], options: Record<string, any> = {}) =>
+  baseMount(component, { ...options, global: { ...(options.global || {}), plugins: [i18n] } })
 
 function mountCard(props: Record<string, unknown> = {}) {
   return mount(ApprovalCard, {

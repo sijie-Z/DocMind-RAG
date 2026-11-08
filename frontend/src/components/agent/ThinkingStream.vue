@@ -37,10 +37,10 @@ const thinkingLabel = computed(() => {
   // 取消收敛后不得残留"思考中…"（浏览器验收 F4 实拍）：终态标签覆盖类型标签。
   if (props.stopped) return `${t('hitl.stopped')}...`
   switch (props.thinkingType) {
-    case 'planning': return '规划中...'
-    case 'evaluation': return '评估中...'
-    case 'correction': return '纠正中...'
-    default: return '思考中...'
+    case 'planning': return t('agent.thinking.planning')
+    case 'evaluation': return t('agent.thinking.evaluation')
+    case 'correction': return t('agent.thinking.correction')
+    default: return t('agent.thinking.default')
   }
 })
 

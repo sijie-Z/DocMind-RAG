@@ -6,7 +6,7 @@
         <span class="tool-icon">{{ statusIcon }}</span>
         <span class="tool-name">{{ toolName }}</span>
         <span v-if="duration" class="tool-duration">{{ duration }}</span>
-        <span v-if="(retryAttempt ?? 0) > 0" class="tool-retry">重试 {{ retryAttempt }}</span>
+        <span v-if="(retryAttempt ?? 0) > 0" class="tool-retry">{{ t('agent.toolCard.retry', { count: retryAttempt }) }}</span>
       </div>
       <span class="tool-toggle">{{ collapsed ? '▶' : '▼' }}</span>
     </div>
@@ -14,7 +14,7 @@
     <!-- Args -->
     <div v-if="!collapsed" class="tool-body">
       <div v-if="argsStr" class="tool-args">
-        <span class="args-label">参数:</span>
+        <span class="args-label">{{ t('agent.toolCard.args') }}</span>
         <code>{{ argsStr }}</code>
       </div>
 
@@ -34,13 +34,13 @@
           class="expand-btn"
           @click="expanded = !expanded"
         >
-          {{ expanded ? '收起' : '展开全部' }}
+          {{ expanded ? t('agent.toolCard.collapse') : t('agent.toolCard.expandAll') }}
         </button>
       </div>
 
       <div v-if="status === 'loading'" class="tool-loading">
         <span class="loading-spinner"></span>
-        执行中...
+        {{ t('agent.toolCard.running') }}
       </div>
     </div>
   </div>
@@ -48,6 +48,7 @@
 
 <script setup lang="ts">
 import { computed, ref } from 'vue'
+import { useI18n } from 'vue-i18n'
 import ArtifactViewer from '@/components/agent/ArtifactViewer.vue'
 import { detectArtifactKind } from '@/utils/artifact'
 
@@ -60,6 +61,7 @@ const props = defineProps<{
   retryAttempt?: number
 }>()
 
+const { t } = useI18n()
 const collapsed = ref(false)
 const expanded = ref(false)
 const resultEl = ref<HTMLElement>()
