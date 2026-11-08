@@ -226,7 +226,7 @@
               <SunnyOutline v-else />
             </n-icon>
           </n-button>
-          <n-popover trigger="click" placement="bottom-end">
+          <n-popover trigger="click" placement="bottom-end" @update:show="handleNotificationShow">
             <template #trigger>
               <n-badge
                 :value="unreadCount"
@@ -241,7 +241,7 @@
                 </n-button>
               </n-badge>
             </template>
-            <div class="w-80">
+            <div class="w-80 max-md:w-64 max-w-[calc(100vw-2rem)]">
               <div class="flex items-center justify-between mb-2 px-4 pt-2">
                 <div class="text-sm font-medium cursor-pointer" @click="router.push({ name: 'Notifications' })">
                   {{ t('menu.notifications') }}
@@ -274,7 +274,10 @@
                     <n-button text size="tiny" @click.stop="handleDeleteNotification(notification.id)">删除</n-button>
                   </div>
                 </n-list-item>
-                <div v-if="notifications.length === 0 && !notificationStore.lastError" class="py-8 text-center text-gray-400 text-sm">
+                <div v-if="notificationStore.headerLoading && notifications.length === 0" class="py-8 text-center text-gray-400 text-sm">
+                  {{ t('common.loading') }}
+                </div>
+                <div v-else-if="notifications.length === 0 && !notificationStore.lastError" class="py-8 text-center text-gray-400 text-sm">
                   {{ t('notifications.empty') }}
                 </div>
               </n-list>
@@ -550,7 +553,7 @@ const handleNotificationClick = async (notification: Notification) => {
 const handleMarkAllRead = async () => {
   try {
     await markAllAsRead()
-    await notificationStore.bootstrap()
+    await notificationStore.refresh()
   } catch {
     // Failed to mark all as read
   }
@@ -561,17 +564,23 @@ const notificationRetrying = ref(false)
 const handleNotificationRetry = async () => {
   notificationRetrying.value = true
   try {
-    await notificationStore.bootstrap()
+    await notificationStore.refresh()
   } finally {
     notificationRetrying.value = false
   }
+}
+
+const handleNotificationShow = (show: boolean) => {
+  if (!show) return
+  if (!notificationStore.loadedOnce) void notificationStore.bootstrapBadge()
+  if (!notificationStore.headerLoaded) void notificationStore.loadHeaderItems()
 }
 
 const handleDeleteNotification = async (notificationId: number) => {
   try {
     await deleteNotification(notificationId)
     notificationStore.headerItems = notificationStore.headerItems.filter((n) => n.id !== notificationId)
-    await notificationStore.bootstrap()
+    await notificationStore.refresh()
   } catch {
     // Failed to delete notification
   }
@@ -604,7 +613,7 @@ onMounted(async () => {
     // T7：组织列表由顶栏切换器与移动端用户菜单共享（store 内并发去重）。
     // 先同步发起，避免被下方 await 拆到两个请求窗口。
     void userStore.fetchMyOrganizations()
-    await notificationStore.bootstrap()
+    await notificationStore.bootstrapBadge()
     notificationSocket.connect()
     // Load user settings from backend
     userStore.fetchSettings().then(() => {

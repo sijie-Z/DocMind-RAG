@@ -1084,6 +1084,7 @@ export default {
   notifications: {
     markAllRead: '全部已读',
     loadFailed: '加载通知失败',
+    retry: '重试',
     empty: '暂无通知',
     deleteSuccess: '删除成功',
     deleteFailed: '删除失败',
