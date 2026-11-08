@@ -152,6 +152,8 @@ const props = defineProps<{
   hintOverride?: string
   /** issue #475：当前会话 id——GET /commands 据此合并 agent 作用域命令。 */
   sessionId?: string | null
+  /** 从聊天页「前往 Agent 工作台」接力来的提示词（消费后由父级清空 URL）。 */
+  initialText?: string
 }>()
 
 const emit = defineEmits<{
@@ -471,6 +473,17 @@ watch(inputText, async () => {
 })
 
 // 运行开始（转入 steering）时收起选择层与命令菜单
+// 聊天页接力：把用户已输入的提示词填进输入框（不自动发送，用户可补充）。
+watch(
+  () => props.initialText,
+  (text) => {
+    if (!text) return
+    inputText.value = text
+    nextTick(() => textareaEl.value?.focus())
+  },
+  { immediate: true },
+)
+
 watch(() => props.steering, (v) => {
   if (v) {
     closePicker()
