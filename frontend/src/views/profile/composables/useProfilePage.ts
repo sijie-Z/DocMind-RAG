@@ -435,7 +435,22 @@ const providerForm = reactive({
 })
 
 interface ProviderDef { id: string; name: string; base_url: string; models: string[]; requires_key: boolean }
-const providerOptions = computed(() => providers.value.map(p => ({ label: p.name, value: p.id })))
+
+// provider 名称四语化：后端目录仍返回中文 name 作为未知 id 的兜底。
+const PROVIDER_LABEL_KEYS: Record<string, string> = {
+  deepseek: 'profile.providerDeepseek',
+  ollama: 'profile.providerOllama',
+  openai: 'profile.providerOpenai',
+  zhipu: 'profile.providerZhipu',
+  custom: 'profile.providerCustom',
+}
+const providerLabel = (provider: ProviderDef) => {
+  const key = PROVIDER_LABEL_KEYS[provider.id]
+  return key ? t(key) : provider.name
+}
+const providerOptions = computed(() =>
+  providers.value.map(p => ({ label: providerLabel(p), value: p.id }))
+)
 const currentProvider = computed(() => providers.value.find(p => p.id === providerForm.provider))
 const currentModelOptions = computed(() => (currentProvider.value?.models || []).map(m => ({ label: m, value: m })))
 const currentProviderNeedsKey = computed(() => currentProvider.value?.requires_key ?? true)

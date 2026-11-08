@@ -302,6 +302,11 @@ describe('AI 模型设置 · 四语词条齐备', () => {
     'aiProviderUseServerDefault',
     'aiProviderUseServerDefaultDesc',
     'aiProviderProvider',
+    'providerDeepseek',
+    'providerOllama',
+    'providerOpenai',
+    'providerZhipu',
+    'providerCustom',
     'aiProviderModel',
     'aiProviderKeyHint',
     'aiProviderSave',
@@ -323,4 +328,15 @@ describe('AI 模型设置 · 四语词条齐备', () => {
       }
     })
   }
+
+  it('provider 名称按当前语言本地化（zh）', async () => {
+    mountHarness()
+    await flushPromises()
+    await flushPromises()
+    const labels = capturedApi.providerOptions.value
+    expect(labels.find((option) => option.value === 'deepseek')?.label).toBe('DeepSeek')
+    expect(labels.find((option) => option.value === 'custom')?.label).toBe(
+      '自定义（OpenAI 兼容）'
+    )
+  })
 })
