@@ -193,11 +193,16 @@ describe('E7 · ChatMessages 三态可见性（历史加载 / 生成中 / 已停
     // 历史加载 ≠ 生成中：生成 loading 与光标不得出现
     expect(wrapper.find('[data-testid="generation-loading"]').exists()).toBe(false)
     expect(wrapper.find('.animate-blink').exists()).toBe(false)
+    const scroller = wrapper.find('[class*="pt-20"]').element as HTMLElement
+    expect(scroller.style.paddingBottom).toBe('')
     wrapper.unmount()
   })
 
-  it('生成态：只有生成 loading，不出现历史加载指示', () => {
+  it('生成态：只有生成 loading，不出现历史加载指示；消息区为停止按钮预留空间', () => {
     const wrapper = mountMessages([assistantMsg()], { isLoading: true, isLoadingHistory: false })
+    // 停止按钮浮在消息区上方 48px：生成期间增加底部留白，避免压住最后一条消息。
+    const scroller = wrapper.find('[class*="pt-20"]').element as HTMLElement
+    expect(scroller.style.paddingBottom).toBe('216px')
     expect(wrapper.find('[data-testid="generation-loading"]').exists()).toBe(true)
     expect(wrapper.find('[data-testid="history-loading"]').exists()).toBe(false)
     wrapper.unmount()

@@ -394,7 +394,7 @@ import {
 } from '@vicons/ionicons5'
 import type { DataTableColumns, TreeSelectOption, FormInst, TreeOption, TreeDropInfo } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
-import { formatDate } from '@/utils/format'
+import { formatDate, parseApiDate } from '@/utils/format'
 import { useConfirmDangerousAction } from '@/utils/confirm'
 import { useUserStore } from '@/stores/user'
 
@@ -761,7 +761,7 @@ const columns = computed<DataTableColumns<Organization>>(() => [
     title: t('org.createdAt'),
     key: 'created_at',
     width: 170,
-    render: (row) => new Date(row.created_at).toLocaleString('zh-CN')
+    render: (row) => parseApiDate(row.created_at)?.toLocaleString('zh-CN') ?? '-'
   },
   {
     title: t('common.actions'),

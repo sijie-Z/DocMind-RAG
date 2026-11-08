@@ -295,6 +295,7 @@ import { useRouter } from 'vue-router'
 import { useDialog } from 'naive-ui'
 import { useDedupedMessage } from '@/utils/message'
 import { getErrorMessage } from '@/utils/apiError'
+import { parseApiDate } from '@/utils/format'
 import { useI18n } from 'vue-i18n'
 import { AddOutline, TrashOutline, CreateOutline, CopyOutline, SparklesOutline, SearchOutline, DocumentTextOutline, PlayOutline, TimeOutline } from '@vicons/ionicons5'
 import { getPrompts, createPrompt, updatePrompt, deletePrompt, seedDefaultPrompts, getPromptVersions, restorePromptVersion, type PromptTemplate, type PromptTemplateVersion } from '@/api/prompt'
@@ -432,8 +433,8 @@ const getCategoryLabel = (category: string) => {
 }
 
 const formatDate = (dateStr: string) => {
-  if (!dateStr) return ''
-  const d = new Date(dateStr)
+  const d = parseApiDate(dateStr)
+  if (!d) return ''
   return d.toLocaleString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
 }
 

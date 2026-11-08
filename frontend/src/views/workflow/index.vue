@@ -172,6 +172,7 @@ import { useI18n } from 'vue-i18n'
 import { NIcon, NButton, NSpin, NTag, NInput, NDropdown, useDialog } from 'naive-ui'
 import { useDedupedMessage } from '@/utils/message'
 import { getErrorMessage } from '@/utils/apiError'
+import { parseApiDate } from '@/utils/format'
 import {
   AddOutline, CreateOutline, TrashOutline, GitBranchOutline, SearchOutline,
   TimeOutline, GitNetworkOutline, CheckmarkCircleOutline, EllipsisVertical, CopyOutline, ServerOutline,
@@ -352,7 +353,8 @@ const getNodePreviewClass = (type: string) => {
 }
 
 const formatDate = (date: string) => {
-  return dayjs(date).format('MM-DD HH:mm')
+  const parsed = parseApiDate(date)
+  return parsed ? dayjs(parsed).format('MM-DD HH:mm') : '-'
 }
 
 onMounted(() => {

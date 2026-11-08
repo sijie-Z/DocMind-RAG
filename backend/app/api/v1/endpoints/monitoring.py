@@ -15,6 +15,8 @@ from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.time_utils import utcnow
+
 logger = logging.getLogger(__name__)
 
 from app.core.config import settings
@@ -964,15 +966,15 @@ async def _session_week_over_week(db: AsyncSession, org_id: int | None) -> tuple
     W2-T7：管理仪表盘「总会话 ↑ +12%（对比上周）」此前是前端写死的假趋势
     （第三轮终检 §八 实机实锤）——后端从未提供任何环比数据。此助手补上真实
     口径：本周新增 = created_at >= now-7d；上周新增 = [now-14d, now-7d)。
-    时间基准与既有 active_users_24h 同款（朴素本地时间，与 func.now() 服务端
-    时间一致）；org 作用域同相邻计数（租户管理员只看自己组织）。
+    时间基准与既有 active_users_24h 同款（naive UTC，与 MySQL func.now()
+    的服务端口径一致）；org 作用域同相邻计数（租户管理员只看自己组织）。
     单条条件聚合查询取回两值，避免两次往返。
     """
     from datetime import timedelta
 
     from sqlalchemy import and_, case
 
-    now = datetime.now()
+    now = utcnow()
     this_start = now - timedelta(days=7)
     last_start = now - timedelta(days=14)
     week_q = select(
@@ -1039,7 +1041,7 @@ async def get_admin_summary(
         # 活跃用户（24小时内登录的）
         from datetime import timedelta
 
-        active_cutoff = datetime.now() - timedelta(hours=24)
+        active_cutoff = utcnow() - timedelta(hours=24)
         active_q = select(func.count(User.id)).where(User.last_login_at >= active_cutoff)
         if org_id:
             active_q = active_q.where(User.organization_id == org_id)

@@ -12,6 +12,8 @@ from collections.abc import Awaitable, Callable
 from datetime import datetime
 from typing import Any
 
+from app.core.time_utils import utcnow
+
 logger = logging.getLogger(__name__)
 
 
@@ -39,16 +41,16 @@ class MemoryItem:
             try:
                 self.created_at = datetime.fromisoformat(created_at)
             except (ValueError, TypeError):
-                self.created_at = datetime.now()
+                self.created_at = utcnow()
         else:
-            self.created_at = datetime.now()
+            self.created_at = utcnow()
         if last_accessed:
             try:
                 self.last_accessed = datetime.fromisoformat(last_accessed)
             except (ValueError, TypeError):
-                self.last_accessed = datetime.now()
+                self.last_accessed = utcnow()
         else:
-            self.last_accessed = datetime.now()
+            self.last_accessed = utcnow()
         self.access_count = access_count
         self.id = item_id or self._generate_id()
 
@@ -60,12 +62,12 @@ class MemoryItem:
 
     def access(self) -> None:
         """访问记忆"""
-        self.last_accessed = datetime.now()
+        self.last_accessed = utcnow()
         self.access_count += 1
 
     def get_decay_score(self, half_life_hours: float = 24.0) -> float:
         """计算衰减分数"""
-        age_hours = (datetime.now() - self.created_at).total_seconds() / 3600
+        age_hours = (utcnow() - self.created_at).total_seconds() / 3600
         decay = 0.5 ** (age_hours / half_life_hours)
         return decay * self.importance
 
@@ -333,7 +335,7 @@ class WorkingMemory:
 
     def push_task(self, task: dict[str, Any]) -> None:
         """推入任务"""
-        self.task_stack.append({"task": task, "started_at": datetime.now().isoformat()})
+        self.task_stack.append({"task": task, "started_at": utcnow().isoformat()})
 
     def pop_task(self) -> dict[str, Any] | None:
         """弹出任务"""
@@ -414,7 +416,7 @@ class ReflectiveMemory:
     def add_insight(self, insight: str, context: dict[str, Any] | None = None) -> None:
         """添加洞察"""
         self.insights.append(
-            {"content": insight, "context": context or {}, "created_at": datetime.now().isoformat()}
+            {"content": insight, "context": context or {}, "created_at": utcnow().isoformat()}
         )
 
     def add_pattern(self, pattern: str, examples: list[str] | None = None) -> None:
@@ -423,7 +425,7 @@ class ReflectiveMemory:
             {
                 "pattern": pattern,
                 "examples": examples or [],
-                "created_at": datetime.now().isoformat(),
+                "created_at": utcnow().isoformat(),
             }
         )
 
@@ -436,7 +438,7 @@ class ReflectiveMemory:
                 "lesson": lesson,
                 "trigger": trigger,
                 "solution": solution,
-                "created_at": datetime.now().isoformat(),
+                "created_at": utcnow().isoformat(),
             }
         )
 

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { formatDate, formatDateTime, formatFileSize, formatDuration, truncateText } from '../format'
+import { formatDate, formatDateTime, formatFileSize, formatDuration, parseApiDate, truncateText } from '../format'
 
 describe('formatDate', () => {
   it('returns "-" for null/undefined', () => {
@@ -131,5 +131,55 @@ describe('formatDateTime（审计列表绝对时间）', () => {
   it('空值与非法日期返回 -', () => {
     expect(formatDateTime(null, 'en')).toBe('-')
     expect(formatDateTime('not-a-date', 'en')).toBe('-')
+  })
+})
+describe('parseApiDate（后端 UTC 无时区字符串）', () => {
+  it('无时区 ISO 按 UTC 解析（不再被当作本地时间）', () => {
+    expect(parseApiDate('2026-11-08T19:15:33')?.toISOString()).toBe('2026-11-08T19:15:33.000Z')
+  })
+
+  it('空格分隔与毫秒同样按 UTC 解析', () => {
+    expect(parseApiDate('2026-11-08 19:15:33.250')?.toISOString()).toBe('2026-11-08T19:15:33.250Z')
+  })
+
+  it('带 Z / offset 的字符串保持原有时刻', () => {
+    expect(parseApiDate('2026-11-08T19:15:33Z')?.toISOString()).toBe('2026-11-08T19:15:33.000Z')
+    expect(parseApiDate('2026-11-08T19:15:33+08:00')?.toISOString()).toBe('2026-11-08T11:15:33.000Z')
+  })
+
+  it('纯日期按规范即 UTC，不受补 Z 影响', () => {
+    expect(parseApiDate('2026-11-08')?.toISOString()).toBe('2026-11-08T00:00:00.000Z')
+  })
+
+  it('秒可省略（后端仍可能给到分钟精度）', () => {
+    expect(parseApiDate('2026-11-08T19:15')?.toISOString()).toBe('2026-11-08T19:15:00.000Z')
+  })
+
+  it('Date 对象：有效原样返回，Invalid Date 返回 null', () => {
+    const d = new Date('2026-11-08T19:15:33Z')
+    expect(parseApiDate(d)).toBe(d)
+    expect(parseApiDate(new Date('nope'))).toBeNull()
+  })
+
+  it('空白字符串与数字字符串返回 null', () => {
+    expect(parseApiDate('   ')).toBeNull()
+    expect(parseApiDate('1759926405')).toBeNull()
+  })
+
+  it('空值/非法值返回 null', () => {
+    expect(parseApiDate(null)).toBeNull()
+    expect(parseApiDate('')).toBeNull()
+    expect(parseApiDate('not-a-date')).toBeNull()
+  })
+
+  it('formatDateTime 对「无时区」与「带 Z」输出同一时刻', () => {
+    expect(formatDateTime('2026-11-08T19:15:33', 'zh')).toBe(
+      formatDateTime('2026-11-08T19:15:33Z', 'zh'),
+    )
+  })
+
+  it('formatDate 的相对时间基于 UTC 解析（本地时区不再偏移）', () => {
+    const naiveUtc = new Date(Date.now() - 5 * 60 * 1000).toISOString().slice(0, 19)
+    expect(formatDate(naiveUtc)).toBe('5分钟前')
   })
 })
