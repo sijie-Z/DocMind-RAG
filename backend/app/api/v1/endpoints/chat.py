@@ -1400,12 +1400,14 @@ async def chat_stream_endpoint(
                     elif agent_event.type == "error":
                         # W0-5：error 事件内容过白名单——无组织拒绝等既有诚实
                         # 文案放行；含原始异常/内部类名的内容降级为通用文案。
-                        yield await emitter.emit(
-                            "error",
-                            {
-                                "content": public_agent_event_content("error", agent_event.content),
-                            },
-                        )
+                        # 机器码（如 USER_LLM_REQUEST_FAILED）与 SSE RAG 同口径透传，
+                        # 前端据此四语化并给出可操作指引。
+                        legacy_error_payload: dict[str, object] = {
+                            "content": public_agent_event_content("error", agent_event.content),
+                        }
+                        if agent_event.code:
+                            legacy_error_payload["code"] = agent_event.code
+                        yield await emitter.emit("error", legacy_error_payload)
                         return
                     elif agent_event.type == "execution_context":
                         # issue #222：PER 循环收尾时真的会发出它，此前无 case 被静默丢弃。
@@ -1449,6 +1451,7 @@ async def chat_stream_endpoint(
                     "approval_required",
                     "run_cancelled",
                     "plan_approval_required",
+                    "error",
                 ):
                     try:
                         saved_id = await save_session_interaction(

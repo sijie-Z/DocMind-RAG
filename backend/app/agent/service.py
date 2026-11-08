@@ -25,6 +25,12 @@ from app.agent.loop import PERAgentLoop
 from app.agent.memory_bridge import AgentMemoryBridge
 from app.core.config import settings
 from app.core.database import AsyncSessionLocal
+from app.core.llm_failures import (
+    USER_LLM_REQUEST_FAILED_CODE,
+    USER_LLM_REQUEST_FAILED_MESSAGE,
+    UserLLMRequestError,
+    mark_user_llm_client,
+)
 from app.core.log_safety import log_safe
 from app.core.request_id import get_request_id
 from app.models.agent_task import AgentTask, TaskStatus
@@ -377,6 +383,10 @@ class AgentService:
         request_id = request_id or get_request_id()
 
         active_client = llm_client or self.client
+        if llm_client is not None:
+            # 防御性补标：正常路径由 llm_settings_service 建客户端时已标记；
+            # 这里兜住直接注入客户端的调用方（测试/后台）。
+            mark_user_llm_client(active_client)
         if not active_client:
             # 文案必须命中 error_mapping 的安全白名单（否则对外被降级为通用文案）。
             err_event = AgentEvent(
@@ -504,6 +514,21 @@ class AgentService:
             # 请求被取消（uvicorn 断连取消任务）：同断流语义（快照 + 收敛）。
             await self._checkpoint_disconnect(task_id, agent)
             raise
+        except UserLLMRequestError as exc:
+            # 个人模型上游失败：以带错误码的 error 事件收尾（前端四语化），
+            # 任务置 FAILED；不进入 done/completed，回答不得落库。
+            await self._checkpoint_error(task_id, agent, exc)
+            err_event = AgentEvent(
+                type="error",
+                content=USER_LLM_REQUEST_FAILED_MESSAGE,
+                code=USER_LLM_REQUEST_FAILED_CODE,
+            )
+            if task_id:
+                err_event.task_id = task_id
+            if request_id:
+                err_event.request_id = request_id
+            yield err_event
+            return
         except BaseException as exc:
             # run 内异常：快照 + 置 FAILED（FAILED→RUNNING 是既有重试边，可 resume）。
             await self._checkpoint_error(task_id, agent, exc)
@@ -685,6 +710,19 @@ class AgentService:
         except asyncio.CancelledError:
             await self._checkpoint_disconnect(task_id, agent, release_lease=True)
             raise
+        except UserLLMRequestError as exc:
+            # 续跑同样以带码 error 事件收尾（与 chat 同口径），不落半成品。
+            await self._checkpoint_error(task_id, agent, exc)
+            err_event = AgentEvent(
+                type="error",
+                content=USER_LLM_REQUEST_FAILED_MESSAGE,
+                code=USER_LLM_REQUEST_FAILED_CODE,
+            )
+            err_event.task_id = task_id
+            if request_id:
+                err_event.request_id = request_id
+            yield err_event
+            return
         except BaseException as exc:
             await self._checkpoint_error(task_id, agent, exc)
             raise

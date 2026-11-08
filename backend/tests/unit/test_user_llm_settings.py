@@ -825,6 +825,45 @@ class TestAgentServiceWiring:
             pass
         assert captured["client"] is default_client
 
+    async def test_agent_user_llm_failure_emits_code_and_no_done(self, monkeypatch):
+        """个人模型失败：service 以带码 error 事件收尾，不发 done（不落库）。"""
+        from app.agent.config import AgentConfig
+        from app.agent.service import AgentService
+        from app.core.llm_failures import (
+            USER_LLM_REQUEST_FAILED_CODE,
+            USER_LLM_REQUEST_FAILED_MESSAGE,
+            UserLLMRequestError,
+        )
+
+        class FailingLoop:
+            def __init__(self, openai_client, config, organization_id, user_id):
+                pass
+
+            def _get_tools(self):
+                return []
+
+            async def run(self, *args, **kwargs):
+                raise UserLLMRequestError(USER_LLM_REQUEST_FAILED_MESSAGE)
+                yield None  # pragma: no cover - 保持 async generator
+
+        monkeypatch.setattr("app.agent.service.PERAgentLoop", FailingLoop)
+        service = AgentService(openai_client=object())
+        events = [
+            event
+            async for event in service.chat(
+                "hi",
+                organization_id=1,
+                user_id=1,
+                config=AgentConfig(enable_checkpoint=False),
+                llm_client=object(),
+            )
+        ]
+        errors = [event for event in events if event.type == "error"]
+        assert len(errors) == 1, "必须且只能发一个 error 事件"
+        assert errors[0].code == USER_LLM_REQUEST_FAILED_CODE
+        assert errors[0].content == USER_LLM_REQUEST_FAILED_MESSAGE
+        assert not any(event.type == "done" for event in events), "失败不得发 done"
+
 
 def test_server_default_model_matches_settings():
     """未启用本地模型时，服务端默认模型与全局配置一致（行为不变锚点）。"""

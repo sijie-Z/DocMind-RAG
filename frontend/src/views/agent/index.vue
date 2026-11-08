@@ -269,7 +269,11 @@
                      单工具失败行以「运行失败」徽标 + 红边框做视觉区分） -->
                 <div v-else-if="evt.type === 'error'" class="run-error-standalone">
                   <span class="run-error-badge">运行失败</span>
-                  <span class="run-error-text">{{ evt.content }}</span>
+                  <span class="run-error-text">{{
+                    evt.code === 'USER_LLM_REQUEST_FAILED'
+                      ? t('chat.userLlmRequestFailed')
+                      : evt.content
+                  }}</span>
                 </div>
                 <!-- HITL 取消（浏览器验收 F4）：run_cancelled 此前只落 store，
                      页面无"已取消"字样——用户无法分辨"停住了"。中立灰徽标：

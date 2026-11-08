@@ -41,6 +41,11 @@ from app.agent.skill_prompt import build_skills_index
 from app.agent.skills import skill_manager
 from app.agent.usage import record_llm_call_error, record_llm_usage
 from app.core.config import ai as ai_config
+from app.core.llm_failures import (
+    USER_LLM_REQUEST_FAILED_CODE,
+    USER_LLM_REQUEST_FAILED_MESSAGE,
+    is_user_llm_client,
+)
 from app.core.log_safety import log_safe
 
 logger = logging.getLogger(__name__)
@@ -1056,15 +1061,32 @@ class PERAgentLoop:
                                 messages=messages,
                             )
                         self.run_failed = True
-                        self.run_failure = f"LLM Error: {e}"
-                        ctx.complete_step(
-                            step_id="direct_llm",
-                            description="直接回答（无工具模式）",
-                            tool=None,
-                            status="failed",
-                            error=self.run_failure,
-                        )
-                        yield AgentEvent(type="error", content=f"LLM Error: {e}")
+                        if is_user_llm_client(self.client):
+                            # 个人模型端点失败：可操作文案 + 机器码；不落库
+                            # （/agent 由 error 事件阻断，legacy 由 chat 端点拦截）。
+                            self.run_failure = USER_LLM_REQUEST_FAILED_MESSAGE
+                            ctx.complete_step(
+                                step_id="direct_llm",
+                                description="直接回答（无工具模式）",
+                                tool=None,
+                                status="failed",
+                                error="user_llm_request_failed",
+                            )
+                            yield AgentEvent(
+                                type="error",
+                                content=USER_LLM_REQUEST_FAILED_MESSAGE,
+                                code=USER_LLM_REQUEST_FAILED_CODE,
+                            )
+                        else:
+                            self.run_failure = f"LLM Error: {e}"
+                            ctx.complete_step(
+                                step_id="direct_llm",
+                                description="直接回答（无工具模式）",
+                                tool=None,
+                                status="failed",
+                                error=self.run_failure,
+                            )
+                            yield AgentEvent(type="error", content=f"LLM Error: {e}")
 
             # 最终答案以最后一版计划的执行产出为准：replan 后旧计划的产出
             # 已被取代，不能再混进 record_interaction / run report。
@@ -1418,7 +1440,18 @@ class PERAgentLoop:
                             return
                     else:
                         self.run_failed = True
-                        self.run_failure = f"最终综合未完成: {final_result.status}"
+                        if (
+                            is_user_llm_client(self.client)
+                            and final_result.status == "provider_error"
+                        ):
+                            # 个人模型端点失败：与直答同口径（可操作文案 + 码）。
+                            self.run_failure = USER_LLM_REQUEST_FAILED_MESSAGE
+                            error_content = USER_LLM_REQUEST_FAILED_MESSAGE
+                            error_code = USER_LLM_REQUEST_FAILED_CODE
+                        else:
+                            self.run_failure = f"最终综合未完成: {final_result.status}"
+                            error_content = f"最终综合未完成（{final_result.status}）"
+                            error_code = ""
                         ctx.complete_step(
                             step_id="final_synthesis",
                             description="统一最终答案综合",
@@ -1428,7 +1461,8 @@ class PERAgentLoop:
                         )
                         yield AgentEvent(
                             type="error",
-                            content=f"最终综合未完成（{final_result.status}）",
+                            content=error_content,
+                            code=error_code,
                         )
             ctx.artifacts["final_synthesis"] = final_result.as_artifact()
 
@@ -1626,7 +1660,9 @@ class PERAgentLoop:
                     return
 
         # ── Phase 4: Store + Finalize ─────────────────────────────────────
-        if (not unified or not self.run_failed) and not final_already_ready:
+        # 失败的 run 一律不写短期记忆（此前 legacy 模式即使 run_failed 也写，
+        # 会把占位/半截回答记成"历史经验"）。
+        if not self.run_failed and not final_already_ready:
             await self.memory.record_interaction(query, final_output)
         if unified:
             cancel_event = await self._cancel_event()

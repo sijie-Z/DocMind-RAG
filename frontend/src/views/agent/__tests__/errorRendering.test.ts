@@ -163,4 +163,20 @@ describe('AgentView · error 渲染分支（#288 整次运行失败）', () => {
 
     expect(wrapper.find('.run-error-standalone').exists()).toBe(false)
   })
+
+  it('code=USER_LLM_REQUEST_FAILED → 展示四语词条，而不是后端中文原文', async () => {
+    const { wrapper } = await setupView([
+      {
+        type: 'error',
+        code: 'USER_LLM_REQUEST_FAILED',
+        content: '后端中文诊断（不应展示）',
+      },
+    ])
+
+    const box = wrapper.find('.run-error-standalone')
+    expect(box.exists()).toBe(true)
+    // zh 词条来自 locales/zh.ts::chat.userLlmRequestFailed
+    expect(box.text()).toContain(zh.chat.userLlmRequestFailed)
+    expect(box.text()).not.toContain('后端中文诊断')
+  })
 })

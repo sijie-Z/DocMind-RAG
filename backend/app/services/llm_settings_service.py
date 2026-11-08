@@ -34,6 +34,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
+from app.core.llm_failures import mark_user_llm_client
 from app.models.user_settings import UserSettings
 
 logger = logging.getLogger(__name__)
@@ -300,8 +301,15 @@ def _new_client(provider: str, base_url: str, api_key: str) -> AsyncOpenAI:
     http_client = DefaultAsyncHttpxClient(follow_redirects=False)
     if provider == "ollama":
         # Ollama 的 OpenAI 兼容端点不校验 key，但 SDK 要求非空字符串。
-        return AsyncOpenAI(api_key=api_key or "ollama", base_url=base_url, http_client=http_client)
-    return AsyncOpenAI(api_key=api_key, base_url=base_url, http_client=http_client)
+        client = AsyncOpenAI(
+            api_key=api_key or "ollama", base_url=base_url, http_client=http_client
+        )
+    else:
+        client = AsyncOpenAI(api_key=api_key, base_url=base_url, http_client=http_client)
+    # Agent/RAG 共用标记：失败时据此给「检查我的模型配置」文案，而不是
+    # 通用系统错误，也不把它算进服务端模型的熔断计数。
+    mark_user_llm_client(client)
+    return client
 
 
 def _cached_client(provider: str, base_url: str, cache_id: str, api_key: str) -> AsyncOpenAI:

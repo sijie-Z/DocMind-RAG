@@ -12,6 +12,11 @@ from openai.types.chat import ChatCompletionMessageParam
 
 from app.core.config import settings
 from app.core.llm_failfast import create_chat_completion
+from app.core.llm_failures import (
+    USER_LLM_REQUEST_FAILED_CODE,  # noqa: F401 — 兼容既有导入路径
+    USER_LLM_REQUEST_FAILED_MESSAGE,  # noqa: F401 — 兼容既有导入路径
+    UserLLMRequestError,  # noqa: F401 — 兼容既有导入路径
+)
 from app.core.prometheus import (
     LLM_LATENCY,
     LLM_REQUEST_ERRORS,
@@ -49,15 +54,6 @@ from app.rag.retriever import (
 from app.rag.source_provenance import filter_original_results, original_text_of
 
 logger = logging.getLogger(__name__)
-
-
-USER_LLM_REQUEST_FAILED_MESSAGE = (
-    "个人模型调用失败。请在个人设置的 AI 模型设置中检查 API Key / Base URL，或稍后重试。"
-)
-
-
-class UserLLMRequestError(RuntimeError):
-    """个人模型上游失败；聊天层据此发 error 事件，不得把诊断当作回答落库。"""
 
 
 def no_context_system_prompt(intent_guidance: str = "请基于通用知识作答。") -> str:

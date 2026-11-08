@@ -43,6 +43,12 @@ from app.agent.run_context import RunContext
 from app.agent.usage import record_llm_call_error, record_llm_usage
 from app.core.circuit_breaker import CircuitBreaker
 from app.core.config import ai as ai_config
+from app.core.llm_failures import (
+    USER_LLM_REQUEST_FAILED_MESSAGE,
+    UserLLMRequestError,
+    is_provider_call_error,
+    is_user_llm_client,
+)
 from app.core.log_safety import log_safe
 from app.core.prometheus import (
     AGENT_EXECUTION_STEPS,
@@ -1610,6 +1616,9 @@ class Executor:
     ) -> AsyncGenerator[AgentEvent, None]:
         """Execute a single attempt of a plan step."""
         step_start = time.perf_counter()
+        # 个人模型（用户自带 key/base URL）：失败即本次运行终态——重试无意义，
+        # 且不得计入/受制于服务端模型的进程级熔断器。
+        user_llm = is_user_llm_client(self.client)
         # HITL：协作式取消（步骤前检查点）——在发起本步 LLM 调用前观察取消旗。
         if await self._cancel_requested():
             self.pending_control = "cancel"
@@ -1810,7 +1819,7 @@ class Executor:
             # 跨请求熔断（issue #242 第 7 条）：OPEN 时毫秒级快速失败——provider 挂掉后，
             # 后续请求不再各自重付分钟级超时成本。错误码 fatal（retry_policy），
             # 后续沿用既有降级路径（fallback 链 / 步骤失败文案）。
-            if not _LLM_BREAKER.allow_request():
+            if not user_llm and not _LLM_BREAKER.allow_request():
                 logger.warning("LLM breaker OPEN — fast-fail step %s", step.id)
                 # 门早退同样要收尾观测 span（issue #256）：lf 启用时若不 end，
                 # 每个被拦步骤都会泄漏两条未闭合 span，门拦量在观测层不可见。
@@ -1866,6 +1875,15 @@ class Executor:
                     messages=messages,
                 )
                 llm_recorded = True
+                if user_llm:
+                    # 个人模型端点失败（鉴权/连接/超时/额度）：立即终止本次运行，
+                    # 由 service 发带错误码的 error 事件；不写 tool_error、不产出
+                    # 占位 chunk，也不进入重试/fallback（重试只会同样失败）。
+                    if lf and step_span:
+                        step_span.end(
+                            output="llm_error: user_llm_request_failed", level="ERROR"
+                        )
+                    raise UserLLMRequestError(USER_LLM_REQUEST_FAILED_MESSAGE) from None
                 _LLM_BREAKER.record_failure()  # 跨请求熔断计数（issue #242）
                 if lf and step_span:
                     step_span.end(output=f"llm_error: {call.error}", level="ERROR")
@@ -1899,7 +1917,12 @@ class Executor:
                     output=response.choices[0].message.content or f"tool_calls: {tool_names}",
                     usage=response.usage,
                 )
+        except UserLLMRequestError:
+            # user_llm 失败分支已主动上抛：本层不得改写成 tool_error。
+            raise
         except Exception as e:
+            if user_llm and call_attempted and is_provider_call_error(e):
+                raise UserLLMRequestError(USER_LLM_REQUEST_FAILED_MESSAGE) from e
             logger.error(f"LLM call failed for step {step.id}: {e}")
             # issue #510：非 StepRunner 形态的异常（配置/构建期等）同样留痕；
             # 未真正发起调用（前置 span/熔断门异常）或已记账的 attempt 不重复记。
