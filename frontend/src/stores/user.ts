@@ -45,6 +45,7 @@ export const useUserStore = defineStore('user', () => {
   let organizationsRequest: Promise<Array<{ id: number; name: string }>> | null = null
   let organizationsRequestSeq = 0
   let settingsRequest: Promise<void> | null = null
+  let settingsRequestSeq = 0
   let authScopeVersion = 0
 
   const resetAgentAndChat = () => {
@@ -55,6 +56,11 @@ export const useUserStore = defineStore('user', () => {
   const invalidateOrganizationsRequest = () => {
     organizationsRequest = null
     organizationsRequestSeq += 1
+  }
+
+  const invalidateSettingsRequest = () => {
+    settingsRequest = null
+    settingsRequestSeq += 1
   }
 
   const clearIdentityScopedStorage = () => {
@@ -79,6 +85,7 @@ export const useUserStore = defineStore('user', () => {
         // 支持不经过空用户态的直接换账号：旧账号的异步组织请求一并失效。
         authScopeVersion += 1
         invalidateOrganizationsRequest()
+        invalidateSettingsRequest()
         myOrganizations.value = []
         resetAgentAndChat()
         clearIdentityScopedStorage()
@@ -392,9 +399,12 @@ export const useUserStore = defineStore('user', () => {
   // 不缓存结果（settle 后置空），后续显式调用仍会重新拉取。
   const fetchSettings = (): Promise<void> => {
     if (settingsRequest) return settingsRequest
+    const seq = settingsRequestSeq
     const request = (async () => {
       try {
         const response = await getUserSettings()
+        // 身份已切换/登出：旧账号的响应不得写进新会话。
+        if (seq !== settingsRequestSeq) return
         const resData = response.data as unknown as Record<string, unknown>
         const data = (resData.data && typeof resData.data === 'object')
           ? resData.data as UserSettings

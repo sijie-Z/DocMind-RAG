@@ -157,4 +157,25 @@ describe('useUserStore · fetchSettings 并发单飞', () => {
     await store.fetchSettings()
     expect(getUserSettings).toHaveBeenCalledTimes(2)
   })
+
+  it('身份切换后在途的旧设置响应被丢弃（不得写进新会话）', async () => {
+    let resolveRequest!: (value: unknown) => void
+    const deferred = new Promise((resolve) => {
+      resolveRequest = resolve
+    })
+    vi.mocked(getUserSettings).mockReturnValueOnce(deferred as never)
+
+    const store = useUserStore()
+    store.userInfo = makeInfo({ id: 7 })
+    const pending = store.fetchSettings()
+
+    vi.mocked(loginWithJson).mockResolvedValueOnce({
+      data: { data: { access_token: 'token-2', user_info: makeInfo({ id: 99 }) } },
+    } as never)
+    await store.login({ username: 'other', password: 'x' })
+
+    resolveRequest({ data: { data: { theme: 'dark' } } })
+    await pending
+    expect(store.settings.theme).not.toBe('dark')
+  })
 })
