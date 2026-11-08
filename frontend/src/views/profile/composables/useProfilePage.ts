@@ -32,6 +32,7 @@ import type { Activity, UserSession, UserAuditLog } from '@/api/user'
 import { formatDate } from '@/utils/format'
 import { LANGUAGES, isLanguageCode } from '@/utils/languages'
 import { setLanguage } from '@/locales'
+import { PROVIDER_LABEL_KEYS } from '@/utils/providerLabels'
 import type { UploadCustomRequestOptions } from 'naive-ui'
 
 export function useProfilePage() {
@@ -436,14 +437,8 @@ const providerForm = reactive({
 
 interface ProviderDef { id: string; name: string; base_url: string; models: string[]; requires_key: boolean }
 
-// provider 名称四语化：后端目录仍返回中文 name 作为未知 id 的兜底。
-const PROVIDER_LABEL_KEYS: Record<string, string> = {
-  deepseek: 'profile.providerDeepseek',
-  ollama: 'profile.providerOllama',
-  openai: 'profile.providerOpenai',
-  zhipu: 'profile.providerZhipu',
-  custom: 'profile.providerCustom',
-}
+// provider 名称四语化：映射见 utils/providerLabels（组织设置共用）；
+// 后端目录仍返回中文 name 作为未知 id 的兜底。
 const providerLabel = (provider: ProviderDef) => {
   const key = PROVIDER_LABEL_KEYS[provider.id]
   return key ? t(key) : provider.name

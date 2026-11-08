@@ -11,7 +11,7 @@ import { mount, flushPromises } from '@vue/test-utils'
 import { defineComponent, h, nextTick } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
 import { createI18n } from 'vue-i18n'
-import naive, { NMessageProvider, NInputNumber, NButton } from 'naive-ui'
+import naive, { NMessageProvider, NInputNumber, NButton, NSelect } from 'naive-ui'
 
 vi.mock('@/api/organization', () => ({
   getOrganizationSettings: vi.fn(),
@@ -124,6 +124,33 @@ describe('organization settings page', () => {
 
     const provider = wrapper.find('[data-testid="effective-default_provider"]')
     expect(provider.text()).toContain('需重启')
+    // 生效值显示四语名称而不是裸 id（providerDeepseek = 'DeepSeek'）
+    expect(provider.text()).toContain(zh.profile.providerDeepseek)
+  })
+
+  it('下拉选项使用四语标签；存储值不在选项集时回退标签与生效值表一致', async () => {
+    const wrapper = await mountPage()
+    const select = wrapper.findComponent(NSelect)
+    const options = select.props('options') as Array<{ label: string; value: string }>
+    const labels = options.map((o) => o.label)
+    expect(labels).toContain(zh.profile.providerZhipu)
+    expect(labels).toContain(zh.profile.providerLocal)
+    expect(labels).not.toContain('Zhipu')
+
+    const fallback = select.props('fallbackOption') as (value: string) => { label: string }
+    expect(fallback('ollama').label).toBe(zh.profile.providerOllama)
+    wrapper.unmount()
+  })
+
+  it('组织 provider 使用四语名称：qwen 显示 Qwen 而不是裸 id', async () => {
+    const localized = structuredClone(baseSettings)
+    localized.settings.default_provider.value = 'qwen'
+    mockedGet.mockResolvedValue({ data: localized } as never)
+
+    const wrapper = await mountPage()
+    const provider = wrapper.find('[data-testid="effective-default_provider"]')
+    expect(provider.text()).toContain(zh.profile.providerQwen)
+    wrapper.unmount()
   })
 
   it('切换组织后按新组织重新加载', async () => {
