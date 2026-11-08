@@ -11,14 +11,14 @@
 
     <n-spin :show="loading" class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 -mt-24 relative z-10">
       <template #description>
-        <span>加载中...</span>
+        <span>{{ t('common.loading') }}</span>
       </template>
 
       <!-- Error state -->
       <div v-if="loadError" class="flex items-center justify-center min-h-[400px]">
-        <n-result status="error" title="加载失败" :description="loadErrorMsg">
+        <n-result status="error" :title="t('profile.loadErrorTitle')" :description="loadErrorMsg">
           <template #footer>
-            <n-button type="primary" round @click="loadAllData">重试</n-button>
+            <n-button type="primary" round @click="loadAllData">{{ t('common.retry') }}</n-button>
           </template>
         </n-result>
       </div>
@@ -134,7 +134,7 @@
                     <div>
                       <h3 class="text-lg font-semibold text-gray-800 dark:text-white mb-4 flex items-center gap-2">
                         <n-icon :component="HardwareChipOutline" class="text-blue-500" />
-                        {{ t('profile.storage') || '存储分析' }}
+                        {{ t('profile.storage') }}
                         <span class="text-xs px-2 py-0.5 rounded-full border"
                           :class="storageMetricsSource === 'real' ? 'text-emerald-600 border-emerald-200 dark:text-emerald-400 dark:border-emerald-700' : 'text-amber-600 border-amber-200 dark:text-amber-400 dark:border-amber-700'">
                           {{ storageMetricsSource === 'real' ? t('profile.realData') : t('profile.estimatedData') }}
@@ -145,7 +145,7 @@
                         <div class="space-y-6">
                           <div>
                             <div class="flex justify-between text-sm mb-2">
-                              <span class="text-gray-500 dark:text-gray-400">{{ t('profile.totalProgress') || '总体进度' }}</span>
+                              <span class="text-gray-500 dark:text-gray-400">{{ t('profile.totalProgress') }}</span>
                               <span class="font-bold text-blue-600 dark:text-blue-400">{{ storageUsage }}%</span>
                             </div>
                             <n-progress
@@ -160,11 +160,11 @@
                           </div>
                           <div class="grid grid-cols-2 gap-4">
                             <div class="p-3 bg-slate-50/50 dark:bg-slate-900/10 rounded-lg">
-                              <div class="text-xs text-blue-500 font-semibold mb-1">{{ t('profile.used') || '已用' }}</div>
+                              <div class="text-xs text-blue-500 font-semibold mb-1">{{ t('profile.used') }}</div>
                               <div class="text-lg font-bold text-gray-800 dark:text-gray-200">{{ formatBytes(storageUsedBytes) }}</div>
                             </div>
                             <div class="p-3 bg-emerald-50/50 dark:bg-emerald-900/10 rounded-lg">
-                              <div class="text-xs text-emerald-500 font-semibold mb-1">{{ t('profile.available') || '可用' }}</div>
+                              <div class="text-xs text-emerald-500 font-semibold mb-1">{{ t('profile.available') }}</div>
                               <div class="text-lg font-bold text-gray-800 dark:text-gray-200">{{ formatBytes(storageLimitBytes - storageUsedBytes) }}</div>
                             </div>
                           </div>
@@ -179,7 +179,7 @@
                     <div>
                       <h3 class="text-lg font-semibold text-gray-800 dark:text-white mb-4 flex items-center gap-2">
                         <n-icon :component="StatsChartOutline" class="text-blue-500" />
-                        {{ t('profile.activityTrend') || '活动趋势' }}
+                        {{ t('profile.activityTrend') }}
                       </h3>
                       <div class="bg-white dark:bg-gray-800 p-6 rounded-xl border border-gray-100 dark:border-gray-700 shadow-sm">
                         <div ref="activityChartRef" class="h-64"></div>
@@ -193,7 +193,7 @@
                     <div>
                       <h3 class="text-lg font-semibold text-gray-800 dark:text-white mb-4 flex items-center gap-2">
                         <n-icon :component="TimeOutline" class="text-orange-500" />
-                        {{ t('profile.recentActivity') || '最近动态' }}
+                        {{ t('profile.recentActivity') }}
                       </h3>
                       <div class="p-6 bg-white dark:bg-gray-800 rounded-xl border border-gray-100 dark:border-gray-700 shadow-sm">
                         <n-timeline>
@@ -237,10 +237,10 @@
                     </div>
 
                     <div class="p-5 bg-gradient-to-br from-blue-500 to-blue-600 rounded-2xl text-white">
-                      <div class="text-xs opacity-80 mb-2">系统活跃度</div>
+                      <div class="text-xs opacity-80 mb-2">{{ t('profile.systemActivityTitle') }}</div>
                       <div class="text-3xl font-bold">{{ workflowCompletion }}%</div>
                       <p class="text-xs mt-2 opacity-90 leading-relaxed">
-                        基于近期会话、消息与知识资产综合计算，建议保持每周持续交互以提升系统使用效率。
+                        {{ t('profile.systemActivityDesc') }}
                       </p>
                       <n-progress
                         class="mt-4"
@@ -337,7 +337,7 @@
                     <div class="flex items-center justify-between p-4 bg-gray-50 dark:bg-gray-800 rounded-xl">
                       <div>
                         <div class="font-medium text-gray-800 dark:text-white">{{ t('profile.theme') }}</div>
-                        <div class="text-sm text-gray-500 mt-1">{{ t('profile.themeSettingDesc') || '选择界面主题风格' }}</div>
+                        <div class="text-sm text-gray-500 mt-1">{{ t('profile.themeSettingDesc') }}</div>
                       </div>
                       <n-select
                         v-model:value="settingsForm.theme"
@@ -350,7 +350,7 @@
                     <div class="flex items-center justify-between p-4 bg-gray-50 dark:bg-gray-800 rounded-xl">
                       <div>
                         <div class="font-medium text-gray-800 dark:text-white">{{ t('profile.language') }}</div>
-                        <div class="text-sm text-gray-500 mt-1">{{ t('profile.languageSettingDesc') || '选择界面显示语言' }}</div>
+                        <div class="text-sm text-gray-500 mt-1">{{ t('profile.languageSettingDesc') }}</div>
                       </div>
                       <n-select
                         v-model:value="settingsForm.language"
@@ -435,7 +435,7 @@
                  </div>
               </n-tab-pane>
 
-              <n-tab-pane name="sessions" tab="设备管理">
+              <n-tab-pane name="sessions" :tab="t('profile.tabs.sessions')">
                 <n-data-table
                   :columns="sessionColumns"
                   :data="sessions"
@@ -446,7 +446,7 @@
                 />
               </n-tab-pane>
 
-              <n-tab-pane name="audit" tab="操作审计">
+              <n-tab-pane name="audit" :tab="t('profile.tabs.audit')">
                 <n-data-table
                   :columns="auditColumns"
                   :data="auditLogs"

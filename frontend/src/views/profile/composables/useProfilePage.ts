@@ -120,22 +120,30 @@ const auditPagination = reactive({
 // 设备管理表格列
 // B3：「信任此设备」开关已删除——修前只写 localStorage，后端无任何设备信任
 // 逻辑读取（假开关），未发现可接的真实逻辑，按任务书默认删除。
+// 列头/枚举文案随语言切换（computed 依赖 t，locale 变化实时重算）
+const deviceTypeLabel = (ua: string) => {
+  if (ua.includes('Mobile') || ua.includes('Android') || ua.includes('iPhone')) {
+    return t('profile.sessions.mobile')
+  }
+  if (ua.includes('Tablet') || ua.includes('iPad')) {
+    return t('profile.sessions.tablet')
+  }
+  return t('profile.sessions.desktop')
+}
 
-const sessionColumns = [
+const sessionColumns = computed(() => [
   {
-    title: '设备信息',
+    title: t('profile.sessions.deviceInfo'),
     key: 'device_name',
     render: (row: UserSession) => {
       const ua = row.user_agent || ''
       let DeviceIcon = LaptopOutline
-      let deviceType = '桌面设备'
       if (ua.includes('Mobile') || ua.includes('Android') || ua.includes('iPhone')) {
         DeviceIcon = PhonePortraitOutline
-        deviceType = '移动设备'
       } else if (ua.includes('Tablet') || ua.includes('iPad')) {
         DeviceIcon = TabletPortraitOutline
-        deviceType = '平板设备'
       }
+      const deviceType = deviceTypeLabel(ua)
       return h('div', { class: 'flex items-center gap-3' }, [
         h('div', { class: 'w-10 h-10 rounded-xl bg-gradient-to-br from-blue-100 to-slate-100 dark:from-blue-900/30 dark:to-slate-900/30 flex items-center justify-center' }, [
           h(resolveComponent('n-icon'), { size: '22', class: 'text-blue-600 dark:text-blue-400' }, { default: () => h(DeviceIcon) })
@@ -150,19 +158,19 @@ const sessionColumns = [
     }
   },
   {
-    title: 'IP地址',
+    title: t('profile.sessions.ipAddress'),
     key: 'ip_address',
     width: 130,
     render: (row: UserSession) => h('div', { class: 'flex items-center gap-1' }, [
       h('code', { class: 'text-xs bg-gray-100 dark:bg-gray-700 px-2 py-1 rounded font-mono' }, row.ip_address || '-'),
       row.ip_address ? h('n-tooltip', {}, {
         trigger: () => h('n-icon', { class: 'text-gray-400 cursor-help', size: 14 }, h('InformationCircleOutline')),
-        default: () => '登录地点可能不准确，仅供参考'
+        default: () => t('profile.sessions.ipTooltip')
       }) : null
     ])
   },
   {
-    title: '状态',
+    title: t('profile.sessions.status'),
     key: 'is_active',
     width: 90,
     render: (row: UserSession) => h('span', {
@@ -174,17 +182,17 @@ const sessionColumns = [
       ]
     }, [
       row.is_active ? h('span', { class: 'w-1.5 h-1.5 bg-emerald-500 rounded-full animate-pulse' }) : null,
-      row.is_active ? '在线' : '已下线'
+      row.is_active ? t('profile.sessions.online') : t('profile.sessions.offline')
     ])
   },
   {
-    title: '最后活跃',
+    title: t('profile.sessions.lastActive'),
     key: 'last_seen_at',
     width: 100,
     render: (row: UserSession) => h('span', { class: 'text-xs text-gray-500' }, row.last_seen_at ? formatDate(row.last_seen_at) : '-')
   },
   {
-    title: '操作',
+    title: t('common.actions'),
     key: 'actions',
     width: 200,
     render: (row: UserSession) => {
@@ -195,7 +203,7 @@ const sessionColumns = [
         size: 'small',
         quaternary: true,
         onClick: (e: Event) => { e.stopPropagation(); showSessionDetail(row) }
-      }, { default: () => '详情' }))
+      }, { default: () => t('profile.sessions.detail') }))
 
       // 下线按钮
       if (row.is_active && row.id) {
@@ -204,35 +212,33 @@ const sessionColumns = [
           quaternary: true,
           type: 'error',
           onClick: (e: Event) => { e.stopPropagation(); handleRevokeSession(row.id) }
-        }, { default: () => '下线' }))
+        }, { default: () => t('profile.sessions.revoke') }))
       }
 
       return h('div', { class: 'flex gap-1 flex-wrap' }, buttons)
     }
   }
-]
+])
 
 // 显示会话详情
 const showSessionDetail = (session: UserSession) => {
   const ua = session.user_agent || ''
   let deviceIcon = '💻'
-  let deviceType = '桌面设备'
   if (ua.includes('Mobile') || ua.includes('Android') || ua.includes('iPhone')) {
     deviceIcon = '📱'
-    deviceType = '移动设备'
   } else if (ua.includes('Tablet') || ua.includes('iPad')) {
     deviceIcon = '📲'
-    deviceType = '平板设备'
   }
+  const deviceType = deviceTypeLabel(ua)
 
   // 解析浏览器信息
-  let browser = '未知浏览器'
+  let browser = t('profile.sessions.unknownBrowser')
   if (ua.includes('Chrome')) browser = 'Chrome'
   else if (ua.includes('Firefox')) browser = 'Firefox'
   else if (ua.includes('Safari')) browser = 'Safari'
   else if (ua.includes('Edge')) browser = 'Edge'
 
-  let os = '未知系统'
+  let os = t('profile.sessions.unknownOS')
   if (ua.includes('Windows')) os = 'Windows'
   else if (ua.includes('Mac')) os = 'macOS'
   else if (ua.includes('Linux')) os = 'Linux'
@@ -240,7 +246,7 @@ const showSessionDetail = (session: UserSession) => {
   else if (ua.includes('iPhone') || ua.includes('iPad')) os = 'iOS'
 
   dialog.info({
-    title: '设备详情',
+    title: t('profile.sessions.detailTitle'),
     content: () => h('div', { class: 'space-y-4' }, [
       // 设备概览卡片
       h('div', { class: 'flex items-center gap-4 p-4 bg-gradient-to-r from-blue-50 to-slate-50 dark:from-blue-900/20 dark:to-slate-900/20 rounded-xl' }, [
@@ -254,21 +260,21 @@ const showSessionDetail = (session: UserSession) => {
       // 详细信息
       h('div', { class: 'grid grid-cols-2 gap-3 text-sm' }, [
         h('div', { class: 'p-3 bg-gray-50 dark:bg-gray-800/50 rounded-lg' }, [
-          h('div', { class: 'text-xs text-gray-400 mb-1' }, 'IP地址'),
+          h('div', { class: 'text-xs text-gray-400 mb-1' }, t('profile.sessions.ipAddress')),
           h('div', { class: 'font-mono font-medium text-gray-700 dark:text-gray-200' }, session.ip_address || '-')
         ]),
         h('div', { class: 'p-3 bg-gray-50 dark:bg-gray-800/50 rounded-lg' }, [
-          h('div', { class: 'text-xs text-gray-400 mb-1' }, '状态'),
+          h('div', { class: 'text-xs text-gray-400 mb-1' }, t('profile.sessions.status')),
           h('div', { class: 'font-medium' }, [
-            session.is_active ? h('span', { class: 'inline-flex items-center gap-1.5 text-emerald-600 dark:text-emerald-400' }, [h('span', { class: 'w-2 h-2 rounded-full bg-emerald-500' }), '在线']) : h('span', { class: 'inline-flex items-center gap-1.5 text-gray-400' }, [h('span', { class: 'w-2 h-2 rounded-full bg-gray-400' }), '已下线'])
+            session.is_active ? h('span', { class: 'inline-flex items-center gap-1.5 text-emerald-600 dark:text-emerald-400' }, [h('span', { class: 'w-2 h-2 rounded-full bg-emerald-500' }), t('profile.sessions.online')]) : h('span', { class: 'inline-flex items-center gap-1.5 text-gray-400' }, [h('span', { class: 'w-2 h-2 rounded-full bg-gray-400' }), t('profile.sessions.offline')])
           ])
         ]),
         h('div', { class: 'p-3 bg-gray-50 dark:bg-gray-800/50 rounded-lg' }, [
-          h('div', { class: 'text-xs text-gray-400 mb-1' }, '首次登录'),
+          h('div', { class: 'text-xs text-gray-400 mb-1' }, t('profile.sessions.firstLogin')),
           h('div', { class: 'font-medium text-gray-700 dark:text-gray-200' }, session.created_at ? formatDate(session.created_at) : '-')
         ]),
         h('div', { class: 'p-3 bg-gray-50 dark:bg-gray-800/50 rounded-lg' }, [
-          h('div', { class: 'text-xs text-gray-400 mb-1' }, '最后活跃'),
+          h('div', { class: 'text-xs text-gray-400 mb-1' }, t('profile.sessions.lastActive')),
           h('div', { class: 'font-medium text-gray-700 dark:text-gray-200' }, session.last_seen_at ? formatDate(session.last_seen_at) : '-')
         ])
       ]),
@@ -279,34 +285,34 @@ const showSessionDetail = (session: UserSession) => {
         h('div', { class: 'text-xs text-gray-400 break-all bg-gray-50 dark:bg-gray-800/50 p-2 rounded-lg font-mono' }, ua || '-')
       ])
     ]),
-    positiveText: '关闭'
+    positiveText: t('common.close')
   })
 }
 
-// 审计日志表格列
-const auditColumns = [
+// 审计日志表格列（computed：语言切换时列头实时跟随）
+const auditColumns = computed(() => [
   {
-    title: '操作',
+    title: t('common.actions'),
     key: 'action',
     render: (row: UserAuditLog) => formatAuditAction(row.action)
   },
   {
-    title: '详情',
+    title: t('profile.audit.detail'),
     key: 'detail',
     ellipsis: { tooltip: true },
     render: (row: UserAuditLog) => row.detail || '-'
   },
   {
-    title: 'IP',
+    title: t('profile.audit.ip'),
     key: 'ip_address',
     render: (row: UserAuditLog) => row.ip_address || '-'
   },
   {
-    title: '时间',
+    title: t('profile.audit.time'),
     key: 'created_at',
     render: (row: UserAuditLog) => row.created_at ? formatDate(row.created_at) : '-'
   }
-]
+])
 
 const storageUsage = ref(0) // percent
 const storageUsedBytes = ref(0)
@@ -362,26 +368,26 @@ const workflowCompletion = computed(() => {
 
 const quickActions = computed(() => [
   {
-    label: '进入智能对话',
-    desc: '继续当前任务并复用历史上下文',
+    label: t('profile.quickActions.chat'),
+    desc: t('profile.quickActions.chatDesc'),
     route: 'Chat',
     icon: ChatbubblesOutline
   },
   {
-    label: '查看知识库',
-    desc: '上传和管理团队知识文档',
+    label: t('profile.quickActions.knowledge'),
+    desc: t('profile.quickActions.knowledgeDesc'),
     route: 'Knowledge',
     icon: BookOutline
   },
   {
-    label: '系统监控',
-    desc: '查看系统运行状态和性能指标',
+    label: t('profile.quickActions.monitoring'),
+    desc: t('profile.quickActions.monitoringDesc'),
     route: 'Monitoring',
     icon: StatsChartOutline
   },
   {
-    label: '处理消息通知',
-    desc: '快速查看系统提醒和处理状态',
+    label: t('profile.quickActions.notifications'),
+    desc: t('profile.quickActions.notificationsDesc'),
     route: 'Notifications',
     icon: NotificationsOutline
   }
@@ -391,11 +397,11 @@ const goToRoute = (name: string) => {
   router.push({ name })
 }
 
-const themeOptions = [
-  { label: '浅色', value: 'light' },
-  { label: '深色', value: 'dark' },
-  { label: '跟随系统', value: 'auto' }
-]
+const themeOptions = computed(() => [
+  { label: t('profile.themeOptions.light'), value: 'light' },
+  { label: t('profile.themeOptions.dark'), value: 'dark' },
+  { label: t('profile.themeOptions.auto'), value: 'auto' }
+])
 
 // 语言清单单一事实源（ISS-4）；下拉用纯文本 label，Beta 以 · 后缀标注
 const languageOptions = LANGUAGES.map((l) => ({
@@ -618,6 +624,13 @@ const activityChartRef = ref<HTMLElement | null>(null)
 let storageChart: echarts.ECharts | null = null
 let activityChart: echarts.ECharts | null = null
 
+const DATE_LOCALE_MAP: Record<string, string> = {
+  zh: 'zh-CN',
+  en: 'en-US',
+  ja: 'ja-JP',
+  fr: 'fr-FR',
+}
+
 const initCharts = () => {
   const isDark = appStore.themeMode === 'dark'
   const textColor = isDark ? '#ccc' : '#666'
@@ -640,15 +653,15 @@ const initCharts = () => {
         textStyle: { color: textColor } 
       },
       series: [{
-        name: '存储分布',
+        name: t('profile.storageChart.seriesName'),
         type: 'pie',
         radius: ['40%', '70%'],
         avoidLabelOverlap: false,
         itemStyle: { borderRadius: 10, borderColor: isDark ? '#111827' : '#fff', borderWidth: 2 },
         label: { show: false },
         data: [
-          { value: storageUsedBytes.value, name: '已用文档', itemStyle: { color: '#3b82f6' } },
-          { value: Math.max(0, storageLimitBytes.value - storageUsedBytes.value), name: '可用空间', itemStyle: { color: isDark ? '#374151' : '#e2e8f0' } }
+          { value: storageUsedBytes.value, name: t('profile.storageChart.used'), itemStyle: { color: '#3b82f6' } },
+          { value: Math.max(0, storageLimitBytes.value - storageUsedBytes.value), name: t('profile.storageChart.available'), itemStyle: { color: isDark ? '#374151' : '#e2e8f0' } }
         ]
       }]
     })
@@ -656,10 +669,11 @@ const initCharts = () => {
 
   if (activityChartRef.value) {
     if (!activityChart) activityChart = echarts.init(activityChartRef.value)
+    const dateLocale = DATE_LOCALE_MAP[locale.value] || 'en-US'
     const dates = Array.from({ length: 7 }, (_, i) => {
       const d = new Date()
       d.setDate(d.getDate() - (6 - i))
-      return d.toLocaleDateString(locale.value === 'zh' ? 'zh-CN' : 'en-US', { month: 'short', day: 'numeric' })
+      return d.toLocaleDateString(dateLocale, { month: 'short', day: 'numeric' })
     })
     
     activityChart.setOption({
@@ -684,7 +698,7 @@ const initCharts = () => {
         axisLabel: { color: textColor }
       },
       series: [{
-        name: '活跃度',
+        name: t('profile.activityChart.seriesName'),
         type: 'line',
         smooth: true,
         data: stats.activityTrend || [0, 0, 0, 0, 0, 0, 0],
@@ -711,6 +725,15 @@ watch(() => appStore.themeMode, () => {
     activityChart = null
     setTimeout(initCharts, 100)
   }
+})
+
+// 语言切换：图表内嵌文案与日期轴需重建（ECharts 不会响应 i18n）
+watch(locale, () => {
+  storageChart?.dispose()
+  activityChart?.dispose()
+  storageChart = null
+  activityChart = null
+  setTimeout(initCharts, 100)
 })
 
 // Watch stats data change to update activity chart
@@ -909,14 +932,14 @@ const loadAuditLogs = async () => {
 
 const formatAuditAction = (action?: string) => {
   const mapping: Record<string, string> = {
-    login: '登录系统',
-    profile_updated: '更新个人资料',
-    password_changed: '修改密码',
-    api_key_generated: '生成 API Key',
-    api_key_revoked: '撤销 API Key',
-    session_revoked: '下线设备',
+    login: t('profile.audit.actions.login'),
+    profile_updated: t('profile.audit.actions.profileUpdated'),
+    password_changed: t('profile.audit.actions.passwordChanged'),
+    api_key_generated: t('profile.audit.actions.apiKeyGenerated'),
+    api_key_revoked: t('profile.audit.actions.apiKeyRevoked'),
+    session_revoked: t('profile.audit.actions.sessionRevoked'),
   }
-  return mapping[action || ''] || action || '未知操作'
+  return mapping[action || ''] || action || t('profile.audit.unknownAction')
 }
 
 const handleRevokeSession = async (sessionId: number) => {
@@ -929,10 +952,10 @@ const handleRevokeSession = async (sessionId: number) => {
   if (!confirmed) return
   try {
     await revokeMySession(sessionId)
-    message.success(t('profile.sessionRevoked') || '设备已下线')
+    message.success(t('profile.sessionRevoked'))
     await Promise.all([loadSessions(), loadAuditLogs()])
   } catch (error) {
-    message.error(t('profile.revokeFailed') || '下线失败')
+    message.error(t('profile.revokeFailed'))
   }
 }
 
@@ -995,7 +1018,7 @@ const loadAllData = async () => {
     loadError.value = false
   } catch (error) {
     loadError.value = true
-    loadErrorMsg.value = t('profile.loadFailed', '加载个人资料失败')
+    loadErrorMsg.value = t('profile.loadFailed')
   } finally {
     loading.value = false
   }
