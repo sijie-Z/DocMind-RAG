@@ -59,13 +59,13 @@ class TestValidateFile:
         with pytest.raises(HTTPException) as exc_info:
             svc._validate_file("legacy.doc", 1024)
         assert exc_info.value.status_code == 400
-        assert "docx" in exc_info.value.detail
+        assert "另存为" in exc_info.value.detail and ".docx" in exc_info.value.detail
 
     def test_legacy_xls_rejected_with_actionable_message(self, svc):
         with pytest.raises(HTTPException) as exc_info:
             svc._validate_file("legacy.xls", 1024)
         assert exc_info.value.status_code == 400
-        assert "xlsx" in exc_info.value.detail
+        assert "另存为" in exc_info.value.detail and ".xlsx" in exc_info.value.detail
 
     def test_legacy_extensions_not_in_allowed_list(self, svc):
         assert ".doc" not in svc.allowed_extensions

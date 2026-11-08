@@ -272,6 +272,7 @@ class TestDocumentUploadEndpointLegacyFormats:
                 current_user=MagicMock(),
             )
         assert exc.value.status_code == 400
+        assert "另存为" in exc.value.message
         assert ".docx" in exc.value.message and ".xlsx" in exc.value.message
 
     @pytest.mark.asyncio

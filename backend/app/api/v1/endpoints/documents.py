@@ -39,7 +39,7 @@ from app.rag.source_provenance import SourceProvenanceUnavailableError
 from app.schemas.knowledge import DocumentDownloadUrl, DocumentDownloadUrlResponse
 from app.schemas.review import ReviewMetaUpsert
 from app.services.document_preview import load_document_chunk, load_document_preview_text
-from app.services.file_service import FileUploadService
+from app.services.file_service import file_service
 from app.services.review_document_service import (
     ReviewMetaInput,
     compute_readiness,
@@ -182,7 +182,7 @@ async def upload_document(
         # 解析阶段失败——入口直接 400 并提示可操作路径（与 /files/upload 同口径）。
         filename = file.filename or ""
         ext = Path(filename).suffix.lower()
-        allowed_ext = FileUploadService().allowed_extensions
+        allowed_ext = file_service.allowed_extensions
         if ext in {".doc", ".xls"}:
             raise ValidationError("暂不支持旧版 .doc/.xls，请另存为 .docx/.xlsx 后上传")
         if ext not in allowed_ext:

@@ -1,5 +1,3 @@
-import pytest
-
 """RAG 评估端点回归：曾读一个不存在的配置字段（`settings.DEEPSEEK_BASE_URL`）
 —— AsyncOpenAI 构造即抛 AttributeError，被 except 吞掉 → 端点永远返回全 0 分
 （"看起来能用、永远全 0"）。修复 = 改读真实字段 `DEEPSEEK_API_URL`。
@@ -8,6 +6,8 @@ import pytest
 """
 
 import asyncio
+
+import pytest
 
 from app.api.v1.endpoints import monitoring
 

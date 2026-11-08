@@ -67,7 +67,6 @@ _ALLOWED_MIME_TYPES = {
     "application/pdf": {".pdf"},
     "application/vnd.openxmlformats-officedocument.wordprocessingml.document": {".docx"},
     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": {".xlsx"},
-    "application/vnd.ms-excel": {".xls"},
     "text/plain": {".txt", ".md", ".csv"},
     "text/markdown": {".md"},
     "text/csv": {".csv"},
@@ -661,12 +660,8 @@ class FileUploadService:
         """根据文件扩展名获取文档类型"""
         extension_map = {
             ".pdf": DocumentType.PDF,
-            ".doc": DocumentType.WORD,
             ".docx": DocumentType.WORD,
-            ".xls": DocumentType.EXCEL,
             ".xlsx": DocumentType.EXCEL,
-            ".ppt": DocumentType.PPT,
-            ".pptx": DocumentType.PPT,
             ".txt": DocumentType.TXT,
             ".md": DocumentType.TXT,
             ".csv": DocumentType.TXT,
@@ -677,12 +672,8 @@ class FileUploadService:
         """根据文件扩展名获取内容类型"""
         content_type_map = {
             ".pdf": "application/pdf",
-            ".doc": "application/msword",
             ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-            ".xls": "application/vnd.ms-excel",
             ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            ".ppt": "application/vnd.ms-powerpoint",
-            ".pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
             ".txt": "text/plain",
             ".md": "text/markdown",
             ".csv": "text/csv",
