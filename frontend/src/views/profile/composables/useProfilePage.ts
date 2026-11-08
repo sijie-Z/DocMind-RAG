@@ -716,6 +716,14 @@ const initCharts = () => {
   }
 }
 
+// 主题/语言切换后图表需重建（ECharts 不响应 CSS 与 i18n）。
+// 定时器统一句柄：连续切换只保留最后一次，卸载时清理。
+let chartInitTimer: ReturnType<typeof setTimeout> | undefined
+const scheduleChartInit = () => {
+  if (chartInitTimer !== undefined) clearTimeout(chartInitTimer)
+  chartInitTimer = setTimeout(initCharts, 100)
+}
+
 // Watch theme change
 watch(() => appStore.themeMode, () => {
   if (storageChart || activityChart) {
@@ -723,7 +731,7 @@ watch(() => appStore.themeMode, () => {
     activityChart?.dispose()
     storageChart = null
     activityChart = null
-    setTimeout(initCharts, 100)
+    scheduleChartInit()
   }
 })
 
@@ -733,7 +741,7 @@ watch(locale, () => {
   activityChart?.dispose()
   storageChart = null
   activityChart = null
-  setTimeout(initCharts, 100)
+  scheduleChartInit()
 })
 
 // Watch stats data change to update activity chart
@@ -1043,6 +1051,7 @@ onMounted(loadAllData)
 
 onUnmounted(() => {
   if (resizeTimer !== undefined) clearTimeout(resizeTimer)
+  if (chartInitTimer !== undefined) clearTimeout(chartInitTimer)
   if (typeof window !== 'undefined') window.removeEventListener('resize', handleResize)
   storageChart?.dispose()
   activityChart?.dispose()

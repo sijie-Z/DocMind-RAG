@@ -7,7 +7,8 @@
  *
  * 变异点：
  *  - 把 sessionColumns/auditColumns/themeOptions 退回非 computed（或写死中文）→ 红；
- *  - tab/系统活跃度/快捷入口文案退回硬编码 → 红。
+ *  - tab/系统活跃度/快捷入口文案退回硬编码 → 红；
+ *  - 删除 watch(locale) 的图表重建（或只 mock 哑 ECharts 实例）→ 红。
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
@@ -61,12 +62,27 @@ vi.mock('@/api/user', async (importOriginal) => {
   }
 })
 vi.mock('vue-router', () => ({ useRouter: () => ({ push: vi.fn() }) }))
+
+// ECharts 实例工厂：记录每次 setOption 的配置，供“语言切换后重建”断言。
+// 注意不能只 mock 成哑对象——那样删掉 watch(locale) 重建逻辑测试仍会绿（评审 B）。
+const { echartsInit, setOptionCalls } = vi.hoisted(() => {
+  const calls: Array<Record<string, any>> = []
+  const init = vi.fn(() => ({
+    setOption: vi.fn((option: Record<string, any>) => { calls.push(option) }),
+    resize: vi.fn(),
+    dispose: vi.fn(),
+  }))
+  return { echartsInit: init, setOptionCalls: calls }
+})
+
 vi.mock('@/utils/echarts', () => ({
   default: {
-    init: vi.fn(() => ({ setOption: vi.fn(), resize: vi.fn(), dispose: vi.fn() })),
+    init: echartsInit,
     graphic: { LinearGradient: class {} },
   },
 }))
+
+const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 
 const i18n = createI18n({
   legacy: false,
@@ -135,13 +151,51 @@ describe('Profile · 语言切换后文案实时更新', () => {
 
     await switchLanguage('en')
 
-    // 已打开的表格不重挂载：列定义必须自身响应 locale
-    const text = wrapper.text()
-    expect(text).toContain('Device')
-    expect(text).toContain('IP address')
-    expect(text).toContain('Last active')
-    expect(text).toContain('Online')
-    expect(text, '切换后列头残留中文').not.toContain('设备信息')
+    // 已打开的表格不重挂载：列定义必须自身响应 locale。
+    // 用表头单元格精确断言，避免 'Devices' 包含子串 'Device' 的空转（评审 B）。
+    const headers = wrapper.findAll('th').map((th) => th.text())
+    expect(headers).toContain('Device')
+    expect(headers).toContain('IP address')
+    expect(headers).toContain('Last active')
+    expect(headers).toContain('Actions')
+    expect(wrapper.text()).toContain('Online')
+    expect(headers, '切换后列头残留中文').not.toContain('设备信息')
+  })
+
+  it('审计表格列头随 locale 切换（computed 列）', async () => {
+    const wrapper = mountPage()
+    await flushPromises()
+    await openTab(wrapper, '操作审计')
+    expect(wrapper.findAll('th').map((th) => th.text())).toContain('详情')
+
+    await switchLanguage('en')
+
+    const headers = wrapper.findAll('th').map((th) => th.text())
+    expect(headers).toContain('Actions')
+    expect(headers).toContain('Details')
+    expect(headers).toContain('IP')
+    expect(headers).toContain('Time')
+    expect(headers, '切换后审计列头残留中文').not.toContain('详情')
+  })
+
+  it('图表内嵌文案随 locale 重建（ECharts 不响应 i18n）', async () => {
+    const wrapper = mountPage()
+    await flushPromises()
+    // 挂载后的 initCharts 走 100ms 定时器
+    await wait(300)
+
+    const before = setOptionCalls.length
+    expect(before, '挂载后应至少绘制存储/活跃度两张图').toBeGreaterThanOrEqual(2)
+    expect(setOptionCalls.some((o) => o?.series?.[0]?.name === '存储分布')).toBe(true)
+    expect(setOptionCalls.some((o) => o?.series?.[0]?.name === '活跃度')).toBe(true)
+
+    await switchLanguage('en')
+    await wait(300)
+
+    const rebuilt = setOptionCalls.slice(before)
+    expect(rebuilt.some((o) => o?.series?.[0]?.name === 'Storage distribution')).toBe(true)
+    expect(rebuilt.some((o) => o?.series?.[0]?.name === 'Activity')).toBe(true)
+    expect(rebuilt.some((o) => o?.series?.[0]?.name === '存储分布'), '重建后仍是中文系列名').toBe(false)
   })
 
   it('主题下拉选项随 locale 切换（computed 选项）', async () => {
