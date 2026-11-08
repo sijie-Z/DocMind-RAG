@@ -7,6 +7,7 @@ import type { AxiosError } from 'axios'
 import { useAppStore } from './app'
 import { useAgentStore } from './agent'
 import { useChatStore } from './chat'
+import { useNotificationStore } from './notification'
 import { getUserSettings, updateUserSettings, getMyOrganizations, switchOrganization as switchOrganizationApi, type UserSettings } from '@/api/user'
 
 function _extractErrorMessage(error: unknown, fallback: string): string {
@@ -49,6 +50,8 @@ export const useUserStore = defineStore('user', () => {
   const resetAgentAndChat = () => {
     useAgentStore().resetForIdentityChange()
     useChatStore().resetForIdentityChange()
+    // 通知缓存是身份作用域数据：换账号/登出后不得沿用上一账号的标题与未读数。
+    useNotificationStore().resetForIdentityChange()
   }
 
   const invalidateOrganizationsRequest = () => {

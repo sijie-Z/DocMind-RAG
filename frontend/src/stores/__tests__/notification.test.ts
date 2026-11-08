@@ -241,14 +241,26 @@ describe('T1 · 通知 store 错误态', () => {
 
 function deferred<T>() {
   let resolve!: (value: T) => void
-  const promise = new Promise<T>((res) => {
+  let reject!: (reason?: unknown) => void
+  const promise = new Promise<T>((res, rej) => {
     resolve = res
+    reject = rej
   })
-  return { promise, resolve }
+  return { promise, resolve, reject }
 }
 
 describe('通知 store · 在途响应按世代丢弃', () => {
-  it('标记全部已读后的强制刷新：旧列表/旧未读快照被丢弃，计数不反弹', async () => {
+  beforeEach(() => {
+    vi.useFakeTimers()
+  })
+
+  afterEach(() => {
+    // 清掉防抖对账定时器，避免跨用例落地
+    useNotificationStore().resetForIdentityChange()
+    vi.useRealTimers()
+  })
+
+  it('标记全部已读后的强制刷新：旧快照被丢弃，计数不反弹', async () => {
     const store = useNotificationStore()
     seedSuccess()
     await store.bootstrapBadge()
@@ -270,11 +282,15 @@ describe('通知 store · 在途响应按世代丢弃', () => {
     } as never)
     const forced = store.refresh({ force: true })
 
-    // 旧请求此时才返回（仍是未读快照）
+    // 强制刷新先落地：服务端真值立即可见，不等待旧请求
+    await forced
+    expect(store.unreadCount).toBe(0)
+    expect(store.headerItems.every((n) => n.is_read)).toBe(true)
+
+    // 旧请求此时才返回（仍是未读快照）：必须被丢弃
     staleBadge.resolve({ data: { count: 5 } })
     staleList.resolve({ data: { items: [notif(2), notif(1)], total: 2 } })
-
-    await Promise.all([inFlightBadge, inFlightList, forced])
+    await Promise.all([inFlightBadge, inFlightList])
 
     expect(store.unreadCount).toBe(0)
     expect(store.headerItems.every((n) => n.is_read)).toBe(true)
@@ -283,7 +299,7 @@ describe('通知 store · 在途响应按世代丢弃', () => {
     expect(mockedList).toHaveBeenCalledTimes(3)
   })
 
-  it('实时推送后，迟到的未读数快照不得覆盖 +1', async () => {
+  it('实时推送后，迟到的未读数快照不得覆盖 +1，且事后对账收敛', async () => {
     const store = useNotificationStore()
     seedSuccess()
     await store.bootstrapBadge()
@@ -298,12 +314,16 @@ describe('通知 store · 在途响应按世代丢弃', () => {
 
     staleBadge.resolve({ data: { count: 5 } })
     await inFlight
-
     expect(store.unreadCount).toBe(6)
     expect(store.headerItems.some((n) => n.id === 100)).toBe(true)
+
+    // 防抖对账：服务端真值（含推送）覆盖本地推算
+    mockedCount.mockResolvedValueOnce({ data: { count: 6 } } as never)
+    await vi.advanceTimersByTimeAsync(300)
+    expect(store.unreadCount).toBe(6)
   })
 
-  it('已读单条后，迟到的未读快照不得把计数加回去', async () => {
+  it('已读单条后，迟到的未读快照不得把计数加回去，且事后对账收敛', async () => {
     const store = useNotificationStore()
     seedSuccess()
     await store.bootstrapBadge()
@@ -318,8 +338,101 @@ describe('通知 store · 在途响应按世代丢弃', () => {
 
     staleBadge.resolve({ data: { count: 5 } })
     await inFlight
-
     expect(store.unreadCount).toBe(4)
     expect(store.headerItems.find((n) => n.id === 1)?.is_read).toBe(true)
+
+    mockedCount.mockResolvedValueOnce({ data: { count: 4 } } as never)
+    mockedList.mockResolvedValueOnce({
+      data: { items: [notif(2), notif(1, true)], total: 2 },
+    } as never)
+    await vi.advanceTimersByTimeAsync(300)
+    expect(store.unreadCount).toBe(4)
+  })
+
+  it('删除后强制刷新：迟到的旧列表不得让已删行复活', async () => {
+    const store = useNotificationStore()
+    seedSuccess()
+    await store.bootstrapBadge()
+    await store.loadHeaderItems()
+
+    const staleList = deferred<{ data: { items: ReturnType<typeof notif>[]; total: number } }>()
+    mockedList.mockReturnValueOnce(staleList.promise as never)
+    const inFlight = store.loadHeaderItems()
+
+    // 删除成功后本地先移除，再强制刷新
+    store.headerItems = store.headerItems.filter((n) => n.id !== 1)
+    mockedCount.mockResolvedValueOnce({ data: { count: 4 } } as never)
+    mockedList.mockResolvedValueOnce({
+      data: { items: [notif(2)], total: 1 },
+    } as never)
+    const forced = store.refresh({ force: true })
+
+    staleList.resolve({ data: { items: [notif(2), notif(1)], total: 2 } })
+    await Promise.all([inFlight, forced])
+
+    expect(store.headerItems.map((n) => n.id)).toEqual([2])
+  })
+
+  it('迟到的失败响应不得在新请求成功后再点亮错误横幅', async () => {
+    const store = useNotificationStore()
+    seedSuccess()
+    await store.bootstrapBadge()
+    expect(store.lastError).toBeNull()
+
+    const staleBadge = deferred<{ data: { count: number } }>()
+    mockedCount.mockReturnValueOnce(staleBadge.promise as never)
+    const inFlight = store.bootstrapBadge()
+
+    mockedCount.mockResolvedValueOnce({ data: { count: 0 } } as never)
+    mockedList.mockResolvedValueOnce({ data: { items: [], total: 0 } } as never)
+    await store.refresh({ force: true })
+    expect(store.lastError).toBeNull()
+
+    staleBadge.reject(new Error('stale network error'))
+    await inFlight
+    expect(store.lastError).toBeNull()
+  })
+
+  it('列表请求被作废时 headerLoading 必须收口', async () => {
+    const store = useNotificationStore()
+    seedSuccess()
+    const staleList = deferred<{ data: { items: ReturnType<typeof notif>[]; total: number } }>()
+    mockedList.mockReturnValueOnce(staleList.promise as never)
+
+    const inFlight = store.loadHeaderItems()
+    expect(store.headerLoading).toBe(true)
+
+    store.applyRealtime(realtimePayload(101))
+    expect(store.headerLoading).toBe(false)
+
+    staleList.resolve({ data: { items: [], total: 0 } })
+    await inFlight
+    expect(store.headerLoading).toBe(false)
+  })
+
+  it('旧请求的 finally 不得清掉新请求的 loading 与引用', async () => {
+    const store = useNotificationStore()
+    seedSuccess()
+
+    const oldList = deferred<{ data: { items: ReturnType<typeof notif>[]; total: number } }>()
+    const newList = deferred<{ data: { items: ReturnType<typeof notif>[]; total: number } }>()
+    mockedList.mockReturnValueOnce(oldList.promise as never)
+    const first = store.loadHeaderItems()
+    expect(store.headerLoading).toBe(true)
+
+    mockedCount.mockResolvedValueOnce({ data: { count: 1 } } as never)
+    mockedList.mockReturnValueOnce(newList.promise as never)
+    const forced = store.refresh({ force: true })
+    expect(store.headerLoading).toBe(true)
+
+    // 旧请求此时返回：世代不匹配 → 丢弃响应；且不得把新请求的 loading 关掉
+    oldList.resolve({ data: { items: [], total: 0 } })
+    await first
+    expect(store.headerLoading).toBe(true)
+
+    newList.resolve({ data: { items: [notif(2)], total: 1 } })
+    await forced
+    expect(store.headerLoading).toBe(false)
+    expect(store.headerItems.map((n) => n.id)).toEqual([2])
   })
 })

@@ -21,12 +21,46 @@ export const useNotificationStore = defineStore('notification', () => {
   // 状态世代：标记全部已读/删除/实时推送/强制刷新会递增。在途请求按发起时的
   // 世代决定能否写回——迟到的旧响应不得覆盖更新的本地状态或伪造未读回弹。
   let stateEpoch = 0
+  let reconcileTimer: ReturnType<typeof setTimeout> | null = null
 
   /** 丢弃所有在途响应并解除在途引用（下一次调用会重新发请求）。 */
   const invalidate = () => {
     stateEpoch += 1
     badgePromise = null
     headerPromise = null
+    // 被丢弃的列表请求不会走到自己的 finally：spinner 必须在这里收口。
+    headerLoading.value = false
+  }
+
+  /**
+   * 本地增量（实时推送/单条已读）作废了在途权威请求时，安排一次防抖对账：
+   * 本地 +1/-1 基于旧基线，只有服务端真值能把「全部已读后的计数」等状态收敛；
+   * 若不作废旧请求，迟到的旧快照又会回弹——两者必须成对。
+   */
+  const scheduleReconcile = () => {
+    if (reconcileTimer) clearTimeout(reconcileTimer)
+    reconcileTimer = setTimeout(() => {
+      reconcileTimer = null
+      void bootstrapBadge()
+      if (headerLoaded.value) void loadHeaderItems()
+    }, 300)
+  }
+
+  /** 身份切换/登出：清空跨账号缓存与在途状态。 */
+  const resetForIdentityChange = () => {
+    if (reconcileTimer) {
+      clearTimeout(reconcileTimer)
+      reconcileTimer = null
+    }
+    invalidate()
+    headerItems.value = []
+    unreadCount.value = 0
+    latestRealtimeId.value = null
+    badgeError.value = null
+    listError.value = null
+    loadedOnce.value = false
+    headerLoaded.value = false
+    headerLoading.value = false
   }
 
   const recordError = (kind: 'badge' | 'list', error: unknown) => {
@@ -41,7 +75,8 @@ export const useNotificationStore = defineStore('notification', () => {
     if (options.force) invalidate()
     if (badgePromise) return badgePromise
     const epoch = stateEpoch
-    const request = (async () => {
+    let request!: Promise<void>
+    request = (async () => {
       try {
         const countRes = await getUnreadCount()
         // 期间发生过已读/删除/推送/身份变化：旧快照不得写回。
@@ -66,7 +101,8 @@ export const useNotificationStore = defineStore('notification', () => {
     if (headerPromise) return headerPromise
     const epoch = stateEpoch
     headerLoading.value = true
-    const request = (async () => {
+    let request!: Promise<void>
+    request = (async () => {
       try {
         const listRes = await getNotifications({ limit: 8 })
         if (epoch !== stateEpoch) return
@@ -98,7 +134,8 @@ export const useNotificationStore = defineStore('notification', () => {
 
   const applyRealtime = (payload: RealtimeNotificationPayload) => {
     // 推送代表比在途 GET 更新的状态：丢弃旧快照，避免新通知被列表快照覆盖、
-    // ++ 计数被旧未读数回写。
+    // ++ 计数被旧未读数回写；若确有在途权威请求被作废，事后再对账一次。
+    const hadInFlight = badgePromise !== null || headerPromise !== null
     invalidate()
     const existed = headerItems.value.some((n) => n.id === payload.id)
     const normalized: Notification = {
@@ -114,6 +151,7 @@ export const useNotificationStore = defineStore('notification', () => {
 
     headerItems.value = [normalized, ...headerItems.value.filter((n) => n.id !== normalized.id)].slice(0, 8)
     latestRealtimeId.value = payload.id
+    if (hadInFlight) scheduleReconcile()
     if (existed) return
     // 未成功加载过（无有效基线）时实时推送不加计：否则未读数会"从 0 起跳"伪造
     // （失败置空后的持续失真放大 bug）；等重试成功后以服务端真值覆盖
@@ -126,10 +164,13 @@ export const useNotificationStore = defineStore('notification', () => {
   const consumeRead = (id: number) => {
     const notification = headerItems.value.find((n) => n.id === id)
     if (!notification || notification.is_read) return
-    // 已读是比在途未读快照更新的状态：丢弃旧响应，防止计数回弹。
+    // 已读是比在途未读快照更新的状态：丢弃旧响应，防止计数回弹；
+    // 有权威请求被作废时，事后对账把整个计数收敛到服务端真值。
+    const hadInFlight = badgePromise !== null || headerPromise !== null
     invalidate()
     headerItems.value = headerItems.value.map((n) => (n.id === id ? { ...n, is_read: true } : n))
     unreadCount.value = Math.max(0, unreadCount.value - 1)
+    if (hadInFlight) scheduleReconcile()
   }
 
   return {
@@ -145,5 +186,6 @@ export const useNotificationStore = defineStore('notification', () => {
     refresh,
     applyRealtime,
     consumeRead,
+    resetForIdentityChange,
   }
 })
