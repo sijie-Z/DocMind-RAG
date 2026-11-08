@@ -61,6 +61,7 @@ import asyncio
 import json
 import math
 import uuid
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -877,7 +878,30 @@ class TestAnswerCacheScope:
             cache_scope="user:7:deepseek:m",
         )
         assert rec.get_scopes == ["user:7:deepseek:m"]
-        assert all(scope == "user:7:deepseek:m" for scope in rec.set_scopes)
+        assert rec.set_scopes and all(scope == "user:7:deepseek:m" for scope in rec.set_scopes)
+
+    @pytest.mark.asyncio
+    async def test_run_pipeline_uses_org_model_for_server_scope(self, monkeypatch):
+        """server 源的缓存 scope 必须用组织实际默认模型，而不是进程默认。"""
+        _enable(monkeypatch, answer=True, retrieval=False)
+        rec = _RecordingScopeCache()
+        fake_rag = _fake_rag_stack(_VEC_A, AsyncMock(return_value=([], None)), {})
+        policy = SimpleNamespace(
+            default_model="org-model", retrieval_top_k=None, allow_privacy_mode=True
+        )
+        with patch(
+            "app.services.chat_service.organization_settings_service.get_runtime_policy",
+            new=AsyncMock(return_value=policy),
+        ):
+            await _run_chat(
+                _mock_chat_session(),
+                fake_rag,
+                rec,
+                "q",
+                cache_scope="server:global-model",
+            )
+        assert rec.get_scopes == ["server:org-model"]
+        assert rec.set_scopes and all(scope == "server:org-model" for scope in rec.set_scopes)
 
     def test_scope_segment_sanitizes_and_avoids_collisions(self):
         from app.rag.cache import _scope_segment
