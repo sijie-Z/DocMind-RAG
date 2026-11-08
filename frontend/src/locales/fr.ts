@@ -85,7 +85,7 @@ export default {
     providerZhipu: 'Zhipu GLM',
     providerCustom: 'Personnalisé (compatible OpenAI)',
     aiProviderModel: 'Modèle',
-    aiProviderKeyHint: "La clé est stockée chiffrée côté serveur ; laissez vide ou conservez le masque pour réutiliser la clé enregistrée. Ressaisissez-la si vous changez de fournisseur ou d'URL de base.",
+    aiProviderKeyHint: "Laissez vide ou conservez le masque pour réutiliser la clé API enregistrée uniquement si le fournisseur et l'URL de base sont inchangés. Ressaisissez la clé après modification.",
     aiProviderSave: 'Enregistrer les paramètres du modèle',
     aiProviderSavedUser: 'Enregistré : le chat et l\'Agent utiliseront votre configuration personnelle',
     aiProviderSavedServer: 'Basculé : le chat et l\'Agent utiliseront le modèle par défaut du serveur',

@@ -125,7 +125,7 @@ export default {
     providerZhipu: '智谱 GLM',
     providerCustom: '自定义（OpenAI 兼容）',
     aiProviderModel: '模型',
-    aiProviderKeyHint: 'Key 仅加密保存在服务端；留空或保持掩码表示沿用已保存的 Key；切换提供商或 Base URL 时需重新填写',
+    aiProviderKeyHint: '仅当提供商与 Base URL 不变时，留空或保持掩码可沿用已保存的 API Key；变更后需重新填写。',
     aiProviderSave: '保存模型设置',
     aiProviderSavedUser: '已保存：智能对话与 Agent 将使用你的个人模型配置',
     aiProviderSavedServer: '已切换：智能对话与 Agent 将使用服务端默认模型',

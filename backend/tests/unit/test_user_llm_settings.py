@@ -567,7 +567,9 @@ class TestPipelineOverride:
                     client_override=_FailingClient(),
                 )
             ]
-        assert chunks == ["个人模型调用失败，请检查 API Key / Base URL 或稍后重试。"]
+        assert chunks == [
+            "个人模型调用失败。请在个人设置的 AI 模型设置中检查 API Key / Base URL，或稍后重试。"
+        ]
         assert SECRET not in caplog.text, "API key 明文不得写日志"
         assert "RuntimeError" in caplog.text, "只记录异常类型以便排障"
 

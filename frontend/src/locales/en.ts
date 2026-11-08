@@ -121,7 +121,7 @@ export default {
     providerZhipu: 'Zhipu GLM',
     providerCustom: 'Custom (OpenAI-compatible)',
     aiProviderModel: 'Model',
-    aiProviderKeyHint: 'The key is stored encrypted server-side; leave empty or keep the mask to reuse the saved key. Re-enter it when switching provider or base URL.',
+    aiProviderKeyHint: 'Leave empty or keep the mask to reuse the saved API key only if the provider and base URL are unchanged. Re-enter the key after changing either.',
     aiProviderSave: 'Save model settings',
     aiProviderSavedUser: 'Saved: Chat and Agent will use your personal model configuration',
     aiProviderSavedServer: 'Switched: Chat and Agent will use the server default model',

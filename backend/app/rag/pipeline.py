@@ -51,7 +51,9 @@ from app.rag.source_provenance import filter_original_results, original_text_of
 logger = logging.getLogger(__name__)
 
 
-USER_LLM_REQUEST_FAILED_MESSAGE = "个人模型调用失败，请检查 API Key / Base URL 或稍后重试。"
+USER_LLM_REQUEST_FAILED_MESSAGE = (
+    "个人模型调用失败。请在个人设置的 AI 模型设置中检查 API Key / Base URL，或稍后重试。"
+)
 
 
 def no_context_system_prompt(intent_guidance: str = "请基于通用知识作答。") -> str:

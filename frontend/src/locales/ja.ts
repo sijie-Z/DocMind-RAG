@@ -85,7 +85,7 @@ export default {
     providerZhipu: 'Zhipu GLM',
     providerCustom: 'カスタム（OpenAI 互換）',
     aiProviderModel: 'モデル',
-    aiProviderKeyHint: 'キーはサーバー側で暗号化して保存されます。空欄またはマスクのままにすると保存済みのキーを使用します。プロバイダーまたは Base URL を変更した場合は再入力が必要です',
+    aiProviderKeyHint: 'プロバイダーと Base URL が変わらない場合に限り、空欄またはマスクのままにすると保存済みの API キーを使用します。変更後は再入力が必要です。',
     aiProviderSave: 'モデル設定を保存',
     aiProviderSavedUser: '保存しました：チャットと Agent は個人のモデル設定を使用します',
     aiProviderSavedServer: '切り替えました：チャットと Agent はサーバーデフォルトのモデルを使用します',
