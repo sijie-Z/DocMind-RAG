@@ -95,7 +95,7 @@
         <!-- 右侧主要内容区 -->
         <div class="w-full lg:w-2/3 xl:w-3/4">
           <n-card class="rounded-2xl shadow-xl border-0 min-h-[600px]">
-            <n-tabs type="line" animated size="large" pane-class="pt-6">
+            <n-tabs v-model:value="activeTab" type="line" animated size="large" pane-class="pt-6">
               <!-- 概览面板 -->
               <!-- T5 命名归一：个人概览 tab 不再借用仪表盘页名，改用本页域键 profile.overview -->
               <n-tab-pane name="overview" :tab="t('profile.overview')">
@@ -489,7 +489,7 @@ import type { UserSession, UserAuditLog } from '@/api/user'
 
 const {
   getResponseDetail, message, dialog, t, locale, router, userStore, appStore,
-  loading, loadError, loadErrorMsg, userInfo, stats, activities, sessions, auditLogs,
+  loading, loadError, loadErrorMsg, activeTab, userInfo, stats, activities, sessions, auditLogs,
   sessionPagination, auditPagination, sessionColumns,
   showSessionDetail, auditColumns, storageUsage, storageUsedBytes, storageLimitBytes,
   storageMetricsSource, formatBytes, statItems, workflowCompletion, quickActions,

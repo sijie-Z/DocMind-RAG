@@ -1,6 +1,6 @@
 // Profile page composable — extracted from views/profile/index.vue
 
-import { ref, reactive, computed, onMounted, onUnmounted, watch, h, resolveComponent } from 'vue'
+import { ref, reactive, computed, onMounted, onUnmounted, watch, nextTick, h, resolveComponent } from 'vue'
 import { useDialog, NButton } from 'naive-ui'
 import { useDedupedMessage } from '@/utils/message'
 import { useConfirmDangerousAction } from '@/utils/confirm'
@@ -86,6 +86,8 @@ const appStore = useAppStore()
 const loading = ref(true)
 const loadError = ref(false)
 const loadErrorMsg = ref('')
+// 当前 tab：naive-ui 非激活 pane 默认卸载 DOM，回到概览需重建图表
+const activeTab = ref('overview')
 
 // 状态定义
 const userInfo = ref<UserInfo>({
@@ -735,6 +737,17 @@ watch(() => appStore.themeMode, () => {
   }
 })
 
+// tab 往返：离开概览后图表 DOM 被卸载，ECharts 实例随之失效；回来时重建
+watch(activeTab, async (tab) => {
+  if (tab !== 'overview') return
+  await nextTick()
+  storageChart?.dispose()
+  activityChart?.dispose()
+  storageChart = null
+  activityChart = null
+  initCharts()
+})
+
 // 语言切换：图表内嵌文案与日期轴需重建（ECharts 不会响应 i18n）
 watch(locale, () => {
   storageChart?.dispose()
@@ -771,8 +784,8 @@ const passwordForm = ref({
   confirmPassword: ''
 })
 
-// 校验规则
-const editFormRules = {
+// 校验规则（computed：语言切换后校验提示文案同步更新）
+const editFormRules = computed(() => ({
   nickname: [
     { required: true, message: t('profile.placeholder.nickname'), trigger: 'blur' },
     { min: 2, max: 50, message: t('profile.validation.nicknameLength'), trigger: 'blur' }
@@ -780,9 +793,9 @@ const editFormRules = {
   phone: [
     { pattern: /^1[3-9]\d{9}$/, message: t('profile.validation.phoneInvalid'), trigger: 'blur' }
   ]
-}
+}))
 
-const passwordFormRules = {
+const passwordFormRules = computed(() => ({
   currentPassword: [
     { required: true, message: t('profile.placeholder.oldPassword'), trigger: 'blur' }
   ],
@@ -800,7 +813,7 @@ const passwordFormRules = {
       trigger: 'blur'
     }
   ]
-}
+}))
 
 // 头像上传
 const getApiBaseUrl = () => import.meta.env.VITE_API_BASE_URL || ''
@@ -1060,7 +1073,7 @@ onUnmounted(() => {
   return {
   getResponseDetail,
   message, dialog, t, locale, router, userStore, appStore,
-  loading, loadError, loadErrorMsg,
+  loading, loadError, loadErrorMsg, activeTab,
   userInfo, stats, activities, sessions, auditLogs,
   sessionPagination, auditPagination,
   sessionColumns, showSessionDetail,

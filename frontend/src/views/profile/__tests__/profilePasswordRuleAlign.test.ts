@@ -105,7 +105,7 @@ async function validateNewPassword(password: string) {
           default: () =>
             h(
               NForm,
-              { model, rules: capturedApi.passwordFormRules },
+              { model, rules: capturedApi.passwordFormRules.value },
               {
                 default: () =>
                   h(
@@ -172,7 +172,7 @@ describe('个人中心改密最小长度与后端口径对齐（≥8）', () => 
   })
 
   it('规则上下限为 8-20，且四语文案同步（不再出现 6-20）', () => {
-    const rules = capturedApi.passwordFormRules.newPassword as Array<Record<string, unknown>>
+    const rules = capturedApi.passwordFormRules.value.newPassword as Array<Record<string, unknown>>
     const lengthRule = rules.find((rule) => typeof rule.min === 'number')
     expect(lengthRule, '缺少长度规则').toBeTruthy()
     expect(lengthRule?.min).toBe(8)

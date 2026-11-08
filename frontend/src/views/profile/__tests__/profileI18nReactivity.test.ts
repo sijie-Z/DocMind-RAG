@@ -18,6 +18,7 @@ import { createPinia, setActivePinia } from 'pinia'
 import naive, { NMessageProvider, NDialogProvider } from 'naive-ui'
 
 import ProfilePage from '../index.vue'
+import { useProfilePage } from '../composables/useProfilePage'
 import zh from '@/locales/zh'
 import en from '@/locales/en'
 
@@ -100,6 +101,24 @@ function mountPage() {  const pinia = createPinia()
   return mount(Host, { global: { plugins: [pinia, i18n, naive] } })
 }
 
+let capturedApi: ReturnType<typeof useProfilePage>
+
+function mountHarness() {
+  const pinia = createPinia()
+  setActivePinia(pinia)
+  const Harness = defineComponent({
+    setup() {
+      capturedApi = useProfilePage()
+      return () => null
+    },
+  })
+  const Host = defineComponent({
+    render: () =>
+      h(NDialogProvider, null, { default: () => h(NMessageProvider, null, { default: () => h(Harness) }) }),
+  })
+  return mount(Host, { global: { plugins: [pinia, i18n, naive] } })
+}
+
 async function switchLanguage(code: 'zh' | 'en') {
   i18n.global.locale.value = code
   await nextTick()
@@ -176,6 +195,32 @@ describe('Profile · 语言切换后文案实时更新', () => {
     expect(headers).toContain('IP')
     expect(headers).toContain('Time')
     expect(headers, '切换后审计列头残留中文').not.toContain('详情')
+  })
+
+  it('表单校验文案随 locale 更新（rules 为 computed，不是 setup 常量）', async () => {
+    mountHarness()
+    await flushPromises()
+    expect(capturedApi.editFormRules.value.nickname[0].message).toBe('请输入昵称')
+
+    await switchLanguage('en')
+
+    expect(capturedApi.editFormRules.value.nickname[0].message).toBe('Please enter nickname')
+    expect(capturedApi.passwordFormRules.value.newPassword[1].message).toBe(
+      'Password must be between 8-20 characters',
+    )
+  })
+
+  it('tab 往返后图表重建（非激活 pane 卸载 DOM）', async () => {
+    const wrapper = mountPage()
+    await flushPromises()
+    await wait(300)
+    const before = setOptionCalls.length
+
+    await openTab(wrapper, '偏好设置')
+    await openTab(wrapper, '概览')
+    await wait(100)
+
+    expect(setOptionCalls.length, '回到概览后应重新 setOption').toBeGreaterThan(before)
   })
 
   it('图表内嵌文案随 locale 重建（ECharts 不响应 i18n）', async () => {

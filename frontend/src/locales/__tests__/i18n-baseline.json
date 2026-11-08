@@ -49,10 +49,6 @@
       "org.loadFailed",
       "org.saveFailed",
       "org.updateSuccess",
-      "profile.languageSettingDesc",
-      "profile.revokeFailed",
-      "profile.sessionRevoked",
-      "profile.themeSettingDesc",
       "prompts.create"
     ],
     "fr": [
@@ -100,10 +96,6 @@
       "org.loadFailed",
       "org.saveFailed",
       "org.updateSuccess",
-      "profile.languageSettingDesc",
-      "profile.revokeFailed",
-      "profile.sessionRevoked",
-      "profile.themeSettingDesc",
       "prompts.create"
     ]
   }
