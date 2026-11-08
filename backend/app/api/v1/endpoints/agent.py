@@ -85,6 +85,7 @@ from app.services.session_service import (
     session_access_org_conditions,
     session_visibility_conditions,
 )
+from app.services.terminal_service import terminal_service
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -1833,6 +1834,11 @@ async def get_config(
     return {
         "success": True,
         "data": config.to_dict(),
+        # 服务端能力/强制策略：前端据此禁用开关、隐藏不可用入口（不再假装可配置）
+        "capabilities": {
+            "enforced_disabled_tools": list(DEFAULT_DISABLED_TOOLS),
+            "terminal_enabled": terminal_service.enabled(),
+        },
     }
 
 

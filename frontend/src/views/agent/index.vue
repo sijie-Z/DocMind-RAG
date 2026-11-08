@@ -103,6 +103,7 @@
           <n-icon size="14" class="mr-1" aria-hidden="true"><SettingsOutline /></n-icon>{{ t('agent.config') }}
         </button>
         <button
+          v-if="agentStore.terminalEnabled"
           class="header-btn"
           :class="{ active: showTerminal }"
           data-testid="agent-terminal-toggle"
@@ -1711,10 +1712,19 @@ async function handleNewSession() {
   }
 }
 
-function handleConfigApply(config: typeof agentStore.config) {
+async function handleConfigApply(config: typeof agentStore.config) {
+  const previous = JSON.parse(JSON.stringify(agentStore.config))
   agentStore.updateConfig(config)
-  // Persist to server
-  agentApi.updateConfig(config).catch(() => {})
+  try {
+    const res = await agentApi.updateConfig(config)
+    // 以服务端合并后的配置为准（高危工具的强制禁单会回加）
+    const saved = apiUnwrap<typeof agentStore.config>(res)
+    if (saved && typeof saved === 'object') agentStore.updateConfig(saved)
+  } catch {
+    // 保存失败不得伪装成功：回滚本地状态并如实提示
+    agentStore.updateConfig(previous)
+    message.error(t('agent.configSaveFailed'))
+  }
 }
 
 // Load initial data — wrap in try/catch to prevent errors from
@@ -1760,6 +1770,10 @@ async function loadInit() {
     if (Array.isArray(toolsData)) agentStore.tools = toolsData
     if (Array.isArray(sessionsData?.sessions)) agentStore.setSessions(sessionsData.sessions)
     if (configData && typeof configData === 'object') agentStore.updateConfig(configData)
+    // 服务端能力：终端默认关闭时不展示入口（此前点了才报 TERMINAL_ENABLED=false）
+    const caps = (configRes?.data as { capabilities?: { terminal_enabled?: unknown } } | undefined)
+      ?.capabilities
+    agentStore.terminalEnabled = caps?.terminal_enabled === true
   } catch (e) {
     if (!agentStore.isIdentityEpochCurrent(requestEpoch)) return
     initError.value = true

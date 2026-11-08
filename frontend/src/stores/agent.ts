@@ -58,6 +58,8 @@ export const useAgentStore = defineStore('agent', () => {
 
   // ── HITL（人在环）：当前任务 / 任务态 / 待审批请求 ──
   const taskId = ref<string | null>(null)
+  // 服务端能力（GET /agent/config capabilities）：终端关闭时不展示入口
+  const terminalEnabled = ref(false)
   // 'idle' 仅是前端占位；其余与后端 TaskStatus 对齐（'failed' 由错误分支落）
   const taskState = ref<'idle' | AgentTaskState>('idle')
   const pendingApproval = ref<PendingApproval | null>(null)
@@ -516,6 +518,7 @@ export const useAgentStore = defineStore('agent', () => {
   return {
     // State
     config,
+    terminalEnabled,
     identityEpoch,
     sessions,
     currentSessionId,

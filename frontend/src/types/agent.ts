@@ -346,6 +346,10 @@ export interface ToolInfo {
   parameters: Record<string, any>
   requires_auth: boolean
   disabled_by_default: boolean
+  /** 服务端强制禁用（高危工具）：客户端无法解除，UI 必须禁用开关。 */
+  config_disabled?: boolean
+  /** 运行时按条件启用（如终端需服务端开关）：开启开关也不保证可用。 */
+  gated_by_predicate?: boolean
 }
 
 export interface SkillInfo {

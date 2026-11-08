@@ -91,13 +91,20 @@
               <input
                 type="checkbox"
                 :checked="!localConfig.disabled_tools.includes(tool.name)"
+                :disabled="tool.config_disabled"
                 @change="toggleTool(tool.name)"
               />
               <span class="switch-slider"></span>
             </label>
             <span class="tool-item-name" :title="tool.description">
               {{ tool.name }}
-              <span v-if="tool.disabled_by_default" class="default-disabled">默认关闭</span>
+              <span v-if="tool.config_disabled" class="default-disabled" :title="t('agent.serverDisabledHint')">
+                {{ t('agent.serverDisabled') }}
+              </span>
+              <span v-else-if="tool.gated_by_predicate" class="default-disabled" :title="t('agent.gatedToolHint')">
+                {{ t('agent.gatedTool') }}
+              </span>
+              <span v-else-if="tool.disabled_by_default" class="default-disabled">默认关闭</span>
             </span>
           </div>
         </div>
@@ -151,6 +158,9 @@ watch(
 )
 
 function toggleTool(name: string) {
+  // 服务端强制禁用的工具不得在 UI 上“打开”（PUT 会被强制合并回去）
+  const tool = availableTools.value.find((t) => t.name === name)
+  if (tool?.config_disabled) return
   const idx = localConfig.disabled_tools.indexOf(name)
   if (idx === -1) {
     localConfig.disabled_tools.push(name)
