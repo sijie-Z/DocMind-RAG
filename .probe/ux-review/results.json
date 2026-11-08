@@ -1,0 +1,440 @@
+{
+  "emptyState": {
+    "hasWelcome": true,
+    "bodyScrollWidth": 1440,
+    "innerWidth": 1440
+  },
+  "layout1440Loading": {
+    "label": "1440-loading",
+    "viewport": {
+      "w": 1440,
+      "h": 900
+    },
+    "paddingBottom": "216px",
+    "paddingTop": "80px",
+    "scrollTop": 0,
+    "scrollHeight": 836,
+    "clientHeight": 836,
+    "distToBottom": 0,
+    "scroller": {
+      "top": 64,
+      "bottom": 900,
+      "height": 836
+    },
+    "footer": {
+      "top": 721,
+      "bottom": 900,
+      "height": 179,
+      "position": "absolute"
+    },
+    "content": {
+      "top": 144,
+      "bottom": 350
+    },
+    "gapContentToFooter": 371,
+    "stopBtn": {
+      "top": 697,
+      "bottom": 725,
+      "height": 28,
+      "width": 108,
+      "clearanceAboveContent": 347,
+      "offsetAboveFooterTop": 24
+    },
+    "backToBottom": null
+  },
+  "layout1440AfterStop": {
+    "label": "1440-after-stop",
+    "viewport": {
+      "w": 1440,
+      "h": 900
+    },
+    "paddingBottom": "160px",
+    "paddingTop": "80px",
+    "scrollTop": 0,
+    "scrollHeight": 836,
+    "clientHeight": 836,
+    "distToBottom": 0,
+    "scroller": {
+      "top": 64,
+      "bottom": 900,
+      "height": 836
+    },
+    "footer": {
+      "top": 721,
+      "bottom": 900,
+      "height": 179,
+      "position": "absolute"
+    },
+    "content": {
+      "top": 144,
+      "bottom": 290
+    },
+    "gapContentToFooter": 431,
+    "stopBtn": null,
+    "backToBottom": null
+  },
+  "afterStop": {
+    "padding": "160px",
+    "backToBottomVisible": false
+  },
+  "errors1440": [
+    "WebSocket connection to 'ws://localhost:5187/api/v1/notifications/ws' failed: Error during WebSocket handshake: Unexpected response code: 403",
+    "WebSocket connection to 'ws://localhost:5187/api/v1/notifications/ws' failed: Error during WebSocket handshake: Unexpected response code: 403"
+  ],
+  "language": {
+    "popoverBefore": {
+      "open": true,
+      "text": "简体中文 English 日本語 Français"
+    },
+    "duringLoad": {
+      "popoverOpen": true,
+      "anySpinner": false,
+      "anyDisabled": false
+    },
+    "closedAfterMs": 2137,
+    "nowEnglish": "en",
+    "errors": [
+      "WebSocket connection to 'ws://localhost:5187/api/v1/notifications/ws' failed: Error during WebSocket handshake: Unexpected response code: 403",
+      "WebSocket connection to 'ws://localhost:5187/api/v1/notifications/ws' failed: Error during WebSocket handshake: Unexpected response code: 403"
+    ]
+  },
+  "languageFailure": {
+    "popoverStillOpen": true,
+    "toasts": [],
+    "htmlLang": "zh-CN"
+  },
+  "handoff": {
+    "url": "/agent",
+    "value": "请核验这两份合同的关键条款差异",
+    "focused": true,
+    "activeTag": "TEXTAREA.agent-textarea",
+    "caret": {
+      "start": 15,
+      "end": 15,
+      "len": 15
+    },
+    "textareaHeight": 40,
+    "toastTexts": [
+      "深度分析已移至 Agent 工作台（支持审批/回放）"
+    ],
+    "bodyScrollWidth": 1440
+  },
+  "handoffPosts": [],
+  "handoffAfterRefresh": {
+    "value": "",
+    "url": "/agent"
+  },
+  "handoffSecondSameText": {
+    "value": "请核验这两份合同的关键条款差异",
+    "url": "/agent"
+  },
+  "handoffEmpty": {
+    "value": "",
+    "focused": false,
+    "activeTag": "BODY"
+  },
+  "errorsHandoff": [
+    "WebSocket connection to 'ws://localhost:5187/api/v1/notifications/ws' failed: Error during WebSocket handshake: Unexpected response code: 403",
+    "WebSocket connection to 'ws://localhost:5187/api/v1/notifications/ws' failed: Error during WebSocket handshake: Unexpected response code: 403",
+    "WebSocket connection to 'ws://localhost:5187/api/v1/notifications/ws' failed: Error during WebSocket handshake: Unexpected response code: 403",
+    "WebSocket connection to 'ws://localhost:5187/api/v1/notifications/ws' failed: Error during WebSocket handshake: Unexpected response code: 403",
+    "WebSocket connection to 'ws://localhost:5187/api/v1/notifications/ws' failed: Error during WebSocket handshake: Unexpected response code: 403",
+    "WebSocket connection to 'ws://localhost:5187/api/v1/notifications/ws' failed: Error during WebSocket handshake: Unexpected response code: 403",
+    "WebSocket connection to 'ws://localhost:5187/api/v1/notifications/ws' failed: Error during WebSocket handshake: Unexpected response code: 403"
+  ],
+  "header_375": {
+    "hamburger": {
+      "aria": "打开菜单",
+      "rect": {
+        "x": 16,
+        "y": 6,
+        "width": 44,
+        "height": 44,
+        "top": 6,
+        "right": 60,
+        "bottom": 50,
+        "left": 16
+      },
+      "svg": "<path fill=\"none\" stroke=\"currentColor\" stroke-linecap=\"round\" stroke-miterlimit=\"10\" stroke-width=\"32\" d=\"M80 160h352\">"
+    },
+    "bubbles": {
+      "aria": "打开会话列表",
+      "rect": {
+        "x": 16,
+        "y": 69,
+        "width": 28,
+        "height": 28,
+        "top": 69,
+        "right": 44,
+        "bottom": 97,
+        "left": 16
+      },
+      "svg": "<path d=\"M431 320.6c-1-3.6 1.2-8.6 3.3-12.2a33.68 33.68 0 0 1 2.1-3.1A162 162 0 0 0 464 215c.3-92.2-77.5-167-173.7-167c-"
+    },
+    "activeElement": "BODY"
+  },
+  "layout_375_loading": {
+    "label": "375-loading",
+    "viewport": {
+      "w": 375,
+      "h": 812
+    },
+    "paddingBottom": "248px",
+    "paddingTop": "80px",
+    "scrollTop": 0,
+    "scrollHeight": 756,
+    "clientHeight": 756,
+    "distToBottom": 0,
+    "scroller": {
+      "top": 56,
+      "bottom": 812,
+      "height": 756
+    },
+    "footer": {
+      "top": 615,
+      "bottom": 812,
+      "height": 197,
+      "position": "fixed"
+    },
+    "content": {
+      "top": 136,
+      "bottom": 342
+    },
+    "gapContentToFooter": 273,
+    "stopBtn": {
+      "top": 583,
+      "bottom": 611,
+      "height": 28,
+      "width": 108,
+      "clearanceAboveContent": 241,
+      "offsetAboveFooterTop": 32
+    },
+    "backToBottom": null
+  },
+  "layout_375_afterStop": {
+    "label": "375-after-stop",
+    "viewport": {
+      "w": 375,
+      "h": 812
+    },
+    "paddingBottom": "248px",
+    "paddingTop": "80px",
+    "scrollTop": 0,
+    "scrollHeight": 756,
+    "clientHeight": 756,
+    "distToBottom": 0,
+    "scroller": {
+      "top": 56,
+      "bottom": 812,
+      "height": 756
+    },
+    "footer": {
+      "top": 615,
+      "bottom": 812,
+      "height": 197,
+      "position": "fixed"
+    },
+    "content": {
+      "top": 136,
+      "bottom": 282
+    },
+    "gapContentToFooter": 333,
+    "stopBtn": null,
+    "backToBottom": null
+  },
+  "errors_375": [
+    "WebSocket connection to 'ws://localhost:5187/api/v1/notifications/ws' failed: Error during WebSocket handshake: Unexpected response code: 403",
+    "WebSocket connection to 'ws://localhost:5187/api/v1/notifications/ws' failed: Error during WebSocket handshake: Unexpected response code: 403"
+  ],
+  "header_375-dark": {
+    "hamburger": {
+      "aria": "打开菜单",
+      "rect": {
+        "x": 16,
+        "y": 6,
+        "width": 44,
+        "height": 44,
+        "top": 6,
+        "right": 60,
+        "bottom": 50,
+        "left": 16
+      },
+      "svg": "<path fill=\"none\" stroke=\"currentColor\" stroke-linecap=\"round\" stroke-miterlimit=\"10\" stroke-width=\"32\" d=\"M80 160h352\">"
+    },
+    "bubbles": {
+      "aria": "打开会话列表",
+      "rect": {
+        "x": 16,
+        "y": 69,
+        "width": 28,
+        "height": 28,
+        "top": 69,
+        "right": 44,
+        "bottom": 97,
+        "left": 16
+      },
+      "svg": "<path d=\"M431 320.6c-1-3.6 1.2-8.6 3.3-12.2a33.68 33.68 0 0 1 2.1-3.1A162 162 0 0 0 464 215c.3-92.2-77.5-167-173.7-167c-"
+    },
+    "activeElement": "BODY"
+  },
+  "layout_375-dark_loading": {
+    "label": "375-dark-loading",
+    "viewport": {
+      "w": 375,
+      "h": 812
+    },
+    "paddingBottom": "248px",
+    "paddingTop": "80px",
+    "scrollTop": 0,
+    "scrollHeight": 756,
+    "clientHeight": 756,
+    "distToBottom": 0,
+    "scroller": {
+      "top": 56,
+      "bottom": 812,
+      "height": 756
+    },
+    "footer": {
+      "top": 615,
+      "bottom": 812,
+      "height": 197,
+      "position": "fixed"
+    },
+    "content": {
+      "top": 136,
+      "bottom": 342
+    },
+    "gapContentToFooter": 273,
+    "stopBtn": {
+      "top": 583,
+      "bottom": 611,
+      "height": 28,
+      "width": 108,
+      "clearanceAboveContent": 241,
+      "offsetAboveFooterTop": 32
+    },
+    "backToBottom": null
+  },
+  "layout_375-dark_afterStop": {
+    "label": "375-dark-after-stop",
+    "viewport": {
+      "w": 375,
+      "h": 812
+    },
+    "paddingBottom": "248px",
+    "paddingTop": "80px",
+    "scrollTop": 0,
+    "scrollHeight": 756,
+    "clientHeight": 756,
+    "distToBottom": 0,
+    "scroller": {
+      "top": 56,
+      "bottom": 812,
+      "height": 756
+    },
+    "footer": {
+      "top": 615,
+      "bottom": 812,
+      "height": 197,
+      "position": "fixed"
+    },
+    "content": {
+      "top": 136,
+      "bottom": 282
+    },
+    "gapContentToFooter": 333,
+    "stopBtn": null,
+    "backToBottom": null
+  },
+  "errors_375-dark": [
+    "WebSocket connection to 'ws://localhost:5187/api/v1/notifications/ws' failed: Error during WebSocket handshake: Unexpected response code: 403",
+    "WebSocket connection to 'ws://localhost:5187/api/v1/notifications/ws' failed: Error during WebSocket handshake: Unexpected response code: 403"
+  ],
+  "layout768Loading": {
+    "label": "768-loading",
+    "viewport": {
+      "w": 768,
+      "h": 1024
+    },
+    "paddingBottom": "216px",
+    "paddingTop": "80px",
+    "scrollTop": 0,
+    "scrollHeight": 960,
+    "clientHeight": 960,
+    "distToBottom": 0,
+    "scroller": {
+      "top": 64,
+      "bottom": 1024,
+      "height": 960
+    },
+    "footer": {
+      "top": 819,
+      "bottom": 1024,
+      "height": 205,
+      "position": "absolute"
+    },
+    "content": {
+      "top": 144,
+      "bottom": 350
+    },
+    "gapContentToFooter": 469,
+    "stopBtn": {
+      "top": 795,
+      "bottom": 823,
+      "height": 28,
+      "width": 108,
+      "clearanceAboveContent": 445,
+      "offsetAboveFooterTop": 24
+    },
+    "backToBottom": null
+  },
+  "errors768": [
+    "WebSocket connection to 'ws://localhost:5187/api/v1/notifications/ws' failed: Error during WebSocket handshake: Unexpected response code: 403"
+  ],
+  "layout1440DarkLoading": {
+    "label": "1440-dark-loading",
+    "viewport": {
+      "w": 1440,
+      "h": 900
+    },
+    "paddingBottom": "216px",
+    "paddingTop": "80px",
+    "scrollTop": 0,
+    "scrollHeight": 836,
+    "clientHeight": 836,
+    "distToBottom": 0,
+    "scroller": {
+      "top": 64,
+      "bottom": 900,
+      "height": 836
+    },
+    "footer": {
+      "top": 721,
+      "bottom": 900,
+      "height": 179,
+      "position": "absolute"
+    },
+    "content": {
+      "top": 144,
+      "bottom": 350
+    },
+    "gapContentToFooter": 371,
+    "stopBtn": {
+      "top": 697,
+      "bottom": 725,
+      "height": 28,
+      "width": 108,
+      "clearanceAboveContent": 347,
+      "offsetAboveFooterTop": 24
+    },
+    "backToBottom": null
+  },
+  "darkApplied": {
+    "htmlClass": "dark",
+    "bodyBg": "rgba(0, 0, 0, 0)",
+    "footerBg": "linear-gradient(to top in oklch, rgb(3, 7, 18) 0%, rgb(3, 7, 18) 50%, rgba(3, 7, 18, 0))"
+  },
+  "errors1440Dark": [
+    "WebSocket connection to 'ws://localhost:5187/api/v1/notifications/ws' failed: Error during WebSocket handshake: Unexpected response code: 403"
+  ]
+}

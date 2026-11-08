@@ -1,0 +1,6 @@
+{
+  "title": "feat(firsthome): 产品首页改为合同核验叙事，侧栏折叠移入品牌头部",
+  "head": "feat/firsthome-redesign",
+  "base": "develop",
+  "body": "## 背景\n\n用户指出 /firsthome 的 UI 需要改：原页面是开发者/工程叙事（「让功能不悄悄变坏」），不是采购/法务看的产品页；侧栏底部折叠按钮孤立在边框栏里也显得廉价。\n\n## 变更\n\n- Hero 改为「合同核验，逐条有据」：一张纯 HTML/CSS 产品示意（付款期限 30→60 日、证据原文、「证据原文未变」徽标、带 [1]/[2] 来源页码的问答卡，标注「界面示意」）\n- 统计区移除无法解释的 88%/28/ClauseHit，改为可核验产品事实：逐条证据 / 原文可回溯 / 快照哈希 / 四语言\n- 三步 + 四张能力卡：有据问答、合同核验、可审计、私有化与多语言；文案对齐真实能力，不编造客户/指标\n- 侧栏折叠/展开按钮移入品牌头部右侧（44px、aria-label 保留）；折叠态（80px）头部居中显示展开按钮；移动端仍隐藏，由抽屉关闭承接；底部只保留主题/语言/用户\n- 四语文案齐备；纸+墨、单一动作蓝 #2563eb、无紫色/装饰性渐变；375/768/1440 与深色模式\n\n## 验证\n\n- firsthome + keySnapshot + completeness + tUsage + CJK + responsiveDarkPolish：34 passed\n- `vue-tsc` 0；ESLint 0；`check:no-purple` 通过\n- Playwright 实测 1440/768/375 与暗色：无横向溢出、可见按钮 ≥44px；侧栏折叠/展开按钮可见\n- 截图：`firsthome-1440.png`、`firsthome-375.png`、`sidebar-expanded-1440.png`、`sidebar-collapsed-1440.png`\n\n注：截图页的「网络连接失败」来自评审环境的接口 mock/abort，与本次改动无关；firsthome 本身不依赖后端。"
+}

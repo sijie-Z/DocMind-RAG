@@ -1,0 +1,619 @@
+{
+  "375": {
+    "loading": {
+      "viewport": {
+        "w": 375,
+        "h": 812
+      },
+      "padding": "248px",
+      "scrollTop": 1216,
+      "scrollHeight": 1972,
+      "clientHeight": 756,
+      "distToBottom": 0,
+      "footer": {
+        "top": 615,
+        "height": 197
+      },
+      "stop": {
+        "top": 583,
+        "bottom": 611,
+        "left": 134,
+        "right": 242
+      },
+      "loadingRow": {
+        "top": 524,
+        "bottom": 564,
+        "left": 16,
+        "right": 359
+      },
+      "loadingAvatar": {
+        "top": 524,
+        "bottom": 564,
+        "left": 16,
+        "right": 56
+      },
+      "loadingDots": {
+        "top": 540,
+        "bottom": 548,
+        "left": 72,
+        "right": 108
+      },
+      "bubbleOverlaps": [],
+      "avatarOverlap": null,
+      "dotsOverlap": null,
+      "loadingRowOverlap": null,
+      "lastBubble": {
+        "top": 414,
+        "bottom": 500,
+        "left": 72,
+        "right": 172
+      },
+      "under": [
+        {
+          "label": "top-center",
+          "x": 188,
+          "y": 586,
+          "els": [
+            {
+              "tag": "BUTTON",
+              "cls": "n-button n-button--default-type n-button--small-type shadow-lg border-",
+              "text": "停止生成"
+            },
+            {
+              "tag": "DIV",
+              "cls": "absolute -top-12 left-1/2 -translate-x-1/2",
+              "text": "停止生成"
+            },
+            {
+              "tag": "DIV",
+              "cls": "flex-1 overflow-y-auto px-4 pt-20 pb-40 scroll-smooth relative",
+              "text": "请核验这份合同的关键条款差异。请核验这份合同的关"
+            },
+            {
+              "tag": "MAIN",
+              "cls": "flex-1 flex flex-col h-full relative min-w-0",
+              "text": "文档问答请核验这份合同的关键条款差异。请核验这份"
+            }
+          ]
+        },
+        {
+          "label": "left-mid",
+          "x": 150,
+          "y": 597,
+          "els": [
+            {
+              "tag": "path",
+              "cls": "[object SVGAnimatedString]",
+              "text": ""
+            },
+            {
+              "tag": "svg",
+              "cls": "[object SVGAnimatedString]",
+              "text": ""
+            },
+            {
+              "tag": "I",
+              "cls": "n-icon",
+              "text": ""
+            },
+            {
+              "tag": "DIV",
+              "cls": "n-icon-slot",
+              "text": ""
+            }
+          ]
+        },
+        {
+          "label": "right-mid",
+          "x": 225,
+          "y": 597,
+          "els": [
+            {
+              "tag": "SPAN",
+              "cls": "n-button__content",
+              "text": "停止生成"
+            },
+            {
+              "tag": "BUTTON",
+              "cls": "n-button n-button--default-type n-button--small-type shadow-lg border-",
+              "text": "停止生成"
+            },
+            {
+              "tag": "DIV",
+              "cls": "absolute -top-12 left-1/2 -translate-x-1/2",
+              "text": "停止生成"
+            },
+            {
+              "tag": "DIV",
+              "cls": "flex-1 overflow-y-auto px-4 pt-20 pb-40 scroll-smooth relative",
+              "text": "请核验这份合同的关键条款差异。请核验这份合同的关"
+            }
+          ]
+        },
+        {
+          "label": "center",
+          "x": 188,
+          "y": 597,
+          "els": [
+            {
+              "tag": "SPAN",
+              "cls": "n-button__content",
+              "text": "停止生成"
+            },
+            {
+              "tag": "BUTTON",
+              "cls": "n-button n-button--default-type n-button--small-type shadow-lg border-",
+              "text": "停止生成"
+            },
+            {
+              "tag": "DIV",
+              "cls": "absolute -top-12 left-1/2 -translate-x-1/2",
+              "text": "停止生成"
+            },
+            {
+              "tag": "DIV",
+              "cls": "flex-1 overflow-y-auto px-4 pt-20 pb-40 scroll-smooth relative",
+              "text": "请核验这份合同的关键条款差异。请核验这份合同的关"
+            }
+          ]
+        }
+      ]
+    },
+    "afterStopScroll": {
+      "scrollTop": 1156,
+      "scrollHeight": 1912,
+      "clientHeight": 756
+    },
+    "after": {
+      "viewport": {
+        "w": 375,
+        "h": 812
+      },
+      "padding": "248px",
+      "scrollTop": 1156,
+      "scrollHeight": 1912,
+      "clientHeight": 756,
+      "distToBottom": 0,
+      "footer": {
+        "top": 615,
+        "height": 197
+      },
+      "stop": null,
+      "loadingRow": null,
+      "loadingAvatar": null,
+      "loadingDots": null,
+      "bubbleOverlaps": [],
+      "avatarOverlap": null,
+      "dotsOverlap": null,
+      "loadingRowOverlap": null,
+      "lastBubble": {
+        "top": 474,
+        "bottom": 564,
+        "left": 72,
+        "right": 321
+      },
+      "under": []
+    },
+    "errors": []
+  },
+  "768": {
+    "loading": {
+      "viewport": {
+        "w": 768,
+        "h": 1024
+      },
+      "padding": "216px",
+      "scrollTop": 493,
+      "scrollHeight": 1453,
+      "clientHeight": 960,
+      "distToBottom": 0,
+      "footer": {
+        "top": 819,
+        "height": 205
+      },
+      "stop": {
+        "top": 795,
+        "bottom": 823,
+        "left": 458,
+        "right": 566
+      },
+      "loadingRow": {
+        "top": 768,
+        "bottom": 808,
+        "left": 272,
+        "right": 752
+      },
+      "loadingAvatar": {
+        "top": 768,
+        "bottom": 808,
+        "left": 272,
+        "right": 312
+      },
+      "loadingDots": {
+        "top": 784,
+        "bottom": 792,
+        "left": 328,
+        "right": 364
+      },
+      "bubbleOverlaps": [],
+      "avatarOverlap": null,
+      "dotsOverlap": null,
+      "loadingRowOverlap": {
+        "w": 108,
+        "h": 13
+      },
+      "lastBubble": {
+        "top": 658,
+        "bottom": 744,
+        "left": 328,
+        "right": 428
+      },
+      "under": [
+        {
+          "label": "top-center",
+          "x": 512,
+          "y": 798,
+          "els": [
+            {
+              "tag": "BUTTON",
+              "cls": "n-button n-button--default-type n-button--small-type shadow-lg border-",
+              "text": "停止生成"
+            },
+            {
+              "tag": "DIV",
+              "cls": "absolute -top-12 left-1/2 -translate-x-1/2",
+              "text": "停止生成"
+            },
+            {
+              "tag": "DIV",
+              "cls": "flex gap-4 animate-pulse",
+              "text": ""
+            },
+            {
+              "tag": "DIV",
+              "cls": "max-w-3xl mx-auto space-y-6",
+              "text": "请核验这份合同的关键条款差异。请核验这份合同的关"
+            }
+          ]
+        },
+        {
+          "label": "left-mid",
+          "x": 474,
+          "y": 809,
+          "els": [
+            {
+              "tag": "path",
+              "cls": "[object SVGAnimatedString]",
+              "text": ""
+            },
+            {
+              "tag": "svg",
+              "cls": "[object SVGAnimatedString]",
+              "text": ""
+            },
+            {
+              "tag": "I",
+              "cls": "n-icon",
+              "text": ""
+            },
+            {
+              "tag": "DIV",
+              "cls": "n-icon-slot",
+              "text": ""
+            }
+          ]
+        },
+        {
+          "label": "right-mid",
+          "x": 550,
+          "y": 809,
+          "els": [
+            {
+              "tag": "SPAN",
+              "cls": "n-button__content",
+              "text": "停止生成"
+            },
+            {
+              "tag": "BUTTON",
+              "cls": "n-button n-button--default-type n-button--small-type shadow-lg border-",
+              "text": "停止生成"
+            },
+            {
+              "tag": "DIV",
+              "cls": "absolute -top-12 left-1/2 -translate-x-1/2",
+              "text": "停止生成"
+            },
+            {
+              "tag": "DIV",
+              "cls": "flex-1 overflow-y-auto px-4 pt-20 pb-40 scroll-smooth relative",
+              "text": "请核验这份合同的关键条款差异。请核验这份合同的关"
+            }
+          ]
+        },
+        {
+          "label": "center",
+          "x": 512,
+          "y": 809,
+          "els": [
+            {
+              "tag": "SPAN",
+              "cls": "n-button__content",
+              "text": "停止生成"
+            },
+            {
+              "tag": "BUTTON",
+              "cls": "n-button n-button--default-type n-button--small-type shadow-lg border-",
+              "text": "停止生成"
+            },
+            {
+              "tag": "DIV",
+              "cls": "absolute -top-12 left-1/2 -translate-x-1/2",
+              "text": "停止生成"
+            },
+            {
+              "tag": "DIV",
+              "cls": "flex-1 overflow-y-auto px-4 pt-20 pb-40 scroll-smooth relative",
+              "text": "请核验这份合同的关键条款差异。请核验这份合同的关"
+            }
+          ]
+        }
+      ]
+    },
+    "afterStopScroll": {
+      "scrollTop": 377,
+      "scrollHeight": 1337,
+      "clientHeight": 960
+    },
+    "after": {
+      "viewport": {
+        "w": 768,
+        "h": 1024
+      },
+      "padding": "160px",
+      "scrollTop": 377,
+      "scrollHeight": 1337,
+      "clientHeight": 960,
+      "distToBottom": 0,
+      "footer": {
+        "top": 819,
+        "height": 205
+      },
+      "stop": null,
+      "loadingRow": null,
+      "loadingAvatar": null,
+      "loadingDots": null,
+      "bubbleOverlaps": [],
+      "avatarOverlap": null,
+      "dotsOverlap": null,
+      "loadingRowOverlap": null,
+      "lastBubble": {
+        "top": 774,
+        "bottom": 864,
+        "left": 328,
+        "right": 577
+      },
+      "under": []
+    },
+    "errors": []
+  },
+  "1440": {
+    "loading": {
+      "viewport": {
+        "w": 1440,
+        "h": 900
+      },
+      "padding": "216px",
+      "scrollTop": 227,
+      "scrollHeight": 1063,
+      "clientHeight": 836,
+      "distToBottom": 0,
+      "footer": {
+        "top": 721,
+        "height": 179
+      },
+      "stop": {
+        "top": 697,
+        "bottom": 725,
+        "left": 938,
+        "right": 1046
+      },
+      "loadingRow": {
+        "top": 644,
+        "bottom": 684,
+        "left": 608,
+        "right": 1376
+      },
+      "loadingAvatar": {
+        "top": 644,
+        "bottom": 684,
+        "left": 608,
+        "right": 648
+      },
+      "loadingDots": {
+        "top": 660,
+        "bottom": 668,
+        "left": 664,
+        "right": 700
+      },
+      "bubbleOverlaps": [],
+      "avatarOverlap": null,
+      "dotsOverlap": null,
+      "loadingRowOverlap": null,
+      "lastBubble": {
+        "top": 534,
+        "bottom": 620,
+        "left": 664,
+        "right": 764
+      },
+      "under": [
+        {
+          "label": "top-center",
+          "x": 992,
+          "y": 700,
+          "els": [
+            {
+              "tag": "BUTTON",
+              "cls": "n-button n-button--default-type n-button--small-type shadow-lg border-",
+              "text": "停止生成"
+            },
+            {
+              "tag": "DIV",
+              "cls": "absolute -top-12 left-1/2 -translate-x-1/2",
+              "text": "停止生成"
+            },
+            {
+              "tag": "DIV",
+              "cls": "flex-1 overflow-y-auto px-4 pt-20 pb-40 scroll-smooth relative",
+              "text": "请核验这份合同的关键条款差异。请核验这份合同的关"
+            },
+            {
+              "tag": "MAIN",
+              "cls": "flex-1 flex flex-col h-full relative min-w-0",
+              "text": "文档问答请核验这份合同的关键条款差异。请核验这份"
+            }
+          ]
+        },
+        {
+          "label": "left-mid",
+          "x": 954,
+          "y": 711,
+          "els": [
+            {
+              "tag": "path",
+              "cls": "[object SVGAnimatedString]",
+              "text": ""
+            },
+            {
+              "tag": "svg",
+              "cls": "[object SVGAnimatedString]",
+              "text": ""
+            },
+            {
+              "tag": "I",
+              "cls": "n-icon",
+              "text": ""
+            },
+            {
+              "tag": "DIV",
+              "cls": "n-icon-slot",
+              "text": ""
+            }
+          ]
+        },
+        {
+          "label": "right-mid",
+          "x": 1030,
+          "y": 711,
+          "els": [
+            {
+              "tag": "SPAN",
+              "cls": "n-button__content",
+              "text": "停止生成"
+            },
+            {
+              "tag": "BUTTON",
+              "cls": "n-button n-button--default-type n-button--small-type shadow-lg border-",
+              "text": "停止生成"
+            },
+            {
+              "tag": "DIV",
+              "cls": "absolute -top-12 left-1/2 -translate-x-1/2",
+              "text": "停止生成"
+            },
+            {
+              "tag": "DIV",
+              "cls": "flex-1 overflow-y-auto px-4 pt-20 pb-40 scroll-smooth relative",
+              "text": "请核验这份合同的关键条款差异。请核验这份合同的关"
+            }
+          ]
+        },
+        {
+          "label": "center",
+          "x": 992,
+          "y": 711,
+          "els": [
+            {
+              "tag": "SPAN",
+              "cls": "n-button__content",
+              "text": "停止生成"
+            },
+            {
+              "tag": "BUTTON",
+              "cls": "n-button n-button--default-type n-button--small-type shadow-lg border-",
+              "text": "停止生成"
+            },
+            {
+              "tag": "DIV",
+              "cls": "absolute -top-12 left-1/2 -translate-x-1/2",
+              "text": "停止生成"
+            },
+            {
+              "tag": "DIV",
+              "cls": "flex-1 overflow-y-auto px-4 pt-20 pb-40 scroll-smooth relative",
+              "text": "请核验这份合同的关键条款差异。请核验这份合同的关"
+            }
+          ]
+        }
+      ]
+    },
+    "afterStopScroll": {
+      "scrollTop": 111,
+      "scrollHeight": 947,
+      "clientHeight": 836
+    },
+    "after": {
+      "viewport": {
+        "w": 1440,
+        "h": 900
+      },
+      "padding": "160px",
+      "scrollTop": 111,
+      "scrollHeight": 947,
+      "clientHeight": 836,
+      "distToBottom": 0,
+      "footer": {
+        "top": 721,
+        "height": 179
+      },
+      "stop": null,
+      "loadingRow": null,
+      "loadingAvatar": null,
+      "loadingDots": null,
+      "bubbleOverlaps": [],
+      "avatarOverlap": null,
+      "dotsOverlap": null,
+      "loadingRowOverlap": null,
+      "lastBubble": {
+        "top": 650,
+        "bottom": 740,
+        "left": 664,
+        "right": 913
+      },
+      "under": []
+    },
+    "errors": []
+  },
+  "languageKeyboard": {
+    "focusBefore": "语言设置",
+    "openByKeyboard": true,
+    "closedByEscape": false,
+    "afterSwitch": {
+      "popoverOpen": true,
+      "active": {
+        "tag": "BUTTON",
+        "aria": "语言设置",
+        "text": ""
+      },
+      "htmlLang": "zh-CN"
+    }
+  },
+  "handoffFocusStyle": {
+    "focused": true,
+    "outline": "none 3px rgb(17, 24, 39)",
+    "border": "1px solid rgb(59, 130, 246)",
+    "caret": 7,
+    "valueLen": 7,
+    "ariaLabel": null,
+    "placeholder": "输入复杂任务，自动拆解为步骤执行…"
+  }
+}

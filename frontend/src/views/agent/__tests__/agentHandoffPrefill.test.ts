@@ -4,7 +4,7 @@
  */
 import { describe, it, expect, vi } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
-import { defineComponent, h, ref } from 'vue'
+import { defineComponent, h, ref, watchEffect } from 'vue'
 import { createRouter, createMemoryHistory } from 'vue-router'
 import { createPinia, setActivePinia } from 'pinia'
 import { createI18n } from 'vue-i18n'
@@ -34,7 +34,9 @@ const captured = ref<string | null>(null)
 const AgentInputStub = defineComponent({
   props: { initialText: { type: String, default: '' } },
   setup(props) {
-    captured.value = props.initialText
+    watchEffect(() => {
+      captured.value = props.initialText
+    })
     return () => h('div', { 'data-testid': 'agent-input-stub' })
   },
 })
@@ -68,7 +70,7 @@ describe('Agent 页 · 聊天接力提示词', () => {
   it('?prompt= 填入输入框并从 URL 移除', async () => {
     const router = createRouter({
       history: createMemoryHistory(),
-      routes: [{ path: '/agent', component: Dummy }],
+      routes: [{ path: '/agent', name: 'Agent', component: Dummy }],
     })
     await router.push('/agent?prompt=' + encodeURIComponent('请核验这两份合同'))
     await router.isReady()
@@ -87,5 +89,35 @@ describe('Agent 页 · 聊天接力提示词', () => {
 
     expect(captured.value).toBe('请核验这两份合同')
     expect(router.currentRoute.value.query.prompt).toBeUndefined()
+    expect(router.currentRoute.value.path).toBe('/agent')
+  })
+
+  it('同一路由已挂载时收到新的 ?prompt= 也会填入并清参', async () => {
+    const router = createRouter({
+      history: createMemoryHistory(),
+      routes: [{ path: '/agent', name: 'Agent', component: Dummy }],
+    })
+    await router.push('/agent')
+    await router.isReady()
+    setActivePinia(createPinia())
+
+    const Host = defineComponent({
+      render: () =>
+        h(NMessageProvider, null, {
+          default: () => h(NDialogProvider, null, { default: () => h(AgentView) }),
+        }),
+    })
+    mount(Host, {
+      global: { plugins: [naive, i18n, router], stubs },
+    })
+    await flushPromises()
+    expect(captured.value).toBe('')
+
+    await router.push('/agent?prompt=' + encodeURIComponent('同一路由接力'))
+    await flushPromises()
+
+    expect(captured.value).toBe('同一路由接力')
+    expect(router.currentRoute.value.query.prompt).toBeUndefined()
+    expect(router.currentRoute.value.path).toBe('/agent')
   })
 })

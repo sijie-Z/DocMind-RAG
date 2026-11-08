@@ -1,0 +1,537 @@
+{
+  "375": {
+    "loading": {
+      "label": "375-loading",
+      "viewport": {
+        "w": 375,
+        "h": 812
+      },
+      "paddingBottom": "248px",
+      "scrollTop": 1216,
+      "scrollHeight": 1972,
+      "clientHeight": 756,
+      "distToBottom": 0,
+      "scroller": {
+        "top": 56,
+        "bottom": 812
+      },
+      "footer": {
+        "top": 615,
+        "height": 197
+      },
+      "stop": {
+        "top": 583,
+        "bottom": 611,
+        "left": 134,
+        "right": 242
+      },
+      "contentBottom": 564,
+      "bottomEl": {
+        "i": 1,
+        "cls": "flex gap-4 animate-pulse",
+        "top": 524,
+        "bottom": 564,
+        "left": 16,
+        "right": 359,
+        "h": 40,
+        "text": ""
+      },
+      "clearance": 19,
+      "overlaps": [],
+      "lastBubble": {
+        "top": 414,
+        "bottom": 500,
+        "left": 72,
+        "right": 172,
+        "h": 86
+      },
+      "backBtn": null
+    },
+    "scrollTest": 716,
+    "backVisible": false,
+    "backPos": null,
+    "before": {
+      "scrollTop": 1216,
+      "lastTop": 414,
+      "lastBottom": 500
+    },
+    "after": {
+      "label": "375-after-stop",
+      "viewport": {
+        "w": 375,
+        "h": 812
+      },
+      "paddingBottom": "248px",
+      "scrollTop": 1156,
+      "scrollHeight": 1912,
+      "clientHeight": 756,
+      "distToBottom": 0,
+      "scroller": {
+        "top": 56,
+        "bottom": 812
+      },
+      "footer": {
+        "top": 615,
+        "height": 197
+      },
+      "stop": null,
+      "contentBottom": 564,
+      "bottomEl": {
+        "i": 0,
+        "cls": "vue-recycle-scroller ready direction-vertical flex-1",
+        "top": -1020,
+        "bottom": 564,
+        "left": 16,
+        "right": 359,
+        "h": 1584,
+        "text": "请核验这份合同的关键条款差异。请核验这份"
+      },
+      "clearance": null,
+      "overlaps": [],
+      "lastBubble": {
+        "top": 474,
+        "bottom": 564,
+        "left": 72,
+        "right": 321,
+        "h": 90
+      },
+      "backBtn": null
+    },
+    "delta": {
+      "scrollTop": -60,
+      "lastTop": 60,
+      "lastBottom": 64
+    },
+    "errors": []
+  },
+  "768": {
+    "loading": {
+      "label": "768-loading",
+      "viewport": {
+        "w": 768,
+        "h": 1024
+      },
+      "paddingBottom": "216px",
+      "scrollTop": 493,
+      "scrollHeight": 1453,
+      "clientHeight": 960,
+      "distToBottom": 0,
+      "scroller": {
+        "top": 64,
+        "bottom": 1024
+      },
+      "footer": {
+        "top": 819,
+        "height": 205
+      },
+      "stop": {
+        "top": 795,
+        "bottom": 823,
+        "left": 458,
+        "right": 566
+      },
+      "contentBottom": 808,
+      "bottomEl": {
+        "i": 1,
+        "cls": "flex gap-4 animate-pulse",
+        "top": 768,
+        "bottom": 808,
+        "left": 272,
+        "right": 752,
+        "h": 40,
+        "text": ""
+      },
+      "clearance": -13,
+      "overlaps": [
+        {
+          "i": 1,
+          "cls": "flex gap-4 animate-pulse",
+          "text": "",
+          "inter": {
+            "w": 108,
+            "h": 13
+          }
+        }
+      ],
+      "lastBubble": {
+        "top": 658,
+        "bottom": 744,
+        "left": 328,
+        "right": 428,
+        "h": 86
+      },
+      "backBtn": null
+    },
+    "scrollTest": 0,
+    "backVisible": false,
+    "backPos": null,
+    "before": {
+      "scrollTop": 493,
+      "lastTop": 658,
+      "lastBottom": 744
+    },
+    "after": {
+      "label": "768-after-stop",
+      "viewport": {
+        "w": 768,
+        "h": 1024
+      },
+      "paddingBottom": "160px",
+      "scrollTop": 377,
+      "scrollHeight": 1337,
+      "clientHeight": 960,
+      "distToBottom": 0,
+      "scroller": {
+        "top": 64,
+        "bottom": 1024
+      },
+      "footer": {
+        "top": 819,
+        "height": 205
+      },
+      "stop": null,
+      "contentBottom": 864,
+      "bottomEl": {
+        "i": 0,
+        "cls": "vue-recycle-scroller ready direction-vertical flex-1",
+        "top": -233,
+        "bottom": 864,
+        "left": 272,
+        "right": 752,
+        "h": 1097,
+        "text": "请核验这份合同的关键条款差异。请核验这份"
+      },
+      "clearance": null,
+      "overlaps": [],
+      "lastBubble": {
+        "top": 774,
+        "bottom": 864,
+        "left": 328,
+        "right": 577,
+        "h": 90
+      },
+      "backBtn": null
+    },
+    "delta": {
+      "scrollTop": -116,
+      "lastTop": 116,
+      "lastBottom": 120
+    },
+    "errors": []
+  },
+  "1440": {
+    "loading": {
+      "label": "1440-loading",
+      "viewport": {
+        "w": 1440,
+        "h": 900
+      },
+      "paddingBottom": "216px",
+      "scrollTop": 227,
+      "scrollHeight": 1063,
+      "clientHeight": 836,
+      "distToBottom": 0,
+      "scroller": {
+        "top": 64,
+        "bottom": 900
+      },
+      "footer": {
+        "top": 721,
+        "height": 179
+      },
+      "stop": {
+        "top": 697,
+        "bottom": 725,
+        "left": 938,
+        "right": 1046
+      },
+      "contentBottom": 684,
+      "bottomEl": {
+        "i": 1,
+        "cls": "flex gap-4 animate-pulse",
+        "top": 644,
+        "bottom": 684,
+        "left": 608,
+        "right": 1376,
+        "h": 40,
+        "text": ""
+      },
+      "clearance": 13,
+      "overlaps": [],
+      "lastBubble": {
+        "top": 534,
+        "bottom": 620,
+        "left": 664,
+        "right": 764,
+        "h": 86
+      },
+      "backBtn": null
+    },
+    "scrollTest": 0,
+    "backVisible": false,
+    "backPos": null,
+    "before": {
+      "scrollTop": 227,
+      "lastTop": 534,
+      "lastBottom": 620
+    },
+    "after": {
+      "label": "1440-after-stop",
+      "viewport": {
+        "w": 1440,
+        "h": 900
+      },
+      "paddingBottom": "160px",
+      "scrollTop": 111,
+      "scrollHeight": 947,
+      "clientHeight": 836,
+      "distToBottom": 0,
+      "scroller": {
+        "top": 64,
+        "bottom": 900
+      },
+      "footer": {
+        "top": 721,
+        "height": 179
+      },
+      "stop": null,
+      "contentBottom": 740,
+      "bottomEl": {
+        "i": 0,
+        "cls": "vue-recycle-scroller ready direction-vertical flex-1",
+        "top": 33,
+        "bottom": 740,
+        "left": 608,
+        "right": 1376,
+        "h": 707,
+        "text": "请核验这份合同的关键条款差异。请核验这份"
+      },
+      "clearance": null,
+      "overlaps": [],
+      "lastBubble": {
+        "top": 650,
+        "bottom": 740,
+        "left": 664,
+        "right": 913,
+        "h": 90
+      },
+      "backBtn": null
+    },
+    "delta": {
+      "scrollTop": -116,
+      "lastTop": 116,
+      "lastBottom": 120
+    },
+    "errors": []
+  },
+  "1440-dark": {
+    "loading": {
+      "label": "1440-dark-loading",
+      "viewport": {
+        "w": 1440,
+        "h": 900
+      },
+      "paddingBottom": "216px",
+      "scrollTop": 227,
+      "scrollHeight": 1063,
+      "clientHeight": 836,
+      "distToBottom": 0,
+      "scroller": {
+        "top": 64,
+        "bottom": 900
+      },
+      "footer": {
+        "top": 721,
+        "height": 179
+      },
+      "stop": {
+        "top": 697,
+        "bottom": 725,
+        "left": 938,
+        "right": 1046
+      },
+      "contentBottom": 684,
+      "bottomEl": {
+        "i": 1,
+        "cls": "flex gap-4 animate-pulse",
+        "top": 644,
+        "bottom": 684,
+        "left": 608,
+        "right": 1376,
+        "h": 40,
+        "text": ""
+      },
+      "clearance": 13,
+      "overlaps": [],
+      "lastBubble": {
+        "top": 534,
+        "bottom": 620,
+        "left": 664,
+        "right": 764,
+        "h": 86
+      },
+      "backBtn": null
+    },
+    "scrollTest": 0,
+    "backVisible": false,
+    "backPos": null,
+    "before": {
+      "scrollTop": 227,
+      "lastTop": 534,
+      "lastBottom": 620
+    },
+    "after": {
+      "label": "1440-dark-after-stop",
+      "viewport": {
+        "w": 1440,
+        "h": 900
+      },
+      "paddingBottom": "160px",
+      "scrollTop": 111,
+      "scrollHeight": 947,
+      "clientHeight": 836,
+      "distToBottom": 0,
+      "scroller": {
+        "top": 64,
+        "bottom": 900
+      },
+      "footer": {
+        "top": 721,
+        "height": 179
+      },
+      "stop": null,
+      "contentBottom": 740,
+      "bottomEl": {
+        "i": 0,
+        "cls": "vue-recycle-scroller ready direction-vertical flex-1",
+        "top": 33,
+        "bottom": 740,
+        "left": 608,
+        "right": 1376,
+        "h": 707,
+        "text": "请核验这份合同的关键条款差异。请核验这份"
+      },
+      "clearance": null,
+      "overlaps": [],
+      "lastBubble": {
+        "top": 650,
+        "bottom": 740,
+        "left": 664,
+        "right": 913,
+        "h": 90
+      },
+      "backBtn": null
+    },
+    "delta": {
+      "scrollTop": -116,
+      "lastTop": 116,
+      "lastBottom": 120
+    },
+    "errors": []
+  },
+  "375-dark": {
+    "loading": {
+      "label": "375-dark-loading",
+      "viewport": {
+        "w": 375,
+        "h": 812
+      },
+      "paddingBottom": "248px",
+      "scrollTop": 1216,
+      "scrollHeight": 1972,
+      "clientHeight": 756,
+      "distToBottom": 0,
+      "scroller": {
+        "top": 56,
+        "bottom": 812
+      },
+      "footer": {
+        "top": 615,
+        "height": 197
+      },
+      "stop": {
+        "top": 583,
+        "bottom": 611,
+        "left": 134,
+        "right": 242
+      },
+      "contentBottom": 564,
+      "bottomEl": {
+        "i": 1,
+        "cls": "flex gap-4 animate-pulse",
+        "top": 524,
+        "bottom": 564,
+        "left": 16,
+        "right": 359,
+        "h": 40,
+        "text": ""
+      },
+      "clearance": 19,
+      "overlaps": [],
+      "lastBubble": {
+        "top": 414,
+        "bottom": 500,
+        "left": 72,
+        "right": 172,
+        "h": 86
+      },
+      "backBtn": null
+    },
+    "scrollTest": 716,
+    "backVisible": false,
+    "backPos": null,
+    "before": {
+      "scrollTop": 1216,
+      "lastTop": 414,
+      "lastBottom": 500
+    },
+    "after": {
+      "label": "375-dark-after-stop",
+      "viewport": {
+        "w": 375,
+        "h": 812
+      },
+      "paddingBottom": "248px",
+      "scrollTop": 1156,
+      "scrollHeight": 1912,
+      "clientHeight": 756,
+      "distToBottom": 0,
+      "scroller": {
+        "top": 56,
+        "bottom": 812
+      },
+      "footer": {
+        "top": 615,
+        "height": 197
+      },
+      "stop": null,
+      "contentBottom": 564,
+      "bottomEl": {
+        "i": 0,
+        "cls": "vue-recycle-scroller ready direction-vertical flex-1",
+        "top": -1020,
+        "bottom": 564,
+        "left": 16,
+        "right": 359,
+        "h": 1584,
+        "text": "请核验这份合同的关键条款差异。请核验这份"
+      },
+      "clearance": null,
+      "overlaps": [],
+      "lastBubble": {
+        "top": 474,
+        "bottom": 564,
+        "left": 72,
+        "right": 321,
+        "h": 90
+      },
+      "backBtn": null
+    },
+    "delta": {
+      "scrollTop": -60,
+      "lastTop": 60,
+      "lastBottom": 64
+    },
+    "errors": []
+  }
+}

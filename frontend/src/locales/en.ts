@@ -69,6 +69,7 @@ export default {
     preferences: 'Preferences',
     language: 'Language Setting',
     languageBeta: 'Beta — some content appears in English',
+    languageSwitchFailed: 'Failed to switch language, please retry',
     theme: 'Theme Setting',
     themeSettingDesc: 'Choose interface theme',
     languageSettingDesc: 'Choose display language',
