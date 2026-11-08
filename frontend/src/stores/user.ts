@@ -50,7 +50,11 @@ export const useUserStore = defineStore('user', () => {
   const resetAgentAndChat = () => {
     useAgentStore().resetForIdentityChange()
     useChatStore().resetForIdentityChange()
-    // 通知缓存是身份作用域数据：换账号/登出后不得沿用上一账号的标题与未读数。
+  }
+
+  // 通知是用户级数据（后端按 user_id 过滤，无组织维度）：只有真正的账号切换/
+  // 登出才清；切换组织不得清空铃铛。
+  const resetNotifications = () => {
     useNotificationStore().resetForIdentityChange()
   }
 
@@ -83,6 +87,7 @@ export const useUserStore = defineStore('user', () => {
         invalidateOrganizationsRequest()
         myOrganizations.value = []
         resetAgentAndChat()
+        resetNotifications()
         clearIdentityScopedStorage()
       }
       userInfo.value = info
@@ -332,6 +337,7 @@ export const useUserStore = defineStore('user', () => {
     authScopeVersion += 1
     invalidateOrganizationsRequest()
     resetAgentAndChat()
+    resetNotifications()
     userInfo.value = null
     token.value = ''
     currentOrganizationId.value = null

@@ -37,12 +37,12 @@ export const useNotificationStore = defineStore('notification', () => {
    * 本地 +1/-1 基于旧基线，只有服务端真值能把「全部已读后的计数」等状态收敛；
    * 若不作废旧请求，迟到的旧快照又会回弹——两者必须成对。
    */
-  const scheduleReconcile = () => {
+  const scheduleReconcile = (includeHeader: boolean) => {
     if (reconcileTimer) clearTimeout(reconcileTimer)
     reconcileTimer = setTimeout(() => {
       reconcileTimer = null
       void bootstrapBadge()
-      if (headerLoaded.value) void loadHeaderItems()
+      if (includeHeader) void loadHeaderItems()
     }, 300)
   }
 
@@ -129,14 +129,21 @@ export const useNotificationStore = defineStore('notification', () => {
    * 覆盖（徽标回弹、已删行复活）。
    */
   const refresh = async (options: { force?: boolean } = {}): Promise<void> => {
-    if (options.force) invalidate()
+    if (options.force) {
+      if (reconcileTimer) {
+        clearTimeout(reconcileTimer)
+        reconcileTimer = null
+      }
+      invalidate()
+    }
     await Promise.all([bootstrapBadge(), loadHeaderItems()])
   }
 
   const applyRealtime = (payload: RealtimeNotificationPayload) => {
     // 推送代表比在途 GET 更新的状态：丢弃旧快照，避免新通知被列表快照覆盖、
     // ++ 计数被旧未读数回写；若确有在途权威请求被作废，事后再对账一次。
-    const hadInFlight = badgePromise !== null || headerPromise !== null
+    const hadBadgeInFlight = badgePromise !== null
+    const hadHeaderInFlight = headerPromise !== null
     invalidate()
     const existed = headerItems.value.some((n) => n.id === payload.id)
     const normalized: Notification = {
@@ -152,7 +159,9 @@ export const useNotificationStore = defineStore('notification', () => {
 
     headerItems.value = [normalized, ...headerItems.value.filter((n) => n.id !== normalized.id)].slice(0, 8)
     latestRealtimeId.value = payload.id
-    if (hadInFlight) scheduleReconcile()
+    if (hadBadgeInFlight || hadHeaderInFlight) {
+      scheduleReconcile(headerLoaded.value || hadHeaderInFlight)
+    }
     if (existed) return
     // 未成功加载过（无有效基线）时实时推送不加计：否则未读数会"从 0 起跳"伪造
     // （失败置空后的持续失真放大 bug）；等重试成功后以服务端真值覆盖
@@ -167,11 +176,14 @@ export const useNotificationStore = defineStore('notification', () => {
     if (!notification || notification.is_read) return
     // 已读是比在途未读快照更新的状态：丢弃旧响应，防止计数回弹；
     // 有权威请求被作废时，事后对账把整个计数收敛到服务端真值。
-    const hadInFlight = badgePromise !== null || headerPromise !== null
+    const hadBadgeInFlight = badgePromise !== null
+    const hadHeaderInFlight = headerPromise !== null
     invalidate()
     headerItems.value = headerItems.value.map((n) => (n.id === id ? { ...n, is_read: true } : n))
     unreadCount.value = Math.max(0, unreadCount.value - 1)
-    if (hadInFlight) scheduleReconcile()
+    if (hadBadgeInFlight || hadHeaderInFlight) {
+      scheduleReconcile(headerLoaded.value || hadHeaderInFlight)
+    }
   }
 
   return {

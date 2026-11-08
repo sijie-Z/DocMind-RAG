@@ -18,14 +18,20 @@ vi.mock('@/api/auth', () => ({
   loginWithJson: vi.fn(),
   register: vi.fn(),
   getUserProfile: vi.fn(),
+  logout: vi.fn().mockResolvedValue({}),
 }))
 vi.mock('@/api/user', () => ({
   getUserSettings: vi.fn(() => Promise.resolve({ data: {} })),
   updateUserSettings: vi.fn(() => Promise.resolve({ data: {} })),
   updateUserProfile: vi.fn(() => Promise.resolve({ data: {} })),
+  switchOrganization: vi.fn(),
+}))
+vi.mock('@/utils/request', () => ({
+  clearDefaultAuth: vi.fn(),
 }))
 vi.mock('@/utils/auth', () => ({
   getToken: vi.fn(() => ''),
+  getRefreshToken: vi.fn(() => ''),
   setToken: vi.fn(),
   setRefreshToken: vi.fn(),
   removeToken: vi.fn(),
@@ -33,6 +39,8 @@ vi.mock('@/utils/auth', () => ({
 
 import { useUserStore } from '@/stores/user'
 import { loginWithJson, getUserProfile } from '@/api/auth'
+import { switchOrganization as switchOrganizationApi } from '@/api/user'
+import { useNotificationStore } from '@/stores/notification'
 import { getToken } from '@/utils/auth'
 import type { UserInfo } from '@/types/user'
 
@@ -126,5 +134,29 @@ describe('useUserStore · isAdmin 组合判定', () => {
 
     expect(store.userInfo?.is_superuser).toBe(true)
     expect(store.isAdmin).toBe(true)
+  })
+
+  it('切换组织不清空通知；登出才清空（通知是用户级数据）', async () => {
+    const notif = useNotificationStore()
+    notif.headerItems = [
+      { id: 1, title: '标题', content: '内容', type: 'system', is_read: false, created_at: '' },
+    ] as never
+    notif.unreadCount = 3
+    notif.loadedOnce = true
+
+    const store = useUserStore()
+    store.userInfo = makeInfo({ id: 7 })
+    store.token = 'tok'
+
+    vi.mocked(switchOrganizationApi).mockResolvedValueOnce({
+      data: { data: { organization_id: 2, is_org_admin: false } },
+    } as never)
+    await store.switchOrganization(2)
+    expect(notif.unreadCount).toBe(3)
+    expect(notif.headerItems).toHaveLength(1)
+
+    await store.logout({ navigate: false })
+    expect(notif.unreadCount).toBe(0)
+    expect(notif.headerItems).toEqual([])
   })
 })
