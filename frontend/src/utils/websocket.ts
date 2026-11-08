@@ -14,6 +14,9 @@ interface WebSocketMessage {
   // 旧声明与旧读点（useChatConnection）同为幽灵字段。
   type: 'chunk' | 'message' | 'error' | 'connect' | 'disconnect'
   content?: string
+  // 与 SSE 同口径：后端 error 帧可带机器码（如 USER_LLM_REQUEST_FAILED），
+  // 前端据此本地化，不把中文诊断当成用户语言的提示。
+  code?: string
   conversationId?: number | string
   messageId?: string
   sources?: WebSocketSource[]

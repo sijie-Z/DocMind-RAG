@@ -263,6 +263,7 @@ export default {
       policyDesc: 'Trouver les passages sources par thème avec références'
     },
     sseError: 'Erreur SSE',
+    userLlmRequestFailed: "Échec de l'appel au modèle personnel. Vérifiez la clé API / l'URL de base dans Paramètres → Préférences → Paramètres du modèle IA, ou réessayez plus tard.",
     feedbackLiked: 'Merci pour votre retour !',
     feedbackDisliked: 'Bien noté, nous continuerons d\'améliorer.',
     feedbackRetryLater: 'Échec de l\'envoi du retour, veuillez réessayer plus tard',

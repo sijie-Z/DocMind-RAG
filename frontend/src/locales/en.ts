@@ -275,6 +275,7 @@ export default {
     defaultTitle: 'New Chat',
     confirmDelete: 'Are you sure you want to delete this conversation?',
     sseError: 'SSE Error',
+    userLlmRequestFailed: 'Personal model request failed. Check the API key / base URL in Settings → Preferences → AI model settings, or try again later.',
     sseWarning: 'Server notice: this response may be incomplete',
     feedbackLiked: 'Liked, thank you for your feedback!',
     feedbackDisliked: 'Disliked, we will continue to improve.',

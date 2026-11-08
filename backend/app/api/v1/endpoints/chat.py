@@ -855,14 +855,15 @@ async def websocket_endpoint(
                                 # 转发。此前无此 case，错误事件会被静默丢弃、客户端
                                 # 只等到一个无回应的空转。
                                 # W0-5：RAG error 内容同样过白名单（与 SSE 同口径）。
+                                error_payload = {
+                                    "type": "error",
+                                    "content": public_rag_error_content(event.content),
+                                    "conversationId": event.conversation_id,
+                                }
+                                if event.debug_data and event.debug_data.get("error_code"):
+                                    error_payload["code"] = event.debug_data["error_code"]
                                 await manager.send_personal_message(
-                                    json.dumps(
-                                        {
-                                            "type": "error",
-                                            "content": public_rag_error_content(event.content),
-                                            "conversationId": event.conversation_id,
-                                        }
-                                    ),
+                                    json.dumps(error_payload, ensure_ascii=False),
                                     websocket,
                                 )
                         except TimeoutError:
@@ -897,16 +898,17 @@ async def websocket_endpoint(
                                             websocket,
                                         )
                                     elif event.type == "error":
+                                        drain_error_payload = {
+                                            "type": "error",
+                                            "content": public_rag_error_content(event.content),
+                                            "conversationId": event.conversation_id,
+                                        }
+                                        if event.debug_data and event.debug_data.get("error_code"):
+                                            drain_error_payload["code"] = event.debug_data[
+                                                "error_code"
+                                            ]
                                         await manager.send_personal_message(
-                                            json.dumps(
-                                                {
-                                                    "type": "error",
-                                                    "content": public_rag_error_content(
-                                                        event.content
-                                                    ),
-                                                    "conversationId": event.conversation_id,
-                                                }
-                                            ),
+                                            json.dumps(drain_error_payload),
                                             websocket,
                                         )
                                 break
@@ -1580,12 +1582,10 @@ async def chat_stream_endpoint(
                             # issue #268：RAG 链路的显式拒绝（如无组织）经此事件
                             # 转发（与 WS 路径同一语义）。此前无此 case，错误会被
                             # 静默丢弃。W0-5：内容过 RAG 白名单（白名单外通用文案）。
-                            yield await emitter.emit(
-                                "error",
-                                {
-                                    "content": public_rag_error_content(event.content),
-                                },
-                            )
+                            error_data = {"content": public_rag_error_content(event.content)}
+                            if event.debug_data and event.debug_data.get("error_code"):
+                                error_data["code"] = event.debug_data["error_code"]
+                            yield await emitter.emit("error", error_data)
                     except TimeoutError:
                         if pipeline_task.done():
                             # Drain remaining events
@@ -1611,12 +1611,12 @@ async def chat_stream_endpoint(
                                         },
                                     )
                                 elif event.type == "error":
-                                    yield await emitter.emit(
-                                        "error",
-                                        {
-                                            "content": public_rag_error_content(event.content),
-                                        },
-                                    )
+                                    drain_sse_payload = {
+                                        "content": public_rag_error_content(event.content),
+                                    }
+                                    if event.debug_data and event.debug_data.get("error_code"):
+                                        drain_sse_payload["code"] = event.debug_data["error_code"]
+                                    yield await emitter.emit("error", drain_sse_payload)
                             break
 
                 await pipeline_task

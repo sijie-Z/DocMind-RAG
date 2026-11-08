@@ -135,6 +135,8 @@ export interface UploadProgressEvent {
 export interface SSEMessage {
   type: string
   content?: string
+  /** 后端错误码（如 USER_LLM_REQUEST_FAILED）；前端按码映射四语文案。 */
+  code?: string
   conversationId?: string | number
   messageId?: string
   sources?: KnowledgeSourceRef[]

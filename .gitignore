@@ -67,6 +67,7 @@ backend/logs/
 frontend/src/views/chat/上下文.txt
 
 # Local orchestration / scratch workspaces (never commit)
+/.scratch/
 /_orchestrate/
 /.orchestrate/
 /_uisweep/

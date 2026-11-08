@@ -10,7 +10,7 @@
 """
 
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from sqlalchemy import select
@@ -573,6 +573,30 @@ class TestPipelineOverride:
         assert SECRET not in caplog.text, "API key 明文不得写日志"
         assert "RuntimeError" in caplog.text, "只记录异常类型以便排障"
 
+    async def test_user_llm_error_raises_for_chat_layer(self, monkeypatch):
+        """聊天层以 raise_user_errors 获取显式异常，改为 error 事件而非正文。"""
+        from app.rag.pipeline import RAGPipeline, UserLLMRequestError
+
+        class _FailingClient:
+            api_key = "x"
+
+        async def fake_create(_client, **_kwargs):
+            raise RuntimeError("upstream down")
+
+        monkeypatch.setattr("app.rag.pipeline.create_chat_completion", fake_create)
+        pipeline = RAGPipeline(openai_client=object())
+        with pytest.raises(UserLLMRequestError):
+            async for _ in pipeline.chat_stream(
+                "q",
+                [],
+                [],
+                system_prompt_override="sys",
+                enable_masking=False,
+                client_override=_FailingClient(),
+                raise_user_errors=True,
+            ):
+                pass
+
 
 class _FakeRag:
     def __init__(self):
@@ -639,6 +663,102 @@ class TestRunRagPipelineWiring:
         assert fake_rag.chat_kwargs is not None
         assert fake_rag.chat_kwargs["client_override"] is override
         assert fake_rag.chat_kwargs["model_override"] == "user-model"
+        assert fake_rag.chat_kwargs["raise_user_errors"] is True
+
+    async def test_user_llm_error_emits_error_event_without_persisting(self, db, monkeypatch):
+        from app.rag.pipeline import USER_LLM_REQUEST_FAILED_MESSAGE, UserLLMRequestError
+        from app.services import chat_service as chat_service_mod
+
+        db.add(Organization(id=1, name="org", owner_id=1))
+        await db.commit()
+
+        class RaisingRag(_FakeRag):
+            async def chat_stream(self, *args, **kwargs):
+                self.chat_kwargs = kwargs
+                raise UserLLMRequestError(USER_LLM_REQUEST_FAILED_MESSAGE)
+                yield ""  # pragma: no cover - 让函数保持 async generator
+
+        fake_rag = RaisingRag()
+        monkeypatch.setattr(chat_service_mod, "rag_service", fake_rag)
+        monkeypatch.setattr(chat_service_mod, "get_memory_system", lambda *a, **k: _FakeMemory())
+        persisted = AsyncMock()
+        monkeypatch.setattr(chat_service_mod, "_persist_assistant_message", persisted)
+
+        import asyncio
+
+        queue: asyncio.Queue = asyncio.Queue()
+        await chat_service_mod.run_rag_pipeline(
+            session=db,
+            user_content="问题",
+            user_id=1,
+            search_org_id=1,
+            organization_id=1,
+            conversation_id=None,
+            file_ids=[],
+            strict_mode=False,
+            privacy_mode=False,
+            event_queue=queue,
+            llm_client=object(),
+            llm_model="user-model",
+        )
+        events = []
+        while not queue.empty():
+            events.append(queue.get_nowait())
+        errors = [event for event in events if event.type == "error"]
+        assert errors, "个人模型失败必须发 error 事件"
+        assert errors[0].content == USER_LLM_REQUEST_FAILED_MESSAGE
+        assert errors[0].debug_data == {"error_code": "USER_LLM_REQUEST_FAILED"}
+        assert not any(event.type == "message" for event in events), "不得把诊断当回答"
+        persisted.assert_not_awaited()
+
+    async def test_user_llm_error_after_partial_stream_still_not_persisted(self, db, monkeypatch):
+        """已流出部分正文后上游失败：半截回答同样不得落库/写记忆。"""
+        from app.rag.pipeline import USER_LLM_REQUEST_FAILED_MESSAGE, UserLLMRequestError
+        from app.services import chat_service as chat_service_mod
+
+        db.add(Organization(id=1, name="org", owner_id=1))
+        await db.commit()
+
+        class PartialRag(_FakeRag):
+            async def chat_stream(self, *args, **kwargs):
+                self.chat_kwargs = kwargs
+                yield "半截回答"
+                raise UserLLMRequestError(USER_LLM_REQUEST_FAILED_MESSAGE)
+
+        fake_rag = PartialRag()
+        memory = _FakeMemory()
+        memory.store_interaction = AsyncMock()
+        monkeypatch.setattr(chat_service_mod, "rag_service", fake_rag)
+        monkeypatch.setattr(chat_service_mod, "get_memory_system", lambda *a, **k: memory)
+        persisted = AsyncMock()
+        monkeypatch.setattr(chat_service_mod, "_persist_assistant_message", persisted)
+
+        import asyncio
+
+        queue: asyncio.Queue = asyncio.Queue()
+        await chat_service_mod.run_rag_pipeline(
+            session=db,
+            user_content="问题",
+            user_id=1,
+            search_org_id=1,
+            organization_id=1,
+            conversation_id=None,
+            file_ids=[],
+            strict_mode=False,
+            privacy_mode=False,
+            event_queue=queue,
+            llm_client=object(),
+            llm_model="user-model",
+        )
+        events = []
+        while not queue.empty():
+            events.append(queue.get_nowait())
+        # 管线会先发一个空 chunk（建立 conversationId），按内容拼接断言。
+        assert "".join(event.content for event in events if event.type == "chunk") == "半截回答"
+        assert not any(event.type == "message" for event in events), "不得产生终态回答"
+        assert any(event.type == "error" for event in events)
+        persisted.assert_not_awaited()
+        memory.store_interaction.assert_not_awaited()
 
 
 class TestAgentServiceWiring:
