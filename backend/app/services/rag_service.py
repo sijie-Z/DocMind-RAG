@@ -36,7 +36,7 @@ class RagServiceFacade:
     ) -> tuple[list[dict[str, Any]], dict | None]:
         # issue #225 决策 7A：search_mode 此前收下即丢弃（门面静默吞参）——
         # 现在如实透传给 pipeline；None = 自动路由（行为不变）。
-        return await self._pipeline.search_knowledge_base(
+        results, debug_info = await self._pipeline.search_knowledge_base(
             query,
             organization_id,
             top_k,
@@ -44,6 +44,17 @@ class RagServiceFacade:
             debug=debug,
             search_mode=search_mode,
         )
+        # 平均召回文档数：在此单一门面记录（chat / 知识库检索 / 工作流共用）。
+        metrics = getattr(self._pipeline, "metrics", None)
+        if metrics is not None:
+            try:
+                count = len(results or [])
+                metrics.inc("docs_retrieved_total", count)
+                metrics.inc("docs_retrieved_queries", 1)
+                metrics.record_event("docs_retrieved", float(count))
+            except Exception as exc:  # noqa: BLE001 — 观测不得影响检索
+                logger.warning("记录召回文档数失败: %s", type(exc).__name__)
+        return results, debug_info
 
     def report_grounded(self, has_sources: bool) -> None:
         self._pipeline.report_grounded(has_sources)

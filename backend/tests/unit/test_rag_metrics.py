@@ -1,3 +1,5 @@
+import pytest
+
 """Tests for RAG metrics."""
 
 from app.rag.metrics import RAGMetrics
@@ -86,3 +88,64 @@ class TestRAGMetrics:
         assert snap["retrieval_total"] == 0
         assert snap["retrieval_hit"] == 0
         assert snap["hit_rate"] == 0
+
+
+class TestAvgDocsPerQuery:
+    def test_cumulative_average(self):
+        m = RAGMetrics()
+        m.inc("docs_retrieved_total", 3)
+        m.inc("docs_retrieved_queries", 1)
+        m.inc("docs_retrieved_total", 1)
+        m.inc("docs_retrieved_queries", 1)
+        snap = m.get_snapshot()
+        assert snap["avg_docs_per_query"] == 2.0
+
+    def test_windowed_average(self):
+        m = RAGMetrics()
+        m.record_event("docs_retrieved", 4.0)
+        m.record_event("docs_retrieved", 0.0)
+        snap = m.get_snapshot(window_seconds=60)
+        assert snap["avg_docs_per_query"] == 2.0
+
+    def test_no_queries_is_zero(self):
+        m = RAGMetrics()
+        assert m.get_snapshot()["avg_docs_per_query"] == 0
+        assert m.get_snapshot(window_seconds=60)["avg_docs_per_query"] == 0
+
+
+class TestRagServiceDocsRecording:
+    @pytest.mark.asyncio
+    async def test_search_records_docs_per_query(self, monkeypatch):
+        from app.rag.metrics import RAGMetrics
+        from app.services import rag_service as mod
+
+        class FakePipeline:
+            def __init__(self):
+                self.metrics = RAGMetrics()
+
+            async def search_knowledge_base(
+                self,
+                query,
+                organization_id,
+                top_k,
+                document_ids,
+                debug=False,
+                search_mode=None,
+            ):
+                return [{"id": 1}, {"id": 2}], None
+
+        fake = FakePipeline()
+        monkeypatch.setattr(mod, "get_rag_pipeline", lambda: fake)
+        svc = mod.RagServiceFacade()
+
+        results, _ = await svc.search_knowledge_base("q", 1, 5)
+        assert len(results) == 2
+        assert fake.metrics.get_snapshot()["avg_docs_per_query"] == 2.0
+
+        # 第二次检索 0 条：平均值按真实分母收敛到 1.0
+        async def _empty(*args, **kwargs):
+            return [], None
+
+        fake.search_knowledge_base = _empty
+        await svc.search_knowledge_base("q2", 1, 5)
+        assert fake.metrics.get_snapshot()["avg_docs_per_query"] == 1.0

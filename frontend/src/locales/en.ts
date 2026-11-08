@@ -844,6 +844,7 @@ export default {
     queries7d: 'Queries (24h)',
     hits: 'Hits',
     avgDocs: 'Avg Docs Retrieved',
+    avgDocsNoData: 'No retrieval data yet',
     recentAuditLogs: 'Recent Audit Logs',
     manageUsers: 'Manage Users',
     manageKB: 'Manage KB',

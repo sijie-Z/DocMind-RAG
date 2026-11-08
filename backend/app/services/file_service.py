@@ -106,7 +106,6 @@ class FileUploadService:
             ".pdf",
             ".docx",
             ".xlsx",
-            ".xls",
             ".txt",
             ".md",
             ".csv",
@@ -141,6 +140,13 @@ class FileUploadService:
         allowed = self.allowed_avatar_extensions if is_avatar else self.allowed_extensions
         max_size = self.max_avatar_size if is_avatar else self.max_file_size
 
+        if not is_avatar and file_extension in {".doc", ".xls"}:
+            # 旧版二进制 Office：解析链只支持 OOXML（openpyxl/python-docx），
+            # 收下也只会在异步解析阶段失败——入口即拒绝并给出可操作指引。
+            raise HTTPException(
+                status_code=400,
+                detail="暂不支持旧版 .doc/.xls，请另存为 .docx/.xlsx 后上传",
+            )
         if file_extension not in allowed:
             raise HTTPException(
                 status_code=400, detail=f"不支持的文件格式。支持的格式: {', '.join(allowed)}"

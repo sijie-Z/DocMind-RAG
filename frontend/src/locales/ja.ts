@@ -793,6 +793,7 @@ export default {
     queries7d: 'クエリ数（24時間）',
     hits: 'ヒット数',
     avgDocs: '平均取得ドキュメント数',
+    avgDocsNoData: '検索データはまだありません',
     recentAuditLogs: '最近の監査ログ',
     manageUsers: 'ユーザー管理',
     manageKB: 'ナレッジベース管理',

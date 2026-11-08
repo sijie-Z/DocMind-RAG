@@ -850,6 +850,7 @@ export default {
     queries7d: '24 小时查询数',
     hits: '命中次数',
     avgDocs: '平均召回文档',
+    avgDocsNoData: '暂无检索数据',
     recentAuditLogs: '最近操作日志',
     manageUsers: '用户管理',
     manageKB: '知识库管理',
