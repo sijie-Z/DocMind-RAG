@@ -461,13 +461,13 @@ ADR-001 已把这条语义冻结（`docs/decisions/ADR-001-路线冻结.md` D5�
 |------|--------|----------|
 | PDF | `.pdf` | `pdfplumber` 抽文本；页面文本少于 50 字符时尝试 `pytesseract` + `pdf2image` OCR |
 | Word | `.docx` | `python-docx` 为主，`docx2txt` 兜底（不支持旧版 `.doc`） |
-| Excel | `.xlsx` | `openpyxl`。`.xls` 虽在扩展名映射里，但 `openpyxl` 不支持旧版 `.xls`，实际会失败 |
+| Excel | `.xlsx` | `openpyxl`（旧版 `.xls` 不支持，上传入口直接拒绝） |
 | 文本 | `.txt` / `.md` / `.csv` | 直接读取 |
 | 图片 | `.png` / `.jpg` / `.jpeg` / `.webp` / `.bmp` / `.gif` | RapidOCR（ONNX）；GIF 仅识别首帧 |
 
 注意：
 
-- **不支持** `.doc` / `.ppt` / `.pptx`；上传这类文件会在解析阶段报「不支持的文件格式」。前端上传选择器的 `accept` 也不含 `.gif`（后端解析器支持 `.gif`，可通过 API 上传）。
+- **不支持** `.doc` / `.xls` / `.ppt` / `.pptx`；上传入口会直接拒绝并给出可操作提示。上传选择器已包含后端支持的 `.gif`（仅识别首帧）。
 - 图片 OCR 依赖 `rapidocr-onnxruntime`（在 `requirements.txt` 中）；**扫描版 PDF** 的 OCR 依赖 `pytesseract` / `pdf2image` 与系统级 Tesseract/Poppler，这两项不在默认依赖里——纯扫描 PDF 没装它们会解析失败。
 - 单文件上限 `MAX_FILE_SIZE=100 MB`；`USER_STORAGE_LIMIT_BYTES=10 GiB` 目前只用于统计展示，上传路径并未强制执行。
 - 分块是**语义分块**（`backend/app/services/semantic_chunker.py`）：按嵌入距离的 90 分位找断点，`chunk_max_chars=1200`；短文本（<500 字符）整体成块；文本足够长且摘要生成成功时，会为每块加一段 50–100 字的文档摘要前缀（contextual retrieval）。

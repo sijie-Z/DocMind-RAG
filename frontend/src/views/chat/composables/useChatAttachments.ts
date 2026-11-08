@@ -5,6 +5,7 @@ import type { AttachedFile } from '@/types/chat'
 import { uploadKnowledgeBase, getKnowledgeBase } from '@/api/knowledge'
 import { parseUpload } from '@/api/chat'
 import { apiUnwrap } from '@/utils/apiUnwrap'
+import { getErrorMessage } from '@/utils/apiError'
 
 export function useChatAttachments() {
   const message = useDedupedMessage()
@@ -139,9 +140,10 @@ export function useChatAttachments() {
         tempFile.status = 'parsing'
         pollDocumentStatus(String(docId), tempFile)
       }
-    } catch (error: any) {
+    } catch (error: unknown) {
       tempFile.status = 'error'
-      tempFile.errorMsg = error.message || t('chat.fileUploadFailed')
+      // 后端 4xx 的可读文案（如旧版 .doc 的可操作提示）优先；axios 传输文案不上屏。
+      tempFile.errorMsg = getErrorMessage(error, t('chat.fileUploadFailed'))
     } finally {
       target.value = ''
     }

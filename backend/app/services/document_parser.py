@@ -83,7 +83,6 @@ class DocumentParser:
             ".pdf": self._parse_pdf,
             ".docx": self._parse_docx,
             ".xlsx": self._parse_excel,
-            ".xls": self._parse_excel,
             ".txt": self._parse_txt,
             ".md": self._parse_txt,
             ".csv": self._parse_txt,

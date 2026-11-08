@@ -454,13 +454,13 @@ The semantic cache namespaces (`SEMANTIC_CACHE_RETRIEVAL_ENABLED` / `SEMANTIC_CA
 |------|------------|---------|
 | PDF | `.pdf` | `pdfplumber`; pages with <50 extracted chars attempt `pytesseract` + `pdf2image` OCR |
 | Word | `.docx` | `python-docx` primary, `docx2txt` fallback (legacy `.doc` unsupported) |
-| Excel | `.xlsx` | `openpyxl`. `.xls` is in the extension map, but `openpyxl` cannot read legacy `.xls` — it fails in practice |
+| Excel | `.xlsx` | `openpyxl` (legacy `.xls` is unsupported and rejected at upload) |
 | Text | `.txt` / `.md` / `.csv` | direct read |
 | Images | `.png` / `.jpg` / `.jpeg` / `.webp` / `.bmp` / `.gif` | RapidOCR (ONNX); GIF uses the first frame only |
 
 Notes:
 
-- `.doc` / `.ppt` / `.pptx` are **not supported**; uploads fail at parse time with "unsupported file format". The upload picker's `accept` also omits `.gif` (the backend parser supports it; upload via API if needed).
+- `.doc` / `.xls` / `.ppt` / `.pptx` are **not supported**; uploads are rejected at the entry point with an actionable message. The upload picker now includes `.gif` (first frame only).
 - Image OCR depends on `rapidocr-onnxruntime` (in `requirements.txt`). **Scanned PDFs** need `pytesseract` / `pdf2image` plus system Tesseract/Poppler, which are not default dependencies — scanned PDFs fail without them.
 - Limits: `MAX_FILE_SIZE=100 MB` per file; `USER_STORAGE_LIMIT_BYTES=10 GiB` is currently used for statistics only and is not enforced on upload.
 - Chunking is **semantic** (`semantic_chunker.py`): breakpoints at the 90th percentile of embedding distance, `chunk_max_chars=1200`; short texts (<500 chars) become one chunk; when the text is long enough and summary generation succeeds, each chunk gets a 50-100 char document-summary prefix (contextual retrieval).

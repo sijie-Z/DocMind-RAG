@@ -970,6 +970,14 @@ async def chat_parse_upload(
         raise ValidationError("文件名不能为空")
 
     ext = Path(file.filename).suffix.lower() or ".tmp"
+    # 与 /documents/upload 同口径前置拒绝：旧版二进制 Office 解析链不支持，
+    # 收下只会在解析阶段 500；这里直接给可操作 400。
+    if ext in {".doc", ".xls"}:
+        raise ValidationError("暂不支持旧版 .doc/.xls，请另存为 .docx/.xlsx 后上传")
+    if ext not in document_service.supported_extensions:
+        raise ValidationError(
+            f"不支持的文件格式。支持的格式: {', '.join(sorted(document_service.supported_extensions))}"
+        )
     fd, temp_path = tempfile.mkstemp(suffix=ext)
     os.close(fd)
 

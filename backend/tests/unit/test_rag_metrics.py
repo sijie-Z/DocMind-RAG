@@ -1,5 +1,7 @@
 """Tests for RAG metrics."""
 
+import pytest
+
 from app.rag.metrics import RAGMetrics
 
 
@@ -86,3 +88,54 @@ class TestRAGMetrics:
         assert snap["retrieval_total"] == 0
         assert snap["retrieval_hit"] == 0
         assert snap["hit_rate"] == 0
+
+
+class TestAvgDocsPerQuery:
+    def test_cumulative_average(self):
+        m = RAGMetrics()
+        m.inc("docs_retrieved_total", 3)
+        m.inc("docs_retrieved_queries", 1)
+        m.inc("docs_retrieved_total", 1)
+        m.inc("docs_retrieved_queries", 1)
+        snap = m.get_snapshot()
+        assert snap["avg_docs_per_query"] == 2.0
+
+    def test_windowed_average(self):
+        m = RAGMetrics()
+        m.record_event("docs_retrieved", 4.0)
+        m.record_event("docs_retrieved", 0.0)
+        snap = m.get_snapshot(window_seconds=60)
+        assert snap["avg_docs_per_query"] == 2.0
+
+    def test_no_queries_is_zero(self):
+        m = RAGMetrics()
+        assert m.get_snapshot()["avg_docs_per_query"] == 0
+        assert m.get_snapshot(window_seconds=60)["avg_docs_per_query"] == 0
+
+
+class TestPipelineDocsRecording:
+    @pytest.mark.asyncio
+    async def test_search_records_docs_and_failures_as_zero(self, monkeypatch):
+        """检索入口统一记录：成功按返回条数、失败按 0（与 retrieval_total 同人群）。"""
+        from app.rag.metrics import RAGMetrics
+        from app.rag.pipeline import RAGPipeline
+
+        pipeline = object.__new__(RAGPipeline)
+        pipeline.metrics = RAGMetrics()
+
+        async def _ok(*args, **kwargs):
+            return [{"id": 1}, {"id": 2}], None
+
+        monkeypatch.setattr(RAGPipeline, "_search_knowledge_base_impl", _ok)
+        results, _ = await pipeline.search_knowledge_base("q", 1, 5)
+        assert len(results) == 2
+        assert pipeline.metrics.get_snapshot()["avg_docs_per_query"] == 2.0
+
+        async def _fail(*args, **kwargs):
+            raise RuntimeError("retrieval down")
+
+        monkeypatch.setattr(RAGPipeline, "_search_knowledge_base_impl", _fail)
+        with pytest.raises(RuntimeError):
+            await pipeline.search_knowledge_base("q2", 1, 5)
+        # (2 + 0) / 2 次检索 = 1.0：失败也进入分母，不会伪造偏高均值
+        assert pipeline.metrics.get_snapshot()["avg_docs_per_query"] == 1.0

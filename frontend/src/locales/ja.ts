@@ -722,7 +722,6 @@ export default {
     systemTitle: 'DocMind ナレッジベース'
   },
   dashboard: {
-    metricNotAvailable: '指標未接続',
     adminSubtitle: '組織の稼働状況と AI リソース使用量',
     adminTitle: '管理概要',
     llmNoDailyTrend: '日別データなし',
@@ -794,6 +793,7 @@ export default {
     queries7d: 'クエリ数（24時間）',
     hits: 'ヒット数',
     avgDocs: '平均取得ドキュメント数',
+    avgDocsNoData: '検索データはまだありません',
     recentAuditLogs: '最近の監査ログ',
     manageUsers: 'ユーザー管理',
     manageKB: 'ナレッジベース管理',

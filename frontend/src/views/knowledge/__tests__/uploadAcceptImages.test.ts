@@ -44,13 +44,17 @@ describe('KnowledgeUploadPanel · accept 放行图片（OCR 支线配套）', ()
     expect(input.exists()).toBe(true)
 
     const accept = input.attributes('accept') || ''
-    // 原有 7 项不动
-    for (const ext of ['.pdf', '.docx', '.xlsx', '.xls', '.txt', '.md', '.csv']) {
-      expect(accept).toContain(ext)
+    // 精确 token（子串匹配会把 .xlsx 误当 .xls）
+    const tokens = accept.split(',').map((s) => s.trim())
+    for (const ext of ['.pdf', '.docx', '.xlsx', '.txt', '.md', '.csv']) {
+      expect(tokens).toContain(ext)
     }
-    // 新增位图 5 项
-    for (const ext of ['.png', '.jpg', '.jpeg', '.webp', '.bmp']) {
-      expect(accept).toContain(ext)
+    // 旧版二进制 Office 不再提供（解析链不支持）
+    expect(tokens).not.toContain('.xls')
+    expect(tokens).not.toContain('.doc')
+    // 位图 6 项（含后端已支持的 GIF）
+    for (const ext of ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp']) {
+      expect(tokens).toContain(ext)
     }
   })
 

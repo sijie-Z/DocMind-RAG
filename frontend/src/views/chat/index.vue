@@ -26,7 +26,7 @@
       id="global-chat-file-input"
       style="display: none;"
       @change="handleFileUpload"
-      accept=".pdf,.doc,.docx,.txt,.md"
+      accept=".pdf,.docx,.txt,.md"
     />
 
     <ChatSidebar

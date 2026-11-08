@@ -337,6 +337,7 @@ import { markAsRead, markAllAsRead, deleteNotification, type Notification } from
 import { notificationSocket, type RealtimeNotificationPayload } from '@/utils/notificationSocket'
 import { useNotificationStore } from '@/stores/notification'
 import { formatDate } from '@/utils/format'
+import { notificationTargetLocation } from '@/utils/notificationTarget'
 import type { MenuOption, MenuGroupOption, DropdownOption, DropdownGroupOption, DropdownDividerOption } from 'naive-ui'
 import { NMenu, NIcon, NInput, NButton, NBadge, NPopover, NList, NListItem, NDropdown, NAvatar } from 'naive-ui'
 import { useDedupedMessage } from '@/utils/message'
@@ -517,27 +518,8 @@ const unreadCount = computed(() => notificationStore.unreadCount)
 
 
 const navigateByNotification = async (notification: Notification) => {
-  const routeName = notification.target_route as string | undefined
-  const targetId = notification.target_id as string | number | undefined
-
-  if (routeName) {
-    await router.push({ name: routeName as any, query: targetId ? { id: String(targetId) } : undefined })
-    return
-  }
-
-  const nType = notification.type || 'system'
-  if (nType === 'document' || nType === 'knowledge') {
-    await router.push({ name: 'Knowledge' })
-  } else if (nType === 'chat') {
-    await router.push({ name: 'Chat' })
-  } else if (nType === 'account' || nType === 'security') {
-    await router.push({ name: 'Profile' })
-  } else if (nType === 'agent') {
-    // Agent 任务终态通知（无 target_route 的旧行兜底）：落到 /agent
-    await router.push({ name: 'Agent' })
-  } else {
-    await router.push({ name: 'Notifications' })
-  }
+  // target_route=Knowledge + target_id → 文档深链（/knowledge/:documentId）。
+  await router.push(notificationTargetLocation(notification))
 }
 
 const handleNotificationClick = async (notification: Notification) => {

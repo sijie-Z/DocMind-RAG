@@ -55,6 +55,24 @@ class TestValidateFile:
             svc._validate_file("big.pdf", 200 * 1024 * 1024)
         assert exc_info.value.status_code == 400
 
+    def test_legacy_doc_rejected_with_actionable_message(self, svc):
+        with pytest.raises(HTTPException) as exc_info:
+            svc._validate_file("legacy.doc", 1024)
+        assert exc_info.value.status_code == 400
+        assert "另存为" in exc_info.value.detail and ".docx" in exc_info.value.detail
+
+    def test_legacy_xls_rejected_with_actionable_message(self, svc):
+        with pytest.raises(HTTPException) as exc_info:
+            svc._validate_file("legacy.xls", 1024)
+        assert exc_info.value.status_code == 400
+        assert "另存为" in exc_info.value.detail and ".xlsx" in exc_info.value.detail
+
+    def test_legacy_extensions_not_in_allowed_list(self, svc):
+        assert ".doc" not in svc.allowed_extensions
+        assert ".xls" not in svc.allowed_extensions
+        assert ".docx" in svc.allowed_extensions
+        assert ".xlsx" in svc.allowed_extensions
+
     def test_avatar_valid(self, svc):
         svc._validate_file("avatar.jpg", 1024, is_avatar=True)
 

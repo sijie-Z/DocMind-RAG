@@ -67,7 +67,6 @@ _ALLOWED_MIME_TYPES = {
     "application/pdf": {".pdf"},
     "application/vnd.openxmlformats-officedocument.wordprocessingml.document": {".docx"},
     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": {".xlsx"},
-    "application/vnd.ms-excel": {".xls"},
     "text/plain": {".txt", ".md", ".csv"},
     "text/markdown": {".md"},
     "text/csv": {".csv"},
@@ -106,7 +105,6 @@ class FileUploadService:
             ".pdf",
             ".docx",
             ".xlsx",
-            ".xls",
             ".txt",
             ".md",
             ".csv",
@@ -141,6 +139,13 @@ class FileUploadService:
         allowed = self.allowed_avatar_extensions if is_avatar else self.allowed_extensions
         max_size = self.max_avatar_size if is_avatar else self.max_file_size
 
+        if not is_avatar and file_extension in {".doc", ".xls"}:
+            # 旧版二进制 Office：解析链只支持 OOXML（openpyxl/python-docx），
+            # 收下也只会在异步解析阶段失败——入口即拒绝并给出可操作指引。
+            raise HTTPException(
+                status_code=400,
+                detail="暂不支持旧版 .doc/.xls，请另存为 .docx/.xlsx 后上传",
+            )
         if file_extension not in allowed:
             raise HTTPException(
                 status_code=400, detail=f"不支持的文件格式。支持的格式: {', '.join(allowed)}"
@@ -655,12 +660,8 @@ class FileUploadService:
         """根据文件扩展名获取文档类型"""
         extension_map = {
             ".pdf": DocumentType.PDF,
-            ".doc": DocumentType.WORD,
             ".docx": DocumentType.WORD,
-            ".xls": DocumentType.EXCEL,
             ".xlsx": DocumentType.EXCEL,
-            ".ppt": DocumentType.PPT,
-            ".pptx": DocumentType.PPT,
             ".txt": DocumentType.TXT,
             ".md": DocumentType.TXT,
             ".csv": DocumentType.TXT,
@@ -671,12 +672,8 @@ class FileUploadService:
         """根据文件扩展名获取内容类型"""
         content_type_map = {
             ".pdf": "application/pdf",
-            ".doc": "application/msword",
             ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-            ".xls": "application/vnd.ms-excel",
             ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            ".ppt": "application/vnd.ms-powerpoint",
-            ".pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
             ".txt": "text/plain",
             ".md": "text/markdown",
             ".csv": "text/csv",

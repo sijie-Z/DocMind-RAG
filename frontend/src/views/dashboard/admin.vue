@@ -330,7 +330,10 @@
             </div>
             <div class="text-center p-3 bg-gray-50 dark:bg-gray-700/50 rounded-xl">
               <p class="text-xs text-gray-500 dark:text-gray-400 mb-1">{{ t('dashboard.avgDocs') }}</p>
-              <p class="text-lg font-bold text-gray-900 dark:text-white" :title="t('dashboard.metricNotAvailable')">—</p>
+              <p
+                class="text-lg font-bold text-gray-900 dark:text-white"
+                :title="ragStats.totalQueries > 0 ? undefined : t('dashboard.avgDocsNoData')"
+              >{{ ragStats.totalQueries > 0 ? ragStats.avgDocs.toLocaleString(undefined, { maximumFractionDigits: 2 }) : '—' }}</p>
             </div>
           </div>
           <!-- 趋势图（flex-1：与左卡等高时填充剩余空间，消除卡底空白） -->

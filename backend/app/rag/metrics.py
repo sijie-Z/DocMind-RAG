@@ -79,6 +79,12 @@ class RAGMetrics:
                 "semantic_cache_hit": int(sc),
                 "retry_total": int(rt_retry),
                 "cache_hit_rate": round(ch / rt, 4) if rt > 0 else 0,
+                # 平均召回文档数（每次检索返回条数的均值）：仪表盘 KPI 的真实来源。
+                "avg_docs_per_query": round(
+                    self.window_sum("docs_retrieved", window_seconds)
+                    / max(1, self.window_count("docs_retrieved", window_seconds)),
+                    2,
+                ),
             }
 
         # 同样：计数原样返回，max(1) 仅作为比率分母。
@@ -103,6 +109,11 @@ class RAGMetrics:
             "semantic_cache_hit": self._counters.get("semantic_cache_hit", 0),
             "retry_total": self._counters["retry_total"],
             "cache_hit_rate": round(self._counters["cache_hit"] / rt, 4) if rt > 0 else 0,
+            "avg_docs_per_query": round(
+                self._counters["docs_retrieved_total"]
+                / max(1, self._counters["docs_retrieved_queries"]),
+                2,
+            ),
         }
 
     def reset(self) -> None:
