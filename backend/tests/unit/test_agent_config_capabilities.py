@@ -25,6 +25,7 @@ async def test_get_config_exposes_enforced_tools_and_terminal_flag(monkeypatch):
     # 配置本体仍按原契约在 data
     assert "model" in payload["data"]
 
+
 @pytest.mark.asyncio
 async def test_get_config_reports_terminal_enabled_when_available(monkeypatch):
     from app.api.v1.endpoints import agent as agent_api
