@@ -89,8 +89,11 @@ describe('conversations 页 · 时间与搜索（B31/B30 前端侧）', () => {
     const pad = (n: number) => String(n).padStart(2, '0')
     const expectedClock = `${pad(updated.getMonth() + 1)}-${pad(updated.getDate())} ${pad(updated.getHours())}:${pad(updated.getMinutes())}`
     expect(text).toContain(expectedClock)
-    // 空串行不渲染任何 "10-09" 形式时间（原断言写死本地钟点，UTC+8 下会漏判）
-    expect(text).not.toMatch(/10-09 \d{2}:\d{2}/)
+    // 空串行不回退到 created_at：把该时刻的本地表示算出来，断言不出现
+    //（跨时区可移植；负时区下写死 "10-09" 前缀会误判正确的 05:00Z 渲染）
+    const fallback = new Date('2026-10-09T13:49:00Z')
+    const forbiddenClock = `${pad(fallback.getMonth() + 1)}-${pad(fallback.getDate())} ${pad(fallback.getHours())}:${pad(fallback.getMinutes())}`
+    expect(text).not.toContain(forbiddenClock)
   })
 
   it('搜索参数名为 search，随输入透传（前端侧回归守卫）', async () => {

@@ -966,8 +966,8 @@ async def _session_week_over_week(db: AsyncSession, org_id: int | None) -> tuple
     W2-T7：管理仪表盘「总会话 ↑ +12%（对比上周）」此前是前端写死的假趋势
     （第三轮终检 §八 实机实锤）——后端从未提供任何环比数据。此助手补上真实
     口径：本周新增 = created_at >= now-7d；上周新增 = [now-14d, now-7d)。
-    时间基准与既有 active_users_24h 同款（朴素本地时间，与 func.now() 服务端
-    时间一致）；org 作用域同相邻计数（租户管理员只看自己组织）。
+    时间基准与既有 active_users_24h 同款（naive UTC，与 MySQL func.now()
+    的服务端口径一致）；org 作用域同相邻计数（租户管理员只看自己组织）。
     单条条件聚合查询取回两值，避免两次往返。
     """
     from datetime import timedelta

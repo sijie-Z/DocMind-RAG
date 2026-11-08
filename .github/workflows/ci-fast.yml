@@ -49,6 +49,8 @@ jobs:
 
     env:
       DATABASE_URL: sqlite+aiosqlite:///test.db
+      # UTC 写入/本地展示的时区回归：固定非 UTC 时区才能让 naive/aware 混用暴露
+      TZ: Asia/Shanghai
 
     steps:
       - uses: actions/checkout@v7
