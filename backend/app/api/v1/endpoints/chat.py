@@ -898,16 +898,17 @@ async def websocket_endpoint(
                                             websocket,
                                         )
                                     elif event.type == "error":
+                                        drain_error_payload = {
+                                            "type": "error",
+                                            "content": public_rag_error_content(event.content),
+                                            "conversationId": event.conversation_id,
+                                        }
+                                        if event.debug_data and event.debug_data.get("error_code"):
+                                            drain_error_payload["code"] = event.debug_data[
+                                                "error_code"
+                                            ]
                                         await manager.send_personal_message(
-                                            json.dumps(
-                                                {
-                                                    "type": "error",
-                                                    "content": public_rag_error_content(
-                                                        event.content
-                                                    ),
-                                                    "conversationId": event.conversation_id,
-                                                }
-                                            ),
+                                            json.dumps(drain_error_payload),
                                             websocket,
                                         )
                                 break
@@ -1610,12 +1611,12 @@ async def chat_stream_endpoint(
                                         },
                                     )
                                 elif event.type == "error":
-                                    yield await emitter.emit(
-                                        "error",
-                                        {
-                                            "content": public_rag_error_content(event.content),
-                                        },
-                                    )
+                                    drain_sse_payload = {
+                                        "content": public_rag_error_content(event.content),
+                                    }
+                                    if event.debug_data and event.debug_data.get("error_code"):
+                                        drain_sse_payload["code"] = event.debug_data["error_code"]
+                                    yield await emitter.emit("error", drain_sse_payload)
                             break
 
                 await pipeline_task

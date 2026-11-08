@@ -704,7 +704,7 @@ class RAGPipeline:
         3. 结束时把 context/query 的占位符映射写入 mask_mapping_sink（引用传递），
            调用方可据此还原"引用型"占位符；模型自行新生成的 PII 占位符不还原。
         """
-        llm_client = client_override or self.openai_client
+        llm_client = client_override if client_override is not None else self.openai_client
         if not llm_client:
             # 配置缺失 = 生成能力不可用，不是回答内容。此前 yield "LLM未配置"
             # 会被上层当成正文逐字累加、落库并写记忆；改为抛出显式异常，
@@ -822,6 +822,7 @@ class RAGPipeline:
         )
 
         llm_start = time.perf_counter()
+        full_response = ""
         try:
             # B4（D5）：组织设置的默认模型经 model_override 透传；未设置时保持
             # 进程级 Settings 的既有选择语义（本地/DeepSeek）。
@@ -840,7 +841,6 @@ class RAGPipeline:
                 temperature=0.1,
                 max_tokens=settings.AI_MAX_TOKENS,
             )
-            full_response = ""
             first_token = True
             # 安全加固：流式输出前对 chunk 掩码（编号继续递增，PII 不离开服务器）；
             # 模型新生成的 PII 占位符不参与最终还原，仅 context/query 的占位符可还原。
@@ -866,6 +866,23 @@ class RAGPipeline:
                     else:
                         yield content
 
+        except Exception as e:
+            LLM_REQUEST_ERRORS.inc()
+            if client_override is not None:
+                # 个人设置密钥不得写日志：异常文本可能回显 key 片段，只记录异常类型。
+                logger.error("LLM streaming failed (user provider): %s", type(e).__name__)
+                if raise_user_errors:
+                    raise UserLLMRequestError(USER_LLM_REQUEST_FAILED_MESSAGE) from e
+                # 直接调用方（非聊天链路）保留可操作文案，不泄露上游文本。
+                yield USER_LLM_REQUEST_FAILED_MESSAGE
+            else:
+                logger.error(f"LLM streaming failed: {e}", exc_info=True)
+                yield "系统处理异常，请重试"
+            return
+
+        # 流完成后的记账/掩码回传不属于「上游调用失败」：这里即使出错，也不能
+        # 把已经生成完的回答丢弃，更不能误报成个人模型配置问题。
+        try:
             # Token estimation
             input_text = "".join(str(m.get("content", "")) for m in messages if m.get("content"))
             self.report_tokens(
@@ -882,16 +899,5 @@ class RAGPipeline:
                         f"PII masking: {len(mask_mapping_sink)} placeholders exposed "
                         "for final unmask"
                     )
-
-        except Exception as e:
-            LLM_REQUEST_ERRORS.inc()
-            if client_override is not None:
-                # 个人设置密钥不得写日志：异常文本可能回显 key 片段，只记录异常类型。
-                logger.error("LLM streaming failed (user provider): %s", type(e).__name__)
-                if raise_user_errors:
-                    raise UserLLMRequestError(USER_LLM_REQUEST_FAILED_MESSAGE) from e
-                # 直接调用方（非聊天链路）保留可操作文案，不泄露上游文本。
-                yield USER_LLM_REQUEST_FAILED_MESSAGE
-            else:
-                logger.error(f"LLM streaming failed: {e}", exc_info=True)
-                yield "系统处理异常，请重试"
+        except Exception:
+            logger.exception("post-stream bookkeeping failed after answer completion")

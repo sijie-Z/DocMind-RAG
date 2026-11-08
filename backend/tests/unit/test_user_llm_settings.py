@@ -711,6 +711,55 @@ class TestRunRagPipelineWiring:
         assert not any(event.type == "message" for event in events), "不得把诊断当回答"
         persisted.assert_not_awaited()
 
+    async def test_user_llm_error_after_partial_stream_still_not_persisted(self, db, monkeypatch):
+        """已流出部分正文后上游失败：半截回答同样不得落库/写记忆。"""
+        from app.rag.pipeline import USER_LLM_REQUEST_FAILED_MESSAGE, UserLLMRequestError
+        from app.services import chat_service as chat_service_mod
+
+        db.add(Organization(id=1, name="org", owner_id=1))
+        await db.commit()
+
+        class PartialRag(_FakeRag):
+            async def chat_stream(self, *args, **kwargs):
+                self.chat_kwargs = kwargs
+                yield "半截回答"
+                raise UserLLMRequestError(USER_LLM_REQUEST_FAILED_MESSAGE)
+
+        fake_rag = PartialRag()
+        memory = _FakeMemory()
+        memory.store_interaction = AsyncMock()
+        monkeypatch.setattr(chat_service_mod, "rag_service", fake_rag)
+        monkeypatch.setattr(chat_service_mod, "get_memory_system", lambda *a, **k: memory)
+        persisted = AsyncMock()
+        monkeypatch.setattr(chat_service_mod, "_persist_assistant_message", persisted)
+
+        import asyncio
+
+        queue: asyncio.Queue = asyncio.Queue()
+        await chat_service_mod.run_rag_pipeline(
+            session=db,
+            user_content="问题",
+            user_id=1,
+            search_org_id=1,
+            organization_id=1,
+            conversation_id=None,
+            file_ids=[],
+            strict_mode=False,
+            privacy_mode=False,
+            event_queue=queue,
+            llm_client=object(),
+            llm_model="user-model",
+        )
+        events = []
+        while not queue.empty():
+            events.append(queue.get_nowait())
+        # 管线会先发一个空 chunk（建立 conversationId），按内容拼接断言。
+        assert "".join(event.content for event in events if event.type == "chunk") == "半截回答"
+        assert not any(event.type == "message" for event in events), "不得产生终态回答"
+        assert any(event.type == "error" for event in events)
+        persisted.assert_not_awaited()
+        memory.store_interaction.assert_not_awaited()
+
 
 class TestAgentServiceWiring:
     async def test_agent_loop_uses_per_user_client_and_model(self, monkeypatch):
