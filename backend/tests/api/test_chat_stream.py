@@ -178,6 +178,9 @@ async def test_legacy_agent_failed_done_is_not_persisted(client, monkeypatch):
     )
 
     assert resp.status_code == 200
+    # 只抑制持久化，流式输出不变（占位 chunk 仍到达客户端）
+    assert "event: chunk" in resp.text
+    assert "该步骤因 API 连接问题未能完成" in resp.text
     assert "called" not in saved, "失败 run 的占位回答不得落库"
 
 
