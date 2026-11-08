@@ -18,6 +18,7 @@
       </div>
     </nav>
 
+    <main id="main-content">
     <!-- Hero：价值主张 + 产品示意（纯 HTML/CSS，标注为界面示意） -->
     <header class="hero">
       <div class="hero-inner">
@@ -144,6 +145,7 @@
         </button>
       </div>
     </section>
+    </main>
 
     <footer class="footer">
       <div class="footer-inner">
@@ -735,7 +737,7 @@ button:focus-visible {
 .step-title {
   margin: 0 0 8px;
   font-size: 16px;
-  font-weight: 600;
+  font-weight: 500;
   color: var(--c-text);
 }
 .step-desc {
@@ -775,7 +777,7 @@ button:focus-visible {
 .feature-title {
   margin: 0 0 8px;
   font-size: 15px;
-  font-weight: 600;
+  font-weight: 500;
   color: var(--c-text);
 }
 .feature-desc {
@@ -1020,6 +1022,12 @@ html.dark .mock-sources {
   color: #93c5fd;
 }
 
+/* 暗色下 --c-ink 与页面底色几乎同色（约 1.05:1），CTA 带改用纸面 + 边框分层 */
+html.dark .cta {
+  background: var(--c-surface);
+  border-top: 1px solid var(--c-border);
+}
+
 html.dark .cta-desc {
   color: #cbd5e1;
 }
@@ -1029,7 +1037,9 @@ html.dark .btn-cta {
   color: #fff;
 }
 
+/* 悬停保持 #2563eb（对 #111c2e >3:1），用内描边给出状态，不再压暗到 2.6:1 */
 html.dark .btn-cta:hover {
-  background: #1d4ed8;
+  background: #2563eb;
+  box-shadow: inset 0 0 0 1px #bfdbfe;
 }
 </style>

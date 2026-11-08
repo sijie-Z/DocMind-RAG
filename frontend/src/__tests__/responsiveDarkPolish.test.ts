@@ -203,6 +203,26 @@ describe('E16-H5 · firsthome 暗色适配', () => {
     expect(hexLuminance(bg)).toBeLessThan(0.35)
   })
 
+  it('CTA 暗色分层与按钮边界：不再与页面同色，按钮对底色 ≥3，hover 有描边', () => {
+    expect(css).toMatch(/html\.dark\s+\.cta(?:[\s{])/)
+    const cta = declarationsFor(css, /html\.dark\s+\.cta(?![-\w])/)
+    expect(cta['background']).toContain('var(--c-surface)')
+    expect(cta['border-top']).toContain('1px')
+
+    const dark = declarationsFor(css, /html\.dark\s+\.landing/)
+    const surface = dark['--c-surface']
+    expect(surface, '暗色令牌应定义 --c-surface').toBeTruthy()
+
+    const btn = declarationsFor(css, /html\.dark\s+\.btn-cta/)
+    const btnBg = (btn['background'] || '').match(/#[0-9a-f]{6}/i)?.[0] ?? ''
+    expect(btnBg, '暗色 CTA 按钮应有实色背景').toBeTruthy()
+    expect(contrastRatio(btnBg, surface)).toBeGreaterThanOrEqual(3)
+
+    const hover = declarationsFor(css, /html\.dark\s+\.btn-cta:hover/)
+    expect(hover['box-shadow'] || '').toContain('#bfdbfe')
+    expect(hover['background']).toContain(btnBg)
+  })
+
   it('强调标题在暗色下使用高对比亮蓝（不再依赖装饰性渐变）', () => {
     expect(css).toMatch(/html\.dark\s+\.hero-title-accent\s*\{/)
     const accent = declarationsFor(css, /html\.dark\s+\.hero-title-accent/)
