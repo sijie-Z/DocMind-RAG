@@ -43,8 +43,12 @@ def _resolve_for_user_server(monkeypatch):
 
     import app.api.v1.endpoints.agent as agent_api
 
+    server_client = object()
+
     async def _resolve(_db, _user):
-        return SimpleNamespace(source="server", client=None, model=None)
+        # 服务端模式返回非 None 客户端/模型：拿掉端点 source==user 门就会
+        # 把它们传进 resume_chat，断言 None 即红。
+        return SimpleNamespace(source="server", client=server_client, model="server-model")
 
     monkeypatch.setattr(agent_api, "resolve_for_user", _resolve)
 
