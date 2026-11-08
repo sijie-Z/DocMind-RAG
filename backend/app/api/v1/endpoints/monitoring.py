@@ -512,7 +512,7 @@ async def get_route_stats(
 async def get_notification_status():
     """获取通知服务状态（需要 VIEW_SYSTEM_HEALTH 权限）"""
     # 站内通知（system）是唯一真实启用的通道；当前没有 SMTP/邮件实现，
-    # 不再把 email 伪装成 enabled（监控页据此展示）。
+    # 不再把 email 伪装成 enabled（前端目前只展示总开关，通道列表供 API 消费）。
     return {"status": "active", "enabled_channels": ["system"]}
 
 

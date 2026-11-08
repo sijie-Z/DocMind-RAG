@@ -6,6 +6,7 @@ import json
 import logging
 import uuid
 from datetime import datetime, timedelta
+from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, Form, Query, UploadFile, status
 from fastapi.responses import RedirectResponse
@@ -28,6 +29,7 @@ from app.exceptions import (
     ConflictError,
     NotFoundError,
     PayloadTooLargeError,
+    ValidationError,
 )
 from app.models.document import Document, DocumentStatus, DocumentType
 from app.models.knowledge_job import KnowledgeJobStatus, KnowledgeProcessingJob
@@ -37,6 +39,7 @@ from app.rag.source_provenance import SourceProvenanceUnavailableError
 from app.schemas.knowledge import DocumentDownloadUrl, DocumentDownloadUrlResponse
 from app.schemas.review import ReviewMetaUpsert
 from app.services.document_preview import load_document_chunk, load_document_preview_text
+from app.services.file_service import FileUploadService
 from app.services.review_document_service import (
     ReviewMetaInput,
     compute_readiness,
@@ -174,6 +177,16 @@ async def upload_document(
             except (json.JSONDecodeError, TypeError):
                 # 也可能传普通逗号分隔字符串 "tag1,tag2"
                 keywords_list = [t.strip() for t in tags.split(",") if t.strip()]
+
+        # 扩展名前置校验：旧版二进制 Office 解析链不支持，收下只会在异步
+        # 解析阶段失败——入口直接 400 并提示可操作路径（与 /files/upload 同口径）。
+        filename = file.filename or ""
+        ext = Path(filename).suffix.lower()
+        allowed_ext = FileUploadService().allowed_extensions
+        if ext in {".doc", ".xls"}:
+            raise ValidationError("暂不支持旧版 .doc/.xls，请另存为 .docx/.xlsx 后上传")
+        if ext not in allowed_ext:
+            raise ValidationError(f"不支持的文件格式。支持的格式: {', '.join(sorted(allowed_ext))}")
 
         # 限制上传大小后再读文件，避免超大文件先占满内存
         file.file.seek(0, 2)

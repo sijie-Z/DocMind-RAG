@@ -142,6 +142,44 @@ class RAGPipeline:
         debug: bool = False,
         search_mode: str | None = None,
     ) -> tuple[list[dict[str, Any]], dict | None]:
+        """检索入口：统一记录「每次检索返回条数」指标（含失败=0 次）。
+
+        记录放在 pipeline 最低层而不是 facade：Agent 工作流等路径直接调用本方法，
+        若只在 facade 记录，avg_docs_per_query 的人群会小于 retrieval_total。
+        """
+        try:
+            results, debug_info = await self._search_knowledge_base_impl(
+                query,
+                organization_id,
+                top_k,
+                document_ids,
+                debug=debug,
+                search_mode=search_mode,
+            )
+        except Exception:
+            # 失败检索同样计入分母（0 条）：与 retrieval_total 的入口计数同人群。
+            self._record_docs_retrieved(0)
+            raise
+        self._record_docs_retrieved(len(results or []))
+        return results, debug_info
+
+    def _record_docs_retrieved(self, count: int) -> None:
+        try:
+            self.metrics.inc("docs_retrieved_total", count)
+            self.metrics.inc("docs_retrieved_queries", 1)
+            self.metrics.record_event("docs_retrieved", float(count))
+        except Exception:  # noqa: BLE001 — 观测不得影响检索
+            logger.debug("记录召回文档数失败", exc_info=True)
+
+    async def _search_knowledge_base_impl(
+        self,
+        query: str,
+        organization_id: int,
+        top_k: int = 5,
+        document_ids: list[str] | None = None,
+        debug: bool = False,
+        search_mode: str | None = None,
+    ) -> tuple[list[dict[str, Any]], dict | None]:
         """Retrieve relevant documents with caching and retry.
 
         Returns (results, debug_info) — debug_info is None unless debug=True.

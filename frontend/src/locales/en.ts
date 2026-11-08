@@ -772,7 +772,6 @@ export default {
     systemTitle: 'DocMind Knowledge Base'
   },
   dashboard: {
-    metricNotAvailable: 'Metric not connected',
     adminSubtitle: 'Organization health and AI resource usage',
     adminTitle: 'Admin overview',
     llmNoDailyTrend: 'No daily data',

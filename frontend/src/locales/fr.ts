@@ -722,7 +722,6 @@ export default {
     systemTitle: 'DocMind Base de Connaissances'
   },
   dashboard: {
-    metricNotAvailable: 'Indicateur non connecté',
     adminSubtitle: 'Santé de l’organisation et usage des ressources IA',
     adminTitle: 'Vue d’ensemble admin',
     llmNoDailyTrend: 'Aucune donnée journalière',

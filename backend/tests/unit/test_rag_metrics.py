@@ -1,6 +1,6 @@
-import pytest
-
 """Tests for RAG metrics."""
+
+import pytest
 
 from app.rag.metrics import RAGMetrics
 
@@ -113,39 +113,29 @@ class TestAvgDocsPerQuery:
         assert m.get_snapshot(window_seconds=60)["avg_docs_per_query"] == 0
 
 
-class TestRagServiceDocsRecording:
+class TestPipelineDocsRecording:
     @pytest.mark.asyncio
-    async def test_search_records_docs_per_query(self, monkeypatch):
+    async def test_search_records_docs_and_failures_as_zero(self, monkeypatch):
+        """检索入口统一记录：成功按返回条数、失败按 0（与 retrieval_total 同人群）。"""
         from app.rag.metrics import RAGMetrics
-        from app.services import rag_service as mod
+        from app.rag.pipeline import RAGPipeline
 
-        class FakePipeline:
-            def __init__(self):
-                self.metrics = RAGMetrics()
+        pipeline = object.__new__(RAGPipeline)
+        pipeline.metrics = RAGMetrics()
 
-            async def search_knowledge_base(
-                self,
-                query,
-                organization_id,
-                top_k,
-                document_ids,
-                debug=False,
-                search_mode=None,
-            ):
-                return [{"id": 1}, {"id": 2}], None
+        async def _ok(*args, **kwargs):
+            return [{"id": 1}, {"id": 2}], None
 
-        fake = FakePipeline()
-        monkeypatch.setattr(mod, "get_rag_pipeline", lambda: fake)
-        svc = mod.RagServiceFacade()
-
-        results, _ = await svc.search_knowledge_base("q", 1, 5)
+        monkeypatch.setattr(RAGPipeline, "_search_knowledge_base_impl", _ok)
+        results, _ = await pipeline.search_knowledge_base("q", 1, 5)
         assert len(results) == 2
-        assert fake.metrics.get_snapshot()["avg_docs_per_query"] == 2.0
+        assert pipeline.metrics.get_snapshot()["avg_docs_per_query"] == 2.0
 
-        # 第二次检索 0 条：平均值按真实分母收敛到 1.0
-        async def _empty(*args, **kwargs):
-            return [], None
+        async def _fail(*args, **kwargs):
+            raise RuntimeError("retrieval down")
 
-        fake.search_knowledge_base = _empty
-        await svc.search_knowledge_base("q2", 1, 5)
-        assert fake.metrics.get_snapshot()["avg_docs_per_query"] == 1.0
+        monkeypatch.setattr(RAGPipeline, "_search_knowledge_base_impl", _fail)
+        with pytest.raises(RuntimeError):
+            await pipeline.search_knowledge_base("q2", 1, 5)
+        # (2 + 0) / 2 次检索 = 1.0：失败也进入分母，不会伪造偏高均值
+        assert pipeline.metrics.get_snapshot()["avg_docs_per_query"] == 1.0
