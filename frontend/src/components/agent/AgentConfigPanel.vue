@@ -90,14 +90,21 @@
             <label class="switch small">
               <input
                 type="checkbox"
-                :checked="!localConfig.disabled_tools.includes(tool.name)"
+                :checked="!isEnforced(tool) && !localConfig.disabled_tools.includes(tool.name)"
+                :disabled="isEnforced(tool)"
                 @change="toggleTool(tool.name)"
               />
               <span class="switch-slider"></span>
             </label>
             <span class="tool-item-name" :title="tool.description">
               {{ tool.name }}
-              <span v-if="tool.disabled_by_default" class="default-disabled">默认关闭</span>
+              <span v-if="isEnforced(tool)" class="default-disabled" :title="t('agent.serverDisabledHint')">
+                {{ t('agent.serverDisabled') }}
+              </span>
+              <span v-else-if="tool.gated_by_predicate" class="default-disabled" :title="t('agent.gatedToolHint')">
+                {{ t('agent.gatedTool') }}
+              </span>
+              <span v-else-if="tool.disabled_by_default" class="default-disabled">默认关闭</span>
             </span>
           </div>
         </div>
@@ -131,6 +138,8 @@ import { apiUnwrap } from '@/utils/apiUnwrap'
 
 const props = defineProps<{
   config: AgentConfig
+  /** GET /agent/config capabilities.enforced_disabled_tools：兜底强制禁用清单 */
+  enforcedTools?: string[]
 }>()
 
 const emit = defineEmits<{
@@ -142,15 +151,25 @@ const { t } = useI18n()
 const collapsed = ref(true)
 const availableTools = ref<ToolInfo[]>([])
 
-const localConfig = reactive<AgentConfig>({ ...props.config })
+const localConfig = reactive<AgentConfig>({
+  ...props.config,
+  disabled_tools: [...props.config.disabled_tools],
+})
 
 watch(
   () => props.config,
-  (c) => Object.assign(localConfig, c),
+  (c) => Object.assign(localConfig, { ...c, disabled_tools: [...c.disabled_tools] }),
   { deep: true },
 )
 
+function isEnforced(tool: { name: string; config_disabled?: boolean }): boolean {
+  return tool.config_disabled === true || (props.enforcedTools || []).includes(tool.name)
+}
+
 function toggleTool(name: string) {
+  // 服务端强制禁用的工具不得在 UI 上“打开”（PUT 会被强制合并回去）
+  const tool = availableTools.value.find((t) => t.name === name)
+  if (tool && isEnforced(tool)) return
   const idx = localConfig.disabled_tools.indexOf(name)
   if (idx === -1) {
     localConfig.disabled_tools.push(name)
@@ -300,6 +319,8 @@ onMounted(async () => {
   height: 12px; width: 12px;
 }
 
+input:disabled + .switch-slider { background: #e5e7eb; opacity: 0.65; cursor: not-allowed; }
+input:disabled:checked + .switch-slider { background: #93c5fd; }
 input:checked + .switch-slider { background: #3b82f6; }
 input:checked + .switch-slider::before {
   transform: translateX(16px);

@@ -15,7 +15,7 @@
  * - chat 请求体不带 approval_mode → 用例 4 红。
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { mount } from '@vue/test-utils'
+import { mount, flushPromises } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { createI18n } from 'vue-i18n'
 import type { Mock } from 'vitest'
@@ -46,12 +46,15 @@ const mocked = request as unknown as {
 // 面板文案已词条化（hitl.*）——mount 必须装 i18n 实例（仓内先例：agentInitContract）
 const i18n = createI18n({ legacy: false, locale: 'zh', messages: { zh } })
 
-function mountPanel(config: AgentConfig) {
-  return mount(AgentConfigPanel, { props: { config }, global: { plugins: [i18n] } })
+function mountPanel(config: AgentConfig, enforcedTools?: string[]) {
+  return mount(AgentConfigPanel, {
+    props: { config, enforcedTools },
+    global: { plugins: [i18n] },
+  })
 }
 
 /** 内存假服务端：GET/PUT /agent/config 共享一份存储（默认 risky，同后端）。 */
-function installFakeConfigServer(initial: Partial<AgentConfig> = {}) {
+function installFakeConfigServer(initial: Partial<AgentConfig> = {}, tools: unknown[] = []) {
   let stored: Record<string, unknown> = {
     model: 'deepseek-v4-flash',
     temperature: 0.1,
@@ -73,7 +76,7 @@ function installFakeConfigServer(initial: Partial<AgentConfig> = {}) {
       return Promise.resolve({ data: { success: true, data: { ...stored } } })
     }
     // AgentConfigPanel onMounted 拉工具列表（listTools）
-    return Promise.resolve({ data: { success: true, data: [] } })
+    return Promise.resolve({ data: { success: true, data: tools, total: tools.length } })
   })
   mocked.put.mockImplementation((url: string, body: Record<string, unknown>) => {
     if (url === '/agent/config') {
@@ -134,6 +137,8 @@ describe('AgentConfigPanel · HITL 审批模式', () => {
     expect(mocked.put).toHaveBeenCalledWith(
       '/agent/config',
       expect.objectContaining({ approval_mode: 'always' }),
+      // 保存失败由调用方自有提示：请求层静默，避免双 toast
+      expect.objectContaining({ headers: { 'X-Silent-Error': '1' } }),
     )
 
     // GET 回读：服务端存储与提交一致
@@ -197,5 +202,87 @@ describe('agentApi.chat · 审批模式随请求上送', () => {
 
     const [, init] = fetchMock.mock.calls[0]
     expect(JSON.parse(init.body)).not.toHaveProperty('approval_mode')
+  })
+})
+
+describe('AgentConfigPanel · 服务端强制禁用工具', () => {
+  it('config_disabled 的工具开关禁用并标注，普通工具仍可切换', async () => {
+    installFakeConfigServer({}, [
+      {
+        name: 'execute_python',
+        description: '高危执行',
+        tags: [],
+        parameters: {},
+        requires_auth: false,
+        disabled_by_default: true,
+        config_disabled: true,
+        gated_by_predicate: false,
+      },
+      {
+        name: 'search_knowledge_base',
+        description: '知识库检索',
+        tags: [],
+        parameters: {},
+        requires_auth: false,
+        disabled_by_default: false,
+        config_disabled: false,
+        gated_by_predicate: false,
+      },
+      {
+        name: 'terminal_exec',
+        description: '终端执行',
+        tags: [],
+        parameters: {},
+        requires_auth: false,
+        disabled_by_default: false,
+        config_disabled: false,
+        gated_by_predicate: true,
+      },
+    ])
+    const { w } = await mountPanelFromServer()
+    await flushPromises()
+
+    const python = w.findAll('.tool-item').find((i) => i.text().includes('execute_python'))
+    expect(python).toBeTruthy()
+    expect(python!.find('input').attributes('disabled')).toBeDefined()
+    expect(python!.text()).toContain('服务端禁用')
+
+    const search = w.findAll('.tool-item').find((i) => i.text().includes('search_knowledge_base'))
+    expect(search).toBeTruthy()
+    expect(search!.find('input').attributes('disabled')).toBeUndefined()
+
+    const gated = w.findAll('.tool-item').find((i) => i.text().includes('terminal_exec'))
+    expect(gated).toBeTruthy()
+    expect(gated!.text()).toContain('按条件生效')
+    expect(gated!.find('input').attributes('disabled')).toBeUndefined()
+  })
+})
+
+describe('AgentConfigPanel · capability 兜底清单', () => {
+  it('旧配置缺 config_disabled 时，capabilities 清单仍禁用并取消勾选', async () => {
+    installFakeConfigServer({}, [
+      {
+        name: 'execute_sql',
+        description: 'SQL 执行',
+        tags: [],
+        parameters: {},
+        requires_auth: false,
+        disabled_by_default: true,
+        config_disabled: false,
+        gated_by_predicate: false,
+      },
+    ])
+    const res = await agentApi.getConfig()
+    const config = res.data.data as AgentConfig
+    const w = mountPanel(config, ['execute_sql'])
+    await w.find('.config-header').trigger('click')
+    await flushPromises()
+
+    const item = w.findAll('.tool-item').find((i) => i.text().includes('execute_sql'))
+    expect(item).toBeTruthy()
+    const input = item!.find('input').element as HTMLInputElement
+    expect(input.disabled).toBe(true)
+    expect(input.checked).toBe(false)
+    expect(item!.text()).toContain('服务端禁用')
   })
 })

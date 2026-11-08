@@ -29,7 +29,13 @@ const json = (body: unknown, status = 200) => ({
   body: JSON.stringify(body),
 })
 
-async function stubApi(page: Page): Promise<void> {
+const CONFIG_OK = {
+  success: true,
+  data: {},
+  capabilities: { terminal_enabled: true, enforced_disabled_tools: [] },
+}
+
+async function stubApi(page: Page, terminalEnabled = true): Promise<void> {
   // 兜底在前、精确匹配在后（Playwright 后注册的 handler 优先）。
   await page.route('**/api/v1/**', (route) => route.fulfill(json(ok({}))))
   await page.route('**/api/v1/users/me', (route) => route.fulfill(json(ok(USER))))
@@ -37,7 +43,14 @@ async function stubApi(page: Page): Promise<void> {
     route.fulfill(json(ok({ language: 'zh', theme: 'light' }))),
   )
   await page.route('**/api/v1/agent/tools', (route) => route.fulfill(json(ok([]))))
-  await page.route('**/api/v1/agent/config', (route) => route.fulfill(json(ok({}))))
+  await page.route('**/api/v1/agent/config', (route) =>
+    route.fulfill(
+      json({
+        ...CONFIG_OK,
+        capabilities: { ...CONFIG_OK.capabilities, terminal_enabled: terminalEnabled },
+      }),
+    ),
+  )
   await page.route('**/api/v1/commands*', (route) =>
     route.fulfill(json(ok({ enabled: true, scope: 'global', commands: [] }))),
   )
@@ -76,7 +89,7 @@ test('终端面板：后端不可用时打开抽屉显示错误提示且不建 W
   await stubApi(page)
   await page.goto('/agent')
 
-  // Agent 视图按需编译 + 初始化；toggle 在 header 内恒渲染，不依赖终端接口。
+  // Agent 视图按需编译 + 初始化；terminal_enabled=true 时入口才渲染。
   const toggle = page.locator('[data-testid="agent-terminal-toggle"]')
   await expect(toggle).toBeVisible({ timeout: 20_000 })
   await toggle.click()
@@ -88,4 +101,18 @@ test('终端面板：后端不可用时打开抽屉显示错误提示且不建 W
   // （Vite HMR / notifications）不属于本断言范围。
   const terminalSockets = sockets.filter((url) => url.includes('/api/v1/terminal/ws/'))
   expect(terminalSockets).toEqual([])
+})
+
+test('终端入口：服务端 capability 关闭时不渲染（不再点击后才报错）', async ({ page }) => {
+  await page.addInitScript(() => {
+    localStorage.setItem('docmind_token', 'e2e-fake-token')
+    localStorage.setItem('docmind_token_expires', String(Date.now() + 3_600_000))
+  })
+
+  await stubApi(page, false)
+  await page.goto('/agent')
+
+  // 等初始化完成（工具列表等），入口应始终不存在
+  await expect(page.getByText('Agent 配置').first()).toBeVisible({ timeout: 20_000 })
+  await expect(page.locator('[data-testid="agent-terminal-toggle"]')).toHaveCount(0)
 })
