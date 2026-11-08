@@ -10,7 +10,7 @@
  *  - tab/系统活跃度/快捷入口文案退回硬编码 → 红；
  *  - 删除 watch(locale) 的图表重建（或只 mock 哑 ECharts 实例）→ 红。
  */
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import { defineComponent, h, nextTick } from 'vue'
 import { createI18n } from 'vue-i18n'
@@ -21,6 +21,7 @@ import ProfilePage from '../index.vue'
 import { useProfilePage } from '../composables/useProfilePage'
 import zh from '@/locales/zh'
 import en from '@/locales/en'
+import fr from '@/locales/fr'
 
 vi.mock('@/api/user', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/api/user')>()
@@ -89,16 +90,24 @@ const i18n = createI18n({
   legacy: false,
   locale: 'zh',
   fallbackLocale: 'en',
-  messages: { zh, en },
+  messages: { zh, en, fr },
 })
 
-function mountPage() {  const pinia = createPinia()
+const mountedWrappers: Array<{ unmount: () => void }> = []
+
+function track<T extends { unmount: () => void }>(wrapper: T): T {
+  mountedWrappers.push(wrapper)
+  return wrapper
+}
+
+function mountPage() {
+  const pinia = createPinia()
   setActivePinia(pinia)
   const Host = defineComponent({
     render: () =>
       h(NDialogProvider, null, { default: () => h(NMessageProvider, null, { default: () => h(ProfilePage) }) }),
   })
-  return mount(Host, { global: { plugins: [pinia, i18n, naive] } })
+  return track(mount(Host, { global: { plugins: [pinia, i18n, naive] } }))
 }
 
 let capturedApi: ReturnType<typeof useProfilePage>
@@ -116,10 +125,10 @@ function mountHarness() {
     render: () =>
       h(NDialogProvider, null, { default: () => h(NMessageProvider, null, { default: () => h(Harness) }) }),
   })
-  return mount(Host, { global: { plugins: [pinia, i18n, naive] } })
+  return track(mount(Host, { global: { plugins: [pinia, i18n, naive] } }))
 }
 
-async function switchLanguage(code: 'zh' | 'en') {
+async function switchLanguage(code: 'zh' | 'en' | 'fr') {
   i18n.global.locale.value = code
   await nextTick()
   await flushPromises()
@@ -137,6 +146,12 @@ beforeEach(() => {
   localStorage.clear()
   // 全局 composer 的 locale 在文件内共享：每个用例从 zh 起步
   i18n.global.locale.value = 'zh'
+})
+
+afterEach(() => {
+  // 卸掉页面/watcher/resize 监听，并清空图表调用记录，避免跨用例互相兜底
+  while (mountedWrappers.length > 0) mountedWrappers.pop()!.unmount()
+  setOptionCalls.length = 0
 })
 
 describe('Profile · 语言切换后文案实时更新', () => {
@@ -224,7 +239,7 @@ describe('Profile · 语言切换后文案实时更新', () => {
   })
 
   it('图表内嵌文案随 locale 重建（ECharts 不响应 i18n）', async () => {
-    const wrapper = mountPage()
+    mountPage()
     await flushPromises()
     // 挂载后的 initCharts 走 100ms 定时器
     await wait(300)
@@ -241,6 +256,17 @@ describe('Profile · 语言切换后文案实时更新', () => {
     expect(rebuilt.some((o) => o?.series?.[0]?.name === 'Storage distribution')).toBe(true)
     expect(rebuilt.some((o) => o?.series?.[0]?.name === 'Activity')).toBe(true)
     expect(rebuilt.some((o) => o?.series?.[0]?.name === '存储分布'), '重建后仍是中文系列名').toBe(false)
+
+    // 日期轴必须跟随 DATE_LOCALE_MAP（固定 en-US/zh-CN 会让下面的 fr 断言红）
+    const afterEn = setOptionCalls.length
+    await switchLanguage('fr')
+    await wait(300)
+    const frActivity = setOptionCalls
+      .slice(afterEn)
+      .find((o) => o?.series?.[0]?.name === 'Activité')
+    expect(frActivity, 'fr 下活跃度图表应重建').toBeTruthy()
+    expect(frActivity?.xAxis?.data?.[0], 'fr 日期轴格式不对').toMatch(/\d{1,2}\s+\S+\./)
+    expect(frActivity?.xAxis?.data?.[0]).not.toMatch(/^[A-Z][a-z]{2} \d/)
   })
 
   it('主题下拉选项随 locale 切换（computed 选项）', async () => {
