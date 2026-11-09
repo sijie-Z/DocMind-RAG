@@ -1,13 +1,13 @@
 <template>
   <div class="approval-card" :class="{ expired }">
     <div class="approval-header">
-      <span class="approval-title">工具执行前需人工审批</span>
+      <span class="approval-title">{{ t('agent.approval.title') }}</span>
       <span class="risk-badge" :class="`risk-${riskLevel}`">{{ riskLabel }}</span>
-      <span v-if="expired" class="expired-badge">已超时</span>
+      <span v-if="expired" class="expired-badge">{{ t('agent.approval.expired') }}</span>
     </div>
 
     <div class="approval-tool">
-      <span class="tool-label">工具</span>
+      <span class="tool-label">{{ t('agent.approval.tool') }}</span>
       <code class="tool-name">{{ toolName }}</code>
     </div>
 
@@ -19,7 +19,7 @@
       v-model="instruction"
       class="instruction-input"
       rows="2"
-      :placeholder="'改指令 / 备注（可选）：批准时作为人工指导注入后续步骤；拒绝时作为备注'"
+      :placeholder="t('agent.approval.notePlaceholder')"
       :disabled="busy || expired"
     ></textarea>
 
@@ -29,25 +29,25 @@
         :disabled="busy || expired"
         @click="emitDecision('approve')"
       >
-        {{ busy ? '提交中…' : '✓ 批准' }}
+        {{ busy ? t('agent.approval.submitting') : t('agent.approval.approve') }}
       </button>
       <button
         class="deny-btn"
         :disabled="busy || expired"
         @click="emitDecision('deny')"
       >
-        ✕ 拒绝
+        {{ t('agent.approval.reject') }}
       </button>
     </div>
     <div class="approval-hint">
-      批准 = 放行这一次调用（相同调用本任务内不再打扰）；拒绝 = 该调用不执行，
-      Agent 会收到结构化失败并调整策略。
+      {{ t('agent.approval.hint') }}
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, computed } from 'vue'
+import { useI18n } from 'vue-i18n'
 
 const props = defineProps<{
   toolName: string
@@ -58,6 +58,8 @@ const props = defineProps<{
   busy?: boolean
 }>()
 
+const { t } = useI18n()
+
 const emit = defineEmits<{
   decide: [payload: { decision: 'approve' | 'deny'; modifiedInstruction?: string; note?: string }]
 }>()
@@ -67,11 +69,11 @@ const instruction = ref('')
 const riskLabel = computed(() => {
   switch (props.riskLevel) {
     case 'high':
-      return '高风险'
+      return t('agent.approval.riskHigh')
     case 'medium':
-      return '中风险'
+      return t('agent.approval.riskMedium')
     default:
-      return '低风险'
+      return t('agent.approval.riskLow')
   }
 })
 

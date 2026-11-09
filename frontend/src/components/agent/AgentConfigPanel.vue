@@ -1,14 +1,14 @@
 <template>
   <div class="config-panel">
     <div class="config-header" @click="collapsed = !collapsed">
-      <span class="config-title">Agent 配置</span>
+      <span class="config-title">{{ t('agent.configPanel.title') }}</span>
       <span class="config-toggle">{{ collapsed ? '◀' : '▼' }}</span>
     </div>
 
     <div v-if="!collapsed" class="config-body">
       <!-- Model -->
       <div class="config-section">
-        <label class="config-label">模型</label>
+        <label class="config-label">{{ t('agent.configPanel.model') }}</label>
         <select v-model="localConfig.model" class="config-select">
           <option value="deepseek-v4-flash">DeepSeek V4 Flash</option>
           <option value="deepseek-v4-pro">DeepSeek V4 Pro</option>
@@ -18,7 +18,7 @@
       <!-- Temperature -->
       <div class="config-section">
         <label class="config-label">
-          温度: <span class="config-value">{{ localConfig.temperature }}</span>
+          {{ t('agent.configPanel.temperature') }} <span class="config-value">{{ localConfig.temperature }}</span>
         </label>
         <input
           type="range"
@@ -33,28 +33,28 @@
       <!-- Toggles -->
       <div class="config-toggles">
         <div class="toggle-row">
-          <span class="toggle-label">规划</span>
+          <span class="toggle-label">{{ t('agent.configPanel.planning') }}</span>
           <label class="switch">
             <input type="checkbox" v-model="localConfig.enable_planning" />
             <span class="switch-slider"></span>
           </label>
         </div>
         <div class="toggle-row">
-          <span class="toggle-label">反思</span>
+          <span class="toggle-label">{{ t('agent.configPanel.reflection') }}</span>
           <label class="switch">
             <input type="checkbox" v-model="localConfig.enable_reflection" />
             <span class="switch-slider"></span>
           </label>
         </div>
         <div class="toggle-row">
-          <span class="toggle-label">记忆</span>
+          <span class="toggle-label">{{ t('agent.configPanel.memory') }}</span>
           <label class="switch">
             <input type="checkbox" v-model="localConfig.enable_memory" />
             <span class="switch-slider"></span>
           </label>
         </div>
         <div class="toggle-row">
-          <span class="toggle-label">思考流</span>
+          <span class="toggle-label">{{ t('agent.configPanel.thinkingStream') }}</span>
           <label class="switch">
             <input type="checkbox" v-model="localConfig.enable_thinking" />
             <span class="switch-slider"></span>
@@ -64,11 +64,11 @@
 
       <!-- Personality -->
       <div class="config-section">
-        <label class="config-label">风格</label>
+        <label class="config-label">{{ t('agent.configPanel.style') }}</label>
         <select v-model="localConfig.personality" class="config-select">
-          <option value="balanced">平衡</option>
-          <option value="precise">精准</option>
-          <option value="creative">创意</option>
+          <option value="balanced">{{ t('agent.configPanel.styleBalanced') }}</option>
+          <option value="precise">{{ t('agent.configPanel.stylePrecise') }}</option>
+          <option value="creative">{{ t('agent.configPanel.styleCreative') }}</option>
         </select>
       </div>
 
@@ -84,7 +84,7 @@
 
       <!-- Tools -->
       <div class="config-section">
-        <label class="config-label">工具开关</label>
+        <label class="config-label">{{ t('agent.configPanel.tools') }}</label>
         <div class="tool-list">
           <div v-for="tool in availableTools" :key="tool.name" class="tool-item">
             <label class="switch small">
@@ -104,7 +104,7 @@
               <span v-else-if="tool.gated_by_predicate" class="default-disabled" :title="t('agent.gatedToolHint')">
                 {{ t('agent.gatedTool') }}
               </span>
-              <span v-else-if="tool.disabled_by_default" class="default-disabled">默认关闭</span>
+              <span v-else-if="tool.disabled_by_default" class="default-disabled">{{ t('agent.configPanel.defaultDisabled') }}</span>
             </span>
           </div>
         </div>
@@ -112,18 +112,18 @@
 
       <!-- System prompt -->
       <div class="config-section">
-        <label class="config-label">系统提示词</label>
+        <label class="config-label">{{ t('agent.configPanel.systemPrompt') }}</label>
         <textarea
           v-model="localConfig.system_prompt_override"
           class="config-textarea"
-          placeholder="留空使用默认提示词..."
+          :placeholder="t('agent.configPanel.systemPromptPlaceholder')"
           rows="3"
         ></textarea>
       </div>
 
       <!-- Apply button -->
       <button class="apply-btn" @click="$emit('apply', localConfig)">
-        应用配置
+        {{ t('agent.configPanel.apply') }}
       </button>
     </div>
   </div>

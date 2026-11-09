@@ -39,6 +39,20 @@ const i18n = createI18n({
         welcome: '欢迎',
         welcomeDesc: '描述',
       },
+      // PlanTree 已接入 i18n（agent.plan.*），自建消息集必须覆盖其渲染用到的键
+      agent: {
+        plan: {
+          title: '执行计划',
+          stepsCount: '{completed}/{total} 步',
+          parallelGroup: '∥ 并行组 {group}',
+          riskHigh: '高风险',
+          riskMedium: '中风险',
+          fallback: '备用: {tool}',
+          retryCount: '重试 {count} 次',
+          onFailureSkip: '失败时跳过',
+          onFailureAsk: '失败时询问',
+        },
+      },
       // 体验第四波：RunReportBlock 的 RunReport 摘要与导出按钮走 artifacts.* 键
       artifacts: {
         runReport: '运行报告',

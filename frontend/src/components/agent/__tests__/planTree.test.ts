@@ -11,9 +11,16 @@
  * 变异点：删对应 v-if 徽标 → 用例红；去掉默认值 gating → 负例红。
  */
 import { describe, it, expect } from 'vitest'
-import { mount } from '@vue/test-utils'
+import { mount as baseMount } from '@vue/test-utils'
+import { createI18n } from 'vue-i18n'
 import PlanTree from '../PlanTree.vue'
 import type { PlanStep } from '@/types/agent'
+import zh from '@/locales/zh'
+
+// 组件已接入 useI18n：挂载必须装 i18n 插件（zh 词条与断言一致）
+const i18n = createI18n({ legacy: false, locale: 'zh', messages: { zh } })
+const mount = (component: Parameters<typeof baseMount>[0], options: Record<string, any> = {}) =>
+  baseMount(component, { ...options, global: { ...(options.global || {}), plugins: [i18n] } })
 
 function makeStep(overrides: Partial<PlanStep> = {}): PlanStep {
   return {
