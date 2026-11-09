@@ -1,4 +1,5 @@
 import { getToken } from '@/utils/auth'
+import i18n from '@/locales'
 import type { SSEMessage } from '@/types/api'
 
 interface RetryOptions {
@@ -178,7 +179,9 @@ class SSEService {
           const rateLimitInfo = {
             status: response.status,
             retryAfter: retryAfter ? parseInt(retryAfter) : null,
-            message: response.status === 429 ? '请求过于频繁，请稍后再试' : `HTTP错误: ${response.status}`
+            message: response.status === 429
+        ? (i18n.global.t as (k: string) => string)('errors.rateLimited')
+        : (i18n.global.t as (k: string, p: Record<string, string | number>) => string)('errors.httpStatus', { status: response.status })
           }
           // SSE HTTP error
           this.setStatus('error')

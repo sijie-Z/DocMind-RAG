@@ -1,4 +1,5 @@
 import dayjs from 'dayjs'
+import i18n from '@/locales'
 
 // 后端 MySQL DATETIME 以 UTC 存储，JSON 里是「无时区 ISO」（如 2026-11-08T19:15:33）。
 // ECMAScript 会把这类字符串按**本地时间**解析——UTC+8 下整体早 8 小时。
@@ -22,6 +23,17 @@ export const parseApiDate = (value: string | Date | undefined | null): Date | nu
   return Number.isNaN(date.getTime()) ? null : date
 }
 
+type TParams = Record<string, string | number>
+const t = (key: string, params: TParams = {}): string =>
+  (i18n.global.t as (k: string, p?: TParams) => string)(key, params)
+
+const DATE_LOCALE_TAGS: Record<string, string> = {
+  zh: 'zh-CN',
+  en: 'en-US',
+  ja: 'ja-JP',
+  fr: 'fr-FR',
+}
+
 export const formatDate = (dateString: string | Date | undefined | null): string => {
   if (!dateString) return '-'
   
@@ -41,18 +53,19 @@ export const formatDate = (dateString: string | Date | undefined | null): string
     // 未来时间：显示具体日期时间，而非"刚刚"
     return dayjs(date).format('YYYY-MM-DD HH:mm')
   } else if (diffMinutes < 1) {
-    return '刚刚'
+    return t('common.relative.justNow')
   } else if (diffMinutes < 60) {
-    return `${diffMinutes}分钟前`
+    return t('common.relative.minutesAgo', { count: diffMinutes })
   } else if (diffHours < 24) {
-    return `${diffHours}小时前`
+    return t('common.relative.hoursAgo', { count: diffHours })
   } else if (diffDays < 7) {
-    return `${diffDays}天前`
+    return t('common.relative.daysAgo', { count: diffDays })
   } else if (diffDays < 30) {
     const weeks = Math.floor(diffDays / 7)
-    return `${weeks}周前`
+    return t('common.relative.weeksAgo', { count: weeks })
   } else {
-    return date.toLocaleString('zh-CN', {
+    const locale = String(i18n.global.locale.value || 'zh')
+    return date.toLocaleString(DATE_LOCALE_TAGS[locale] || 'en-US', {
       year: 'numeric',
       month: '2-digit',
       day: '2-digit',
@@ -72,15 +85,15 @@ export const formatFileSize = (bytes: number): string => {
 
 export const formatDuration = (seconds: number): string => {
   if (seconds < 60) {
-    return `${seconds}秒`
+    return t('common.duration.seconds', { seconds })
   } else if (seconds < 3600) {
     const minutes = Math.floor(seconds / 60)
     const remainingSeconds = seconds % 60
-    return `${minutes}分${remainingSeconds}秒`
+    return t('common.duration.minutesSeconds', { minutes, seconds: remainingSeconds })
   } else {
     const hours = Math.floor(seconds / 3600)
     const minutes = Math.floor((seconds % 3600) / 60)
-    return `${hours}小时${minutes}分`
+    return t('common.duration.hoursMinutes', { hours, minutes })
   }
 }
 
