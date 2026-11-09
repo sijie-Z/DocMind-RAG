@@ -16,7 +16,7 @@ import fr from '@/locales/fr'
 // 视图 src/views/monitoring/index.vue 实际消费的 monitoring.* 叶子键（平铺部分）
 // G 波：title 退役（h1 归 menu.monitoring，T9），本清单同步移除
 const FLAT_KEYS = [
-  'refresh', 'systemStatus', 'cpu', 'memory', 'appStatus',
+  'subtitle', 'refresh', 'systemStatus', 'cpu', 'memory', 'appStatus',
   'activeConnections', 'totalRequests', 'errors', 'avgResponseTime',
   'kbStatus', 'totalDocs', 'totalChunks', 'indexSize', 'searchRequests',
   'alertStatus', 'activeAlerts', 'critical', 'warning', 'normal', 'info',
@@ -28,6 +28,7 @@ const FLAT_KEYS = [
 const NESTED: Array<[string, string[]]> = [
   ['timeRange', ['hour1', 'hour6', 'hour12', 'day1', 'day7']],
   ['alert', ['level', 'message', 'time', 'status']],
+  ['auditColumns', ['user', 'action', 'target', 'detail', 'time']],
 ]
 
 const LOCALES: Array<[string, Record<string, unknown>]> = [

@@ -8,7 +8,7 @@
         </h1>
         <p class="text-slate-500 dark:text-slate-400 mt-1 text-sm flex items-center gap-2">
           <span class="w-6 h-0.5 bg-blue-500 rounded-full"></span>
-          实时监控系统运行状态
+          {{ t('monitoring.subtitle') }}
         </p>
       </div>
       <div class="flex items-center gap-3">
@@ -195,7 +195,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, onMounted, onUnmounted, h } from 'vue'
+import { ref, reactive, computed, onMounted, onUnmounted, watch, h } from 'vue'
 import { useDedupedMessage } from '@/utils/message'
 import { NTag } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
@@ -203,7 +203,7 @@ import { getAuditLogs, type AuditLogEntry } from '@/api/user'
 import { RefreshOutline, PulseOutline, GitNetworkOutline, BookOutline, WarningOutline } from '@vicons/ionicons5'
 import echarts from '@/utils/echarts'
 import { getMonitoringDashboard, getMonitoringAlerts, getMetrics, getNotificationStatus, type TrendPoint, type NotificationServiceStatus } from '@/api/monitoring'
-import { parseApiDate } from '@/utils/format'
+import { formatDateTime } from '@/utils/format'
 import { apiUnwrap } from '@/utils/apiUnwrap'
 import { getErrorMessage } from '@/utils/apiError'
 import { filterPointsByTimeRange } from './timeRange'
@@ -252,7 +252,7 @@ interface Alert {
 }
 
 const message = useDedupedMessage()
-const { t } = useI18n()
+const { t, locale } = useI18n()
 const loading = ref(false)
 const loadError = ref(false)
 const loadErrorMsg = ref('')
@@ -335,10 +335,10 @@ const auditPagination = reactive({
   pageSizes: [10, 20, 50]
 })
 
-const auditColumns = [
-  { title: '用户', key: 'username', width: 120 },
+const auditColumns = computed(() => [
+  { title: t('monitoring.auditColumns.user'), key: 'username', width: 120 },
   {
-    title: '动作',
+    title: t('monitoring.auditColumns.action'),
     key: 'action',
     width: 150,
     render(row: AuditLogEntry) {
@@ -355,18 +355,18 @@ const auditColumns = [
       }, { default: () => row.action })
     }
   },
-  { title: '目标', key: 'target_type', width: 100 },
-  { title: '详情', key: 'detail' },
+  { title: t('monitoring.auditColumns.target'), key: 'target_type', width: 100 },
+  { title: t('monitoring.auditColumns.detail'), key: 'detail' },
   { title: 'IP', key: 'ip_address', width: 140 },
   {
-    title: '时间',
+    title: t('monitoring.auditColumns.time'),
     key: 'created_at',
     width: 180,
     render(row: AuditLogEntry) {
-      return parseApiDate(row.created_at)?.toLocaleString() ?? '-'
+      return formatDateTime(row.created_at, locale.value)
     }
   }
-]
+])
 
 // 审计日志请求序号：刷新与翻页可能重叠，旧响应不得覆盖新分页数据，
 // 也不得在新请求成功后补弹旧失败 toast。
@@ -428,7 +428,7 @@ const alertColumns = computed(() => [
     key: 'timestamp',
     width: 180,
     render(row: Alert) {
-      return new Date(row.timestamp * 1000).toLocaleString()
+      return formatDateTime(new Date(row.timestamp * 1000), locale.value)
     }
   },
   {
@@ -525,6 +525,43 @@ const initCharts = () => {
     })
   }
 }
+
+// 语言切换：ECharts 内嵌标题/系列名不会自动重算；setOption 合并只改文案，
+// 已绘制的数据点保留。subtext 必须按当前是否已有数据决定——无条件写
+// 「暂无数据」会让「有曲线 + 暂无数据」同屏（评审 A 实测）。
+type ChartOptionLike = { series?: Array<{ data?: unknown[] }> }
+const hasChartData = (chart: echarts.ECharts | null): boolean => {
+  try {
+    const option = chart?.getOption() as ChartOptionLike | undefined
+    const data = option?.series?.[0]?.data
+    return Array.isArray(data) && data.length > 0
+  } catch {
+    return false
+  }
+}
+const chartSubtext = (chart: echarts.ECharts | null) =>
+  hasChartData(chart) ? '' : emptySubtext()
+
+const relocalizeCharts = () => {
+  cpuChart?.setOption({
+    title: { text: t('monitoring.cpu') + ' (%)', subtext: chartSubtext(cpuChart) },
+    series: [{ name: t('monitoring.cpu') }],
+  })
+  memoryChart?.setOption({
+    title: { text: t('monitoring.memory') + ' (%)', subtext: chartSubtext(memoryChart) },
+    series: [{ name: t('monitoring.memory') }],
+  })
+  requestChart?.setOption({
+    title: { text: t('monitoring.requestTrend'), subtext: chartSubtext(requestChart) },
+    series: [{ name: t('monitoring.totalRequests') }],
+  })
+  responseTimeChart?.setOption({
+    title: { text: t('monitoring.responseTrend') + ' (ms)', subtext: chartSubtext(responseTimeChart) },
+    series: [{ name: t('monitoring.avgResponseTime') }],
+  })
+}
+
+watch(locale, relocalizeCharts)
 
 const updateMetricsCharts = async (seq: number) => {
   try {
