@@ -137,7 +137,12 @@ const typeOptions = computed(() => [
   { label: t('notifications.types.document'), value: 'document' },
   { label: t('notifications.types.chat'), value: 'chat' },
   // Agent 任务终态通知（完成/失败/取消；点击经 target_route="Agent" 跳回放）
-  { label: t('notifications.types.agent'), value: 'agent' }
+  { label: t('notifications.types.agent'), value: 'agent' },
+  // 后端实际写入的其余类型（knowledge/organizations/scheduler/files 端点）
+  { label: t('notifications.types.knowledge'), value: 'knowledge' },
+  { label: t('notifications.types.organization'), value: 'organization' },
+  { label: t('notifications.types.scheduler'), value: 'scheduler' },
+  { label: t('notifications.types.file'), value: 'file' }
 ])
 
 const readOptions = computed(() => [
@@ -154,8 +159,12 @@ const typeLabel = (key: string) => {
     document: t('notifications.types.document'),
     chat: t('notifications.types.chat'),
     agent: t('notifications.types.agent'),
+    knowledge: t('notifications.types.knowledge'),
+    organization: t('notifications.types.organization'),
+    scheduler: t('notifications.types.scheduler'),
+    file: t('notifications.types.file'),
   }
-  return map[key] || key
+  return Object.prototype.hasOwnProperty.call(map, key) ? map[key] : key
 }
 
 const rowKey = (row: Notification) => row.id
@@ -188,7 +197,8 @@ const columns = computed(() => [
   },
   {
     title: t('notifications.columns.type'),
-    key: 'type'
+    key: 'type',
+    render: (row: Notification) => typeLabel(row.type)
   },
   {
     title: t('notifications.columns.time'),
@@ -307,7 +317,7 @@ const handleDelete = async (row: Notification) => {
     await handleRefresh()
   } catch (error: unknown) {
     // E14/D3：失败必须可见且状态如实——不删行、不刷新，单一 toast 呈现后端语义
-    message.error(t('notifications.deleteFailed') + '：' + getErrorMessage(error, t('common.tryAgain')))
+    message.error(t('notifications.withDetail', { message: t('notifications.deleteFailed'), detail: getErrorMessage(error, t('common.tryAgain')) }))
   }
 }
 
@@ -321,7 +331,7 @@ const handleBatchDelete = async () => {
     await handleRefresh()
   } catch (error: unknown) {
     // 批删失败：保留选中状态（不得假装已删），失败可见且只提示一次
-    message.error(t('notifications.batchDeleteFailed') + '：' + getErrorMessage(error, t('common.tryAgain')))
+    message.error(t('notifications.withDetail', { message: t('notifications.batchDeleteFailed'), detail: getErrorMessage(error, t('common.tryAgain')) }))
   }
 }
 

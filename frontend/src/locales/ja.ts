@@ -27,6 +27,7 @@ export default {
     back: '戻る',
     saveSuccess: '保存に成功しました',
     deleteSuccess: '削除に成功しました',
+    batchDelete: '一括削除',
     copy: 'コピー',
     copied: 'コピーしました',
     warning: 'お知らせ',
@@ -1113,6 +1114,10 @@ export default {
       document: 'ドキュメント',
       chat: 'チャット',
       agent: 'エージェント',
+      knowledge: 'ナレッジベース',
+      organization: '組織',
+      scheduler: 'スケジューラ',
+      file: 'ファイル',
     },
     all: 'すべて',
     columns: {
@@ -1124,6 +1129,7 @@ export default {
     },
     read: '既読',
     markRead: '既読にする',
+    withDetail: '{message}：{detail}',
   },
 
   agent: {

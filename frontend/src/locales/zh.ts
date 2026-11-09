@@ -1188,6 +1188,10 @@ export default {
       document: '文档',
       chat: '对话',
       agent: '智能体',
+      knowledge: '知识库',
+      organization: '组织',
+      scheduler: '调度任务',
+      file: '文件',
     },
     all: '全部',
     columns: {
@@ -1199,6 +1203,7 @@ export default {
     },
     read: '已读',
     markRead: '标记已读',
+    withDetail: '{message}：{detail}',
   },
 
   agent: {

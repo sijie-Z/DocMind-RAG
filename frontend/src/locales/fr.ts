@@ -27,6 +27,7 @@ export default {
     back: 'Retour',
     saveSuccess: 'Enregistré avec succès',
     deleteSuccess: 'Supprimé avec succès',
+    batchDelete: 'Supprimer la sélection',
     copy: 'Copier',
     copied: 'Copié',
     warning: 'Avis',
@@ -1114,6 +1115,10 @@ export default {
       document: 'Document',
       chat: 'Chat',
       agent: 'Agent',
+      knowledge: 'Base de connaissances',
+      organization: 'Organisation',
+      scheduler: 'Planificateur',
+      file: 'Fichier',
     },
     all: 'Tout',
     columns: {
@@ -1125,6 +1130,7 @@ export default {
     },
     read: 'Lue',
     markRead: 'Marquer comme lue',
+    withDetail: '{message} : {detail}',
   },
 
   agent: {

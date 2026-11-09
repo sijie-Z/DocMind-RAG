@@ -1180,6 +1180,10 @@ export default {
       document: 'Document',
       chat: 'Chat',
       agent: 'Agent',
+      knowledge: 'Knowledge base',
+      organization: 'Organization',
+      scheduler: 'Scheduler',
+      file: 'File',
     },
     all: 'All',
     columns: {
@@ -1191,6 +1195,7 @@ export default {
     },
     read: 'Read',
     markRead: 'Mark as read',
+    withDetail: '{message}: {detail}',
   },
 
   agent: {

@@ -13,7 +13,7 @@ import { flushPromises, mount } from '@vue/test-utils'
 import { createMemoryHistory, createRouter } from 'vue-router'
 import { createI18n } from 'vue-i18n'
 import { defineComponent, h, nextTick } from 'vue'
-import naive, { NMessageProvider } from 'naive-ui'
+import naive, { NMessageProvider, NSelect } from 'naive-ui'
 
 import NotificationsView from '../index.vue'
 import zh from '@/locales/zh'
@@ -128,6 +128,13 @@ describe('通知页 · 语言切换后文案实时更新', () => {
     )
     expect(wrapper.text()).toContain('未读')
 
+    // 下拉选项本身（typeOptions/readOptions 必须是 computed，否则不随语言变）
+    const optionLabels = () =>
+      wrapper.findAllComponents(NSelect)
+        .map((c) => (c.props('options') as Array<{ label: string }>).map((o) => o.label))
+        .flat()
+    expect(optionLabels()).toEqual(expect.arrayContaining(['系统', '知识库', '未读', '全部']))
+
     i18n.global.locale.value = 'en'
     await nextTick()
     await flushPromises()
@@ -136,6 +143,9 @@ describe('通知页 · 语言切换后文案实时更新', () => {
       expect.arrayContaining(['Title', 'Content', 'Type', 'Time', 'Status', 'Actions']),
     )
     expect(headers(wrapper), '切换后列头残留中文').not.toContain('标题')
+    expect(optionLabels()).toEqual(
+      expect.arrayContaining(['System', 'Knowledge base', 'Unread', 'All']),
+    )
     // 未读状态单元格（readOptions 与状态列共用 notifications.unread 键）
     expect(wrapper.text()).toContain('Unread')
     wrapper.unmount()
