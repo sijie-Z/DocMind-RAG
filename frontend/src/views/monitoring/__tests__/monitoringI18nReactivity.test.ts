@@ -160,7 +160,9 @@ describe('监控页 · 语言切换后文案实时更新', () => {
     await nextTick()
     await flushPromises()
 
-    expect(titles(), '切 en 后图表标题未重设').toContain('CPU Usage (%)')
+    expect(titles(), '切 en 后四张图标题都应重设').toEqual(
+      expect.arrayContaining(['CPU Usage (%)', 'Memory Usage (%)', 'Request Count Trend', 'Response Time Trend (ms)']),
+    )
     // 无数据图表仍须保留诚实空态（chartSubtext 恒 '' 的退化解会被打红）
     expect(chartInstances[0].option.title?.subtext).toBe('No data')
   })

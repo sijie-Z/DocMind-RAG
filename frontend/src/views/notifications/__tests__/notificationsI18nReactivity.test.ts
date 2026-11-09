@@ -18,6 +18,7 @@ import naive, { NMessageProvider, NSelect } from 'naive-ui'
 import NotificationsView from '../index.vue'
 import zh from '@/locales/zh'
 import en from '@/locales/en'
+import fr from '@/locales/fr'
 
 const apiMocks = vi.hoisted(() => ({
   getNotifications: vi.fn(),
@@ -37,7 +38,7 @@ const i18n = createI18n({
   legacy: false,
   locale: 'zh',
   fallbackLocale: 'en',
-  messages: { zh, en },
+  messages: { zh, en, fr },
 })
 
 function makeRouter() {
@@ -59,7 +60,7 @@ function trigger() {
           id: 1,
           title: '系统维护通知',
           content: '今晚 22:00 维护',
-          type: 'system',
+          type: 'knowledge',
           is_read: false,
           target_route: null,
           target_id: null,
@@ -94,7 +95,7 @@ beforeEach(() => {
   i18n.global.locale.value = 'zh'
   trigger()
   apiMocks.getNotificationSummary.mockResolvedValue({
-    data: { total: 1, unread_count: 1, by_type: { system: 1 } },
+    data: { total: 1, unread_count: 1, by_type: { knowledge: 1 } },
   })
 })
 
@@ -107,7 +108,7 @@ describe('通知页 · 语言切换后文案实时更新', () => {
     const wrapper = await mountPage()
     expect(wrapper.text()).toContain('总通知')
     expect(wrapper.text()).toContain('类型分布')
-    expect(wrapper.text()).toContain('系统: 1')
+    expect(wrapper.text()).toContain('知识库: 1')
 
     i18n.global.locale.value = 'en'
     await nextTick()
@@ -116,7 +117,7 @@ describe('通知页 · 语言切换后文案实时更新', () => {
     const text = wrapper.text()
     expect(text).toContain('Total')
     expect(text).toContain('By type')
-    expect(text, '类型分布仍显示中文类型名').toContain('System: 1')
+    expect(text, '类型分布仍显示中文类型名').toContain('Knowledge base: 1')
     expect(text).not.toContain('总通知')
     wrapper.unmount()
   })
@@ -128,8 +129,14 @@ describe('通知页 · 语言切换后文案实时更新', () => {
     )
     // 行内状态单元格（selection,标题,内容,类型,时间,状态,操作 → index 5）；
     // 不用 wrapper.text() 断言，否则会被「只看未读」按钮满足而空转（评审 B）
-    const statusCell = () => wrapper.findAll('tbody tr')[0].findAll('td')[5]
+    const rowCells = () => wrapper.findAll('tbody tr')[0].findAll('td')
+    const statusCell = () => rowCells()[5]
     expect(statusCell().text()).toBe('未读')
+    // 类型列走 typeLabel（新增枚举 knowledge 必须本地化，不能显示裸码）
+    expect(rowCells()[3].text()).toBe('知识库')
+    // 时间列用 formatDateTime(locale)：不得再出现「x周前」等中文相对词
+    expect(rowCells()[4].text()).toContain('2026')
+    expect(rowCells()[4].text()).not.toContain('前')
 
     // 下拉选项本身（typeOptions/readOptions 必须是 computed，否则不随语言变）
     const optionLabels = () =>
@@ -149,8 +156,17 @@ describe('通知页 · 语言切换后文案实时更新', () => {
     expect(optionLabels()).toEqual(
       expect.arrayContaining(['System', 'Knowledge base', 'Unread', 'All']),
     )
-    // 行内状态单元格必须是英文（不与筛选按钮文案共用断言）
+    // 行内单元格：状态英文、类型本地化、时间无中文相对词
     expect(statusCell().text()).toBe('Unread')
+    expect(rowCells()[3].text()).toBe('Knowledge base')
+    expect(rowCells()[4].text()).not.toContain('前')
+
+    // fr：行状态用单数（statusUnread），类型列同样本地化
+    i18n.global.locale.value = 'fr'
+    await nextTick()
+    await flushPromises()
+    expect(statusCell().text()).toBe('Non lue')
+    expect(rowCells()[3].text()).toBe('Base de connaissances')
     wrapper.unmount()
   })
 })
