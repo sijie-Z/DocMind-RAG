@@ -161,6 +161,8 @@ describe('监控页 · 语言切换后文案实时更新', () => {
     await flushPromises()
 
     expect(titles(), '切 en 后图表标题未重设').toContain('CPU Usage (%)')
+    // 无数据图表仍须保留诚实空态（chartSubtext 恒 '' 的退化解会被打红）
+    expect(chartInstances[0].option.title?.subtext).toBe('No data')
   })
 
   it('有数据时切换语言不误报「暂无数据」副文本', async () => {
