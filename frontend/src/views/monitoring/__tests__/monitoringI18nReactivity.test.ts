@@ -21,13 +21,30 @@ import zh from '@/locales/zh'
 import en from '@/locales/en'
 
 const { chartInstances } = vi.hoisted(() => ({
-  chartInstances: [] as Array<Record<string, ReturnType<typeof vi.fn>>>,
+  chartInstances: [] as Array<Record<string, any>>,
 }))
 
 vi.mock('@/utils/echarts', () => ({
   default: {
     init: vi.fn(() => {
-      const chart = { setOption: vi.fn(), dispose: vi.fn(), resize: vi.fn() }
+      // 近似 ECharts 合并语义：title 合并、series 按索引合并；getOption 供
+      // relocalize 判断「是否已有数据」（避免有数据时误报暂无数据）
+      const chart: Record<string, any> = {
+        option: {},
+        setOption: vi.fn((opt: Record<string, any>) => {
+          if (opt.title) chart.option.title = { ...(chart.option.title || {}), ...opt.title }
+          if (opt.series) {
+            const prev = chart.option.series || []
+            chart.option.series = (opt.series as any[]).map((serie, i) => ({
+              ...(prev[i] || {}),
+              ...serie,
+            }))
+          }
+        }),
+        getOption: () => chart.option,
+        dispose: vi.fn(),
+        resize: vi.fn(),
+      }
       chartInstances.push(chart)
       return chart
     }),
@@ -73,6 +90,21 @@ function headers(wrapper: ReturnType<typeof mount>) {
 
 enableAutoUnmount(afterEach)
 
+type SystemTrendPoint = { timestamp: number; cpu_percent: number; memory_percent: number }
+
+const dashboardFixture = (systemTrend: SystemTrendPoint[] = []) => ({
+  data: {
+    current: {
+      system: { cpu_percent: 20, memory_percent: 50, disk_usage: { C: 50 }, process_count: 100, load_average: [] },
+      application: { active_connections: 1, request_count: 10, error_count: 0, response_time: 12, elasticsearch_health: 'green' },
+      knowledge_base: { total_documents: 1, total_chunks: 5, index_size_mb: 0.1, search_requests: 10 },
+    },
+    trends: { system: systemTrend, application: [], knowledge_base: [] },
+    alerts: [],
+    timestamp: nowSec,
+  },
+})
+
 beforeEach(async () => {
   vi.clearAllMocks()
   chartInstances.length = 0
@@ -82,18 +114,7 @@ beforeEach(async () => {
     await import('@/api/monitoring')
   const { getAuditLogs } = await import('@/api/user')
 
-  vi.mocked(getMonitoringDashboard).mockResolvedValue({
-    data: {
-      current: {
-        system: { cpu_percent: 20, memory_percent: 50, disk_usage: { C: 50 }, process_count: 100, load_average: [] },
-        application: { active_connections: 1, request_count: 10, error_count: 0, response_time: 12, elasticsearch_health: 'green' },
-        knowledge_base: { total_documents: 1, total_chunks: 5, index_size_mb: 0.1, search_requests: 10 },
-      },
-      trends: { system: [], application: [], knowledge_base: [] },
-      alerts: [],
-      timestamp: nowSec,
-    },
-  } as never)
+  vi.mocked(getMonitoringDashboard).mockResolvedValue(dashboardFixture() as never)
   vi.mocked(getMonitoringAlerts).mockResolvedValue({ data: { alerts: [], total: 0 } } as never)
   vi.mocked(getMetrics).mockResolvedValue({ data: { data: [] } } as never)
   vi.mocked(getNotificationStatus).mockResolvedValue({
@@ -131,7 +152,7 @@ describe('监控页 · 语言切换后文案实时更新', () => {
 
     const titles = () =>
       chartInstances.flatMap((c) =>
-        c.setOption.mock.calls.map((call) => (call[0] as { title?: { text?: string } })?.title?.text),
+        c.setOption.mock.calls.map((call: unknown[]) => (call[0] as { title?: { text?: string } })?.title?.text),
       )
     expect(titles()).toContain('CPU 使用率 (%)')
 
@@ -140,5 +161,35 @@ describe('监控页 · 语言切换后文案实时更新', () => {
     await flushPromises()
 
     expect(titles(), '切 en 后图表标题未重设').toContain('CPU Usage (%)')
+  })
+
+  it('有数据时切换语言不误报「暂无数据」副文本', async () => {
+    const { getMonitoringDashboard, getMetrics } = await import('@/api/monitoring')
+    vi.mocked(getMonitoringDashboard).mockResolvedValue(
+      dashboardFixture([
+        { timestamp: nowSec - 120, cpu_percent: 10, memory_percent: 20 },
+        { timestamp: nowSec - 60, cpu_percent: 12, memory_percent: 22 },
+      ]) as never,
+    )
+    vi.mocked(getMetrics).mockResolvedValue({
+      data: {
+        data: [
+          { timestamp: nowSec - 120, request_count: 5, response_time: 10 },
+          { timestamp: nowSec - 60, request_count: 6, response_time: 12 },
+        ],
+      },
+    } as never)
+
+    mountView()
+    await flushPromises()
+    await nextTick()
+
+    i18n.global.locale.value = 'en'
+    await nextTick()
+    await flushPromises()
+
+    const cpuChart = chartInstances[0]
+    expect(cpuChart.option.title?.text).toBe('CPU Usage (%)')
+    expect(cpuChart.option.title?.subtext, '有数据仍显示暂无数据').toBe('')
   })
 })

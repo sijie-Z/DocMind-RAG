@@ -527,22 +527,36 @@ const initCharts = () => {
 }
 
 // 语言切换：ECharts 内嵌标题/系列名不会自动重算；setOption 合并只改文案，
-// 已绘制的数据点保留。
+// 已绘制的数据点保留。subtext 必须按当前是否已有数据决定——无条件写
+// 「暂无数据」会让「有曲线 + 暂无数据」同屏（评审 A 实测）。
+type ChartOptionLike = { series?: Array<{ data?: unknown[] }> }
+const hasChartData = (chart: echarts.ECharts | null): boolean => {
+  try {
+    const option = chart?.getOption() as ChartOptionLike | undefined
+    const data = option?.series?.[0]?.data
+    return Array.isArray(data) && data.length > 0
+  } catch {
+    return false
+  }
+}
+const chartSubtext = (chart: echarts.ECharts | null) =>
+  hasChartData(chart) ? '' : emptySubtext()
+
 const relocalizeCharts = () => {
   cpuChart?.setOption({
-    title: { text: t('monitoring.cpu') + ' (%)', subtext: emptySubtext() },
+    title: { text: t('monitoring.cpu') + ' (%)', subtext: chartSubtext(cpuChart) },
     series: [{ name: t('monitoring.cpu') }],
   })
   memoryChart?.setOption({
-    title: { text: t('monitoring.memory') + ' (%)', subtext: emptySubtext() },
+    title: { text: t('monitoring.memory') + ' (%)', subtext: chartSubtext(memoryChart) },
     series: [{ name: t('monitoring.memory') }],
   })
   requestChart?.setOption({
-    title: { text: t('monitoring.requestTrend'), subtext: emptySubtext() },
+    title: { text: t('monitoring.requestTrend'), subtext: chartSubtext(requestChart) },
     series: [{ name: t('monitoring.totalRequests') }],
   })
   responseTimeChart?.setOption({
-    title: { text: t('monitoring.responseTrend') + ' (ms)', subtext: emptySubtext() },
+    title: { text: t('monitoring.responseTrend') + ' (ms)', subtext: chartSubtext(responseTimeChart) },
     series: [{ name: t('monitoring.avgResponseTime') }],
   })
 }
