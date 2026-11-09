@@ -1949,5 +1949,29 @@ export default {
     reasonUndecided: 'Certains éléments d’examen ne sont pas décidés',
     reasonNotAnalyzed: 'L’analyse n’a pas encore été exécutée',
     reasonSideSeparator: ' : ',
+  },
+  memory: {
+    scope: {
+      label: 'Portée',
+      global: 'Globale (default)',
+      hint: 'L’Agent écrit la mémoire par session ; choisissez une session pour consulter et effacer sa mémoire.',
+      outsideList: '{scope} (absente de la liste récente des sessions)',
+      loadFailed: 'Échec du chargement des sessions',
+    },
+    clear: {
+      title: 'Confirmer l’effacement',
+      content: 'Effacer {type} dans « {scope} » ?',
+      shortTerm: 'la mémoire à court terme',
+      otherType: 'ce type de mémoire',
+      success: 'Effacé',
+      failed: 'Échec de l’effacement',
+    },
+    clearAll: {
+      action: 'Effacer la portée actuelle',
+      title: 'Confirmer l’effacement de la portée actuelle',
+      content: 'Cette action efface toute la mémoire de « {scope} » sans toucher aux autres portées. Continuer ?',
+      positive: 'Effacer',
+      success: 'Mémoire de « {scope} » effacée',
+    },
   }
 };

@@ -2014,5 +2014,29 @@ export default {
     reasonUndecided: 'Some review items are undecided',
     reasonNotAnalyzed: 'Analysis has not been run yet',
     reasonSideSeparator: ': ',
+  },
+  memory: {
+    scope: {
+      label: 'Scope',
+      global: 'Global (default)',
+      hint: 'The Agent writes memory per session; pick a session to inspect and clear that session’s memory.',
+      outsideList: '{scope} (not in the recent session list)',
+      loadFailed: 'Failed to load sessions',
+    },
+    clear: {
+      title: 'Confirm clear',
+      content: 'Clear {type} in “{scope}”?',
+      shortTerm: 'short-term memory',
+      otherType: 'this memory type',
+      success: 'Cleared',
+      failed: 'Clear failed',
+    },
+    clearAll: {
+      action: 'Clear current scope',
+      title: 'Confirm clearing the current scope',
+      content: 'This clears all memory in “{scope}” and leaves other scopes untouched. Continue?',
+      positive: 'Clear',
+      success: 'Cleared memory in “{scope}”',
+    },
   }
 };

@@ -2023,5 +2023,29 @@ export default {
     reasonUndecided: '存在未决核验项',
     reasonNotAnalyzed: '尚未执行分析',
     reasonSideSeparator: '：',
+  },
+  memory: {
+    scope: {
+      label: '作用域',
+      global: '全局（default）',
+      hint: 'Agent 运行时按会话写入记忆；选择会话可查看与清理该会话的记忆。',
+      outsideList: '{scope}（不在最近会话列表）',
+      loadFailed: '会话列表加载失败',
+    },
+    clear: {
+      title: '确认清空',
+      content: '确定要清空「{scope}」的{type}吗？',
+      shortTerm: '短期记忆',
+      otherType: '该类型记忆',
+      success: '已清空',
+      failed: '清空失败',
+    },
+    clearAll: {
+      action: '清空当前作用域',
+      title: '确认清空当前作用域',
+      content: '此操作将清空「{scope}」的全部记忆数据，不影响其他作用域，确定继续吗？',
+      positive: '确定清空',
+      success: '已清空「{scope}」的记忆',
+    },
   }
 };

@@ -23,6 +23,13 @@ vi.mock('@/api/memory', () => ({
   clearMemory: vi.fn(),
 }))
 
+// 作用域选择器会拉最近会话列表；本文件只断言 recall 形状，列表给空即可
+vi.mock('@/api/agent', () => ({
+  agentApi: {
+    listSessions: vi.fn().mockResolvedValue({ data: { data: { sessions: [], total: 0, page: 1, page_size: 20 } } }),
+  },
+}))
+
 import MemoryPage from '../memory.vue'
 import { recallMemory } from '@/api/memory'
 

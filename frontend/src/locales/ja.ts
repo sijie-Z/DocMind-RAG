@@ -1948,5 +1948,29 @@ export default {
     reasonUndecided: '未決のレビュー項目があります',
     reasonNotAnalyzed: '分析が未実行です',
     reasonSideSeparator: '：',
+  },
+  memory: {
+    scope: {
+      label: 'スコープ',
+      global: 'グローバル（default）',
+      hint: 'Agent はセッションごとにメモリを書き込みます。セッションを選ぶと、そのセッションのメモリを確認・消去できます。',
+      outsideList: '{scope}（最近のセッション一覧にありません）',
+      loadFailed: 'セッション一覧の読み込みに失敗しました',
+    },
+    clear: {
+      title: '消去の確認',
+      content: '「{scope}」の{type}を消去しますか？',
+      shortTerm: '短期メモリ',
+      otherType: 'この種類のメモリ',
+      success: '消去しました',
+      failed: '消去に失敗しました',
+    },
+    clearAll: {
+      action: '現在のスコープを消去',
+      title: '現在のスコープの消去確認',
+      content: '「{scope}」のすべてのメモリを消去します。他のスコープには影響しません。続行しますか？',
+      positive: '消去する',
+      success: '「{scope}」のメモリを消去しました',
+    },
   }
 };
