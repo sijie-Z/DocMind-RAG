@@ -1950,11 +1950,14 @@ export default {
     reasonSideSeparator: '：',
   },
   memory: {
+    loadFailed: 'メモリの読み込みに失敗しました',
+    searchFailed: '検索に失敗しました',
     scope: {
       label: 'スコープ',
       global: 'グローバル（default）',
-      hint: 'Agent はセッションごとにメモリを書き込みます。セッションを選ぶと、そのセッションのメモリを確認・消去できます。',
+      hint: 'Agent はセッションごとにメモリを書き込みます。ここには最近の終了していないセッションが表示され、選ぶとそのセッションのメモリを確認・消去できます。',
       outsideList: '{scope}（最近のセッション一覧にありません）',
+      untitled: '無題のセッション（{id}）',
       loadFailed: 'セッション一覧の読み込みに失敗しました',
     },
     clear: {

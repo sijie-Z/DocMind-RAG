@@ -44,8 +44,14 @@
         <p class="text-xs text-gray-500 dark:text-gray-400 mt-2">{{ t('memory.scope.hint') }}</p>
       </div>
 
+      <!-- 加载失败：错误态自呈现 + 重试，不用上一作用域的数据或「暂无」冒充当前作用域 -->
+      <div v-if="loadError" class="flex flex-wrap items-center gap-3 mb-6">
+        <span class="text-sm text-red-500">{{ t('memory.loadFailed') }}</span>
+        <n-button size="small" quaternary @click="loadMemory">{{ t('common.retry') }}</n-button>
+      </div>
+
       <!-- 统计卡片 -->
-      <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+      <div v-if="!loadError" class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
         <n-card size="small" class="shadow-sm">
           <div class="flex items-center gap-3">
             <div class="w-10 h-10 rounded-lg bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center">
@@ -96,7 +102,7 @@
       </div>
 
       <!-- 主内容 -->
-      <n-tabs type="line" animated>
+      <n-tabs v-if="!loadError" type="line" animated>
         <!-- 短期记忆 -->
         <n-tab-pane name="short_term" tab="短期记忆">
           <n-card size="small" class="shadow-sm">
@@ -346,6 +352,7 @@ const searching = ref(false)
 const searchQuery = ref('')
 const searchResults = ref<RecallItem[]>([])
 const memoryData = ref<MemoryData | null>(null)
+const loadError = ref(false)
 
 const route = useRoute()
 const router = useRouter()
@@ -363,14 +370,30 @@ const sessions = ref<AgentSession[]>([])
 const sessionsLoading = ref(false)
 const sessionsError = ref(false)
 
+// 后端把空标题统一回 "Untitled"（endpoints/agent.py 的 list_sessions）：非 en 界面
+// 不该冒英文，按未命名会话本地化并带短 id 以便区分多条。
+const sessionLabel = (session: AgentSession): string => {
+  const title = session.title?.trim()
+  return title && title !== 'Untitled'
+    ? title
+    : t('memory.scope.untitled', { id: session.id.slice(0, 8) })
+}
+
 const scopeOptions = computed<Array<{ label: string; value: string }>>(() => {
   const options = [{ label: t('memory.scope.global'), value: GLOBAL_SCOPE }]
   for (const session of sessions.value) {
-    options.push({ label: session.title?.trim() || session.id, value: `session:${session.id}` })
+    const value = `session:${session.id}`
+    // 命名空间不合规的会话选了也只会 400：不提供不可用入口
+    if (!SCOPE_PATTERN.test(value)) continue
+    options.push({ label: sessionLabel(session), value })
   }
   // 深链指向的会话可能已不在最近列表（或删除）：如实保留该选项，不静默改回全局
   if (!options.some((option) => option.value === scope.value)) {
-    options.push({ label: t('memory.scope.outsideList', { scope: scope.value }), value: scope.value })
+    options.push({
+      // 列表还在飞时不能断言「不在列表」，如实显示命名空间本身
+      label: sessionsLoading.value ? scope.value : t('memory.scope.outsideList', { scope: scope.value }),
+      value: scope.value,
+    })
   }
   return options
 })
@@ -401,12 +424,20 @@ const syncRouteScope = (value: string) => {
   router.replace({ query }).catch(() => {})
 }
 
+/** 切换作用域即清空上一作用域的全部呈现：统计、正文、命中、在途检索态。 */
+const applyScope = (next: string) => {
+  scope.value = next
+  memoryData.value = null
+  searchResults.value = []
+  // 旧检索的 finally 因作用域守卫不会复位，这里必须接管，否则搜索按钮永久 loading
+  searching.value = false
+  loadError.value = false
+}
+
 const handleScopeChange = async (value: string) => {
   const next = normalizeScope(value)
   if (next === scope.value) return
-  scope.value = next
-  // 上一作用域的命中不得冒充当前作用域的检索结果
-  searchResults.value = []
+  applyScope(next)
   syncRouteScope(next)
   await loadMemory()
 }
@@ -418,8 +449,7 @@ watch(
     if (route.name !== 'AgentMemory') return
     const next = normalizeScope(raw)
     if (next === scope.value) return
-    scope.value = next
-    searchResults.value = []
+    applyScope(next)
     loadMemory()
   },
 )
@@ -449,13 +479,17 @@ const longTermCount = computed(() => {
 const loadMemory = async () => {
   const requestScope = scope.value
   loading.value = true
+  loadError.value = false
   try {
     const res = await getAgentMemory(requestScope)
     // GET /memory/{agent_id} → {success, data: <导出记忆>} → apiUnwrap 解一层
     if (requestScope !== scope.value) return
     memoryData.value = apiUnwrap<MemoryData | null>(res)
   } catch {
-    if (requestScope === scope.value) message.error('加载记忆失败')
+    if (requestScope !== scope.value) return
+    // 失败清空旧结果：上一作用域的记忆不得冒充当前作用域，错误态自呈现 + 重试
+    memoryData.value = null
+    loadError.value = true
   } finally {
     // 作用域已切换时由新一轮请求掌管 loading，旧请求不得提前收起
     if (requestScope === scope.value) loading.value = false
@@ -473,7 +507,9 @@ const searchMemory = async () => {
     if (requestScope !== scope.value) return
     searchResults.value = apiUnwrap<{ results: RecallItem[] } | null>(res)?.results || []
   } catch {
-    if (requestScope === scope.value) message.error('搜索失败')
+    if (requestScope !== scope.value) return
+    searchResults.value = []
+    message.error(t('memory.searchFailed'))
   } finally {
     if (requestScope === scope.value) searching.value = false
   }

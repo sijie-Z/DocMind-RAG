@@ -2025,11 +2025,14 @@ export default {
     reasonSideSeparator: '：',
   },
   memory: {
+    loadFailed: '记忆加载失败',
+    searchFailed: '搜索失败',
     scope: {
       label: '作用域',
       global: '全局（default）',
-      hint: 'Agent 运行时按会话写入记忆；选择会话可查看与清理该会话的记忆。',
+      hint: 'Agent 运行时按会话写入记忆；这里列出最近未结束的会话，选择后可查看与清理该会话的记忆。',
       outsideList: '{scope}（不在最近会话列表）',
+      untitled: '未命名会话（{id}）',
       loadFailed: '会话列表加载失败',
     },
     clear: {

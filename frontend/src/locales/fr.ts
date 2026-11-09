@@ -1951,11 +1951,14 @@ export default {
     reasonSideSeparator: ' : ',
   },
   memory: {
+    loadFailed: 'Échec du chargement de la mémoire',
+    searchFailed: 'Échec de la recherche',
     scope: {
       label: 'Portée',
       global: 'Globale (default)',
-      hint: 'L’Agent écrit la mémoire par session ; choisissez une session pour consulter et effacer sa mémoire.',
+      hint: 'L’Agent écrit la mémoire par session. Les sessions actives récentes sont listées ici ; choisissez-en une pour consulter et effacer sa mémoire.',
       outsideList: '{scope} (absente de la liste récente des sessions)',
+      untitled: 'Session sans titre ({id})',
       loadFailed: 'Échec du chargement des sessions',
     },
     clear: {
