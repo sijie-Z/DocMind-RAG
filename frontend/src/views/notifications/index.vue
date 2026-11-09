@@ -10,28 +10,28 @@
           <p class="text-sm text-gray-500 dark:text-gray-400">{{ t('notifications.subtitle') }}</p>
         </div>
         <div class="flex items-center gap-3">
-          <n-button type="primary" ghost @click="handleRefresh">刷新</n-button>
-          <n-button type="info" ghost @click="toggleUnreadOnly">{{ filters.unread_only ? '显示全部' : '只看未读' }}</n-button>
-          <n-button type="warning" ghost :disabled="summary.unread_count === 0" @click="handleMarkAllRead">全部已读</n-button>
-          <n-button type="error" ghost :disabled="selectedIds.length === 0" @click="handleBatchDelete">批量删除</n-button>
+          <n-button type="primary" ghost @click="handleRefresh">{{ t('common.refresh') }}</n-button>
+          <n-button type="info" ghost @click="toggleUnreadOnly">{{ filters.unread_only ? t('notifications.showAll') : t('notifications.unreadOnly') }}</n-button>
+          <n-button type="warning" ghost :disabled="summary.unread_count === 0" @click="handleMarkAllRead">{{ t('notifications.markAllRead') }}</n-button>
+          <n-button type="error" ghost :disabled="selectedIds.length === 0" @click="handleBatchDelete">{{ t('common.batchDelete') }}</n-button>
         </div>
       </div>
 
       <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
         <n-card class="rounded-2xl" size="small">
-          <div class="text-sm text-gray-500">总通知</div>
+          <div class="text-sm text-gray-500">{{ t('notifications.total') }}</div>
           <div class="text-2xl font-bold text-gray-900 dark:text-white">{{ summaryError ? '—' : summary.total }}</div>
         </n-card>
         <n-card class="rounded-2xl" size="small">
-          <div class="text-sm text-gray-500">未读</div>
+          <div class="text-sm text-gray-500">{{ t('notifications.unread') }}</div>
           <div class="text-2xl font-bold text-orange-500">{{ summaryError ? '—' : summary.unread_count }}</div>
         </n-card>
         <n-card class="rounded-2xl" size="small">
-          <div class="text-sm text-gray-500">类型分布</div>
+          <div class="text-sm text-gray-500">{{ t('notifications.typeDistribution') }}</div>
           <div class="text-sm text-gray-700 dark:text-gray-300 mt-2">
-            <span v-if="summaryError">—</span>
+            <span v-if="summaryError || Object.keys(summary.by_type).length === 0">—</span>
             <span v-for="(val, key) in summary.by_type" v-else :key="key" class="inline-block mr-3">
-              {{ key }}: {{ val }}
+              {{ typeLabel(key) }}: {{ val }}
             </span>
           </div>
         </n-card>
@@ -39,15 +39,15 @@
 
       <n-card class="rounded-2xl" content-style="padding: 0;">
         <div class="p-4 border-b border-gray-200 dark:border-gray-800 flex flex-col md:flex-row gap-3">
-          <n-input v-model:value="filters.q" placeholder="搜索标题或内容" clearable class="md:w-64" />
-          <n-select v-model:value="filters.type" :options="typeOptions" placeholder="类型" clearable class="md:w-40" />
-          <n-select v-model:value="filters.unread_only" :options="readOptions" placeholder="状态" clearable class="md:w-40" />
-          <n-button type="primary" @click="handleSearch">筛选</n-button>
+          <n-input v-model:value="filters.q" :placeholder="t('notifications.searchPlaceholder')" clearable class="md:w-64" />
+          <n-select v-model:value="filters.type" :options="typeOptions" :placeholder="t('notifications.typePlaceholder')" clearable class="md:w-40" />
+          <n-select v-model:value="filters.unread_only" :options="readOptions" :placeholder="t('notifications.statusPlaceholder')" clearable class="md:w-40" />
+          <n-button type="primary" @click="handleSearch">{{ t('notifications.filter') }}</n-button>
         </div>
 
         <n-spin :show="loading">
           <template #description>
-            <span>加载中...</span>
+            <span>{{ t('common.loading') }}</span>
           </template>
 
           <!-- Error state -->
@@ -86,11 +86,11 @@
 </template>
 
 <script setup lang="ts">
-import { h, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
+import { computed, h, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { NButton, } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
-import { formatDate } from '@/utils/format'
+import { formatDateTime } from '@/utils/format'
 import { notificationTargetLocation } from '@/utils/notificationTarget'
 import { useDedupedMessage } from '@/utils/message'
 import { getErrorMessage } from '@/utils/apiError'
@@ -99,7 +99,7 @@ import { batchDeleteNotifications, deleteNotification, getNotificationSummary, g
 import { notificationSocket, type RealtimeNotificationPayload } from '@/utils/notificationSocket'
 
 const router = useRouter()
-const { t } = useI18n()
+const { t, locale } = useI18n()
 const message = useDedupedMessage()
 const latestRealtimeId = ref<number | null>(null)
 
@@ -129,20 +129,43 @@ const pagination = reactive({
   itemCount: 0
 })
 
-const typeOptions = [
-  { label: '系统', value: 'system' },
-  { label: '安全', value: 'security' },
-  { label: '账户', value: 'account' },
-  { label: '文档', value: 'document' },
-  { label: '对话', value: 'chat' },
+// 选项与列定义随语言切换（computed 依赖 t，locale 变化实时重算）
+const typeOptions = computed(() => [
+  { label: t('notifications.types.system'), value: 'system' },
+  { label: t('notifications.types.security'), value: 'security' },
+  { label: t('notifications.types.account'), value: 'account' },
+  { label: t('notifications.types.document'), value: 'document' },
+  { label: t('notifications.types.chat'), value: 'chat' },
   // Agent 任务终态通知（完成/失败/取消；点击经 target_route="Agent" 跳回放）
-  { label: '智能体', value: 'agent' }
-]
+  { label: t('notifications.types.agent'), value: 'agent' },
+  // 后端实际写入的其余类型（knowledge/organizations/scheduler/files 端点）
+  { label: t('notifications.types.knowledge'), value: 'knowledge' },
+  { label: t('notifications.types.organization'), value: 'organization' },
+  { label: t('notifications.types.scheduler'), value: 'scheduler' },
+  { label: t('notifications.types.file'), value: 'file' }
+])
 
-const readOptions = [
-  { label: '未读', value: true },
-  { label: '全部', value: undefined }
-]
+const readOptions = computed(() => [
+  { label: t('notifications.unread'), value: true },
+  { label: t('notifications.all'), value: undefined }
+])
+
+// 汇总「类型分布」里的后端类型码 → 本地化名称（未知类型原样显示）
+const typeLabel = (key: string) => {
+  const map: Record<string, string> = {
+    system: t('notifications.types.system'),
+    security: t('notifications.types.security'),
+    account: t('notifications.types.account'),
+    document: t('notifications.types.document'),
+    chat: t('notifications.types.chat'),
+    agent: t('notifications.types.agent'),
+    knowledge: t('notifications.types.knowledge'),
+    organization: t('notifications.types.organization'),
+    scheduler: t('notifications.types.scheduler'),
+    file: t('notifications.types.file'),
+  }
+  return Object.prototype.hasOwnProperty.call(map, key) ? map[key] : key
+}
 
 const rowKey = (row: Notification) => row.id
 
@@ -156,45 +179,46 @@ const jumpToNotificationTarget = async (row: Notification) => {
   await router.push(notificationTargetLocation(row))
 }
 
-const columns = [
+const columns = computed(() => [
   {
     type: 'selection',
     multiple: true,
     disabled: (row: Notification) => !row
   },
   {
-    title: '标题',
+    title: t('notifications.columns.title'),
     key: 'title',
     render: (row: Notification) => h('button', { class: 'text-left font-medium text-blue-600 hover:underline', onClick: () => jumpToNotificationTarget(row) }, row.title)
   },
   {
-    title: '内容',
+    title: t('notifications.columns.content'),
     key: 'content',
     render: (row: Notification) => h('div', { class: 'text-xs text-gray-500 line-clamp-2' }, row.content)
   },
   {
-    title: '类型',
-    key: 'type'
+    title: t('notifications.columns.type'),
+    key: 'type',
+    render: (row: Notification) => typeLabel(row.type)
   },
   {
-    title: '时间',
+    title: t('notifications.columns.time'),
     key: 'created_at',
-    render: (row: Notification) => formatDate(row.created_at)
+    render: (row: Notification) => formatDateTime(row.created_at, locale.value)
   },
   {
-    title: '状态',
+    title: t('notifications.columns.status'),
     key: 'is_read',
-    render: (row: Notification) => row.is_read ? '已读' : '未读'
+    render: (row: Notification) => row.is_read ? t('notifications.read') : t('notifications.statusUnread')
   },
   {
-    title: '操作',
+    title: t('common.actions'),
     key: 'actions',
     render: (row: Notification) => h('div', { class: 'flex gap-2' }, [
-      h(NButton, { size: 'tiny', onClick: async () => handleMarkRead(row) }, { default: () => '标记已读' }),
-      h(NButton, { size: 'tiny', type: 'error', ghost: true, onClick: async () => handleDelete(row) }, { default: () => '删除' })
+      h(NButton, { size: 'tiny', onClick: async () => handleMarkRead(row) }, { default: () => t('notifications.markRead') }),
+      h(NButton, { size: 'tiny', type: 'error', ghost: true, onClick: async () => handleDelete(row) }, { default: () => t('common.delete') })
     ])
   }
-]
+])
 
 const fetchSummary = async () => {
   try {
@@ -293,7 +317,7 @@ const handleDelete = async (row: Notification) => {
     await handleRefresh()
   } catch (error: unknown) {
     // E14/D3：失败必须可见且状态如实——不删行、不刷新，单一 toast 呈现后端语义
-    message.error(t('notifications.deleteFailed') + '：' + getErrorMessage(error, t('common.tryAgain')))
+    message.error(t('notifications.withDetail', { message: t('notifications.deleteFailed'), detail: getErrorMessage(error, t('common.tryAgain')) }))
   }
 }
 
@@ -307,7 +331,7 @@ const handleBatchDelete = async () => {
     await handleRefresh()
   } catch (error: unknown) {
     // 批删失败：保留选中状态（不得假装已删），失败可见且只提示一次
-    message.error(t('notifications.batchDeleteFailed') + '：' + getErrorMessage(error, t('common.tryAgain')))
+    message.error(t('notifications.withDetail', { message: t('notifications.batchDeleteFailed'), detail: getErrorMessage(error, t('common.tryAgain')) }))
   }
 }
 

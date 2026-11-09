@@ -18,8 +18,6 @@
     "views/knowledge/components/KnowledgeUploadPanel.vue": 4,
     "views/knowledge/graph.vue": 20,
     "views/knowledge/index.vue": 12,
-    "views/monitoring/index.vue": 6,
-    "views/notifications/index.vue": 29,
     "views/organizations/index.vue": 18,
     "views/prompts/index.vue": 45,
     "views/search.vue": 6,
