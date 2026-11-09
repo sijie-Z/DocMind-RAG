@@ -1,4 +1,6 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, beforeAll, afterEach } from 'vitest'
+import i18n from '@/locales'
+import en from '@/locales/en'
 import { formatDate, formatDateTime, formatFileSize, formatDuration, parseApiDate, truncateText } from '../format'
 
 describe('formatDate', () => {
@@ -181,5 +183,52 @@ describe('parseApiDate（后端 UTC 无时区字符串）', () => {
   it('formatDate 的相对时间基于 UTC 解析（本地时区不再偏移）', () => {
     const naiveUtc = new Date(Date.now() - 5 * 60 * 1000).toISOString().slice(0, 19)
     expect(formatDate(naiveUtc)).toBe('5分钟前')
+  })
+})
+
+describe('相对时间/时长跟随界面语言（全局 i18n）', () => {
+  beforeAll(() => {
+    // 测试环境只内置 zh；en 包按需装载后切 locale
+    i18n.global.setLocaleMessage('en', en as never)
+  })
+
+  afterEach(() => {
+    i18n.global.locale.value = 'zh'
+  })
+
+  it('en：just now / minutes / hours / days / weeks', () => {
+    (i18n.global.locale as unknown as { value: string }).value = 'en'
+    expect(formatDate(new Date())).toBe('Just now')
+    expect(formatDate(new Date(Date.now() - 5 * 60 * 1000))).toBe('5 min ago')
+    expect(formatDate(new Date(Date.now() - 3 * 3600 * 1000))).toBe('3 h ago')
+    expect(formatDate(new Date(Date.now() - 2 * 86400 * 1000))).toBe('2 d ago')
+    expect(formatDate(new Date(Date.now() - 14 * 86400 * 1000))).toBe('2 wk ago')
+  })
+
+  it('en：时长单位不再出现中文', () => {
+    (i18n.global.locale as unknown as { value: string }).value = 'en'
+    expect(formatDuration(30)).toBe('30s')
+    expect(formatDuration(90)).toBe('1m 30s')
+    expect(formatDuration(3661)).toBe('1h 1m')
+  })
+
+  it('切回 zh 后恢复中文相对时间', () => {
+    i18n.global.locale.value = 'zh'
+    expect(formatDate(new Date(Date.now() - 5 * 60 * 1000))).toBe('5分钟前')
+    expect(formatDuration(90)).toBe('1分30秒')
+  })
+
+  it('≥30 天的绝对时间按界面语言选 locale（zh 与 en 格式不同）', () => {
+    const old = new Date(Date.now() - 31 * 86400 * 1000)
+    i18n.global.locale.value = 'zh'
+    const zhText = formatDate(old)
+    ;(i18n.global.locale as unknown as { value: string }).value = 'en'
+    const enText = formatDate(old)
+
+    expect(enText).not.toBe(zhText)
+    // en-US：MM/DD/YYYY（zh-CN 为 YYYY/MM/DD）
+    expect(enText).toMatch(/^\d{1,2}\/\d{1,2}\/\d{4}/)
+    expect(enText).not.toContain('前')
+    expect(zhText).not.toContain('前')
   })
 })

@@ -202,7 +202,7 @@
                             :key="activity.id"
                             :type="activity.type === 'login' ? 'success' : 'info'"
                             :title="activity.content"
-                            :time="activity.time"
+                            :time="formatDate(activity.time)"
                           />
                         </n-timeline>
                       </div>
