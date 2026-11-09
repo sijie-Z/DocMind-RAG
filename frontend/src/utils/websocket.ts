@@ -26,6 +26,7 @@ interface WebSocketMessage {
 }
 
 import { getToken } from '@/utils/auth'
+import i18n from '@/locales'
 
 class WebSocketService {
   private ws: WebSocket | null = null
@@ -81,7 +82,7 @@ class WebSocketService {
     if (!rawToken) {
         // Connection failed: No token found in any storage
         this.connectionStatus = 'error'
-        this.emit('error', { type: 'error', content: '未找到登录凭证，请重新登录' })
+        this.emit('error', { type: 'error', content: (i18n.global.t as (k: string) => string)('errors.wsNoCredentials') })
         return
     }
 
@@ -136,7 +137,7 @@ class WebSocketService {
     socket.onerror = () => {
       if (!ownsSocket()) return
       this.connectionStatus = 'error'
-      this.emit('error', { type: 'error', content: 'WebSocket连接错误' })
+      this.emit('error', { type: 'error', content: (i18n.global.t as (k: string) => string)('errors.wsConnectFailed') })
     }
   }
 

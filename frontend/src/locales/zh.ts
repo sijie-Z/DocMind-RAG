@@ -42,6 +42,32 @@ export default {
     none: '无',
     // 通用星期词条（0=周日，与 Date/cron 口径一致；展示顺序由使用方决定）
     weekdays: { '0': '周日', '1': '周一', '2': '周二', '3': '周三', '4': '周四', '5': '周五', '6': '周六' },
+    relative: {
+      justNow: '刚刚',
+      minutesAgo: '{count}分钟前',
+      hoursAgo: '{count}小时前',
+      daysAgo: '{count}天前',
+      weeksAgo: '{count}周前',
+    },
+    duration: {
+      seconds: '{seconds}秒',
+      minutesSeconds: '{minutes}分{seconds}秒',
+      hoursMinutes: '{hours}小时{minutes}分',
+    },
+  },
+  errors: {
+    requestFailed: '请求失败',
+    sessionExpired: '登录已过期或未登录，请重新登录',
+    authFailed: '身份验证失败，请检查用户名和密码',
+    forbidden: '无权限访问',
+    insufficientPermission: '权限不足，请联系管理员',
+    rateLimited: '请求过于频繁，请稍后再试',
+    serverError: '服务器内部错误，请稍后重试',
+    networkFailed: '网络连接失败，请检查后端服务',
+    withRequestId: '{message}（请求ID: {requestId}）',
+    httpStatus: 'HTTP错误: {status}',
+    wsNoCredentials: '未找到登录凭证，请重新登录',
+    wsConnectFailed: 'WebSocket连接错误',
   },
   profile: {
     // T5 命名归一：个人设置「概览」tab（此前借用 menu.dashboard，现独立页域键）
@@ -1319,6 +1345,11 @@ export default {
       retryCount: '重试 {count} 次',
       onFailureSkip: '失败时跳过',
       onFailureAsk: '失败时询问',
+    },
+    retryHints: {
+      resetTransport: '连接中断，正在重建连接后重试',
+      refreshAuth: '凭据失效，正在刷新凭据后重试',
+      retrying: '正在重试',
     },
     terminal: {
       open: '终端',

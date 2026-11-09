@@ -5,6 +5,10 @@ import { useUserStore } from '@/stores/user'
 import { useAppStore } from '@/stores/app'
 import { createDiscreteApi } from 'naive-ui'
 import { getToken, getRefreshToken, setToken, setRefreshToken } from '@/utils/auth'
+import i18n from '@/locales'
+
+const t = (key: string, params: Record<string, string | number> = {}): string =>
+  (i18n.global.t as (k: string, p?: Record<string, string | number>) => string)(key, params)
 
 declare module 'axios' {
   interface AxiosRequestConfig {
@@ -292,8 +296,10 @@ request.interceptors.response.use(
       if (!originalRequest) return Promise.reject(error)
       const startedAt = originalRequest[REQUEST_START_TIME_KEY]
       
-      let errorMsg = '请求失败'
+      let errorMsg = t('errors.requestFailed')
+      let backendProvidedMessage = false
       if (data && (data.detail !== undefined || data.message !== undefined)) {
+        backendProvidedMessage = true
         const raw = data.detail ?? data.message
         if (Array.isArray(raw)) {
           errorMsg = raw.map((e: unknown) => (e && typeof e === 'object' && 'msg' in e) ? String((e as Record<string, unknown>).msg) : String(e)).join('; ')
@@ -355,20 +361,20 @@ request.interceptors.response.use(
             }
           }
           
-          if (!isLoginRequest && errorMsg === '请求失败') {
-            errorMsg = '登录已过期或未登录，请重新登录'
+          if (!isLoginRequest && !backendProvidedMessage) {
+            errorMsg = t('errors.sessionExpired')
             try {
               const userStore = useUserStore()
               userStore.logout({ navigate: false })
               if (router) router.push({ name: 'Login' })
             } catch (_) { /* store/router 可能未就绪 */ }
-          } else if (isLoginRequest && errorMsg === '请求失败') {
-            errorMsg = '身份验证失败，请检查用户名和密码'
+          } else if (isLoginRequest && !backendProvidedMessage) {
+            errorMsg = t('errors.authFailed')
           }
           break
         }
         case 403:
-          errorMsg = '无权限访问'
+          errorMsg = t('errors.forbidden')
           // E14/D1：X-Silent-Error 的约定是「错误由调用方自行呈现」——
           // 该分支的附加提示同样必须闭嘴，否则页面级单条提示仍会双弹。
           if (!silentError) {
@@ -377,7 +383,7 @@ request.interceptors.response.use(
               if (userStore.isLoggedIn) {
                 // 收敛为一条提示，但保留 Request ID（排障线索不因去重丢失）；
                 // ID 后缀用 ASCII 以免新增一行硬编码中文（CJK 棘轮只缩不涨）
-                const permissionBase = '权限不足，请联系管理员'
+                const permissionBase = t('errors.insufficientPermission')
                 dedupMessage('error', requestId ? `${permissionBase} [Request ID: ${requestId}]` : permissionBase, 5000)
                 suppressGenericToast = true
               }
@@ -385,16 +391,16 @@ request.interceptors.response.use(
           }
           break
         case 429:
-          errorMsg = '请求过于频繁，请稍后再试'
+          errorMsg = t('errors.rateLimited')
           break
         case 500:
           // 安全加固：5xx 不向用户展示内部异常细节（可能含堆栈/内部路径），详情仅进日志
-          errorMsg = '服务器内部错误，请稍后重试'
+          errorMsg = t('errors.serverError')
           break
       }
       
       if (requestId) {
-        errorMsg = `${errorMsg}（请求ID: ${requestId}）`
+        errorMsg = t('errors.withRequestId', { message: errorMsg, requestId })
       }
 
       // 登录/注册/刷新由页面自行呈现错误：全局拦截器再弹一次会变成双 toast，
@@ -415,7 +421,7 @@ request.interceptors.response.use(
       // 与响应分支同口径：auth 请求的网络错误也由页面自行呈现（登录页会兜底
       // “网络连接失败”类可读提示），拦截器再弹一次即双 toast。
       if (!silentError && !isAuthRequest) {
-        dedupMessage('error', '网络连接失败，请检查后端服务', 5000)
+        dedupMessage('error', t('errors.networkFailed'), 5000)
       }
       emitApiMetricEvent({
         kind: 'error',

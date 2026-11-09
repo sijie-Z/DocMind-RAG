@@ -16,6 +16,8 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { sseService } from '../sseService'
+import i18n from '@/locales'
+import en from '@/locales/en'
 import type { SSEMessage } from '@/types/api'
 
 function makeStreamResponse(chunks: string[]) {
@@ -139,5 +141,50 @@ describe('sseService · 命名事件派发（issue #289，白名单条目回归�
     expect(typeof retries[0].waitTime).toBe('number')
     expect(chunks).toHaveLength(1)
     expect(chunks[0].content).toBe('补上')
+  })
+})
+
+// ── HTTP 错误文案跟随语言（共享 utils i18n 批次）──────────────────────────
+describe('sseService · HTTP 错误文案跟随语言（en）', () => {
+  beforeEach(() => {
+    localStorage.setItem('docmind_token', 'tok')
+    // 不重试：直接落到 error 分支
+    sseService.setRetryOptions({ maxRetries: 0, retryDelay: 5 })
+    i18n.global.setLocaleMessage('en', en as never)
+    ;(i18n.global.locale as unknown as { value: string }).value = 'en'
+  })
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
+    localStorage.clear()
+    i18n.global.locale.value = 'zh'
+    sseService.off('error')
+  })
+
+  it('429 → 英文限流文案', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: false, status: 429, headers: { get: () => null },
+    }))
+    const errors: SSEMessage[] = []
+    sseService.on('error', (d: SSEMessage) => errors.push(d))
+
+    const ok = await sseService.post('stream', {})
+
+    expect(ok).toBe(false)
+    expect(errors).toHaveLength(1)
+    expect(errors[0].content).toBe('Too many requests. Please try again later.')
+  })
+
+  it('500 → 英文 HTTP 状态文案', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: false, status: 500, headers: { get: () => null },
+    }))
+    const errors: SSEMessage[] = []
+    sseService.on('error', (d: SSEMessage) => errors.push(d))
+
+    const ok = await sseService.post('stream', {})
+
+    expect(ok).toBe(false)
+    expect(errors[0].content).toBe('HTTP error: 500')
   })
 })
