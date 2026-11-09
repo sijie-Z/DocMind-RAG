@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import { setActivePinia, createPinia } from 'pinia'
 import { useAgentStore } from '../agent'
+import type { ToolInfo } from '@/types/agent'
 
 /**
  * issue #242 收尾：run_report / execution_context 两个事件此前**在 store 的
@@ -211,5 +212,34 @@ describe('useAgentStore · #289 残余事件归约（thinking 落账 / 计划步
     store.processEvent({ type: 'tool_result', plan_step_id: 's1', content: '完成' } as any)
     expect(store.planSteps[0].retry_count).toBe(0)
     expect(store.planSteps[0].status).toBe('completed')
+  })
+})
+
+describe('useAgentStore · 工具计数诚实性', () => {
+  const tool = (name: string, extra: Partial<ToolInfo> = {}): ToolInfo => ({
+    name,
+    description: '',
+    tags: [],
+    parameters: {},
+    requires_auth: false,
+    disabled_by_default: false,
+    ...extra,
+  })
+
+  it('服务端强制禁用/按条件生效/默认关闭/用户禁用都不算启用', () => {
+    setActivePinia(createPinia())
+    const store = useAgentStore()
+    store.tools = [
+      tool('search_docs'),
+      tool('execute_python'), // 默认 disabled_tools 里
+      tool('forced', { config_disabled: true }),
+      tool('gated', { gated_by_predicate: true }),
+      tool('default_off', { disabled_by_default: true }),
+      tool('enforced_by_caps'),
+    ]
+    store.enforcedDisabledTools = ['enforced_by_caps']
+
+    expect(store.toolCount).toBe(6)
+    expect(store.enabledToolCount).toBe(1)
   })
 })

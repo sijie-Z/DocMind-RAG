@@ -19,6 +19,7 @@ import naive, { NMessageProvider, NDialogProvider } from 'naive-ui'
 
 import ProfilePage from '../index.vue'
 import { useProfilePage } from '../composables/useProfilePage'
+import { useUserStore } from '@/stores/user'
 import zh from '@/locales/zh'
 import en from '@/locales/en'
 import fr from '@/locales/fr'
@@ -281,5 +282,20 @@ describe('Profile · 语言切换后文案实时更新', () => {
     // n-select 的当前值文案取自 options；无需展开下拉即可观察到已选中的「Follow system」
     expect(wrapper.text()).toContain('Follow system')
     expect(wrapper.text()).not.toContain('跟随系统')
+  })
+})
+
+describe('Profile · 管理员入口按权限隐藏', () => {
+  it('普通用户无「系统监控」快捷入口，管理员有', async () => {
+    mountHarness()
+    await flushPromises()
+    const routes = () => capturedApi.quickActions.value.map((a) => a.route)
+    expect(routes()).not.toContain('Monitoring')
+
+    const store = useUserStore()
+    store.token = 'tok'
+    store.userInfo = { id: 1, username: 'admin', is_superuser: true } as never
+    await nextTick()
+    expect(routes()).toContain('Monitoring')
   })
 })

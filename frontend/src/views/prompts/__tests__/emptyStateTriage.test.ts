@@ -19,6 +19,7 @@ import naive, { NDialogProvider } from 'naive-ui'
 
 import PromptsView from '../index.vue'
 import zh from '@/locales/zh'
+import { useUserStore } from '@/stores/user'
 
 const apiMocks = vi.hoisted(() => ({
   getPrompts: vi.fn(),
@@ -62,7 +63,7 @@ const Host = defineComponent({
   render: () => h(NDialogProvider, null, { default: () => h(PromptsView) }),
 })
 
-async function mountView() {
+async function mountView(asSuperuser = false) {
   const router = createRouter({
     history: createMemoryHistory(),
     routes: [{ path: '/', name: 'Chat', component: { template: '<div />' } }],
@@ -71,6 +72,11 @@ async function mountView() {
   await router.isReady()
   const pinia = createPinia()
   setActivePinia(pinia)
+  if (asSuperuser) {
+    const store = useUserStore()
+    store.token = 'tok'
+    store.userInfo = { id: 1, username: 'admin', is_superuser: true } as never
+  }
   const wrapper = mount(Host, { global: { plugins: [naive, pinia, router, i18n] } })
   await flushPromises()
   await nextTick()
@@ -179,5 +185,16 @@ describe('提示词页 · D1 错误文案单一通道', () => {
     expect(text).not.toContain('Request failed with status code')
     expect(wrapper.text()).toContain('周报模板')
     expect(apiMocks.getPrompts).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('提示词页 · 初始化入口仅平台管理员可见', () => {
+  it('普通用户不显示「初始化」，平台管理员显示', async () => {
+    const normal = await mountView()
+    expect(findButtonByText(normal, '初始化'), '普通用户不应看到平台级种子入口').toBeUndefined()
+    normal.unmount()
+
+    const admin = await mountView(true)
+    expect(findButtonByText(admin, '初始化'), '平台管理员应看到「初始化」').toBeTruthy()
   })
 })

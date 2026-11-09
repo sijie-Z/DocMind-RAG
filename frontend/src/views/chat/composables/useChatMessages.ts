@@ -29,8 +29,13 @@ export function useChatMessages() {
     }
 
     nextTick(() => {
-      if (chatContainer.value) {
-        chatContainer.value.scrollTo({ top: chatContainer.value.scrollHeight, behavior })
+      const el = chatContainer.value
+      if (!el) return
+      // jsdom（测试）与部分旧环境没有 Element.scrollTo：退化为直接设 scrollTop
+      if (typeof el.scrollTo === 'function') {
+        el.scrollTo({ top: el.scrollHeight, behavior })
+      } else {
+        el.scrollTop = el.scrollHeight
       }
     })
   }

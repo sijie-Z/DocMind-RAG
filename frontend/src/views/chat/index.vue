@@ -209,10 +209,20 @@ const handleWindowResize = () => { windowWidth.value = window.innerWidth }
 const MAX_PROMPT_LENGTH = 5000
 
 const {
-  messages, showBackToBottom,
+  messages, chatContainer, showBackToBottom,
   handleScroll: baseHandleScroll, scrollToBottom: baseScrollToBottom,
   handleFeedback, copyText
 } = useChatMessages()
+
+// ChatMessages 内部持滚动容器：通过 defineExpose 暴露后回填到 composable，
+// 否则 handleScroll/scrollToBottom 一直对 null 操作（自动跟随/回到底部失效）。
+watch(
+  chatMessagesRef,
+  (comp) => {
+    chatContainer.value = (comp as { scrollEl?: HTMLElement } | null)?.scrollEl ?? undefined
+  },
+  { immediate: true, flush: 'post' },
+)
 
 const {
   attachedFiles, attachedFileIds,

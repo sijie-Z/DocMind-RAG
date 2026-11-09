@@ -69,8 +69,18 @@ export const useAgentStore = defineStore('agent', () => {
 
   // ── Computed ──
   const toolCount = computed(() => tools.value.length)
-  const enabledToolCount = computed(
-    () => tools.value.filter((t) => !config.value.disabled_tools.includes(t.name)).length,
+  // 诚实计数：只把「当前确实可用」的工具算作启用——
+  // 服务端强制禁用（config_disabled / capabilities.enforced_disabled_tools）、
+  // 按条件生效（gated_by_predicate）、默认关闭（disabled_by_default）都不算。
+  const enabledToolCount = computed(() =>
+    tools.value.filter(
+      (t) =>
+        !config.value.disabled_tools.includes(t.name) &&
+        t.config_disabled !== true &&
+        !enforcedDisabledTools.value.includes(t.name) &&
+        t.gated_by_predicate !== true &&
+        t.disabled_by_default !== true,
+    ).length,
   )
   const hasSessions = computed(() => sessions.value.length > 0)
   const currentSession = computed(() =>

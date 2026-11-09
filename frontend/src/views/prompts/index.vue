@@ -9,7 +9,7 @@
             <p class="text-gray-500 dark:text-gray-400 mt-1 text-sm">提示词模板将直接影响AI的回答方式和风格</p>
           </div>
           <div class="flex gap-2">
-            <n-button quaternary round @click="handleSeed" :loading="seeding">
+            <n-button v-if="userStore.isSuperuser" quaternary round @click="handleSeed" :loading="seeding">
               <template #icon><n-icon><SparklesOutline /></n-icon></template>
               初始化
             </n-button>
