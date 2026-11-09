@@ -333,6 +333,10 @@ import { citationRank, findSourceByCitation } from '../utils/citations'
 
 const { t } = useI18n()
 
+const chatContainer = ref<HTMLElement>()
+
+defineExpose({ scrollEl: chatContainer })
+
 defineProps<{
   messages: ChatMessage[]
   isLoading: boolean

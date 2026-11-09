@@ -130,11 +130,10 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, watch, onMounted } from 'vue'
+import { ref, reactive, computed, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import type { AgentConfig, ToolInfo } from '@/types/agent'
-import { agentApi } from '@/api/agent'
-import { apiUnwrap } from '@/utils/apiUnwrap'
+import type { AgentConfig } from '@/types/agent'
+import { useAgentStore } from '@/stores/agent'
 
 const props = defineProps<{
   config: AgentConfig
@@ -149,7 +148,10 @@ const emit = defineEmits<{
 const { t } = useI18n()
 
 const collapsed = ref(true)
-const availableTools = ref<ToolInfo[]>([])
+// 工具清单由 Agent 页 loadInit 统一加载进 store：面板只消费，不再重复
+// 请求 /agent/tools（此前面板挂载会与页面初始化各打一次）。
+const agentStore = useAgentStore()
+const availableTools = computed(() => agentStore.tools)
 
 const localConfig = reactive<AgentConfig>({
   ...props.config,
@@ -178,17 +180,6 @@ function toggleTool(name: string) {
   }
 }
 
-onMounted(async () => {
-  try {
-    const res = await agentApi.listTools()
-    // 真载荷 apiUnwrap(res)（{success, data:[...tools], total}，agent.py:458-472）；
-    // 旧读 res.data（整信封）Array.isArray 恒 false → 工具开关列表恒空（B27）
-    const tools = apiUnwrap<ToolInfo[]>(res)
-    if (Array.isArray(tools)) availableTools.value = tools
-  } catch {
-    // ignore
-  }
-})
 </script>
 
 <style scoped>

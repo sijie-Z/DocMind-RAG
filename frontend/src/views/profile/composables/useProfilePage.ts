@@ -368,7 +368,8 @@ const workflowCompletion = computed(() => {
   return Math.min(100, conversationScore + messageScore + knowledgeScore)
 })
 
-const quickActions = computed(() => [
+const quickActions = computed(() => {
+  const actions = [
   {
     label: t('profile.quickActions.chat'),
     desc: t('profile.quickActions.chatDesc'),
@@ -393,7 +394,11 @@ const quickActions = computed(() => [
     route: 'Notifications',
     icon: NotificationsOutline
   }
-])
+  ]
+  // 系统监控是管理员路由（router 守卫会重定向）：无权限时不展示入口，
+  // 避免点了才被弹回首页
+  return actions.filter((a) => a.route !== 'Monitoring' || userStore.isAdmin)
+})
 
 const goToRoute = (name: string) => {
   router.push({ name })

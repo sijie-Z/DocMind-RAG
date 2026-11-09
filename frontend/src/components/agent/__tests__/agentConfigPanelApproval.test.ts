@@ -16,7 +16,7 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
-import { createPinia, setActivePinia } from 'pinia'
+import { createPinia, getActivePinia, setActivePinia } from 'pinia'
 import { createI18n } from 'vue-i18n'
 import type { Mock } from 'vitest'
 
@@ -32,7 +32,7 @@ vi.mock('@/utils/request', () => ({
 import request from '@/utils/request'
 import { agentApi } from '@/api/agent'
 import { useAgentStore } from '@/stores/agent'
-import type { AgentConfig } from '@/types/agent'
+import type { AgentConfig, ToolInfo } from '@/types/agent'
 import zh from '@/locales/zh'
 import AgentConfigPanel from '../AgentConfigPanel.vue'
 
@@ -47,14 +47,23 @@ const mocked = request as unknown as {
 const i18n = createI18n({ legacy: false, locale: 'zh', messages: { zh } })
 
 function mountPanel(config: AgentConfig, enforcedTools?: string[]) {
+  // 面板从 store 读工具清单（不再自打 /agent/tools）：挂载需带 pinia，
+  // store 由 installFakeConfigServer 预先播种
+  const pinia = getActivePinia() ?? createPinia()
+  if (!getActivePinia()) setActivePinia(pinia)
   return mount(AgentConfigPanel, {
     props: { config, enforcedTools },
-    global: { plugins: [i18n] },
+    global: { plugins: [pinia, i18n] },
   })
 }
 
 /** 内存假服务端：GET/PUT /agent/config 共享一份存储（默认 risky，同后端）。 */
 function installFakeConfigServer(initial: Partial<AgentConfig> = {}, tools: unknown[] = []) {
+  // 面板工具清单来自 store（页面 loadInit 会先填充）；测试里直接播种
+  const pinia = createPinia()
+  setActivePinia(pinia)
+  useAgentStore().tools = tools as ToolInfo[]
+
   let stored: Record<string, unknown> = {
     model: 'deepseek-v4-flash',
     temperature: 0.1,
