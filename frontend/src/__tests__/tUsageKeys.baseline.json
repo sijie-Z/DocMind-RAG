@@ -5,7 +5,6 @@
     "chat.feedback.failed",
     "chat.feedback.likeSuccess",
     "common.deleteFailed",
-    "notifications.subtitle",
-    "profile.loadFailed"
+    "notifications.subtitle"
   ]
 }

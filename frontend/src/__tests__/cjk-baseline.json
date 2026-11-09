@@ -26,8 +26,6 @@
     "views/monitoring/index.vue": 6,
     "views/notifications/index.vue": 29,
     "views/organizations/index.vue": 18,
-    "views/profile/composables/useProfilePage.ts": 52,
-    "views/profile/index.vue": 3,
     "views/prompts/index.vue": 45,
     "views/search.vue": 6,
     "views/systemAbout/index.vue": 25,
