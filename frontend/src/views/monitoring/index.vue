@@ -8,7 +8,7 @@
         </h1>
         <p class="text-slate-500 dark:text-slate-400 mt-1 text-sm flex items-center gap-2">
           <span class="w-6 h-0.5 bg-blue-500 rounded-full"></span>
-          实时监控系统运行状态
+          {{ t('monitoring.subtitle') }}
         </p>
       </div>
       <div class="flex items-center gap-3">
@@ -335,10 +335,10 @@ const auditPagination = reactive({
   pageSizes: [10, 20, 50]
 })
 
-const auditColumns = [
-  { title: '用户', key: 'username', width: 120 },
+const auditColumns = computed(() => [
+  { title: t('monitoring.auditColumns.user'), key: 'username', width: 120 },
   {
-    title: '动作',
+    title: t('monitoring.auditColumns.action'),
     key: 'action',
     width: 150,
     render(row: AuditLogEntry) {
@@ -355,18 +355,18 @@ const auditColumns = [
       }, { default: () => row.action })
     }
   },
-  { title: '目标', key: 'target_type', width: 100 },
-  { title: '详情', key: 'detail' },
+  { title: t('monitoring.auditColumns.target'), key: 'target_type', width: 100 },
+  { title: t('monitoring.auditColumns.detail'), key: 'detail' },
   { title: 'IP', key: 'ip_address', width: 140 },
   {
-    title: '时间',
+    title: t('monitoring.auditColumns.time'),
     key: 'created_at',
     width: 180,
     render(row: AuditLogEntry) {
       return parseApiDate(row.created_at)?.toLocaleString() ?? '-'
     }
   }
-]
+])
 
 // 审计日志请求序号：刷新与翻页可能重叠，旧响应不得覆盖新分页数据，
 // 也不得在新请求成功后补弹旧失败 toast。

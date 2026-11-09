@@ -4,7 +4,6 @@
     "chat.feedback.dislikeSuccess",
     "chat.feedback.failed",
     "chat.feedback.likeSuccess",
-    "common.deleteFailed",
-    "notifications.subtitle"
+    "common.deleteFailed"
   ]
 }
