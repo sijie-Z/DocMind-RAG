@@ -29,7 +29,7 @@
         <n-card class="rounded-2xl" size="small">
           <div class="text-sm text-gray-500">{{ t('notifications.typeDistribution') }}</div>
           <div class="text-sm text-gray-700 dark:text-gray-300 mt-2">
-            <span v-if="summaryError">—</span>
+            <span v-if="summaryError || Object.keys(summary.by_type).length === 0">—</span>
             <span v-for="(val, key) in summary.by_type" v-else :key="key" class="inline-block mr-3">
               {{ typeLabel(key) }}: {{ val }}
             </span>
@@ -90,7 +90,7 @@ import { computed, h, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { NButton, } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
-import { formatDate } from '@/utils/format'
+import { formatDateTime } from '@/utils/format'
 import { notificationTargetLocation } from '@/utils/notificationTarget'
 import { useDedupedMessage } from '@/utils/message'
 import { getErrorMessage } from '@/utils/apiError'
@@ -99,7 +99,7 @@ import { batchDeleteNotifications, deleteNotification, getNotificationSummary, g
 import { notificationSocket, type RealtimeNotificationPayload } from '@/utils/notificationSocket'
 
 const router = useRouter()
-const { t } = useI18n()
+const { t, locale } = useI18n()
 const message = useDedupedMessage()
 const latestRealtimeId = ref<number | null>(null)
 
@@ -203,12 +203,12 @@ const columns = computed(() => [
   {
     title: t('notifications.columns.time'),
     key: 'created_at',
-    render: (row: Notification) => formatDate(row.created_at)
+    render: (row: Notification) => formatDateTime(row.created_at, locale.value)
   },
   {
     title: t('notifications.columns.status'),
     key: 'is_read',
-    render: (row: Notification) => row.is_read ? t('notifications.read') : t('notifications.unread')
+    render: (row: Notification) => row.is_read ? t('notifications.read') : t('notifications.statusUnread')
   },
   {
     title: t('common.actions'),

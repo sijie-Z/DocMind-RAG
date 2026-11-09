@@ -126,7 +126,10 @@ describe('通知页 · 语言切换后文案实时更新', () => {
     expect(headers(wrapper)).toEqual(
       expect.arrayContaining(['标题', '内容', '类型', '时间', '状态', '操作']),
     )
-    expect(wrapper.text()).toContain('未读')
+    // 行内状态单元格（selection,标题,内容,类型,时间,状态,操作 → index 5）；
+    // 不用 wrapper.text() 断言，否则会被「只看未读」按钮满足而空转（评审 B）
+    const statusCell = () => wrapper.findAll('tbody tr')[0].findAll('td')[5]
+    expect(statusCell().text()).toBe('未读')
 
     // 下拉选项本身（typeOptions/readOptions 必须是 computed，否则不随语言变）
     const optionLabels = () =>
@@ -146,8 +149,8 @@ describe('通知页 · 语言切换后文案实时更新', () => {
     expect(optionLabels()).toEqual(
       expect.arrayContaining(['System', 'Knowledge base', 'Unread', 'All']),
     )
-    // 未读状态单元格（readOptions 与状态列共用 notifications.unread 键）
-    expect(wrapper.text()).toContain('Unread')
+    // 行内状态单元格必须是英文（不与筛选按钮文案共用断言）
+    expect(statusCell().text()).toBe('Unread')
     wrapper.unmount()
   })
 })

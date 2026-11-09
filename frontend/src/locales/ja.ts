@@ -1128,6 +1128,7 @@ export default {
       status: '状態',
     },
     read: '既読',
+    statusUnread: '未読',
     markRead: '既読にする',
     withDetail: '{message}：{detail}',
   },

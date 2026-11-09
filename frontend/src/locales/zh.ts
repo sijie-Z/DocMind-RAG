@@ -1202,6 +1202,7 @@ export default {
       status: '状态',
     },
     read: '已读',
+    statusUnread: '未读',
     markRead: '标记已读',
     withDetail: '{message}：{detail}',
   },

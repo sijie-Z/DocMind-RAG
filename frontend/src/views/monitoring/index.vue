@@ -195,7 +195,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, onMounted, onUnmounted, h } from 'vue'
+import { ref, reactive, computed, onMounted, onUnmounted, watch, h } from 'vue'
 import { useDedupedMessage } from '@/utils/message'
 import { NTag } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
@@ -203,7 +203,7 @@ import { getAuditLogs, type AuditLogEntry } from '@/api/user'
 import { RefreshOutline, PulseOutline, GitNetworkOutline, BookOutline, WarningOutline } from '@vicons/ionicons5'
 import echarts from '@/utils/echarts'
 import { getMonitoringDashboard, getMonitoringAlerts, getMetrics, getNotificationStatus, type TrendPoint, type NotificationServiceStatus } from '@/api/monitoring'
-import { parseApiDate } from '@/utils/format'
+import { formatDateTime } from '@/utils/format'
 import { apiUnwrap } from '@/utils/apiUnwrap'
 import { getErrorMessage } from '@/utils/apiError'
 import { filterPointsByTimeRange } from './timeRange'
@@ -252,7 +252,7 @@ interface Alert {
 }
 
 const message = useDedupedMessage()
-const { t } = useI18n()
+const { t, locale } = useI18n()
 const loading = ref(false)
 const loadError = ref(false)
 const loadErrorMsg = ref('')
@@ -363,7 +363,7 @@ const auditColumns = computed(() => [
     key: 'created_at',
     width: 180,
     render(row: AuditLogEntry) {
-      return parseApiDate(row.created_at)?.toLocaleString() ?? '-'
+      return formatDateTime(row.created_at, locale.value)
     }
   }
 ])
@@ -428,7 +428,7 @@ const alertColumns = computed(() => [
     key: 'timestamp',
     width: 180,
     render(row: Alert) {
-      return new Date(row.timestamp * 1000).toLocaleString()
+      return formatDateTime(new Date(row.timestamp * 1000), locale.value)
     }
   },
   {
@@ -525,6 +525,29 @@ const initCharts = () => {
     })
   }
 }
+
+// 语言切换：ECharts 内嵌标题/系列名不会自动重算；setOption 合并只改文案，
+// 已绘制的数据点保留。
+const relocalizeCharts = () => {
+  cpuChart?.setOption({
+    title: { text: t('monitoring.cpu') + ' (%)', subtext: emptySubtext() },
+    series: [{ name: t('monitoring.cpu') }],
+  })
+  memoryChart?.setOption({
+    title: { text: t('monitoring.memory') + ' (%)', subtext: emptySubtext() },
+    series: [{ name: t('monitoring.memory') }],
+  })
+  requestChart?.setOption({
+    title: { text: t('monitoring.requestTrend'), subtext: emptySubtext() },
+    series: [{ name: t('monitoring.totalRequests') }],
+  })
+  responseTimeChart?.setOption({
+    title: { text: t('monitoring.responseTrend') + ' (ms)', subtext: emptySubtext() },
+    series: [{ name: t('monitoring.avgResponseTime') }],
+  })
+}
+
+watch(locale, relocalizeCharts)
 
 const updateMetricsCharts = async (seq: number) => {
   try {

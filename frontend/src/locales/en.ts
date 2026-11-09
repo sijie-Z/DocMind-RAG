@@ -1194,6 +1194,7 @@ export default {
       status: 'Status',
     },
     read: 'Read',
+    statusUnread: 'Unread',
     markRead: 'Mark as read',
     withDetail: '{message}: {detail}',
   },

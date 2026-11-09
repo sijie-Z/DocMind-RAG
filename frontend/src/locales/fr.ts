@@ -1129,6 +1129,7 @@ export default {
       status: 'Statut',
     },
     read: 'Lue',
+    statusUnread: 'Non lue',
     markRead: 'Marquer comme lue',
     withDetail: '{message} : {detail}',
   },
