@@ -217,4 +217,18 @@ describe('相对时间/时长跟随界面语言（全局 i18n）', () => {
     expect(formatDate(new Date(Date.now() - 5 * 60 * 1000))).toBe('5分钟前')
     expect(formatDuration(90)).toBe('1分30秒')
   })
+
+  it('≥30 天的绝对时间按界面语言选 locale（zh 与 en 格式不同）', () => {
+    const old = new Date(Date.now() - 31 * 86400 * 1000)
+    i18n.global.locale.value = 'zh'
+    const zhText = formatDate(old)
+    ;(i18n.global.locale as unknown as { value: string }).value = 'en'
+    const enText = formatDate(old)
+
+    expect(enText).not.toBe(zhText)
+    // en-US：MM/DD/YYYY（zh-CN 为 YYYY/MM/DD）
+    expect(enText).toMatch(/^\d{1,2}\/\d{1,2}\/\d{4}/)
+    expect(enText).not.toContain('前')
+    expect(zhText).not.toContain('前')
+  })
 })

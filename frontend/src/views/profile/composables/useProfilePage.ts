@@ -923,10 +923,9 @@ const loadActivities = async () => {
   try {
     const response = await getUserActivities()
     if (response.data) {
-      activities.value = response.data.map(item => ({
-        ...item,
-        time: formatDate(item.time)
-      }))
+      // 保留原始时间串，由模板在渲染时格式化——预格式化会让最近动态在
+      // 切换语言后停留在旧语言（formatDate 的 render 期调用才被 locale 追踪）
+      activities.value = response.data
     }
   } catch (error) {
     // Failed to load activities

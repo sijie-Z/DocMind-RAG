@@ -1,5 +1,8 @@
 import { getToken } from '@/utils/auth'
 import i18n from '@/locales'
+
+const t = (key: string, params: Record<string, string | number> = {}): string =>
+  (i18n.global.t as (k: string, p?: Record<string, string | number>) => string)(key, params)
 import type { SSEMessage } from '@/types/api'
 
 interface RetryOptions {
@@ -180,8 +183,8 @@ class SSEService {
             status: response.status,
             retryAfter: retryAfter ? parseInt(retryAfter) : null,
             message: response.status === 429
-        ? (i18n.global.t as (k: string) => string)('errors.rateLimited')
-        : (i18n.global.t as (k: string, p: Record<string, string | number>) => string)('errors.httpStatus', { status: response.status })
+              ? t('errors.rateLimited')
+              : t('errors.httpStatus', { status: response.status })
           }
           // SSE HTTP error
           this.setStatus('error')

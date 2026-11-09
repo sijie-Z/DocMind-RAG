@@ -48,6 +48,9 @@ class MockWebSocket {
 ;(globalThis as any).window = { location: { protocol: 'http:', host: 'localhost:5173' } }
 
 import { wsService } from '../websocket'
+import { getToken } from '@/utils/auth'
+import i18n from '@/locales'
+import en from '@/locales/en'
 
 describe('WebSocketService', () => {
   beforeEach(() => {
@@ -165,5 +168,45 @@ describe('WebSocketService · 手动断开后的重连路径（ISS-3）', () => 
     vi.advanceTimersByTime(2000) // 遗留定时器到点
     expect(MockWebSocket.instances).toHaveLength(1) // 未偷偷重连
     expect(wsService.getConnectionStatus()).toBe('disconnected')
+  })
+})
+
+// ── 错误文案跟随语言（共享 utils i18n 批次）────────────────────────────────
+describe('WebSocketService · 错误文案跟随语言（en）', () => {
+  beforeEach(() => {
+    i18n.global.setLocaleMessage('en', en as never)
+    ;(i18n.global.locale as unknown as { value: string }).value = 'en'
+    wsService.disconnect()
+  })
+
+  afterEach(() => {
+    wsService.disconnect()
+    i18n.global.locale.value = 'zh'
+  })
+
+  it('无 token → 英文「未登录」提示', () => {
+    vi.mocked(getToken).mockReturnValueOnce(null as never)
+    const handler = vi.fn()
+    wsService.on('error', handler)
+
+    wsService.connect(1)
+
+    expect(handler).toHaveBeenCalled()
+    expect(handler.mock.calls[0][0].content).toBe('No credentials found. Please sign in again.')
+    wsService.off('error')
+  })
+
+  it('socket.onerror → 英文连接错误提示', () => {
+    const handler = vi.fn()
+    wsService.on('error', handler)
+
+    wsService.connect(1)
+    const socket = MockWebSocket.instances.at(-1)!
+    socket.onerror?.(new Event('error'))
+
+    expect(
+      handler.mock.calls.some((c) => c[0].content === 'WebSocket connection error'),
+    ).toBe(true)
+    wsService.off('error')
   })
 })
