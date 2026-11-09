@@ -141,7 +141,7 @@
           :progress="agentStore.overallProgress"
         />
         <div v-else-if="showPlan" class="empty-panel">
-          <p class="empty-text">发送复杂任务后，执行计划将显示在这里</p>
+          <p class="empty-text">{{ t('agent.run.planEmpty') }}</p>
         </div>
       </div>
 
@@ -269,7 +269,7 @@
                      失败时用户只见空气泡、看不到失败原因；与 tool_error 的
                      单工具失败行以「运行失败」徽标 + 红边框做视觉区分） -->
                 <div v-else-if="evt.type === 'error'" class="run-error-standalone">
-                  <span class="run-error-badge">运行失败</span>
+                  <span class="run-error-badge">{{ t('agent.run.runFailed') }}</span>
                   <span class="run-error-text">{{
                     evt.code === 'USER_LLM_REQUEST_FAILED'
                       ? t('chat.userLlmRequestFailed')
@@ -385,7 +385,7 @@
                     <template #icon><n-icon><ThumbsUpOutline /></n-icon></template>
                   </n-button>
                 </template>
-                有帮助
+                {{ t('agent.run.feedbackHelpful') }}
               </n-tooltip>
               <n-tooltip trigger="hover">
                 <template #trigger>
@@ -396,7 +396,7 @@
                     <template #icon><n-icon><ThumbsDownOutline /></n-icon></template>
                   </n-button>
                 </template>
-                没有帮助
+                {{ t('agent.run.feedbackUnhelpful') }}
               </n-tooltip>
             </div>
 
@@ -431,12 +431,12 @@
 
     <!-- Status bar -->
     <div class="status-bar">
-      <span>工具: {{ agentStore.enabledToolCount }}/{{ agentStore.toolCount }}</span>
+      <span>{{ t('agent.run.toolsCount', { enabled: agentStore.enabledToolCount, total: agentStore.toolCount }) }}</span>
       <span v-if="agentStore.currentSessionId">
-        会话: {{ agentStore.currentSession?.title || agentStore.currentSessionId?.slice(0, 8) }}
+        {{ t('agent.run.sessionLabel', { title: agentStore.currentSession?.title || agentStore.currentSessionId?.slice(0, 8) }) }}
       </span>
       <span v-if="agentStore.overallProgress > 0">
-        进度: {{ Math.round(agentStore.overallProgress * 100) }}%
+        {{ t('agent.run.progressLabel', { percent: Math.round(agentStore.overallProgress * 100) }) }}
       </span>
     </div>
 
@@ -730,7 +730,7 @@ async function handleFeedback(msg: AgentChatMessage, value: number) {
     await agentApi.submitFeedback(msg.messageId, fb)
   } catch {
     msg.feedback = 0
-    message.error('反馈提交失败')
+    message.error(t('agent.run.feedbackFailed'))
   }
 }
 
@@ -1212,14 +1212,14 @@ async function handleSend(query: string, refs?: ReferencedDoc[]) {
     // AbortError is expected when user clicks stop
     if (e instanceof DOMException && e.name === 'AbortError') {
       agentStore.updateLastAssistant((msg) => {
-        if (!msg.content) msg.content = '(已停止)'
+        if (!msg.content) msg.content = t('agent.run.stoppedContent')
         msg.loading = false
         msg.endedAt = Date.now()  // 计时：客户端断流也是终态
       })
     } else {
       const errMsg = e instanceof Error ? e.message : String(e)
       agentStore.updateLastAssistant((msg) => {
-        msg.content = `错误: ${errMsg || 'Agent 连接失败'}`
+        msg.content = t('agent.run.errorMessage', { message: errMsg || t('agent.run.connectFailed') })
         msg.loading = false
         msg.endedAt = Date.now()  // 计时：连接失败也是终态
       })
@@ -1315,7 +1315,7 @@ async function handleApprovalDecide(payload: {
     )
   } catch {
     if (!agentStore.isIdentityEpochCurrent(runEpoch)) return
-    message.error('审批提交失败，已刷新任务状态')
+    message.error(t('agent.run.approvalFailed'))
     await refreshTaskState(taskId)
   } finally {
     approvalBusy.value = false
@@ -1671,7 +1671,7 @@ async function handleSessionChange(sessionId: string | null) {
     if (!detail || !isCurrent()) return
     if (detail.is_fork) await loadLineage(sessionId, isCurrent)
   } catch (e) {
-    if (isCurrent()) message.error('加载会话失败')
+    if (isCurrent()) message.error(t('agent.run.loadSessionsFailed'))
   }
 }
 
@@ -1701,9 +1701,9 @@ async function handleSessionDelete(sessionId: string) {
     if (agentStore.currentSessionId === sessionId) {
       agentStore.setCurrentSession(null)
     }
-    message.success('会话已删除')
+    message.success(t('agent.run.sessionDeleted'))
   } catch (e) {
-    if (agentStore.isIdentityEpochCurrent(requestEpoch)) message.error('删除会话失败')
+    if (agentStore.isIdentityEpochCurrent(requestEpoch)) message.error(t('agent.run.deleteSessionFailed'))
   }
 }
 
@@ -1725,10 +1725,10 @@ async function handleNewSession() {
       agentStore.clearMessages()
       lastForkInfo.value = null
       forkErrorText.value = ''
-      message.success('已创建新会话')
+      message.success(t('agent.run.sessionCreated'))
     }
   } catch (e) {
-    if (agentStore.isIdentityEpochCurrent(requestEpoch)) message.error('创建会话失败')
+    if (agentStore.isIdentityEpochCurrent(requestEpoch)) message.error(t('agent.run.createSessionFailed'))
   }
 }
 
@@ -1805,7 +1805,7 @@ async function loadInit() {
   } catch (e) {
     if (!agentStore.isIdentityEpochCurrent(requestEpoch)) return
     initError.value = true
-    try { message.error('Agent 初始化失败') } catch { /* provider not ready */ }
+    try { message.error(t('agent.run.initFailed')) } catch { /* provider not ready */ }
   } finally {
     if (agentStore.isIdentityEpochCurrent(requestEpoch)) initLoading.value = false
   }

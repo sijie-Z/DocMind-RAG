@@ -106,7 +106,7 @@
           :disabled="stopping"
           @click="$emit('stop')"
         >
-          {{ stopping ? '停止中…' : '停止' }}
+          {{ stopping ? t('agent.input.stopping') : t('agent.input.stop') }}
         </button>
       </template>
       <button
@@ -115,7 +115,7 @@
         :disabled="!inputText.trim() || disabled"
         @click="handleSend"
       >
-        发送
+        {{ t('agent.input.send') }}
       </button>
       <button
         v-else
@@ -123,7 +123,7 @@
         :disabled="stopping"
         @click="$emit('stop')"
       >
-        {{ stopping ? '停止中…' : '停止' }}
+        {{ stopping ? t('agent.input.stopping') : t('agent.input.stop') }}
       </button>
     </div>
     <div class="input-hint">

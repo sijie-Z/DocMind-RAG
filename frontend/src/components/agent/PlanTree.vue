@@ -1,8 +1,8 @@
 <template>
   <div class="plan-tree" v-if="steps.length > 0">
     <div class="plan-header">
-      <span class="plan-title">执行计划</span>
-      <span class="plan-stats">{{ completedCount }}/{{ steps.length }} 步</span>
+      <span class="plan-title">{{ t('agent.plan.title') }}</span>
+      <span class="plan-stats">{{ t('agent.plan.stepsCount', { completed: completedCount, total: steps.length }) }}</span>
     </div>
 
     <!-- Progress bar -->
@@ -30,9 +30,9 @@
           <span v-if="step.tool_hint" class="step-tool-hint">{{ step.tool_hint }}</span>
           <!-- 计划语义徽标（issue #289 G7）：plan_step 事件真实携带这些字段
                （planner 发射、默认值不随载荷带出），此前前端未声明未读。 -->
-          <span v-if="step.parallel_group != null" class="step-parallel">∥ 并行组 {{ step.parallel_group }}</span>
+          <span v-if="step.parallel_group != null" class="step-parallel">{{ t('agent.plan.parallelGroup', { group: step.parallel_group }) }}</span>
           <span v-if="step.risk_level === 'high' || step.risk_level === 'medium'" class="step-risk">
-            {{ step.risk_level === 'high' ? '高风险' : '中风险' }}
+            {{ step.risk_level === 'high' ? t('agent.plan.riskHigh') : t('agent.plan.riskMedium') }}
           </span>
           <span
             v-if="step.retry_strategy && step.retry_strategy !== 'auto_retry'"
@@ -40,8 +40,8 @@
           >
             {{ retryStrategyLabel(step.retry_strategy) }}
           </span>
-          <span v-if="step.fallback_tool" class="step-fallback">备用: {{ step.fallback_tool }}</span>
-          <span v-if="step.retry_count > 0" class="step-retry">重试 {{ step.retry_count }} 次</span>
+          <span v-if="step.fallback_tool" class="step-fallback">{{ t('agent.plan.fallback', { tool: step.fallback_tool }) }}</span>
+          <span v-if="step.retry_count > 0" class="step-retry">{{ t('agent.plan.retryCount', { count: step.retry_count }) }}</span>
         </div>
       </div>
     </div>
@@ -50,7 +50,10 @@
 
 <script setup lang="ts">
 import { computed } from 'vue'
+import { useI18n } from 'vue-i18n'
 import type { PlanStep } from '@/types/agent'
+
+const { t } = useI18n()
 
 const props = defineProps<{
   steps: PlanStep[]
@@ -68,13 +71,10 @@ const progressPercent = computed(() => {
 })
 
 // G7 徽标文案：非 auto_retry 的重试策略（默认值不展示）
-const RETRY_STRATEGY_LABELS: Record<string, string> = {
-  skip: '失败时跳过',
-  ask_user: '失败时询问',
-}
-
 function retryStrategyLabel(strategy: string): string {
-  return RETRY_STRATEGY_LABELS[strategy] || strategy
+  if (strategy === 'skip') return t('agent.plan.onFailureSkip')
+  if (strategy === 'ask_user') return t('agent.plan.onFailureAsk')
+  return strategy
 }
 </script>
 
