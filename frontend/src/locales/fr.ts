@@ -1956,7 +1956,7 @@ export default {
     scope: {
       label: 'Portée',
       global: 'Globale (default)',
-      hint: 'L’Agent écrit la mémoire par session. Les sessions actives récentes sont listées ici ; choisissez-en une pour consulter et effacer sa mémoire.',
+      hint: 'L’Agent écrit la mémoire par session. Les 20 sessions non terminées les plus récentes sont listées ici ; choisissez-en une pour consulter et effacer sa mémoire.',
       outsideList: '{scope} (absente de la liste récente des sessions)',
       untitled: 'Session sans titre ({id})',
       loadFailed: 'Échec du chargement des sessions',

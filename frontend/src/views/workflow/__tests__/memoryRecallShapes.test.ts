@@ -18,7 +18,16 @@ import { createRouter, createMemoryHistory } from 'vue-router'
 import { createI18n } from 'vue-i18n'
 
 vi.mock('@/api/memory', () => ({
-  getAgentMemory: vi.fn().mockResolvedValue({ data: { data: null } }),
+  // 真形状的空导出（后端 GET /memory/{id} 恒回 export 对象）：页面按 memoryData 就绪
+  // 才渲染统计与 tabs，给 null 会落在「无数据」占位而非标签页
+  getAgentMemory: vi.fn().mockResolvedValue({
+    data: {
+      data: {
+        agent_id: 'default', short_term: [], long_term: {}, working: {},
+        reflective: { insights: [], patterns: [], lessons: [] }, interaction_count: 0,
+      },
+    },
+  }),
   recallMemory: vi.fn(),
   clearMemory: vi.fn(),
 }))

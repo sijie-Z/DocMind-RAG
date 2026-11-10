@@ -128,6 +128,7 @@ async function mountPage(search = ''): Promise<{ wrapper: ReturnType<typeof moun
 
 type MemoryVm = {
   scope: string
+  activeTab: string
   searchQuery: string
   searchResults: unknown[]
   searching: boolean
@@ -326,6 +327,9 @@ describe('记忆页作用域 · URL 同步与失败态', () => {
     const { wrapper } = await mountPage('?scope=session:s-1')
     expect(wrapper.text()).toContain('会话列表加载失败')
     expect(optionValues(wrapper)).toContain('session:s-1')
+    // 列表失败 ≠ 会话不在列表：不得谎称「不在最近会话列表」
+    expect(optionLabels(wrapper)).toContain('session:s-1')
+    expect(optionLabels(wrapper).join('|')).not.toContain('不在最近会话列表')
     expect(apiMocks.getAgentMemory).toHaveBeenCalledWith('session:s-1')
 
     const retry = wrapper.findAll('button').find((b) => b.text().includes('重试'))
@@ -426,7 +430,7 @@ describe('记忆页作用域 · 在途请求与深链到达（机制覆盖）', 
     wrapper.unmount()
   })
 
-  it('检索失败清空旧命中并给出本地化提示（不残留上一轮结果）', async () => {
+  it('检索失败清空旧命中并给出本地化提示（zh/en 各自自证，不残留上一轮结果）', async () => {
     const { wrapper } = await mountPage()
     const vm = vmOf(wrapper)
     vm.searchQuery = 'q'
@@ -437,8 +441,49 @@ describe('记忆页作用域 · 在途请求与深链到达（机制覆盖）', 
     await vm.searchMemory()
     await flushPromises()
     expect(vm.searchResults).toHaveLength(0)
-    expect(msgState.error).toHaveBeenCalledWith('搜索失败')
+    expect(msgState.error).toHaveBeenLastCalledWith('搜索失败')
     expect(vm.searching).toBe(false)
+
+    // 本地化判别：切 en 后必须给英文（退回硬编码中文即红）
+    i18n.global.locale.value = 'en'
+    await nextTick()
+    apiMocks.recallMemory.mockRejectedValueOnce(new Error('boom'))
+    await vm.searchMemory()
+    await flushPromises()
+    expect(msgState.error).toHaveBeenLastCalledWith('Search failed')
+    wrapper.unmount()
+  })
+
+  it('初次加载在飞时如实呈现加载中，不闪现统计 0 与「暂无记忆」', async () => {
+    const slow = deferred<unknown>()
+    apiMocks.getAgentMemory.mockReturnValueOnce(slow.promise)
+    const { wrapper } = await mountPage()
+    expect(wrapper.text()).toContain('加载中')
+    expect(wrapper.text()).not.toContain('暂无短期记忆')
+    expect(wrapper.findAll('.n-tabs-tab')).toHaveLength(0)
+
+    slow.resolve({ data: { data: MEMORY_EXPORT } })
+    await flushPromises()
+    expect(wrapper.findAll('.n-tabs-tab')).toHaveLength(5)
+    wrapper.unmount()
+  })
+
+  it('错误态重试后保留用户原先选中的标签页', async () => {
+    const { wrapper } = await mountPage()
+    const tabs = wrapper.findAll('.n-tabs-tab')
+    await tabs[4].trigger('click')
+    await flushPromises()
+    expect(vmOf(wrapper).activeTab).toBe('search')
+
+    apiMocks.getAgentMemory.mockRejectedValueOnce(new Error('boom'))
+    await wrapper.findAll('button').find((b) => b.text().includes('刷新'))!.trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain('记忆加载失败')
+
+    await wrapper.findAll('button').find((b) => b.text().includes('重试'))!.trigger('click')
+    await flushPromises()
+    expect(vmOf(wrapper).activeTab, '重试后跳回首个 tab，丢失用户选中页').toBe('search')
+    expect(wrapper.find('.n-tabs-tab--active').text()).toContain('记忆检索')
     wrapper.unmount()
   })
 })

@@ -50,8 +50,16 @@
         <n-button size="small" quaternary @click="loadMemory">{{ t('common.retry') }}</n-button>
       </div>
 
+      <!-- 数据未就绪：如实呈现加载中/无数据，不让统计 0 与「暂无记忆」冒充加载结果 -->
+      <n-card v-if="!loadError && !memoryData" size="small" class="shadow-sm mb-6">
+        <div class="flex items-center justify-center gap-3 py-10 text-sm text-gray-500 dark:text-gray-400">
+          <n-spin v-if="loading" size="small" />
+          <span>{{ loading ? t('common.loading') : t('common.noData') }}</span>
+        </div>
+      </n-card>
+
       <!-- 统计卡片 -->
-      <div v-if="!loadError" class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+      <div v-if="!loadError && memoryData" class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
         <n-card size="small" class="shadow-sm">
           <div class="flex items-center gap-3">
             <div class="w-10 h-10 rounded-lg bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center">
@@ -102,7 +110,7 @@
       </div>
 
       <!-- 主内容 -->
-      <n-tabs v-if="!loadError" type="line" animated>
+      <n-tabs v-if="!loadError && memoryData" v-model:value="activeTab" type="line" animated>
         <!-- 短期记忆 -->
         <n-tab-pane name="short_term" tab="短期记忆">
           <n-card size="small" class="shadow-sm">
@@ -264,7 +272,7 @@
 import { ref, computed, onMounted, watch } from 'vue'
 import {
   NCard, NTabs, NTabPane, NTimeline, NTimelineItem, NTag, NButton, NIcon,
-  NInput, NEmpty, NDescriptions, NDescriptionsItem, NCode, NSelect, useDialog, useMessage
+  NInput, NEmpty, NDescriptions, NDescriptionsItem, NCode, NSelect, NSpin, useDialog, useMessage
 } from 'naive-ui'
 import {
   RefreshOutline, TrashOutline, TimeOutline, LibraryOutline,
@@ -348,6 +356,7 @@ const dialog = useDialog()
 const message = useMessage()
 
 const loading = ref(false)
+const activeTab = ref('short_term')
 const searching = ref(false)
 const searchQuery = ref('')
 const searchResults = ref<RecallItem[]>([])
@@ -390,8 +399,10 @@ const scopeOptions = computed<Array<{ label: string; value: string }>>(() => {
   // 深链指向的会话可能已不在最近列表（或删除）：如实保留该选项，不静默改回全局
   if (!options.some((option) => option.value === scope.value)) {
     options.push({
-      // 列表还在飞时不能断言「不在列表」，如实显示命名空间本身
-      label: sessionsLoading.value ? scope.value : t('memory.scope.outsideList', { scope: scope.value }),
+      // 列表还在飞或加载失败时都不能断言「不在列表」，如实显示命名空间本身
+      label: sessionsLoading.value || sessionsError.value
+        ? scope.value
+        : t('memory.scope.outsideList', { scope: scope.value }),
       value: scope.value,
     })
   }

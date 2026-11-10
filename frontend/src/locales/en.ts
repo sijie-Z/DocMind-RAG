@@ -2021,7 +2021,7 @@ export default {
     scope: {
       label: 'Scope',
       global: 'Global (default)',
-      hint: 'The Agent writes memory per session. Recent active sessions are listed here; pick one to inspect and clear that session’s memory.',
+      hint: 'The Agent writes memory per session. The 20 most recent sessions that have not ended are listed here; pick one to inspect and clear that session’s memory.',
       outsideList: '{scope} (not in the recent session list)',
       untitled: 'Untitled session ({id})',
       loadFailed: 'Failed to load sessions',
