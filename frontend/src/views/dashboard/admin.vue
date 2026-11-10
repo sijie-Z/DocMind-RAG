@@ -219,7 +219,7 @@
                 <div class="w-2 h-2 rounded-full bg-blue-500"></div>
                 <span class="text-xs text-gray-500 dark:text-gray-400">{{ t('dashboard.avgLatency') }}</span>
               </div>
-              <p class="text-xl font-bold text-gray-900 dark:text-white">{{ llmStats.avgLatency }}<span class="text-sm font-normal text-gray-400">ms</span></p>
+              <p class="text-xl font-bold tabular-nums" :class="latencyClass(llmStats.avgLatency, 800, 2000)">{{ llmStats.avgLatency }}<span class="text-sm font-normal text-gray-400">ms</span></p>
               <p class="text-xs text-slate-500 dark:text-slate-400 mt-1">{{ t('dashboard.httpLatencyHint') }}</p>
             </div>
             <div class="bg-gray-50 dark:bg-gray-700/50 rounded-xl p-4">
@@ -227,7 +227,7 @@
                 <div class="w-2 h-2 rounded-full bg-orange-500"></div>
                 <span class="text-xs text-gray-500 dark:text-gray-400">{{ t('dashboard.p95Latency') }}</span>
               </div>
-              <p class="text-xl font-bold text-gray-900 dark:text-white">{{ llmStats.p95Latency }}<span class="text-sm font-normal text-gray-400">ms</span></p>
+              <p class="text-xl font-bold tabular-nums" :class="latencyClass(llmStats.p95Latency, 2000, 5000)">{{ llmStats.p95Latency }}<span class="text-sm font-normal text-gray-400">ms</span></p>
               <p class="text-xs text-slate-500 dark:text-slate-400 mt-1">{{ t('dashboard.httpP95Hint') }}</p>
             </div>
           </div>
@@ -235,7 +235,10 @@
           <div v-if="llmStats.trend.length" class="h-44 rounded-xl bg-gray-50 dark:bg-gray-700/30 p-3">
             <div ref="llmChartRef" class="w-full h-full"></div>
           </div>
-          <div v-else class="flex h-44 items-center justify-center rounded-xl border border-dashed border-slate-200 dark:border-slate-700">
+          <div v-else class="flex h-44 flex-col items-center justify-center gap-2 rounded-xl bg-gray-50 dark:bg-gray-700/30">
+            <span class="flex h-9 w-9 items-center justify-center rounded-full bg-blue-50 text-blue-500 dark:bg-blue-500/10 dark:text-blue-400">
+              <n-icon :size="18"><AnalyticsOutline /></n-icon>
+            </span>
             <span class="text-sm text-slate-600 dark:text-slate-300">{{ t('dashboard.llmNoDailyTrend') }}</span>
           </div>
         </div>
@@ -315,7 +318,10 @@
               <p class="text-4xl font-semibold tabular-nums" :class="hitRateClass">{{ ragStats.hitRate }}<span class="text-xl">%</span></p>
             </div>
           </div>
-          <div v-else class="mb-5 rounded-xl border border-dashed border-slate-200 px-4 py-8 text-center dark:border-slate-700">
+          <div v-else class="mb-5 flex flex-col items-center gap-2 rounded-xl bg-gray-50 px-4 py-8 text-center dark:bg-gray-700/30">
+            <span class="flex h-9 w-9 items-center justify-center rounded-full bg-emerald-50 text-emerald-600 dark:bg-emerald-500/10 dark:text-emerald-400">
+              <n-icon :size="18"><PulseOutline /></n-icon>
+            </span>
             <p class="text-sm text-slate-600 dark:text-slate-300">{{ t('dashboard.ragNoDataHint') }}</p>
           </div>
           <!-- 统计数字 -->
@@ -507,6 +513,14 @@ const isDark = useIsDark()
  * 每个区块只依赖自己那路请求 —— 慢接口不会把整屏锁在 spinner 上。
  */
 type BlockState = 'loading' | 'ready' | 'error'
+/** 延迟数字按阈值着色：慢响应不该和正常值一样黑（真值不变，只加语义色）。 */
+const latencyClass = (ms: number, warnAt: number, badAt: number) =>
+  ms >= badAt
+    ? 'text-red-600 dark:text-red-400'
+    : ms >= warnAt
+      ? 'text-amber-600 dark:text-amber-400'
+      : 'text-gray-900 dark:text-white'
+
 const llmCardValue = computed(() => {
   if (llmState.value !== 'ready' || (llmDegraded.value && !llmEverReady.value)) return '—'
   return llmStats.value.requestCountToday.toLocaleString()

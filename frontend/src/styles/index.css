@@ -14,6 +14,77 @@ html, body {
   height: 100%;
 }
 
+/* ===== 纸墨 · 证据蓝：全局设计令牌 =====
+   视图层（面包屑/图谱/首屏等）消费 var(--c-*)，此前只有首屏局部定义 surface/border，
+   --c-primary / --c-text-2 / --c-text-4 全仓无定义导致 hover 与灰阶静默失效。
+   这里给出 light/dark 两套完整令牌，作为全站唯一真源。 */
+:root {
+  --c-bg: #f6f7f9;
+  --c-surface: #ffffff;
+  --c-surface-subtle: #f1f5f9;
+  --c-border: rgba(15, 23, 42, 0.1);
+  --c-border-strong: rgba(15, 23, 42, 0.2);
+  --c-text-1: #0f172a;
+  --c-text-2: #334155;
+  --c-text-3: #475569;
+  --c-text-4: #64748b;
+  --c-primary: #2563eb;
+  --c-primary-strong: #1d4ed8;
+  --c-primary-soft: rgba(37, 99, 235, 0.08);
+  --c-success: #047857;
+  --c-success-bg: #ecfdf5;
+  --c-warning: #b45309;
+  --c-warning-bg: #fffbeb;
+  --c-danger: #b91c1c;
+  --c-danger-bg: #fef2f2;
+  --c-info: #0369a1;
+  --c-info-bg: #f0f9ff;
+  --c-ink: #0b1526;
+  --c-on-ink: #f8fafc;
+  --c-scroll-thumb: rgba(15, 23, 42, 0.22);
+  --c-scroll-thumb-hover: rgba(15, 23, 42, 0.38);
+  --shadow-1: 0 1px 2px rgba(15, 23, 42, 0.06), 0 1px 1px rgba(15, 23, 42, 0.04);
+  --shadow-2: 0 8px 24px -8px rgba(15, 23, 42, 0.14), 0 2px 6px rgba(15, 23, 42, 0.06);
+  --shadow-3: 0 24px 48px -16px rgba(15, 23, 42, 0.22);
+  --dur-1: 120ms;
+  --dur-2: 200ms;
+  --dur-3: 360ms;
+  --dur-4: 640ms;
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-in: cubic-bezier(0.4, 0, 1, 1);
+  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.dark {
+  --c-bg: #0b1220;
+  --c-surface: #101a2c;
+  --c-surface-subtle: #16233a;
+  --c-border: rgba(226, 232, 240, 0.1);
+  --c-border-strong: rgba(226, 232, 240, 0.2);
+  --c-text-1: #f1f5f9;
+  --c-text-2: #cbd5e1;
+  --c-text-3: #94a3b8;
+  --c-text-4: #8fa0b8;
+  --c-primary: #60a5fa;
+  --c-primary-strong: #93c5fd;
+  --c-primary-soft: rgba(96, 165, 250, 0.12);
+  --c-success: #34d399;
+  --c-success-bg: rgba(16, 185, 129, 0.12);
+  --c-warning: #fbbf24;
+  --c-warning-bg: rgba(245, 158, 11, 0.12);
+  --c-danger: #f87171;
+  --c-danger-bg: rgba(239, 68, 68, 0.12);
+  --c-info: #38bdf8;
+  --c-info-bg: rgba(14, 165, 233, 0.12);
+  --c-ink: #060b16;
+  --c-on-ink: #f8fafc;
+  --c-scroll-thumb: rgba(226, 232, 240, 0.22);
+  --c-scroll-thumb-hover: rgba(226, 232, 240, 0.4);
+  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow-2: 0 8px 24px -8px rgba(0, 0, 0, 0.55), 0 2px 6px rgba(0, 0, 0, 0.35);
+  --shadow-3: 0 24px 48px -16px rgba(0, 0, 0, 0.65);
+}
+
 /* 全局可见焦点：Naive 组件自带焦点样式，这里补原生控件与自定义元素的缺口 */
 :where(a, button, input, select, textarea, [tabindex]):focus-visible {
   outline: 2px solid #2563eb;
@@ -56,41 +127,36 @@ html, body {
   }
 }
 
-/* 滚动条样式 */
+/* 滚动条：取调色板自身的墨色/纸色与悬停态，而非浏览器默认灰 */
 ::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+  width: 10px;
+  height: 10px;
 }
 
 ::-webkit-scrollbar-track {
-  background: #f1f1f1;
-  border-radius: 3px;
+  background: transparent;
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #c1c1c1;
-  border-radius: 3px;
+  background: var(--c-scroll-thumb);
+  border-radius: 8px;
+  border: 3px solid transparent;
+  background-clip: content-box;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #a8a8a8;
+  background: var(--c-scroll-thumb-hover);
+  background-clip: content-box;
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--c-scroll-thumb) transparent;
 }
 
 /* 暗色主题 */
 .dark {
   color-scheme: dark;
-}
-
-.dark ::-webkit-scrollbar-track {
-  background: #2d2d2d;
-}
-
-.dark ::-webkit-scrollbar-thumb {
-  background: #666;
-}
-
-.dark ::-webkit-scrollbar-thumb:hover {
-  background: #777;
 }
 
 /* 工具类 */
@@ -217,5 +283,80 @@ html, body {
 .slide-right-leave-to {
   transform: translateX(100%);
   opacity: 0;
+}
+
+/* ===== 动效原语：全站统一时长/缓动，避免各页各写一套 ===== */
+
+/* 滚动进场：由 useReveal 加 .is-revealed；无 IO / 减少动态时直接可见，绝不藏内容 */
+.reveal {
+  opacity: 0;
+  transform: translateY(18px);
+  transition:
+    opacity var(--dur-4) var(--ease-out),
+    transform var(--dur-4) var(--ease-out);
+  transition-delay: var(--reveal-delay, 0ms);
+  will-change: opacity, transform;
+}
+
+.reveal.is-revealed {
+  opacity: 1;
+  transform: none;
+}
+
+/* 卡片悬停：抬升 + 边框借动作蓝 + 分层阴影，给出可点击/可聚焦的暗示 */
+.card-lift {
+  transition:
+    transform var(--dur-2) var(--ease-out),
+    box-shadow var(--dur-2) var(--ease-out),
+    border-color var(--dur-2) var(--ease-out);
+}
+
+.card-lift:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-2);
+  border-color: var(--c-border-strong);
+}
+
+/* 按压反馈：与 hover 抬升成一对，点击有「落下去」的手感 */
+.press {
+  transition: transform var(--dur-1) var(--ease-spring);
+}
+
+.press:active {
+  transform: scale(0.98);
+}
+
+/* 骨架 shimmer：取纸面灰阶而非纯白闪光 */
+@keyframes skeleton-sweep {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+.skeleton {
+  background: linear-gradient(
+    90deg,
+    var(--c-surface-subtle) 0%,
+    var(--c-surface) 50%,
+    var(--c-surface-subtle) 100%
+  );
+  background-size: 200% 100%;
+  animation: skeleton-sweep 1.6s var(--ease-in) infinite;
+  border-radius: 8px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .reveal {
+    opacity: 1;
+    transform: none;
+    transition: none;
+  }
+
+  .card-lift:hover {
+    transform: none;
+  }
+
+  .skeleton {
+    animation: none;
+  }
 }
 

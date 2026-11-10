@@ -1,5 +1,5 @@
 <template>
-  <div class="landing">
+  <div ref="landingRef" class="landing">
     <!-- 顶栏：纸面底色 + 细边框，单一动作蓝只用于主操作 -->
     <nav class="nav">
       <div class="nav-inner">
@@ -91,7 +91,7 @@
     <!-- 产品事实：不用无法核验的百分比 -->
     <section class="facts" :aria-label="t('firsthome.facts.evidence.title')">
       <ul class="facts-inner">
-        <li v-for="fact in facts" :key="fact.title" class="fact">
+        <li v-for="(fact, i) in facts" :key="fact.title" class="fact reveal" :style="{ '--reveal-delay': `${i * 70}ms` }">
           <span class="fact-icon" aria-hidden="true">
             <component :is="fact.icon" />
           </span>
@@ -105,12 +105,12 @@
 
     <!-- 三步 -->
     <section class="section">
-      <div class="section-header">
+      <div class="section-header reveal">
         <h2 class="section-title">{{ t('firsthome.steps.title') }}</h2>
         <p class="section-desc">{{ t('firsthome.steps.desc') }}</p>
       </div>
       <ol class="steps-grid">
-        <li v-for="(step, i) in steps" :key="step.title" class="step-card">
+        <li v-for="(step, i) in steps" :key="step.title" class="step-card card-lift reveal" :style="{ '--reveal-delay': `${i * 90}ms` }">
           <span class="step-number" aria-hidden="true">{{ String(i + 1).padStart(2, '0') }}</span>
           <span class="step-icon" aria-hidden="true"><component :is="step.icon" /></span>
           <h3 class="step-title">{{ step.title }}</h3>
@@ -121,12 +121,12 @@
 
     <!-- 能力 -->
     <section class="section section-alt">
-      <div class="section-header">
+      <div class="section-header reveal">
         <h2 class="section-title">{{ t('firsthome.features.title') }}</h2>
         <p class="section-desc">{{ t('firsthome.features.desc') }}</p>
       </div>
       <ul class="features-grid">
-        <li v-for="feature in features" :key="feature.title" class="feature-card">
+        <li v-for="(feature, i) in features" :key="feature.title" class="feature-card card-lift reveal" :style="{ '--reveal-delay': `${i * 70}ms` }">
           <span class="feature-icon" aria-hidden="true"><component :is="feature.icon" /></span>
           <h3 class="feature-title">{{ feature.title }}</h3>
           <p class="feature-desc">{{ feature.desc }}</p>
@@ -136,7 +136,7 @@
 
     <!-- CTA：墨色实底，无渐变 -->
     <section class="cta">
-      <div class="cta-inner">
+      <div class="cta-inner reveal">
         <h2 class="cta-title">{{ t('firsthome.cta.title') }}</h2>
         <p class="cta-desc">{{ t('firsthome.cta.desc') }}</p>
         <button type="button" class="btn-cta" @click="handlePrimaryCta">
@@ -160,15 +160,18 @@
 </template>
 
 <script setup lang="ts">
-import { computed, h } from 'vue'
+import { computed, h, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useUserStore } from '@/stores/user'
+import { useReveal } from '@/composables/useReveal'
 import DocMindMark from '@/components/brand/DocMindMark.vue'
 
 const router = useRouter()
 const userStore = useUserStore()
 const { t } = useI18n()
+const landingRef = ref<HTMLElement | null>(null)
+useReveal(landingRef)
 
 // ISS-1：登录态感知——已登录访客的主 CTA 变为「进入工作台」直通 /dashboard。
 const isLoggedIn = computed(() => userStore.isLoggedIn)
@@ -274,8 +277,13 @@ button:focus-visible {
   position: sticky;
   top: 0;
   z-index: 50;
-  background: var(--c-bg);
+  background: rgba(248, 250, 252, 0.85);
+  backdrop-filter: saturate(1.4) blur(10px);
   border-bottom: 1px solid var(--c-border);
+}
+
+.dark .nav {
+  background: rgba(11, 18, 32, 0.82);
 }
 .nav-inner {
   max-width: 1120px;
@@ -362,10 +370,27 @@ button:focus-visible {
 
 /* ===== Hero ===== */
 .hero {
+  position: relative;
   padding: 64px 24px 72px;
   border-bottom: 1px solid var(--c-border);
+  background:
+    radial-gradient(ellipse 60% 48% at 82% 8%, var(--c-primary-soft) 0%, transparent 70%),
+    radial-gradient(ellipse 42% 36% at 12% 92%, rgba(4, 120, 87, 0.05) 0%, transparent 70%);
 }
+
+/* 点阵纸纹：首屏的「证据纸」底，向四周淡出 */
+.hero::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background-image: radial-gradient(var(--c-border) 1px, transparent 1px);
+  background-size: 22px 22px;
+  mask-image: radial-gradient(ellipse 70% 60% at 50% 40%, black 0%, transparent 80%);
+  pointer-events: none;
+}
+
 .hero-inner {
+  position: relative;
   max-width: 1120px;
   margin: 0 auto;
   display: grid;
@@ -481,8 +506,16 @@ button:focus-visible {
   border: 1px solid var(--c-border);
   border-radius: 12px;
   background: var(--c-surface);
-  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+  box-shadow: var(--shadow-2);
   overflow: hidden;
+  transition:
+    transform var(--dur-3) var(--ease-out),
+    box-shadow var(--dur-3) var(--ease-out);
+}
+
+.hero-mock:hover .mock-panel {
+  transform: translateY(-4px) rotate(-0.4deg);
+  box-shadow: var(--shadow-3);
 }
 .mock-head {
   display: flex;
@@ -731,8 +764,18 @@ button:focus-visible {
   height: 40px;
   margin-bottom: 16px;
   border-radius: 8px;
-  background: var(--c-surface-subtle);
+  background: var(--c-primary-soft);
   color: var(--c-accent);
+  transition:
+    background var(--dur-2) var(--ease-out),
+    color var(--dur-2) var(--ease-out),
+    transform var(--dur-2) var(--ease-spring);
+}
+
+.step-card:hover .step-icon {
+  background: var(--c-accent);
+  color: #ffffff;
+  transform: scale(1.06);
 }
 .step-title {
   margin: 0 0 8px;
@@ -789,9 +832,24 @@ button:focus-visible {
 
 /* ===== CTA ===== */
 .cta {
-  background: var(--c-ink);
+  position: relative;
+  background: linear-gradient(115deg, var(--c-ink) 0%, #12244a 58%, #1d4ed8 132%);
+  overflow: hidden;
 }
+
+.cta::before {
+  content: '';
+  position: absolute;
+  width: 560px;
+  height: 560px;
+  right: -160px;
+  top: -260px;
+  background: radial-gradient(circle, rgba(96, 165, 250, 0.22) 0%, transparent 65%);
+  pointer-events: none;
+}
+
 .cta-inner {
+  position: relative;
   max-width: 1120px;
   margin: 0 auto;
   padding: 56px 24px;
@@ -948,6 +1006,16 @@ button:focus-visible {
   .btn-outline,
   .btn-cta {
     transition: none;
+  }
+
+  .mock-panel,
+  .step-icon {
+    transition: none;
+  }
+
+  .hero-mock:hover .mock-panel,
+  .step-card:hover .step-icon {
+    transform: none;
   }
 }
 

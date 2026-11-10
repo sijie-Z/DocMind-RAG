@@ -27,14 +27,15 @@
       <div class="flex flex-col lg:flex-row gap-8">
         <!-- 左侧个人信息卡片 -->
         <div class="w-full lg:w-1/3 xl:w-1/4">
-          <n-card class="rounded-2xl shadow-xl border-0 overflow-hidden" content-style="padding: 0;">
+          <n-card class="rounded-2xl border border-[var(--c-border)] shadow-[var(--shadow-2)] overflow-hidden" content-style="padding: 0;">
+            <div class="h-1.5 bg-gradient-to-r from-blue-600 via-sky-500 to-blue-400"></div>
             <div class="p-6 text-center bg-white dark:bg-gray-800">
               <div class="relative inline-block">
                 <n-avatar
                   round
                   :size="120"
                   :src="userInfo.avatar_url || userInfo.avatar || undefined"
-                  class="border-4 border-white dark:border-gray-700 shadow-md bg-gradient-to-br from-blue-400 to-blue-500 text-white text-4xl font-bold"
+                  class="border-4 border-white dark:border-gray-700 shadow-md bg-gradient-to-br from-blue-400 to-blue-500 text-white text-4xl font-bold ring-4 ring-blue-100 dark:ring-blue-500/20 transition-transform duration-300 hover:scale-[1.03]"
                 >
                   <template #default>
                     {{ (userInfo.nickname || userInfo.username || 'U').charAt(0).toUpperCase() }}
@@ -94,7 +95,7 @@
 
         <!-- 右侧主要内容区 -->
         <div class="w-full lg:w-2/3 xl:w-3/4">
-          <n-card class="rounded-2xl shadow-xl border-0 min-h-[600px]">
+          <n-card class="rounded-2xl border border-[var(--c-border)] shadow-[var(--shadow-2)] min-h-[600px]">
             <n-tabs v-model:value="activeTab" type="line" animated size="large" pane-class="pt-6">
               <!-- 概览面板 -->
               <!-- T5 命名归一：个人概览 tab 不再借用仪表盘页名，改用本页域键 profile.overview -->

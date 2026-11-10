@@ -275,7 +275,10 @@
             <p class="text-3xl font-semibold tabular-nums" :class="hitRateClass">{{ ragStats.hitRate }}<span class="text-lg">%</span></p>
           </div>
         </div>
-        <div v-else class="mb-4 rounded-xl border border-dashed border-slate-200 px-4 py-8 text-center dark:border-slate-700">
+        <div v-else class="mb-4 flex flex-col items-center gap-2 rounded-xl bg-gray-50 px-4 py-8 text-center dark:bg-gray-700/30">
+          <span class="flex h-9 w-9 items-center justify-center rounded-full bg-emerald-50 text-emerald-600 dark:bg-emerald-500/10 dark:text-emerald-400">
+            <n-icon :size="18"><AnalyticsOutline /></n-icon>
+          </span>
           <p class="text-sm text-slate-600 dark:text-slate-300">{{ t('dashboard.ragNoDataHint') }}</p>
         </div>
         <div class="grid grid-cols-3 gap-3">
