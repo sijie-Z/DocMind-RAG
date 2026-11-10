@@ -17,13 +17,49 @@
           </n-button>
           <n-button type="error" @click="confirmClearAll">
             <template #icon><n-icon><TrashOutline /></n-icon></template>
-            清空所有
+            {{ t('memory.clearAll.action') }}
           </n-button>
         </div>
       </div>
 
+      <!-- 作用域：Agent 运行时把记忆写在 session:<会话id>，页面必须能选到该命名空间 -->
+      <div class="mb-6">
+        <div class="flex flex-wrap items-center gap-3">
+          <span class="text-sm text-gray-600 dark:text-gray-300">{{ t('memory.scope.label') }}</span>
+          <n-select
+            :value="scope"
+            :options="scopeOptions"
+            :loading="sessionsLoading"
+            filterable
+            class="w-full sm:w-80"
+            data-testid="memory-scope-select"
+            @update:value="handleScopeChange"
+          />
+          <template v-if="sessionsError">
+            <span class="text-xs text-red-500">{{ t('memory.scope.loadFailed') }}</span>
+            <n-button size="small" quaternary @click="loadSessions">{{ t('common.retry') }}</n-button>
+          </template>
+          <span v-if="loading" class="text-xs text-gray-400">{{ t('common.loading') }}</span>
+        </div>
+        <p class="text-xs text-gray-500 dark:text-gray-400 mt-2">{{ t('memory.scope.hint') }}</p>
+      </div>
+
+      <!-- 加载失败：错误态自呈现 + 重试，不用上一作用域的数据或「暂无」冒充当前作用域 -->
+      <div v-if="loadError" class="flex flex-wrap items-center gap-3 mb-6">
+        <span class="text-sm text-red-500">{{ t('memory.loadFailed') }}</span>
+        <n-button size="small" quaternary @click="loadMemory">{{ t('common.retry') }}</n-button>
+      </div>
+
+      <!-- 数据未就绪：如实呈现加载中/无数据，不让统计 0 与「暂无记忆」冒充加载结果 -->
+      <n-card v-if="!loadError && !memoryData" size="small" class="shadow-sm mb-6">
+        <div class="flex items-center justify-center gap-3 py-10 text-sm text-gray-500 dark:text-gray-400">
+          <n-spin v-if="loading" size="small" />
+          <span>{{ loading ? t('common.loading') : t('common.noData') }}</span>
+        </div>
+      </n-card>
+
       <!-- 统计卡片 -->
-      <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+      <div v-if="!loadError && memoryData" class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
         <n-card size="small" class="shadow-sm">
           <div class="flex items-center gap-3">
             <div class="w-10 h-10 rounded-lg bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center">
@@ -74,7 +110,7 @@
       </div>
 
       <!-- 主内容 -->
-      <n-tabs type="line" animated>
+      <n-tabs v-if="!loadError && memoryData" v-model:value="activeTab" type="line" animated>
         <!-- 短期记忆 -->
         <n-tab-pane name="short_term" tab="短期记忆">
           <n-card size="small" class="shadow-sm">
@@ -233,20 +269,23 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import {
   NCard, NTabs, NTabPane, NTimeline, NTimelineItem, NTag, NButton, NIcon,
-  NInput, NEmpty, NDescriptions, NDescriptionsItem, NCode, useDialog, useMessage
+  NInput, NEmpty, NDescriptions, NDescriptionsItem, NCode, NSelect, NSpin, useDialog, useMessage
 } from 'naive-ui'
 import {
   RefreshOutline, TrashOutline, TimeOutline, LibraryOutline,
   BulbOutline, SchoolOutline
 } from '@vicons/ionicons5'
 import { getAgentMemory, recallMemory, clearMemory } from '@/api/memory'
+import { agentApi } from '@/api/agent'
+import type { AgentSession } from '@/types/agent'
 import { apiUnwrap } from '@/utils/apiUnwrap'
 import dayjs from 'dayjs'
 import { parseApiDate } from '@/utils/format'
 import { useI18n } from 'vue-i18n'
+import { useRoute, useRouter } from 'vue-router'
 import PageBreadcrumb from '@/components/common/PageBreadcrumb.vue'
 
 const { t } = useI18n()
@@ -317,10 +356,114 @@ const dialog = useDialog()
 const message = useMessage()
 
 const loading = ref(false)
+const activeTab = ref('short_term')
 const searching = ref(false)
 const searchQuery = ref('')
 const searchResults = ref<RecallItem[]>([])
 const memoryData = ref<MemoryData | null>(null)
+const loadError = ref(false)
+
+const route = useRoute()
+const router = useRouter()
+
+const GLOBAL_SCOPE = 'default'
+// 与后端 _normalize_agent_id 同口径（endpoints/memory.py）：非法作用域不发请求，
+// 回落全局，避免把深链里的任意字符串拼进记忆命名空间。
+const SCOPE_PATTERN = /^[a-zA-Z0-9_:-]{1,64}$/
+
+const normalizeScope = (raw: unknown): string =>
+  typeof raw === 'string' && SCOPE_PATTERN.test(raw) ? raw : GLOBAL_SCOPE
+
+const scope = ref(normalizeScope(route.query.scope))
+const sessions = ref<AgentSession[]>([])
+const sessionsLoading = ref(false)
+const sessionsError = ref(false)
+
+// 后端把空标题统一回 "Untitled"（endpoints/agent.py 的 list_sessions）：非 en 界面
+// 不该冒英文，按未命名会话本地化并带短 id 以便区分多条。
+const sessionLabel = (session: AgentSession): string => {
+  const title = session.title?.trim()
+  return title && title !== 'Untitled'
+    ? title
+    : t('memory.scope.untitled', { id: session.id.slice(0, 8) })
+}
+
+const scopeOptions = computed<Array<{ label: string; value: string }>>(() => {
+  const options = [{ label: t('memory.scope.global'), value: GLOBAL_SCOPE }]
+  for (const session of sessions.value) {
+    const value = `session:${session.id}`
+    // 命名空间不合规的会话选了也只会 400：不提供不可用入口
+    if (!SCOPE_PATTERN.test(value)) continue
+    options.push({ label: sessionLabel(session), value })
+  }
+  // 深链指向的会话可能已不在最近列表（或删除）：如实保留该选项，不静默改回全局
+  if (!options.some((option) => option.value === scope.value)) {
+    options.push({
+      // 列表还在飞或加载失败时都不能断言「不在列表」，如实显示命名空间本身
+      label: sessionsLoading.value || sessionsError.value
+        ? scope.value
+        : t('memory.scope.outsideList', { scope: scope.value }),
+      value: scope.value,
+    })
+  }
+  return options
+})
+
+const scopeLabel = computed(
+  () => scopeOptions.value.find((option) => option.value === scope.value)?.label || scope.value,
+)
+
+const loadSessions = async () => {
+  sessionsLoading.value = true
+  sessionsError.value = false
+  try {
+    const res = await agentApi.listSessions({ page: 1, page_size: 20 }, { silent: true })
+    sessions.value = apiUnwrap<{ sessions: AgentSession[] } | null>(res)?.sessions || []
+  } catch {
+    sessions.value = []
+    sessionsError.value = true
+  } finally {
+    sessionsLoading.value = false
+  }
+}
+
+/** URL 深链同步：?scope= 可刷新/分享直达；回到全局时清掉，其余 query 原样保留。 */
+const syncRouteScope = (value: string) => {
+  const query = { ...route.query }
+  if (value === GLOBAL_SCOPE) delete query.scope
+  else query.scope = value
+  router.replace({ query }).catch(() => {})
+}
+
+/** 切换作用域即清空上一作用域的全部呈现：统计、正文、命中、在途检索态。 */
+const applyScope = (next: string) => {
+  scope.value = next
+  memoryData.value = null
+  searchResults.value = []
+  // 旧检索的 finally 因作用域守卫不会复位，这里必须接管，否则搜索按钮永久 loading
+  searching.value = false
+  loadError.value = false
+}
+
+const handleScopeChange = async (value: string) => {
+  const next = normalizeScope(value)
+  if (next === scope.value) return
+  applyScope(next)
+  syncRouteScope(next)
+  await loadMemory()
+}
+
+// 同路由仅 query 变化时组件实例复用，深链到达也要生效
+watch(
+  () => route.query.scope,
+  (raw) => {
+    if (route.name !== 'AgentMemory') return
+    const next = normalizeScope(raw)
+    if (next === scope.value) return
+    applyScope(next)
+    loadMemory()
+  },
+)
 
 // recall 结果按真实形状打中文标签（见 RecallItem 注释）；无从推导时返回 ''
 const resultLabel = (item: RecallItem): string => {
@@ -345,64 +488,83 @@ const longTermCount = computed(() => {
 })
 
 const loadMemory = async () => {
+  const requestScope = scope.value
   loading.value = true
+  loadError.value = false
   try {
-    const res = await getAgentMemory()
+    const res = await getAgentMemory(requestScope)
     // GET /memory/{agent_id} → {success, data: <导出记忆>} → apiUnwrap 解一层
+    if (requestScope !== scope.value) return
     memoryData.value = apiUnwrap<MemoryData | null>(res)
-  } catch (error) {
-    message.error('加载记忆失败')
+  } catch {
+    if (requestScope !== scope.value) return
+    // 失败清空旧结果：上一作用域的记忆不得冒充当前作用域，错误态自呈现 + 重试
+    memoryData.value = null
+    loadError.value = true
   } finally {
-    loading.value = false
+    // 作用域已切换时由新一轮请求掌管 loading，旧请求不得提前收起
+    if (requestScope === scope.value) loading.value = false
   }
 }
 
 const searchMemory = async () => {
   if (!searchQuery.value.trim()) return
 
+  const requestScope = scope.value
   searching.value = true
   try {
-    const res = await recallMemory('default', searchQuery.value)
+    const res = await recallMemory(requestScope, searchQuery.value)
     // POST /memory/{agent_id}/recall → {success, data: {query, results, count}}
+    if (requestScope !== scope.value) return
     searchResults.value = apiUnwrap<{ results: RecallItem[] } | null>(res)?.results || []
-  } catch (error) {
-    message.error('搜索失败')
+  } catch {
+    if (requestScope !== scope.value) return
+    searchResults.value = []
+    message.error(t('memory.searchFailed'))
   } finally {
-    searching.value = false
+    if (requestScope === scope.value) searching.value = false
   }
 }
 
-const clearMemoryType = async (type: string) => {
+const clearMemoryType = (type: string) => {
+  // 确认框弹出后作用域仍可能被切换：清空目标锁定在弹框时的作用域
+  const targetScope = scope.value
+  const targetLabel = scopeLabel.value
   dialog.warning({
-    title: '确认清空',
-    content: `确定要清空${type === 'short_term' ? '短期记忆' : '该类型'}记忆吗？`,
-    positiveText: '确定',
-    negativeText: '取消',
+    title: t('memory.clear.title'),
+    content: t('memory.clear.content', {
+      scope: targetLabel,
+      type: type === 'short_term' ? t('memory.clear.shortTerm') : t('memory.clear.otherType'),
+    }),
+    positiveText: t('common.confirm'),
+    negativeText: t('common.cancel'),
     onPositiveClick: async () => {
       try {
-        await clearMemory('default', type)
-        message.success('已清空')
+        await clearMemory(targetScope, type)
+        message.success(t('memory.clear.success'))
         loadMemory()
-      } catch (error) {
-        message.error('清空失败')
+      } catch {
+        message.error(t('memory.clear.failed'))
       }
     }
   })
 }
 
 const confirmClearAll = () => {
+  const targetScope = scope.value
+  const targetLabel = scopeLabel.value
   dialog.error({
-    title: '确认清空所有记忆',
-    content: '此操作将清空 Agent 的所有记忆数据，确定继续吗？',
-    positiveText: '确定清空',
-    negativeText: '取消',
+    title: t('memory.clearAll.title'),
+    content: t('memory.clearAll.content', { scope: targetLabel }),
+    positiveText: t('memory.clearAll.positive'),
+    negativeText: t('common.cancel'),
     onPositiveClick: async () => {
       try {
-        await clearMemory('default')
-        message.success('所有记忆已清空')
+        await clearMemory(targetScope)
+        message.success(t('memory.clearAll.success', { scope: targetLabel }))
         loadMemory()
-      } catch (error) {
-        message.error('清空失败')
+      } catch {
+        message.error(t('memory.clear.failed'))
       }
     }
   })
@@ -414,6 +576,7 @@ const formatTime = (time?: string) => {
 }
 
 onMounted(() => {
+  loadSessions()
   loadMemory()
 })
 </script>

@@ -26,7 +26,7 @@
     "views/workflow/composables/useWorkflowEditor.ts": 92,
     "views/workflow/editor.vue": 116,
     "views/workflow/index.vue": 13,
-    "views/workflow/memory.vue": 55,
+    "views/workflow/memory.vue": 40,
     "views/workflow/nodes/ApiNode.vue": 1,
     "views/workflow/nodes/CodeNode.vue": 1,
     "views/workflow/nodes/ConditionNode.vue": 2,

@@ -347,13 +347,17 @@ export const agentApi = {
   // ── Sessions ──
 
   /** List agent sessions（真载荷 apiUnwrap(res).sessions；agent.py:500-556）
-   *  issue #476：parent_session_id 过滤子会话（谱系/「查看分叉」入口）。 */
+   *  issue #476：parent_session_id 过滤子会话（谱系/「查看分叉」入口）。
+   *  silent：错误由调用方自呈现（错误态 + 重试），避免拦截器重复 toast。 */
   listSessions(params?: {
     page?: number
     page_size?: number
     parent_session_id?: string
-  }): Promise<AxiosResponse<ApiResponse<{ sessions: AgentSession[]; total: number; page: number; page_size: number }>>> {
-    return request.get('/agent/sessions', { params })
+  }, options?: { silent?: boolean }): Promise<AxiosResponse<ApiResponse<{ sessions: AgentSession[]; total: number; page: number; page_size: number }>>> {
+    return request.get('/agent/sessions', {
+      params,
+      ...(options?.silent ? { headers: { 'X-Silent-Error': '1' } } : {}),
+    })
   },
 
   /** Create agent session（后端只回 {id, title}，真载荷 apiUnwrap(res)；agent.py:585-591） */
