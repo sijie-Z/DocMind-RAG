@@ -43,11 +43,11 @@
       >
         {{ t('dashboard.statsStale') }}
       </div>
-      <div class="rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-700 dark:bg-slate-900">
+      <div class="card-hover rounded-xl border border-[var(--c-border)] bg-[var(--c-surface)] p-4 shadow-[var(--shadow-1)]">
         <div class="flex items-center justify-between mb-2">
           <span class="text-xs font-medium text-slate-500 dark:text-slate-400">{{ t('dashboard.totalUsers') }}</span>
-          <div class="w-8 h-8 bg-slate-100 dark:bg-slate-800 flex items-center justify-center">
-            <n-icon size="18" class="text-slate-600 dark:text-slate-300"><PeopleOutline /></n-icon>
+          <div class="w-8 h-8 rounded-lg bg-[var(--c-primary-soft)] text-[var(--c-primary)] flex items-center justify-center">
+            <n-icon size="18"><PeopleOutline /></n-icon>
           </div>
         </div>
         <p class="text-2xl font-semibold tabular-nums text-slate-900 dark:text-white">{{ adminStats.totalUsers.toLocaleString() }}</p>
@@ -55,11 +55,11 @@
         </div>
       </div>
 
-      <div class="rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-700 dark:bg-slate-900">
+      <div class="card-hover rounded-xl border border-[var(--c-border)] bg-[var(--c-surface)] p-4 shadow-[var(--shadow-1)]">
         <div class="flex items-center justify-between mb-2">
           <span class="text-xs font-medium text-slate-500 dark:text-slate-400">{{ t('dashboard.totalSessions') }}</span>
-          <div class="w-8 h-8 bg-slate-100 dark:bg-slate-800 flex items-center justify-center">
-            <n-icon size="18" class="text-slate-600 dark:text-slate-300"><ChatbubbleEllipsesOutline /></n-icon>
+          <div class="w-8 h-8 rounded-lg bg-[var(--c-primary-soft)] text-[var(--c-primary)] flex items-center justify-center">
+            <n-icon size="18"><ChatbubbleEllipsesOutline /></n-icon>
           </div>
         </div>
         <p class="text-2xl font-semibold tabular-nums text-slate-900 dark:text-white">{{ adminStats.totalSessions.toLocaleString() }}</p>
@@ -76,11 +76,11 @@
         </div>
       </div>
 
-      <div class="rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-700 dark:bg-slate-900">
+      <div class="card-hover rounded-xl border border-[var(--c-border)] bg-[var(--c-surface)] p-4 shadow-[var(--shadow-1)]">
         <div class="flex items-center justify-between mb-2">
           <span class="text-xs font-medium text-slate-500 dark:text-slate-400">{{ t('dashboard.totalDocs') }}</span>
-          <div class="w-8 h-8 bg-slate-100 dark:bg-slate-800 flex items-center justify-center">
-            <n-icon size="18" class="text-slate-600 dark:text-slate-300"><DocumentTextOutline /></n-icon>
+          <div class="w-8 h-8 rounded-lg bg-[var(--c-primary-soft)] text-[var(--c-primary)] flex items-center justify-center">
+            <n-icon size="18"><DocumentTextOutline /></n-icon>
           </div>
         </div>
         <p class="text-2xl font-semibold tabular-nums text-slate-900 dark:text-white">{{ adminStats.totalDocs.toLocaleString() }}</p>
@@ -89,11 +89,11 @@
         </div>
       </div>
 
-      <div class="rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-700 dark:bg-slate-900">
+      <div class="card-hover rounded-xl border border-[var(--c-border)] bg-[var(--c-surface)] p-4 shadow-[var(--shadow-1)]">
         <div class="flex items-center justify-between mb-2">
           <span class="text-xs font-medium text-slate-500 dark:text-slate-400">{{ t('dashboard.activeUsers') }}</span>
-          <div class="w-8 h-8 bg-slate-100 dark:bg-slate-800 flex items-center justify-center">
-            <n-icon size="18" class="text-slate-600 dark:text-slate-300"><PulseOutline /></n-icon>
+          <div class="w-8 h-8 rounded-lg bg-[var(--c-primary-soft)] text-[var(--c-primary)] flex items-center justify-center">
+            <n-icon size="18"><PulseOutline /></n-icon>
           </div>
         </div>
         <p class="text-2xl font-semibold tabular-nums text-slate-900 dark:text-white">{{ adminStats.activeUsers }}</p>
@@ -102,11 +102,11 @@
         </div>
       </div>
 
-      <div class="rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-700 dark:bg-slate-900">
+      <div class="card-hover rounded-xl border border-[var(--c-border)] bg-[var(--c-surface)] p-4 shadow-[var(--shadow-1)]">
         <div class="flex items-center justify-between mb-2">
           <span class="text-xs font-medium text-slate-500 dark:text-slate-400">{{ t('dashboard.todayRequests') }}</span>
-          <div class="w-8 h-8 bg-slate-100 dark:bg-slate-800 flex items-center justify-center">
-            <n-icon size="18" class="text-slate-600 dark:text-slate-300"><GitNetworkOutline /></n-icon>
+          <div class="w-8 h-8 rounded-lg bg-[var(--c-primary-soft)] text-[var(--c-primary)] flex items-center justify-center">
+            <n-icon size="18"><GitNetworkOutline /></n-icon>
           </div>
         </div>
         <p class="text-2xl font-semibold tabular-nums text-slate-900 dark:text-white" data-testid="kpi-llm-value">
@@ -119,11 +119,11 @@
         </div>
       </div>
 
-      <div class="rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-700 dark:bg-slate-900">
+      <div class="card-hover rounded-xl border border-[var(--c-border)] bg-[var(--c-surface)] p-4 shadow-[var(--shadow-1)]">
         <div class="flex items-center justify-between mb-2">
           <span class="text-xs font-medium text-slate-500 dark:text-slate-400">{{ t('dashboard.systemStatus') }}</span>
-          <div class="w-8 h-8 bg-slate-100 dark:bg-slate-800 flex items-center justify-center">
-            <n-icon size="18" class="text-slate-600 dark:text-slate-300"><ServerOutline /></n-icon>
+          <div class="w-8 h-8 rounded-lg bg-[var(--c-primary-soft)] text-[var(--c-primary)] flex items-center justify-center">
+            <n-icon size="18"><ServerOutline /></n-icon>
           </div>
         </div>
         <div class="mt-3">
@@ -144,7 +144,7 @@
     <!-- 两列布局：AI 监控 + RAG 性能 -->
     <div class="grid grid-cols-1 lg:grid-cols-2 gap-5">
       <!-- AI 资源监控 -->
-      <div class="bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700 shadow-sm overflow-hidden">
+      <div class="bg-[var(--c-surface)] rounded-2xl border border-[var(--c-border)] shadow-[var(--shadow-1)] overflow-hidden">
         <div class="px-5 py-4 border-b border-gray-100 dark:border-gray-700 flex items-center justify-between">
           <div class="flex items-center gap-2">
             <div class="w-8 h-8 bg-slate-100 dark:bg-slate-900/30 rounded-lg flex items-center justify-center">
@@ -219,7 +219,7 @@
                 <div class="w-2 h-2 rounded-full bg-blue-500"></div>
                 <span class="text-xs text-gray-500 dark:text-gray-400">{{ t('dashboard.avgLatency') }}</span>
               </div>
-              <p class="text-xl font-bold text-gray-900 dark:text-white">{{ llmStats.avgLatency }}<span class="text-sm font-normal text-gray-400">ms</span></p>
+              <p class="text-xl font-bold tabular-nums" :class="latencyClass(llmStats.avgLatency, 800, 2000)">{{ llmStats.avgLatency }}<span class="text-sm font-normal text-gray-400">ms</span></p>
               <p class="text-xs text-slate-500 dark:text-slate-400 mt-1">{{ t('dashboard.httpLatencyHint') }}</p>
             </div>
             <div class="bg-gray-50 dark:bg-gray-700/50 rounded-xl p-4">
@@ -227,7 +227,7 @@
                 <div class="w-2 h-2 rounded-full bg-orange-500"></div>
                 <span class="text-xs text-gray-500 dark:text-gray-400">{{ t('dashboard.p95Latency') }}</span>
               </div>
-              <p class="text-xl font-bold text-gray-900 dark:text-white">{{ llmStats.p95Latency }}<span class="text-sm font-normal text-gray-400">ms</span></p>
+              <p class="text-xl font-bold tabular-nums" :class="latencyClass(llmStats.p95Latency, 2000, 5000)">{{ llmStats.p95Latency }}<span class="text-sm font-normal text-gray-400">ms</span></p>
               <p class="text-xs text-slate-500 dark:text-slate-400 mt-1">{{ t('dashboard.httpP95Hint') }}</p>
             </div>
           </div>
@@ -235,14 +235,17 @@
           <div v-if="llmStats.trend.length" class="h-44 rounded-xl bg-gray-50 dark:bg-gray-700/30 p-3">
             <div ref="llmChartRef" class="w-full h-full"></div>
           </div>
-          <div v-else class="flex h-44 items-center justify-center rounded-xl border border-dashed border-slate-200 dark:border-slate-700">
+          <div v-else class="flex h-44 flex-col items-center justify-center gap-2 rounded-xl bg-gray-50 dark:bg-gray-700/30">
+            <span class="flex h-9 w-9 items-center justify-center rounded-full bg-blue-50 text-blue-500 dark:bg-blue-500/10 dark:text-blue-400">
+              <n-icon :size="18"><AnalyticsOutline /></n-icon>
+            </span>
             <span class="text-sm text-slate-600 dark:text-slate-300">{{ t('dashboard.llmNoDailyTrend') }}</span>
           </div>
         </div>
       </div>
 
       <!-- RAG 命中率 -->
-      <div class="bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700 shadow-sm overflow-hidden flex flex-col lg:self-start" data-testid="rag-card">
+      <div class="bg-[var(--c-surface)] rounded-2xl border border-[var(--c-border)] shadow-[var(--shadow-1)] overflow-hidden flex flex-col lg:self-start" data-testid="rag-card">
         <div class="px-5 py-4 border-b border-gray-100 dark:border-gray-700 flex items-center justify-between">
           <div class="flex items-center gap-2">
             <div class="w-8 h-8 bg-emerald-100 dark:bg-emerald-900/30 rounded-lg flex items-center justify-center">
@@ -315,7 +318,10 @@
               <p class="text-4xl font-semibold tabular-nums" :class="hitRateClass">{{ ragStats.hitRate }}<span class="text-xl">%</span></p>
             </div>
           </div>
-          <div v-else class="mb-5 rounded-xl border border-dashed border-slate-200 px-4 py-8 text-center dark:border-slate-700">
+          <div v-else class="mb-5 flex flex-col items-center gap-2 rounded-xl bg-gray-50 px-4 py-8 text-center dark:bg-gray-700/30">
+            <span class="flex h-9 w-9 items-center justify-center rounded-full bg-emerald-50 text-emerald-600 dark:bg-emerald-500/10 dark:text-emerald-400">
+              <n-icon :size="18"><PulseOutline /></n-icon>
+            </span>
             <p class="text-sm text-slate-600 dark:text-slate-300">{{ t('dashboard.ragNoDataHint') }}</p>
           </div>
           <!-- 统计数字 -->
@@ -346,7 +352,7 @@
     </div>
 
     <!-- 组织概览 -->
-    <div class="bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700 shadow-sm overflow-hidden">
+    <div class="bg-[var(--c-surface)] rounded-2xl border border-[var(--c-border)] shadow-[var(--shadow-1)] overflow-hidden">
       <div class="px-5 py-4 border-b border-gray-100 dark:border-gray-700 flex items-center justify-between">
         <div class="flex items-center gap-2">
           <div class="w-8 h-8 bg-slate-100 dark:bg-slate-900/30 rounded-lg flex items-center justify-center">
@@ -422,7 +428,7 @@
     </div>
 
     <!-- 最近操作日志 -->
-    <div class="bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700 shadow-sm overflow-hidden">
+    <div class="bg-[var(--c-surface)] rounded-2xl border border-[var(--c-border)] shadow-[var(--shadow-1)] overflow-hidden">
       <div class="px-5 py-4 border-b border-gray-100 dark:border-gray-700 flex items-center justify-between">
         <div class="flex items-center gap-2">
           <div class="w-8 h-8 bg-red-100 dark:bg-red-900/30 rounded-lg flex items-center justify-center">
@@ -507,6 +513,14 @@ const isDark = useIsDark()
  * 每个区块只依赖自己那路请求 —— 慢接口不会把整屏锁在 spinner 上。
  */
 type BlockState = 'loading' | 'ready' | 'error'
+/** 延迟数字按阈值着色：慢响应不该和正常值一样黑（真值不变，只加语义色）。 */
+const latencyClass = (ms: number, warnAt: number, badAt: number) =>
+  ms >= badAt
+    ? 'text-red-600 dark:text-red-400'
+    : ms >= warnAt
+      ? 'text-amber-600 dark:text-amber-400'
+      : 'text-gray-900 dark:text-white'
+
 const llmCardValue = computed(() => {
   if (llmState.value !== 'ready' || (llmDegraded.value && !llmEverReady.value)) return '—'
   return llmStats.value.requestCountToday.toLocaleString()

@@ -20,14 +20,14 @@
           </div>
         </div>
 
-        <h1 class="text-4xl font-bold text-white leading-tight">
+        <h1 class="text-4xl font-bold text-white leading-tight login-stagger" style="--stagger: 120ms">
           {{ t('login.brandHeadline') }}
         </h1>
-        <p class="mt-4 max-w-sm text-base text-slate-400 leading-relaxed">
+        <p class="mt-4 max-w-sm text-base text-slate-400 leading-relaxed login-stagger" style="--stagger: 240ms">
           {{ t('login.brandSubtitle') }}
         </p>
 
-        <ul class="mt-10 space-y-3 text-left">
+        <ul class="mt-10 space-y-3 text-left login-stagger" style="--stagger: 360ms">
           <li
             v-for="feature in brandFeatures"
             :key="feature"
@@ -128,7 +128,7 @@
                 :disabled="loading"
                 block
                 attr-type="submit"
-                class="!rounded-xl !h-12 !font-semibold bg-slate-800 hover:bg-slate-700 focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 focus-visible:ring-offset-white dark:bg-slate-100 dark:text-slate-900 dark:hover:bg-white dark:focus-visible:ring-offset-slate-900 btn-bounce"
+                class="!rounded-xl !h-12 !font-semibold login-cta press focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 focus-visible:ring-offset-white dark:focus-visible:ring-offset-slate-900"
               >
                 {{ isRegister ? t('login.register') : t('login.login') }}
               </n-button>
@@ -348,9 +348,47 @@ const quickLogin = async (account: DemoAccount) => {
 </script>
 
 <style scoped>
-/* 品牌区：深墨蓝径向渐变（保留 DocMind 蓝系，不照搬园林绿）。 */
+/* 品牌区：深墨蓝径向渐变 + 证据蓝顶光（保留 DocMind 蓝系，不照搬园林绿）。 */
 .login-brand-panel {
-  background: radial-gradient(circle at 30% 42%, #10304f 0%, #0a1b30 48%, #030712 100%);
+  background:
+    radial-gradient(circle at 78% 12%, rgba(37, 99, 235, 0.28) 0%, transparent 42%),
+    radial-gradient(circle at 30% 42%, #10304f 0%, #0a1b30 48%, #030712 100%);
+}
+
+/* 细网格：给深墨蓝一点「证据纸」的结构感，而非纯色块 */
+.login-brand-panel::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background-image:
+    linear-gradient(rgba(148, 163, 184, 0.07) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(148, 163, 184, 0.07) 1px, transparent 1px);
+  background-size: 44px 44px;
+  mask-image: radial-gradient(circle at 50% 40%, black 0%, transparent 78%);
+  pointer-events: none;
+}
+
+/* 漂移光晕：慢速、低透明度，只作氛围不抢表单 */
+.login-brand-panel::after {
+  content: '';
+  position: absolute;
+  width: 420px;
+  height: 420px;
+  left: -120px;
+  top: 52%;
+  background: radial-gradient(circle, rgba(56, 189, 248, 0.16) 0%, transparent 65%);
+  filter: blur(10px);
+  animation: login-drift 16s ease-in-out infinite alternate;
+  pointer-events: none;
+}
+
+@keyframes login-drift {
+  from {
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+  to {
+    transform: translate3d(140px, -80px, 0) scale(1.15);
+  }
 }
 
 .login-halo-ring {
@@ -378,8 +416,46 @@ const quickLogin = async (account: DemoAccount) => {
   --n-height: 44px !important;
 }
 
+/* 主 CTA 回到动作蓝（此前是 slate-800 灰，与全站 #2563eb 动作色脱节） */
+.login-cta {
+  background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 62%, #1e40af 100%);
+  color: #ffffff;
+  box-shadow: 0 10px 24px -10px rgba(37, 99, 235, 0.6);
+  transition:
+    box-shadow var(--dur-2) var(--ease-out),
+    filter var(--dur-2) var(--ease-out),
+    transform var(--dur-1) var(--ease-spring);
+}
+
+.login-cta:hover {
+  filter: brightness(1.08);
+  box-shadow: 0 14px 30px -10px rgba(37, 99, 235, 0.7);
+}
+
+.dark .login-cta {
+  background: linear-gradient(135deg, #3b82f6 0%, #2563eb 62%, #1d4ed8 100%);
+}
+
+.login-input:focus-within {
+  box-shadow: 0 0 0 3px var(--c-primary-soft);
+  border-radius: 12px;
+}
+
+.login-stagger {
+  animation: login-fade-in 0.7s var(--ease-out) both;
+  animation-delay: var(--stagger, 0ms);
+}
+
 @media (prefers-reduced-motion: reduce) {
   .login-halo-ring {
+    animation: none;
+  }
+
+  .login-brand-panel::after {
+    animation: none;
+  }
+
+  .login-stagger {
     animation: none;
   }
 }
