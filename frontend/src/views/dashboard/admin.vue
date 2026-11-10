@@ -43,11 +43,11 @@
       >
         {{ t('dashboard.statsStale') }}
       </div>
-      <div class="rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-700 dark:bg-slate-900">
+      <div class="card-hover rounded-xl border border-[var(--c-border)] bg-[var(--c-surface)] p-4 shadow-[var(--shadow-1)]">
         <div class="flex items-center justify-between mb-2">
           <span class="text-xs font-medium text-slate-500 dark:text-slate-400">{{ t('dashboard.totalUsers') }}</span>
-          <div class="w-8 h-8 bg-slate-100 dark:bg-slate-800 flex items-center justify-center">
-            <n-icon size="18" class="text-slate-600 dark:text-slate-300"><PeopleOutline /></n-icon>
+          <div class="w-8 h-8 rounded-lg bg-[var(--c-primary-soft)] text-[var(--c-primary)] flex items-center justify-center">
+            <n-icon size="18"><PeopleOutline /></n-icon>
           </div>
         </div>
         <p class="text-2xl font-semibold tabular-nums text-slate-900 dark:text-white">{{ adminStats.totalUsers.toLocaleString() }}</p>
@@ -55,11 +55,11 @@
         </div>
       </div>
 
-      <div class="rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-700 dark:bg-slate-900">
+      <div class="card-hover rounded-xl border border-[var(--c-border)] bg-[var(--c-surface)] p-4 shadow-[var(--shadow-1)]">
         <div class="flex items-center justify-between mb-2">
           <span class="text-xs font-medium text-slate-500 dark:text-slate-400">{{ t('dashboard.totalSessions') }}</span>
-          <div class="w-8 h-8 bg-slate-100 dark:bg-slate-800 flex items-center justify-center">
-            <n-icon size="18" class="text-slate-600 dark:text-slate-300"><ChatbubbleEllipsesOutline /></n-icon>
+          <div class="w-8 h-8 rounded-lg bg-[var(--c-primary-soft)] text-[var(--c-primary)] flex items-center justify-center">
+            <n-icon size="18"><ChatbubbleEllipsesOutline /></n-icon>
           </div>
         </div>
         <p class="text-2xl font-semibold tabular-nums text-slate-900 dark:text-white">{{ adminStats.totalSessions.toLocaleString() }}</p>
@@ -76,11 +76,11 @@
         </div>
       </div>
 
-      <div class="rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-700 dark:bg-slate-900">
+      <div class="card-hover rounded-xl border border-[var(--c-border)] bg-[var(--c-surface)] p-4 shadow-[var(--shadow-1)]">
         <div class="flex items-center justify-between mb-2">
           <span class="text-xs font-medium text-slate-500 dark:text-slate-400">{{ t('dashboard.totalDocs') }}</span>
-          <div class="w-8 h-8 bg-slate-100 dark:bg-slate-800 flex items-center justify-center">
-            <n-icon size="18" class="text-slate-600 dark:text-slate-300"><DocumentTextOutline /></n-icon>
+          <div class="w-8 h-8 rounded-lg bg-[var(--c-primary-soft)] text-[var(--c-primary)] flex items-center justify-center">
+            <n-icon size="18"><DocumentTextOutline /></n-icon>
           </div>
         </div>
         <p class="text-2xl font-semibold tabular-nums text-slate-900 dark:text-white">{{ adminStats.totalDocs.toLocaleString() }}</p>
@@ -89,11 +89,11 @@
         </div>
       </div>
 
-      <div class="rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-700 dark:bg-slate-900">
+      <div class="card-hover rounded-xl border border-[var(--c-border)] bg-[var(--c-surface)] p-4 shadow-[var(--shadow-1)]">
         <div class="flex items-center justify-between mb-2">
           <span class="text-xs font-medium text-slate-500 dark:text-slate-400">{{ t('dashboard.activeUsers') }}</span>
-          <div class="w-8 h-8 bg-slate-100 dark:bg-slate-800 flex items-center justify-center">
-            <n-icon size="18" class="text-slate-600 dark:text-slate-300"><PulseOutline /></n-icon>
+          <div class="w-8 h-8 rounded-lg bg-[var(--c-primary-soft)] text-[var(--c-primary)] flex items-center justify-center">
+            <n-icon size="18"><PulseOutline /></n-icon>
           </div>
         </div>
         <p class="text-2xl font-semibold tabular-nums text-slate-900 dark:text-white">{{ adminStats.activeUsers }}</p>
@@ -102,11 +102,11 @@
         </div>
       </div>
 
-      <div class="rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-700 dark:bg-slate-900">
+      <div class="card-hover rounded-xl border border-[var(--c-border)] bg-[var(--c-surface)] p-4 shadow-[var(--shadow-1)]">
         <div class="flex items-center justify-between mb-2">
           <span class="text-xs font-medium text-slate-500 dark:text-slate-400">{{ t('dashboard.todayRequests') }}</span>
-          <div class="w-8 h-8 bg-slate-100 dark:bg-slate-800 flex items-center justify-center">
-            <n-icon size="18" class="text-slate-600 dark:text-slate-300"><GitNetworkOutline /></n-icon>
+          <div class="w-8 h-8 rounded-lg bg-[var(--c-primary-soft)] text-[var(--c-primary)] flex items-center justify-center">
+            <n-icon size="18"><GitNetworkOutline /></n-icon>
           </div>
         </div>
         <p class="text-2xl font-semibold tabular-nums text-slate-900 dark:text-white" data-testid="kpi-llm-value">
@@ -119,11 +119,11 @@
         </div>
       </div>
 
-      <div class="rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-700 dark:bg-slate-900">
+      <div class="card-hover rounded-xl border border-[var(--c-border)] bg-[var(--c-surface)] p-4 shadow-[var(--shadow-1)]">
         <div class="flex items-center justify-between mb-2">
           <span class="text-xs font-medium text-slate-500 dark:text-slate-400">{{ t('dashboard.systemStatus') }}</span>
-          <div class="w-8 h-8 bg-slate-100 dark:bg-slate-800 flex items-center justify-center">
-            <n-icon size="18" class="text-slate-600 dark:text-slate-300"><ServerOutline /></n-icon>
+          <div class="w-8 h-8 rounded-lg bg-[var(--c-primary-soft)] text-[var(--c-primary)] flex items-center justify-center">
+            <n-icon size="18"><ServerOutline /></n-icon>
           </div>
         </div>
         <div class="mt-3">
@@ -144,7 +144,7 @@
     <!-- 两列布局：AI 监控 + RAG 性能 -->
     <div class="grid grid-cols-1 lg:grid-cols-2 gap-5">
       <!-- AI 资源监控 -->
-      <div class="bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700 shadow-sm overflow-hidden">
+      <div class="bg-[var(--c-surface)] rounded-2xl border border-[var(--c-border)] shadow-[var(--shadow-1)] overflow-hidden">
         <div class="px-5 py-4 border-b border-gray-100 dark:border-gray-700 flex items-center justify-between">
           <div class="flex items-center gap-2">
             <div class="w-8 h-8 bg-slate-100 dark:bg-slate-900/30 rounded-lg flex items-center justify-center">
@@ -245,7 +245,7 @@
       </div>
 
       <!-- RAG 命中率 -->
-      <div class="bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700 shadow-sm overflow-hidden flex flex-col lg:self-start" data-testid="rag-card">
+      <div class="bg-[var(--c-surface)] rounded-2xl border border-[var(--c-border)] shadow-[var(--shadow-1)] overflow-hidden flex flex-col lg:self-start" data-testid="rag-card">
         <div class="px-5 py-4 border-b border-gray-100 dark:border-gray-700 flex items-center justify-between">
           <div class="flex items-center gap-2">
             <div class="w-8 h-8 bg-emerald-100 dark:bg-emerald-900/30 rounded-lg flex items-center justify-center">
@@ -352,7 +352,7 @@
     </div>
 
     <!-- 组织概览 -->
-    <div class="bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700 shadow-sm overflow-hidden">
+    <div class="bg-[var(--c-surface)] rounded-2xl border border-[var(--c-border)] shadow-[var(--shadow-1)] overflow-hidden">
       <div class="px-5 py-4 border-b border-gray-100 dark:border-gray-700 flex items-center justify-between">
         <div class="flex items-center gap-2">
           <div class="w-8 h-8 bg-slate-100 dark:bg-slate-900/30 rounded-lg flex items-center justify-center">
@@ -428,7 +428,7 @@
     </div>
 
     <!-- 最近操作日志 -->
-    <div class="bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700 shadow-sm overflow-hidden">
+    <div class="bg-[var(--c-surface)] rounded-2xl border border-[var(--c-border)] shadow-[var(--shadow-1)] overflow-hidden">
       <div class="px-5 py-4 border-b border-gray-100 dark:border-gray-700 flex items-center justify-between">
         <div class="flex items-center gap-2">
           <div class="w-8 h-8 bg-red-100 dark:bg-red-900/30 rounded-lg flex items-center justify-center">

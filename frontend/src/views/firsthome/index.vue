@@ -110,7 +110,7 @@
         <p class="section-desc">{{ t('firsthome.steps.desc') }}</p>
       </div>
       <ol class="steps-grid">
-        <li v-for="(step, i) in steps" :key="step.title" class="step-card card-lift reveal" :style="{ '--reveal-delay': `${i * 90}ms` }">
+        <li v-for="(step, i) in steps" :key="step.title" class="step-card card-hover reveal" :style="{ '--reveal-delay': `${i * 90}ms` }">
           <span class="step-number" aria-hidden="true">{{ String(i + 1).padStart(2, '0') }}</span>
           <span class="step-icon" aria-hidden="true"><component :is="step.icon" /></span>
           <h3 class="step-title">{{ step.title }}</h3>
@@ -126,7 +126,7 @@
         <p class="section-desc">{{ t('firsthome.features.desc') }}</p>
       </div>
       <ul class="features-grid">
-        <li v-for="(feature, i) in features" :key="feature.title" class="feature-card card-lift reveal" :style="{ '--reveal-delay': `${i * 70}ms` }">
+        <li v-for="(feature, i) in features" :key="feature.title" class="feature-card card-hover reveal" :style="{ '--reveal-delay': `${i * 70}ms` }">
           <span class="feature-icon" aria-hidden="true"><component :is="feature.icon" /></span>
           <h3 class="feature-title">{{ feature.title }}</h3>
           <p class="feature-desc">{{ feature.desc }}</p>

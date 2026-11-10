@@ -303,16 +303,15 @@ html, body {
   transform: none;
 }
 
-/* 卡片悬停：抬升 + 边框借动作蓝 + 分层阴影，给出可点击/可聚焦的暗示 */
-.card-lift {
+/* 展示卡悬停：只加深阴影与边框借色，不位移、不改指针——
+   统计卡/ feature 卡是纯展示（userStatCardsAffordance 钉死不得伪装可点击） */
+.card-hover {
   transition:
-    transform var(--dur-2) var(--ease-out),
     box-shadow var(--dur-2) var(--ease-out),
     border-color var(--dur-2) var(--ease-out);
 }
 
-.card-lift:hover {
-  transform: translateY(-2px);
+.card-hover:hover {
   box-shadow: var(--shadow-2);
   border-color: var(--c-border-strong);
 }
@@ -349,10 +348,6 @@ html, body {
     opacity: 1;
     transform: none;
     transition: none;
-  }
-
-  .card-lift:hover {
-    transform: none;
   }
 
   .skeleton {

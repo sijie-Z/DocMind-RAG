@@ -26,7 +26,7 @@
         <button
           type="button"
           data-testid="home-action-chat"
-          class="text-left bg-white dark:bg-gray-800 rounded-2xl p-5 border border-gray-100 dark:border-gray-700 shadow-sm transition-shadow hover:shadow-md focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+          class="card-hover text-left bg-[var(--c-surface)] rounded-2xl p-5 border border-[var(--c-border)] shadow-[var(--shadow-1)] focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
           @click="$router.push('/chat')"
         >
           <div class="w-10 h-10 bg-blue-100 dark:bg-blue-900/40 rounded-xl flex items-center justify-center mb-3">
@@ -38,7 +38,7 @@
         <button
           type="button"
           data-testid="home-action-upload"
-          class="text-left bg-white dark:bg-gray-800 rounded-2xl p-5 border border-gray-100 dark:border-gray-700 shadow-sm transition-shadow hover:shadow-md focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+          class="card-hover text-left bg-[var(--c-surface)] rounded-2xl p-5 border border-[var(--c-border)] shadow-[var(--shadow-1)] focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
           @click="$router.push('/knowledge')"
         >
           <div class="w-10 h-10 bg-orange-100 dark:bg-orange-900/40 rounded-xl flex items-center justify-center mb-3">
@@ -50,7 +50,7 @@
         <button
           type="button"
           data-testid="home-action-agent"
-          class="text-left bg-white dark:bg-gray-800 rounded-2xl p-5 border border-gray-100 dark:border-gray-700 shadow-sm transition-shadow hover:shadow-md focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+          class="card-hover text-left bg-[var(--c-surface)] rounded-2xl p-5 border border-[var(--c-border)] shadow-[var(--shadow-1)] focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
           @click="$router.push('/agent')"
         >
           <div class="w-10 h-10 bg-emerald-100 dark:bg-emerald-900/40 rounded-xl flex items-center justify-center mb-3">
@@ -87,7 +87,7 @@
     <!-- 最近会话（B5：上移到首屏，统计卡之下） -->
     <div
       data-testid="home-recent-conversations"
-      class="bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700 shadow-sm overflow-hidden"
+      class="bg-[var(--c-surface)] rounded-2xl border border-[var(--c-border)] shadow-[var(--shadow-1)] overflow-hidden"
     >
       <div class="px-5 py-4 border-b border-gray-100 dark:border-gray-700 flex items-center justify-between">
         <div class="flex items-center gap-2">
@@ -165,7 +165,7 @@
         <p class="text-sm text-gray-500 dark:text-gray-400">{{ t('dashboard.overviewDesc') }}</p>
       </div>
     <div v-if="statsState === 'loading'" class="grid grid-cols-2 lg:grid-cols-4 gap-4" data-testid="kpi-skeleton">
-      <div v-for="i in 4" :key="i" class="bg-white dark:bg-gray-800 rounded-2xl p-5 border border-gray-100 dark:border-gray-700 shadow-sm min-h-[140px]">
+      <div v-for="i in 4" :key="i" class="bg-[var(--c-surface)] rounded-2xl p-5 border border-[var(--c-border)] shadow-[var(--shadow-1)] min-h-[140px]">
         <n-skeleton circle width="40px" height="40px" />
         <n-skeleton text style="width: 55%; margin-top: 14px" />
         <n-skeleton text style="width: 70%; margin-top: 8px" size="small" />
@@ -173,7 +173,7 @@
     </div>
     <div
       v-else-if="statsState === 'error'"
-      class="flex flex-col items-center justify-center gap-3 py-10 bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700"
+      class="flex flex-col items-center justify-center gap-3 py-10 bg-[var(--c-surface)] rounded-2xl border border-[var(--c-border)]"
       data-testid="kpi-error"
     >
       <span class="text-sm text-gray-500 dark:text-gray-400">{{ t('dashboard.loadFailed') }}</span>
@@ -208,7 +208,7 @@
     </section>
 
     <!-- RAG 命中率模块 -->
-    <div class="bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700 shadow-sm overflow-hidden">
+    <div class="bg-[var(--c-surface)] rounded-2xl border border-[var(--c-border)] shadow-[var(--shadow-1)] overflow-hidden">
       <div class="px-5 py-4 border-b border-gray-100 dark:border-gray-700 flex items-center justify-between ">
         <div class="flex items-center gap-2">
           <div class="w-8 h-8 bg-emerald-100 dark:bg-emerald-900/30 rounded-lg flex items-center justify-center">
@@ -305,7 +305,7 @@
     <!-- 活动趋势（B5：最近会话已上移至首屏，此处不再重复） -->
     <div class="grid grid-cols-1 gap-5">
       <!-- 活动趋势 -->
-      <div class="bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700 shadow-sm overflow-hidden">
+      <div class="bg-[var(--c-surface)] rounded-2xl border border-[var(--c-border)] shadow-[var(--shadow-1)] overflow-hidden">
         <div class="px-5 py-4 border-b border-gray-100 dark:border-gray-700">
           <div class="flex items-center gap-2">
             <div class="w-8 h-8 bg-slate-100 dark:bg-slate-900/30 rounded-lg flex items-center justify-center">
@@ -337,7 +337,7 @@
     </div>
 
     <!-- 快捷操作 -->
-    <div class="bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700 shadow-sm p-5">
+    <div class="bg-[var(--c-surface)] rounded-2xl border border-[var(--c-border)] shadow-[var(--shadow-1)] p-5">
       <h3 class="font-semibold text-gray-900 dark:text-white mb-4 flex items-center gap-2">
         <n-icon class="text-blue-500"><FlashOutline /></n-icon>
         {{ t('dashboard.quickActions') }}
