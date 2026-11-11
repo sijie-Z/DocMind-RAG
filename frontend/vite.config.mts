@@ -44,9 +44,9 @@ export default defineConfig({
       registerType: 'autoUpdate',
       includeAssets: ['favicon.svg', 'apple-touch-icon.png'],
       manifest: {
-        name: 'DocMind 智能知识库',
+        name: 'DocMind 文档问答与合同核验',
         short_name: 'DocMind',
-        description: '企业级 RAG 知识库系统，支持文档解析、智能问答、语义检索',
+        description: '上传制度、模板与合同版本，答案带出处，差异逐条给证据',
         theme_color: '#1d4ed8',
         background_color: '#ffffff',
         display: 'standalone',
