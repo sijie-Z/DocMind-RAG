@@ -84,6 +84,7 @@
     "@vscode/markdown-it-katex": {
       "katex": "^0.19.1"
     },
-    "follow-redirects": "^1.16.2"
+    "follow-redirects": "^1.16.2",
+    "undici": "^8.12.2"
   }
 }
