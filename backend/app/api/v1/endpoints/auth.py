@@ -388,8 +388,8 @@ async def register(register_data: RegisterRequest, db: AsyncSession = Depends(ge
 
             welcome_notification = Notification(
                 user_id=user.id,
-                title="欢迎加入 DocMind 知识库",
-                content=f"亲爱的 {user.full_name or user.username}，欢迎使用 DocMind 企业级 RAG 知识库。您可以上传文档、构建知识库并开始智能问答。",
+                title="欢迎加入 DocMind",
+                content=f"亲爱的 {user.full_name or user.username}，欢迎使用 DocMind。上传制度、模板或合同后即可提问，答案会带上出处；合同版本比对在「合同核验」里做。",
                 is_read=False,
             )
             db.add(welcome_notification)

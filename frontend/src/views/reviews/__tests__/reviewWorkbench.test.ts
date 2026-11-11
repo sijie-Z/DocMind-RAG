@@ -270,8 +270,9 @@ describe('合同核验工作台', () => {
       note: null
     })
 
-    // 未识别事实必须如实展示（不得渲染成正常值）。
-    expect(wrapper.text()).toContain('未识别')
+    // 未提取到的事实必须如实展示（不得渲染成正常值）——文案与「无法判定」的
+    // 对齐结论区分：前者是抽取没命中，后者是判定无结论。
+    expect(wrapper.text()).toContain('未提取到')
 
     const exportButton = wrapper
       .findAll('button')

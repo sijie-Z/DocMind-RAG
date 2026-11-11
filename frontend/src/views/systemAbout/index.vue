@@ -9,7 +9,7 @@
         <div class="w-12 h-12 rounded-2xl bg-emerald-500 flex items-center justify-center text-white font-bold text-xl shadow-lg shadow-emerald-500/25">D</div>
         <div>
           <h1 class="text-2xl font-bold text-gray-900 dark:text-white">DocMind</h1>
-          <p class="text-sm text-gray-500 dark:text-gray-400">企业级 RAG 知识库系统</p>
+          <p class="text-sm text-gray-500 dark:text-gray-400">文档问答与合同核验平台</p>
         </div>
         <div class="ml-auto">
           <n-tag v-if="appVersion" type="success" round size="small">v{{ appVersion }}</n-tag>
@@ -23,7 +23,7 @@
         </div>
         <div class="p-6">
           <n-descriptions :column="1" bordered label-placement="left" class="rounded-xl overflow-hidden">
-            <n-descriptions-item label="产品">DocMind — 企业级 RAG 知识库</n-descriptions-item>
+            <n-descriptions-item label="产品">DocMind — 文档问答与合同核验平台</n-descriptions-item>
             <n-descriptions-item label="架构">RAG (检索增强生成) + Agent 自主推理</n-descriptions-item>
             <n-descriptions-item label="后端">FastAPI + SQLAlchemy(异步) + MySQL 8 + Redis + Elasticsearch 8 + Kafka + MinIO</n-descriptions-item>
             <n-descriptions-item label="前端">Vue 3 + TypeScript + Vite + Naive UI + Pinia</n-descriptions-item>

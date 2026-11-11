@@ -324,7 +324,7 @@ describe('服务端搜索与进度列（功能批次）', () => {
     const wrapper = mountList()
     await flushPromises()
     expect(wrapper.text()).toContain('2/4 已决策')
-    expect(wrapper.text()).toContain('3 处差异 · 1 项未识别')
+    expect(wrapper.text()).toContain('3 处差异 · 1 项无法判定')
     const vm = wrapper.vm as unknown as {
       statusOptions: Array<{ value: string; label: string }>
     }

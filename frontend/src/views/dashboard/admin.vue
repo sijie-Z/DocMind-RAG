@@ -497,6 +497,7 @@ import { getLLMStats, getRAGStats, getAdminSummary, getOrgSummary, getMonitoring
 import { FIRST_SCREEN_REQUEST_CONFIG } from '@/utils/request'
 import { formatDate } from '@/utils/format'
 import { CHART_COLORS, CHART_THEME, DARK_CHART_THEME } from '@/utils/chartTheme'
+import { classifyRagQuality } from '@/utils/ragQuality'
 import {
   PulseOutline, AnalyticsOutline, PeopleOutline, BookOutline, BusinessOutline,
   DocumentTextOutline, ServerOutline, ChatbubbleEllipsesOutline, GitNetworkOutline,
@@ -624,16 +625,27 @@ const llmStats = ref({
 })
 
 const ragHasData = computed(() => ragStats.value.totalQueries > 0)
-const ragQualityLabel = computed(() =>
-  ragStats.value.hitRate > 60
-    ? t('dashboard.ragQualityGood')
-    : ragStats.value.hitRate > 30
-      ? t('dashboard.ragQualityMedium')
-      : t('dashboard.ragQualityPoor')
+// 档位先看样本量：1–4 次检索不足以判「需关注」，一律显示「样本不足」。
+const ragQualityLevel = computed(() =>
+  classifyRagQuality(ragStats.value.totalQueries, ragStats.value.hitRate)
 )
-const ragQualityTag = computed(() =>
-  ragStats.value.hitRate > 60 ? 'success' : ragStats.value.hitRate > 30 ? 'warning' : 'error'
-)
+const ragQualityLabel = computed(() => {
+  switch (ragQualityLevel.value) {
+    case 'good': return t('dashboard.ragQualityGood')
+    case 'fair': return t('dashboard.ragQualityMedium')
+    case 'poor': return t('dashboard.ragQualityPoor')
+    case 'insufficient': return t('dashboard.ragQualityInsufficient')
+    default: return t('dashboard.ragNoData')
+  }
+})
+const ragQualityTag = computed(() => {
+  switch (ragQualityLevel.value) {
+    case 'good': return 'success'
+    case 'fair': return 'warning'
+    case 'poor': return 'error'
+    default: return 'default'
+  }
+})
 const todayLabel = computed(() =>
   new Intl.DateTimeFormat(locale.value, { dateStyle: 'medium' }).format(new Date())
 )

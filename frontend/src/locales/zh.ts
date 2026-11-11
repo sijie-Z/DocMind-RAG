@@ -896,6 +896,7 @@ export default {
     ragQualityGood: '良好',
     ragQualityMedium: '一般',
     ragQualityPoor: '需关注',
+    ragQualityInsufficient: '样本不足',
     statsUnavailable: '统计服务暂时不可用（已降级），暂不展示数字。',
     statsStale: '统计服务暂时不可用，以下为上次成功加载的数据。',
 
@@ -1819,7 +1820,7 @@ export default {
     progressValue: '{decided}/{total} 已决策',
     diffSummaryLabel: '差异概览',
     diffCount: '{n} 处差异',
-    unidentifiedCount: '{n} 项未识别',
+    unidentifiedCount: '{n} 项无法判定',
     notAnalyzed: '未分析',
     empty: '还没有核验案件',
     emptyHint:
@@ -1873,7 +1874,7 @@ export default {
     changeAdded: '仅修订版有',
     changeRemoved: '仅基准版有',
     changeRenumbered: '条号变化',
-    changeUnidentified: '未识别',
+    changeUnidentified: '无法判定',
     changeNotAnalyzed: '未分析',
     statusPending: '待决策',
     statusVerified: '已核对',
@@ -1890,7 +1891,7 @@ export default {
     eventsLabel: '起算事件',
     termsLabel: '命中词',
     crossRefsLabel: '交叉引用',
-    notFound: '未识别',
+    notFound: '未提取到',
     evidenceTitle: '证据快照',
     evidenceEmpty: '暂无证据',
     evidenceSelect: '选为证据',
@@ -1926,7 +1927,7 @@ export default {
     decisionFailed: '保存决策失败',
     decidedBy: '决策人',
     decidedAt: '决策时间',
-    exportCounts: '共 {items} 项 · 需人工 {needsHuman} · 未识别 {unidentified}',
+    exportCounts: '共 {items} 项 · 需人工 {needsHuman} · 无法判定 {unidentified}',
 
     versionsTitle: '文档版本',
     itemsTitle: '核验项',
