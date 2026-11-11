@@ -889,6 +889,7 @@ export default {
     ragQualityGood: 'Good',
     ragQualityMedium: 'Fair',
     ragQualityPoor: 'Needs attention',
+    ragQualityInsufficient: 'Not enough data',
     statsUnavailable: 'Statistics are temporarily unavailable (degraded); numbers are hidden.',
     statsStale: 'Statistics are temporarily unavailable; showing the last successfully loaded data.',
 

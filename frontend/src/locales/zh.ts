@@ -896,6 +896,7 @@ export default {
     ragQualityGood: '良好',
     ragQualityMedium: '一般',
     ragQualityPoor: '需关注',
+    ragQualityInsufficient: '样本不足',
     statsUnavailable: '统计服务暂时不可用（已降级），暂不展示数字。',
     statsStale: '统计服务暂时不可用，以下为上次成功加载的数据。',
 

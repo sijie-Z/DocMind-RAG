@@ -843,6 +843,7 @@ export default {
     ragQualityGood: '良好',
     ragQualityMedium: '普通',
     ragQualityPoor: '要確認',
+    ragQualityInsufficient: 'データ不足',
     statsUnavailable: '統計サービスは一時的に利用できません（縮退中）。数値は表示しません。',
     statsStale: '統計サービスは一時的に利用できません。最後に取得したデータを表示しています。',
 

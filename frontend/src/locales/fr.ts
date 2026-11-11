@@ -844,6 +844,7 @@ export default {
     ragQualityGood: 'Bon',
     ragQualityMedium: 'Moyen',
     ragQualityPoor: 'À surveiller',
+    ragQualityInsufficient: 'Données insuffisantes',
     statsUnavailable: 'Les statistiques sont temporairement indisponibles (dégradé) ; les chiffres sont masqués.',
     statsStale: 'Les statistiques sont temporairement indisponibles ; affichage des dernières données chargées.',
 
