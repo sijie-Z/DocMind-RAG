@@ -92,3 +92,34 @@ def build_vision_user_content(text: str, image_urls: list[str]) -> list[dict[str
     parts: list[dict[str, object]] = [build_image_content_part(u) for u in image_urls]
     parts.append({"type": "text", "text": text})
     return parts
+
+
+class ImageRequestRejected(ValueError):
+    """请求带了图片，但当前配置/模型不允许视觉直连。
+
+    调用方（端点）应把它映射成 400/422 并**如实告知原因**，而不是静默降级 ——
+    用户明确传了图，系统却当成"没传"，是这类功能最常见的静默假成功。
+    """
+
+
+def assert_image_request_allowed(
+    image_ids: list[str] | None,
+    model: str | None,
+    **kwargs: object,
+) -> None:
+    """校验「带图请求」是否可被接受；不可接受时抛 `ImageRequestRejected`。
+
+    - 未带图片 → 直接通过（不影响既有纯文本链路）
+    - 带图片但多模态关闭 / 模型不在白名单 → 拒绝，并在消息里给出下一步
+    - 带图片且能力满足 → 通过
+    """
+    ids = image_ids or []
+    if not ids:
+        return
+    if supports_vision(model, **kwargs):  # type: ignore[arg-type]
+        return
+    raise ImageRequestRejected(
+        "当前模型不支持图片直连（MULTIMODAL_ENABLED 未开启或模型不在 "
+        "VISION_MODEL_ALLOWLIST 内）。可改为把图片作为文档上传：系统会用 OCR 提取"
+        "文字并纳入检索，回答同样带出处。"
+    )
