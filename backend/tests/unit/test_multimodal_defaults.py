@@ -1,4 +1,4 @@
-﻿"""守卫：多模态默认必须是关闭的。
+"""守卫：多模态默认必须是关闭的。
 
 判别力：把 ai.py 里 MULTIMODAL_ENABLED 默认改成 True，或给
 VISION_MODEL_ALLOWLIST 预置任何模型 → 本用例红。默认一旦被悄悄打开，
