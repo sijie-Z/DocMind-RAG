@@ -661,6 +661,23 @@ class Planner:
         "竞争",
     ]
 
+    # ── Template: knowledge ───────────────────────────────────────────
+    #  知识库类问句必须绑定「检索」或「清单」工具，禁止凭 LLM 直接作答：
+    #  否则用户问「知识库里有哪些文档」时，Agent 会不查就编（零工具调用的静默假成功）。
+    _KNOWLEDGE_WORDS = [
+        "知识库",
+        "文档",
+        "合同",
+        "条款",
+        "资料",
+        "上传",
+        "knowledge base",
+        "document",
+        "contract",
+    ]
+    #  问「有哪些 / 列出」时走清单工具，其余走检索工具
+    _KNOWLEDGE_LIST_HINTS = ["哪些", "列出", "清单", "列表", "有什么", "list", "which"]
+
     def _classify_task_type(self, query: str) -> str | None:
         """Classify query into known task types for template-based planning.
 
@@ -687,6 +704,11 @@ class Planner:
         if any(kw in q for kw in self._RESEARCH_WORDS):
             return "research"
 
+        # 4. Knowledge — 知识库/文档类问句（必须绑定工具，不允许直接作答）
+        #    放在 research 之后：带「总结/综述」的问句仍走既有 research 模板，行为不变。
+        if any(kw in q for kw in self._KNOWLEDGE_WORDS):
+            return "knowledge"
+
         return None
 
     def _try_structured_planning(self, plan_id: str, query: str) -> Plan | None:
@@ -702,7 +724,50 @@ class Planner:
             return self._build_analysis_plan(plan_id, query)
         if task_type == "research":
             return self._build_research_plan(plan_id, query)
+        if task_type == "knowledge":
+            return self._build_knowledge_plan(plan_id, query)
         return None
+
+    # ── Template: knowledge ───────────────────────────────────────────
+    #  s1 检索/清单（必绑工具）  →  s2 基于结果作答
+    #  关键：s1 一定带 tool_hint。以前这类问句落到 LLM 规划器时 tool_hint 为空，
+    #  执行器无工具可调，直接由 LLM 凭上下文作答 —— 有文档也等于没查。
+
+    def _build_knowledge_plan(self, plan_id: str, query: str) -> Plan:
+        """Template: 知识库问句 → 先查（清单或检索）→ 再作答。"""
+        q = query.lower()
+        is_list = any(kw in q for kw in self._KNOWLEDGE_LIST_HINTS)
+        first_tool = "list_documents" if is_list else "search_knowledge_base"
+        first_desc = (
+            f"列出知识库中的文档清单: {query[:50]}"
+            if is_list
+            else f"在知识库中检索相关内容: {query[:50]}"
+        )
+        steps = [
+            PlanStep(
+                id="s1",
+                description=first_desc,
+                dependencies=[],
+                tool_hint=first_tool,
+                parallel_group=1,
+                risk_level="low",
+                retry_strategy="auto_retry",
+            ),
+            PlanStep(
+                id="s2",
+                description=f"基于检索结果作答；若结果为空则如实说明未检索到: {query[:50]}",
+                dependencies=["s1"],
+                tool_hint=None,
+                risk_level="low",
+                retry_strategy="auto_retry",
+            ),
+        ]
+        return Plan(
+            id=plan_id,
+            goal=query,
+            reasoning=f"knowledge 模板：{'清单' if is_list else '检索'}后作答",
+            steps=steps,
+        )
 
     # ── Template: comparison ──────────────────────────────────────────
     #  Research Entity A (parallel)    \
