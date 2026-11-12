@@ -62,6 +62,29 @@ logger = logging.getLogger(__name__)
 # 失败占位只用于告知跳过，不是有效答案；loop 终态判定必须识别同一固定文本。
 STEP_FAILURE_PLACEHOLDER = "[该步骤因 API 连接问题未能完成，已跳过]"
 
+# 凭据类失败（401 / invalid api key）不是"连接抖动"，重试也不会好，而且用户看到的
+# 文案必须是可执行的下一步。实测：key 失效时全链路 401，但用户只收到
+# 「因 API 连接问题未能完成」——把"配置错了"说成"网络不好"，属于静默误导。
+STEP_AUTH_FAILURE_PLACEHOLDER = "[模型凭据无效：该步骤未能执行，请检查 LLM API Key 配置]"
+
+_AUTH_ERROR_MARKERS = (
+    "401",
+    "authentication fails",
+    "authentication_error",
+    "invalid api key",
+    "invalid_api_key",
+    "unauthorized",
+)
+
+
+def is_llm_auth_error(text: str | None) -> bool:
+    """判断失败文本是否属于「模型凭据无效」这一类（不是网络/超时）。"""
+    if not text:
+        return False
+    lowered = text.lower()
+    return any(marker in lowered for marker in _AUTH_ERROR_MARKERS)
+
+
 # 跨请求熔断（issue #242 第 7 条）：LLM 步骤调用路径的进程级熔断器（每 worker 一份）。
 # 阈值 3（与 Executor.MAX_CONSECUTIVE_FAILURES 同量级）；计数口径 = **自上次复位累计**
 # 的失败数（成功的复位只发生在非 CLOSED 态，即半开探测成功时）——provider 连续挂的
@@ -1589,16 +1612,21 @@ class Executor:
         # W0-5：chunk 会原样流给客户端（并进入会话正文）——异常原文只进日志，
         # 对外只保留自撰的跳过说明（与 error / tool_error 的脱敏口径一致）。
         if last_error:
+            placeholder = (
+                STEP_AUTH_FAILURE_PLACEHOLDER
+                if is_llm_auth_error(last_error)
+                else STEP_FAILURE_PLACEHOLDER
+            )
             logger.warning(
                 "步骤 %s 因 API 连接问题跳过（内部细节仅日志）: %s",
                 step.id,
                 log_safe(last_error),
             )
             if final_outcome is not None:
-                final_outcome.local_synthesis += STEP_FAILURE_PLACEHOLDER
+                final_outcome.local_synthesis += placeholder
             yield AgentEvent(
                 type="chunk",
-                content=STEP_FAILURE_PLACEHOLDER,
+                content=placeholder,
                 plan_id=plan.id,
                 plan_step_id=step.id,
             )
