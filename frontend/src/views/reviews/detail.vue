@@ -31,6 +31,7 @@
           </n-button>
           <n-button
             v-if="!analyzedAll || !canAnalyze"
+            data-testid="review-analyze"
             type="primary"
             :loading="analyzing"
             :disabled="!canAnalyze"
@@ -40,6 +41,7 @@
           </n-button>
           <n-button
             v-if="!analyzedAll"
+            data-testid="review-export"
             type="primary"
             secondary
             :loading="exporting"
