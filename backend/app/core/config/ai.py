@@ -99,6 +99,12 @@ class AISettings(BaseSettings):
     # 不同端点互不封锁。0 = 关闭负缓存。
     LLM_UNREACHABLE_COOLDOWN_SECONDS: float = Field(default=5.0, ge=0.0)
 
+    # 多模态输入（图片）：默认关闭 → 图片一律走 OCR 降级路径，行为与现状完全一致。
+    # 只有 MULTIMODAL_ENABLED=true 且模型名命中 VISION_MODEL_ALLOWLIST 时，
+    # 才把图片作为 image_url content part 直接交给视觉模型（见 core/multimodal.py）。
+    MULTIMODAL_ENABLED: bool = False
+    VISION_MODEL_ALLOWLIST: str = ""  # 逗号分隔，如 "deepseek-vl2,qwen2.5-vl-7b"
+
     # Workflow LLM 节点的环境默认 key（services/workflow_engine.py 的 get_llm）。
     # issue #273：此前引擎用 getattr(settings, 'OPENAI_API_KEY', '')（单引号写法）
     # 兜底读取，但 Settings 无对应字段——extra="ignore" 下 .env 配置被静默吞掉，
