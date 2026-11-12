@@ -63,3 +63,32 @@ def build_image_content_part(url: str) -> dict[str, object]:
     if not url or not isinstance(url, str):
         raise ValueError("image url 不能为空")
     return {"type": "image_url", "image_url": {"url": url}}
+
+
+# ── 附件路由与消息组装 ────────────────────────────────────────────────
+# 附件有两种：document（PDF/Word/…）与 image（PNG/JPG/…）。
+# document 永远走解析→chunk→RAG；image 才有多模态直连的可能。
+
+AttachmentKind = Literal["document", "image"]
+
+
+def plan_attachment_route(kind: AttachmentKind, model: str | None, **kwargs: object) -> ImagePath:
+    """该附件本轮走哪条路。
+
+    - `document` → 恒 `"ocr"`（实际上是解析→检索，视觉直连不适用）
+    - `image`    → 由 `decide_image_path` 决定（vision 或 ocr 降级）
+    """
+    if kind == "document":
+        return "ocr"
+    return decide_image_path(model, **kwargs)  # type: ignore[arg-type]
+
+
+def build_vision_user_content(text: str, image_urls: list[str]) -> list[dict[str, object]]:
+    """把「文本 + 若干图片」组装成 OpenAI 兼容的 user content 数组。
+
+    顺序：图片在前、文本在后 —— 与主流视觉模型的推荐用法一致（先给视觉上下文，
+    再给指令）。没有任何图片时返回只含一个 text part 的数组，调用方可直接使用。
+    """
+    parts: list[dict[str, object]] = [build_image_content_part(u) for u in image_urls]
+    parts.append({"type": "text", "text": text})
+    return parts
