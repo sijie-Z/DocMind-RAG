@@ -1,5 +1,5 @@
 """
-DocMind AI知识库系统 - 安全工具
+DocMind 文档问答与合同核验平台 - 安全工具
 """
 
 # backend/app/core/security.py

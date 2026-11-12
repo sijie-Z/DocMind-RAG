@@ -1,5 +1,5 @@
 """
-DocMind AI知识库系统 - 组织管理端点
+DocMind 文档问答与合同核验平台 - 组织管理端点
 """
 
 from typing import Any
