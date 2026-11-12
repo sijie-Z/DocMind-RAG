@@ -8,7 +8,7 @@ VISION_MODEL_ALLOWLIST 预置任何模型 → 本用例红。默认一旦被悄�
 from __future__ import annotations
 
 from app.core.config import settings
-from app.services.multimodal import decide_image_path
+from app.core.multimodal import decide_image_path
 
 
 def test_multimodal_disabled_by_default() -> None:

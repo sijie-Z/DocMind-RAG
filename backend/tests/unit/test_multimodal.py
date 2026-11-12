@@ -1,4 +1,4 @@
-"""多模态降级契约（services/multimodal.py）的单元测试。
+"""多模态降级契约（core/multimodal.py）的单元测试。
 
 判别点：**默认配置下图片必须走 OCR**；打开开关但模型不在白名单也必须走 OCR；
 只有"开关开 + 模型命中白名单"才允许视觉直连。任何一条被破坏都会让图片在
@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import pytest
 
-from app.services.multimodal import (
+from app.core.multimodal import (
     build_image_content_part,
     decide_image_path,
     parse_allowlist,

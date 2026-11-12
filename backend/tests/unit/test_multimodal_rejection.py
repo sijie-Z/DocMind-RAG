@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from app.services.multimodal import ImageRequestRejected, assert_image_request_allowed
+from app.core.multimodal import ImageRequestRejected, assert_image_request_allowed
 
 
 class TestAssertImageRequestAllowed:

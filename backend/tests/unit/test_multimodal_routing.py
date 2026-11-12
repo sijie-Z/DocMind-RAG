@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from app.services.multimodal import build_vision_user_content, plan_attachment_route
+from app.core.multimodal import build_vision_user_content, plan_attachment_route
 
 
 class TestPlanAttachmentRoute:

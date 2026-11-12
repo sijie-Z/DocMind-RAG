@@ -101,7 +101,7 @@ class AISettings(BaseSettings):
 
     # 多模态输入（图片）：默认关闭 → 图片一律走 OCR 降级路径，行为与现状完全一致。
     # 只有 MULTIMODAL_ENABLED=true 且模型名命中 VISION_MODEL_ALLOWLIST 时，
-    # 才把图片作为 image_url content part 直接交给视觉模型（见 services/multimodal.py）。
+    # 才把图片作为 image_url content part 直接交给视觉模型（见 core/multimodal.py）。
     MULTIMODAL_ENABLED: bool = False
     VISION_MODEL_ALLOWLIST: str = ""  # 逗号分隔，如 "deepseek-vl2,qwen2.5-vl-7b"
 
