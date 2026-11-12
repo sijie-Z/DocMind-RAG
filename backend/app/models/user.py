@@ -1,5 +1,5 @@
 """
-DocMind AI知识库系统 - 用户模型
+DocMind 文档问答与合同核验平台 - 用户模型
 """
 
 from datetime import datetime

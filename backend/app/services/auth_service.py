@@ -1,5 +1,5 @@
 """
-DocMind AI知识库系统 - 认证服务
+DocMind 文档问答与合同核验平台 - 认证服务
 """
 
 import asyncio

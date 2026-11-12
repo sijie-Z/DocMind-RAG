@@ -1,5 +1,5 @@
 """
-DocMind AI知识库系统 - API路由模块
+DocMind 文档问答与合同核验平台 - API路由模块
 
 issue #479：路由按 bundle 分组。``ROUTER_SPECS`` 是唯一的路由清单，
 ``build_router(bundles)`` 按 profile 声明的 bundle 集合挂载模块；

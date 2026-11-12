@@ -1,5 +1,5 @@
 """
-DocMind AI知识库系统 - 数据库连接模块
+DocMind 文档问答与合同核验平台 - 数据库连接模块
 """
 
 import logging
