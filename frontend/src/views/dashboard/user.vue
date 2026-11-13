@@ -347,10 +347,6 @@
           <template #icon><n-icon><SearchOutline /></n-icon></template>
           {{ t('dashboard.searchKB') }}
         </n-button>
-        <n-button secondary size="large" :loading="demoLoading" @click="loadDemoData">
-          <template #icon><n-icon><SparklesOutline /></n-icon></template>
-          {{ t('dashboard.demoData') }}
-        </n-button>
       </div>
     </div>
   </div>
@@ -367,7 +363,6 @@ import { getUserStats } from '@/api/user'
 import { getConversations, type Conversation } from '@/api/conversation'
 import { getRAGStats } from '@/api/monitoring'
 import { FIRST_SCREEN_REQUEST_CONFIG } from '@/utils/request'
-import { seedDemoData } from '@/api/demo'
 import { formatFileSize, formatDate as formatDateUtil } from '@/utils/format'
 import { CHART_COLORS, CHART_THEME, DARK_CHART_THEME } from '@/utils/chartTheme'
 import { classifyRagQuality } from '@/utils/ragQuality'
@@ -375,7 +370,7 @@ import {
   ChatbubbleEllipsesOutline, TextOutline, DocumentOutline,
   ServerOutline, CloudUploadOutline, SearchOutline, TimeOutline,
   ChevronForwardOutline, AnalyticsOutline, TrendingUpOutline, FlashOutline,
-  HardwareChipOutline, SparklesOutline
+  HardwareChipOutline
 } from '@vicons/ionicons5'
 import OnboardingChecklist from './components/OnboardingChecklist.vue'
 import echarts from '@/utils/echarts'
@@ -405,7 +400,6 @@ const ragStats = ref({
 
 const recentConversations = ref<Conversation[]>([])
 const chartRef = ref<HTMLElement | null>(null)
-const demoLoading = ref(false)
 let chart: EChartsType | null = null
 
 /** 分块加载状态：各路请求独立落位（骨架 → 内容 / 错误态 + 重试） */
@@ -473,24 +467,6 @@ const ragQualityTag = computed(() => {
 const formatSize = (bytes: number) => formatFileSize(bytes)
 const formatDate = (date: string) => formatDateUtil(date)
 
-const loadDemoData = async () => {
-  demoLoading.value = true
-  try {
-    const res = await seedDemoData()
-    if (res.data?.success) {
-      message.success('示例数据加载成功！页面即将刷新')
-      // 刷新页面数据
-      setTimeout(() => window.location.reload(), 1000)
-    } else {
-      message.info(res.data?.message || '示例数据已存在')
-    }
-  } catch (e: unknown) {
-    const err = e as { response?: { data?: { detail?: string } } }
-    message.error(err?.response?.data?.detail || '加载示例数据失败')
-  } finally {
-    demoLoading.value = false
-  }
-}
 
 const initChart = () => {
   if (!chartRef.value) return
