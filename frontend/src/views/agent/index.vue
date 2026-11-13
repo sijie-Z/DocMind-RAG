@@ -161,12 +161,6 @@
               {{ s }}
             </button>
           </div>
-          <div class="feature-list">
-            <div class="feature-item"><n-icon size="14" class="mr-1" aria-hidden="true"><ListOutline /></n-icon>{{ t('agent.emptyFeaturePlan') }}</div>
-            <div class="feature-item"><n-icon size="14" class="mr-1" aria-hidden="true"><ConstructOutline /></n-icon>{{ toolsFeatureText }}</div>
-            <div class="feature-item"><n-icon size="14" class="mr-1" aria-hidden="true"><CubeOutline /></n-icon>{{ t('agent.emptyFeatureMemory') }}</div>
-            <div class="feature-item"><n-icon size="14" class="mr-1" aria-hidden="true"><SearchOutline /></n-icon>{{ t('agent.emptyFeatureReview') }}</div>
-          </div>
         </div>
 
         <!-- issue #476：分叉失败原因（409 边界非法/checkpoint 要求等，如实展示） -->
@@ -530,8 +524,7 @@ import type {
 } from '@/types/agent'
 import {
   ThumbsUpOutline, ThumbsDownOutline, ArrowBackOutline, TimeOutline,
-  SettingsOutline, AddOutline, AlertCircleOutline, ListOutline,
-  ConstructOutline, CubeOutline, SearchOutline, DocumentTextOutline,
+  SettingsOutline, AddOutline, AlertCircleOutline, DocumentTextOutline,
   CloseCircleOutline, GitBranchOutline, TerminalOutline, TrashOutline,
 } from '@vicons/ionicons5'
 
@@ -667,11 +660,6 @@ const suggestions = computed(() => [
 ])
 
 // 工具数以初始化信封（store）为准；未加载/为 0 时不宣称具体数量。
-const toolsFeatureText = computed(() => (
-  agentStore.toolCount > 0
-    ? t('agent.emptyFeatureToolsCount', { count: agentStore.toolCount })
-    : t('agent.emptyFeatureTools')
-))
 
 const currentPlanSteps = computed<PlanStep[]>(() => {
   // Get plan steps from the last assistant message
