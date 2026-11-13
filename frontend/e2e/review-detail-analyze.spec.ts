@@ -160,3 +160,52 @@ test('核验详情 · 执行分析真的发出 analyze 请求', async ({ page })
 
   await expect.poll(() => analyzeCalls.length).toBeGreaterThan(0)
 })
+
+
+const decidedItem = {
+  id: 'item-1',
+  item_key: 'payment_terms',
+  ordinal: 1,
+  change_type: 'modified',
+  status: 'verified',
+  facts: {},
+  decided_by: 1,
+  decided_at: '2026-11-13T11:30:00+08:00',
+  decision_note: null,
+  evidence_count: 0,
+  selected_evidence_count: 0,
+  evidence: { policy: [], base: [], revised: [] },
+}
+
+const exportableDetail = { ...caseDetail, status: 'in_review', all_analyzed: true, analysis_pending_count: 0, item_count: 1, decided_count: 1, items: [decidedItem] }
+const completedDetail = { ...exportableDetail, status: 'completed', completed_at: '2026-11-13T11:00:00+08:00' }
+
+async function stubWithDetail(page: import('@playwright/test').Page, detail: unknown) {
+  await stubShell(page)
+  await page.unroute(`**/api/v1/reviews/${CASE_ID}`)
+  await page.route(`**/api/v1/reviews/${CASE_ID}`, (route) => route.fulfill(fulfillJson(ok(detail))))
+}
+
+test('核验详情 · 导出核验单真的发出 export 请求', async ({ page }) => {
+  const calls: string[] = []
+  page.on('request', (r) => {
+    if (r.method() === 'POST' && r.url().includes(`/reviews/${CASE_ID}/export`)) calls.push(r.url())
+  })
+
+  await stubWithDetail(page, exportableDetail)
+  await page.route(`**/api/v1/reviews/${CASE_ID}/export`, (route) =>
+    route.fulfill(fulfillJson(ok({ ...exportableDetail }))),
+  )
+
+  await page.goto(`/reviews/${CASE_ID}`)
+  await page.locator('[data-testid="review-export"]').click()
+
+  await expect.poll(() => calls.length).toBeGreaterThan(0)
+})
+
+test('核验详情 · 已完成案件显示归档入口', async ({ page }) => {
+  await stubWithDetail(page, completedDetail)
+
+  await page.goto(`/reviews/${CASE_ID}`)
+  await expect(page.locator('[data-testid="archive-case"]')).toBeVisible()
+})
