@@ -14,6 +14,10 @@ const BASE_URL = process.env.E2E_BASE_URL || 'http://localhost:5173'
 export default defineConfig({
   testDir: './e2e',
   fullyParallel: true,
+  // 串行执行：15 条用例只需 ~43s，但并行时多条用例同时打同一个 Vite dev server，
+  // 首帧编译叠加会让 5s 断言超时（实测本机并行 7 条红、串行 15 条全绿）。
+  // E2E 的价值是确定性，不是省这几十秒。
+  workers: 1,
   // CI 上禁止遗留的 test.only（防止"只跑一条"悄悄放过）
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 1 : 0,
