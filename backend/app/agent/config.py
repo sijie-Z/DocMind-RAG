@@ -8,6 +8,18 @@ page reloads and server restarts.
 import json
 import logging
 from dataclasses import dataclass, field
+
+
+def _default_model() -> str:
+    """模型名优先取 settings.DEEPSEEK_MODEL（可被环境变量覆盖）。"""
+    try:
+        from app.core.config import settings
+
+        return settings.DEEPSEEK_MODEL or "deepseek-v4-flash"
+    except Exception:  # pragma: no cover - 配置不可用时保持旧默认
+        return "deepseek-v4-flash"
+
+
 from typing import Any, Callable, Literal, Optional
 
 logger = logging.getLogger(__name__)
@@ -143,7 +155,9 @@ class AgentConfig:
     """Full agent configuration for a single session or user."""
 
     # ── Model settings ──
-    model: str = "deepseek-v4-flash"
+    # 默认取配置里的模型名，而不是写死厂商型号 —— 否则接 OpenAI 兼容端点/本地 Ollama 时，
+    # 环境变量改了 base_url 却仍会用 deepseek-v4-flash 去请求，得到 404 model not found。
+    model: str = field(default_factory=lambda: _default_model())
     deep_think_model: str = ""  # 强模型（综合推理），为空则回退到 model
     quick_think_model: str = ""  # 快模型（信息收集），为空则回退到 model
     temperature: float = 0.1

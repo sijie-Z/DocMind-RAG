@@ -42,7 +42,10 @@ def _build_openai_client() -> AsyncOpenAI | None:
         try:
             base_url = _normalize_base_url(
                 settings.DEEPSEEK_API_URL,
-                strip_suffixes=["/chat/completions", "/v1"],
+                # 只剥离具体端点，**不能剥 /v1**：OpenAI 兼容服务（含本地 Ollama 的
+                # http://localhost:11434/v1）必须在 base_url 里保留路径，否则 SDK 会拼成
+                # /chat/completions 而非 /v1/chat/completions → 404。DeepSeek 基址不含 /v1，不受影响。
+                strip_suffixes=["/chat/completions"],
             )
         except ValueError as e:
             logger.error(f"Invalid DEEPSEEK_API_URL: {e}")
@@ -57,7 +60,7 @@ def _build_rerank_client() -> AsyncOpenAI | None:
     url = settings.RERANK_API_URL or settings.RAG_RERANK_API_URL or settings.DEEPSEEK_API_URL
     if key and url:
         try:
-            base = _normalize_base_url(url, strip_suffixes=["/chat/completions", "/v1"])
+            base = _normalize_base_url(url, strip_suffixes=["/chat/completions"])
         except ValueError as e:
             logger.error(f"Invalid RERANK_API_URL: {e}")
             return None
