@@ -209,3 +209,41 @@ test('核验详情 · 已完成案件显示归档入口', async ({ page }) => {
   await page.goto(`/reviews/${CASE_ID}`)
   await expect(page.locator('[data-testid="archive-case"]')).toBeVisible()
 })
+
+const pendingItem = {
+  ...decidedItem,
+  id: 'item-pending',
+  item_key: 'payment_terms_pending',
+  status: 'pending',
+  decided_by: null,
+  decided_at: null,
+  change_type: 'modified',
+}
+
+const pendingDetail = {
+  ...caseDetail,
+  status: 'in_review',
+  all_analyzed: true,
+  analysis_pending_count: 0,
+  item_count: 1,
+  decided_count: 0,
+  items: [pendingItem],
+}
+
+test('核验详情 · 保存决策真的发出 decision 请求', async ({ page }) => {
+  const calls: string[] = []
+  page.on('request', (r) => {
+    if (r.method() === 'PUT' && r.url().includes('/decision')) calls.push(r.url())
+  })
+
+  await stubWithDetail(page, pendingDetail)
+  await page.route(`**/api/v1/reviews/${CASE_ID}/items/*/decision`, (route) =>
+    route.fulfill(fulfillJson(ok({ ...pendingDetail }))),
+  )
+
+  await page.goto(`/reviews/${CASE_ID}`)
+  await page.getByText('已核对', { exact: true }).first().click()
+  await page.locator('[data-testid="decision-save-payment_terms_pending"]').click()
+
+  await expect.poll(() => calls.length).toBeGreaterThan(0)
+})

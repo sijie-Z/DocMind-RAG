@@ -41,7 +41,7 @@
           </n-button>
           <n-button
             v-if="!analyzedAll"
-            data-testid="review-export"
+            data-testid="review-export-toolbar"
             type="primary"
             secondary
             :loading="exporting"
@@ -489,6 +489,7 @@
                   size="small"
                   type="primary"
                   class="review-decision-save"
+                  :data-testid="`decision-save-${item.item_key}`"
                   :disabled="detail.status === 'blocked' || !!detail.archived_at || !item.change_type || !canSaveDecision(item)"
                   :loading="decidingItem === item.id"
                   @click="saveDecision(item)"
