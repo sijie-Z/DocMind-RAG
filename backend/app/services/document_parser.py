@@ -627,7 +627,7 @@ class DocumentParser:
     async def _parse_html(self, file_path: str) -> dict[str, Any]:
         """HTML 解析：抽正文，丢弃脚本/样式/导航/页脚等噪音。
 
-        为什么需要：用户真实语料里有数百个 .html（博客、Confluence 导出、网页存档），
+        为什么需要：真实语料里有数百个 .html（博客、Confluence 导出、网页存档），
         以前上传直接 400「不支持的文件格式」，这类资料完全进不了知识库。
         优先级：`<article>` > `<main>` > `<body>`，避免把侧边栏/评论一起收进来。
         """
@@ -643,12 +643,11 @@ class DocumentParser:
             ):
                 tag.decompose()
             root = soup.find("article") or soup.find("main") or soup.body or soup
-            text = root.get_text("\n", strip=True)
-            return title, text
+            return title, root.get_text("\n", strip=True)
 
         try:
             title, text = await asyncio.to_thread(_extract)
-        except ImportError as e:  # 依赖缺失要说清楚，而不是笼统失败
+        except ImportError as e:
             raise Exception("HTML解析失败：缺少 beautifulsoup4/lxml 依赖") from e
         except Exception as e:
             logger.error(f"HTML 解析失败: {e}")
