@@ -108,6 +108,10 @@ class FileUploadService:
             ".txt",
             ".md",
             ".csv",
+            # HTML：真实语料里大量 .html（博客/Confluence 导出/网页存档），
+            # 解析链已支持（document_parser._parse_html），上传口径需同步放开
+            ".html",
+            ".htm",
             # 图片（round2 后端卫生修复②）：OCR 支线解析链已支持，
             # 与主端点 /documents/upload 口径对齐
             ".png",
@@ -665,6 +669,8 @@ class FileUploadService:
             ".txt": DocumentType.TXT,
             ".md": DocumentType.TXT,
             ".csv": DocumentType.TXT,
+            ".html": DocumentType.TXT,
+            ".htm": DocumentType.TXT,
         }
         return extension_map.get(file_extension, DocumentType.OTHER)
 
@@ -677,6 +683,8 @@ class FileUploadService:
             ".txt": "text/plain",
             ".md": "text/markdown",
             ".csv": "text/csv",
+            ".html": "text/html",
+            ".htm": "text/html",
             # 图片（round2 卫生修复②）：分块合并路径经此派生 MockUploadFile 的
             # content_type，落 MinIO 时不再退化成 application/octet-stream
             ".png": "image/png",
