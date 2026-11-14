@@ -7,6 +7,8 @@ import contextlib
 import logging
 import os
 import re
+import shutil
+import tempfile
 import uuid
 import zipfile
 from pathlib import Path
@@ -383,8 +385,26 @@ class DocumentParser:
                 text_content = xml_text.strip()
                 metadata["fallback_parser"] = "zip_xml"
 
+        # 扫描件兜底：正文无文字、但文档里嵌了图片 → 对这些图片做 OCR。
+        # 实测（2026-11-14，真实语料）「面试的一些问题.docx」就是纯图片文档，
+        # 三个文本解析器全部拿不到字，旧实现直接 FAILED 且提示不可执行。
         if not text_content.strip():
-            raise Exception("DOCX解析失败：未提取到有效文本内容")
+            ocr_text, ocr_meta = await self._ocr_docx_embedded_images(file_path)
+            if ocr_text.strip():
+                text_content = ocr_text.strip()
+                metadata.update(ocr_meta)
+                metadata["fallback_parser"] = "ocr_docx_images"
+
+        if not text_content.strip():
+            media = self._docx_media_count(file_path)
+            if media:
+                raise Exception(
+                    f"DOCX解析失败：未提取到有效文本内容（文档内嵌 {media} 张图片，"
+                    "OCR 未识别出文字）。可上传文本版，或提供更清晰的扫描件"
+                )
+            raise Exception(
+                "DOCX解析失败：未提取到有效文本内容（文档本身没有文字内容，既非扫描件也无正文）"
+            )
 
         return {
             "content": text_content.strip(),
@@ -494,6 +514,79 @@ class DocumentParser:
 
         except Exception as e:
             raise Exception(f"文本文件解析失败: {str(e)}")
+
+    # 扫描件兜底：DOCX 内嵌图片的 OCR。
+    # 为什么需要：真实语料里「面试的一些问题.docx」正文为空、全是截图，
+    # 三个文本解析器（python-docx / docx2txt / zip-xml）都拿不到字。
+    _DOCX_MEDIA_SUFFIXES = (".png", ".jpg", ".jpeg", ".bmp", ".webp")
+    _DOCX_OCR_MAX_IMAGES = 20
+    """单文档最多 OCR 的图片数：扫描件常见 1–10 张，20 张足以覆盖且能挡住整本影印件。"""
+
+    def _docx_media_names(self, file_path: str) -> list[str]:
+        """DOCX 包内 word/media/ 下的图片条目名（按包内顺序）。"""
+        try:
+            with zipfile.ZipFile(file_path) as zf:
+                return [
+                    n
+                    for n in zf.namelist()
+                    if n.startswith("word/media/") and n.lower().endswith(self._DOCX_MEDIA_SUFFIXES)
+                ]
+        except Exception as e:
+            logger.warning(f"读取 DOCX 媒体清单失败: {e}")
+            return []
+
+    def _docx_media_count(self, file_path: str) -> int:
+        return len(self._docx_media_names(file_path))
+
+    async def _ocr_docx_embedded_images(self, file_path: str) -> tuple[str, dict[str, Any]]:
+        """对 DOCX 内嵌图片做 OCR，返回 (拼接文本, metadata)；无字时返回 ("", {})。
+
+        复用与图片上传完全相同的链路（`_load_prepared_image` + RapidOCR +
+        `_order_ocr_lines`），因此方向矫正、白底合成、降采样与行序规则保持一致。
+        """
+        names = self._docx_media_names(file_path)[: self._DOCX_OCR_MAX_IMAGES]
+        if not names:
+            return "", {}
+
+        try:
+            with zipfile.ZipFile(file_path) as zf:
+                blobs = [(n, zf.read(n)) for n in names]
+        except Exception as e:
+            logger.warning(f"读取 DOCX 内嵌图片失败: {e}")
+            return "", {}
+
+        engine = _get_ocr_engine()
+        blocks: list[str] = []
+        scores: list[float] = []
+        tmpdir = tempfile.mkdtemp(prefix="docmind-docx-ocr-")
+        try:
+            for idx, (name, blob) in enumerate(blobs):
+                suffix = Path(name).suffix.lower() or ".png"
+                tmp = Path(tmpdir) / f"{idx}{suffix}"
+                try:
+                    tmp.write_bytes(blob)
+                    img, _info = await asyncio.to_thread(self._load_prepared_image, str(tmp))
+                    ocr_result, _elapse = await asyncio.to_thread(engine, img)
+                except Exception as e:
+                    logger.warning(f"内嵌图片 OCR 失败（{name}）: {e}")
+                    continue
+                lines = self._order_ocr_lines(ocr_result) if ocr_result else []
+                if lines:
+                    blocks.append("\n".join(lines))
+                    scores.extend(float(item[2]) for item in ocr_result if str(item[1]).strip())
+        finally:
+            shutil.rmtree(tmpdir, ignore_errors=True)
+
+        text = "\n".join(blocks).strip()
+        if not text:
+            return "", {}
+        return text, {
+            "ocr_engine": "rapidocr-onnxruntime",
+            "ocr_engine_version": _ocr_engine_version(),
+            "ocr_images": len(blobs),
+            "ocr_images_with_text": len(blocks),
+            "ocr_avg_score": round(sum(scores) / len(scores), 4) if scores else None,
+        }
 
     async def _parse_image(self, file_path: str) -> dict[str, Any]:
         """位图 OCR 解析：PNG/JPG/JPEG/WEBP/BMP（GIF 取首帧）。
