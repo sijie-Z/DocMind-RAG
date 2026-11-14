@@ -81,9 +81,39 @@ Clause，按块比较必然"文本不同 + 条号交集"，会把新增误判成
 
 即：e2（新增第10条 违约金）现在会被识别，且**既有 4 项行为不变**。
 
+### 更新（2026-11-15 晚）：清单可配置 + 不确定可判定
+
+**① 清单可配置**（`app/services/review_checklist.py`）：
+
+```bash
+export REVIEW_CHECKLIST_JSON='[{"key":"confidentiality","label":"保密义务","keywords":["保密","泄露"]}]'
+```
+
+默认 4 项不变；配置项追加在后。配置错误（坏 JSON / 非法 key / 空 keywords / 重复）
+直接 `ValueError`，不静默忽略。真实验证：
+
+```text
+带环境变量: 建案 items(5) = payment_term, start_condition, acceptance_invoice, exception, confidentiality
+不带环境变量: 建案 items(4) = 默认 4 项（与改动前一致）
+```
+
+配置项没有专用抽取器，分析后为 `undetermined`（如实呈现，不臆造）。
+
+**② 不确定可在接口层判定**：`GET /reviews/{id}` 新增 `summary`：
+
+```json
+{"item_count":5,"changed_count":0,"added_count":0,"removed_count":0,
+ "unidentified_count":4,"undetermined_count":1,"has_undetermined":true}
+```
+
+`has_undetermined=true` 时界面/导出**不得**呈现为"没有差异"。
+
 ### 仍待解决
 
-- 清单可配置（不同合同类型需要不同清单，现在写死在 `EXTRACTORS` 里）
+- 清单项目前的 keywords 只用于**候选证据抓取**，判定仍依赖 `EXTRACTORS` 里的专用抽取器；
+  配置项要真正参与判定，需要可插拔抽取器（下一步）
+- **无编号文档的附加句可能漏检**：实测在 markdown 里追加一行"保密义务：……"，
+  如果没有独立成段（被 chunker 并入相邻段落），行级比较看不到它 → 不产生 added 项
 - `payment_term` 在 base 侧出现 `unit_unclear / ambiguous`（V1 写"30日"未写单位语境），
   这类"无法判定"目前只体现在 facts 里，界面上如何呈现给审核人值得单独核
 
