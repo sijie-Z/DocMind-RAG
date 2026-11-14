@@ -37,7 +37,6 @@ from app.models.document import Document, DocumentChunk
 from app.models.organization import user_organization
 from app.models.review import (
     REVIEW_CASE_STATUSES,
-    REVIEW_ITEM_KEYS,
     REVIEW_SIDES,
     ReviewCase,
     ReviewEvidence,
@@ -47,6 +46,7 @@ from app.models.user import User
 from app.models.user_audit import UserActivityLog
 from app.rag.source_provenance import PARSER_ORIGINAL, SourceProvenanceUnavailableError
 from app.services.clause_refs import extract_clause_fields
+from app.services.review_checklist import load_checklist
 from app.services.review_document_service import (
     MAX_EVIDENCE_SCAN_CHUNKS,
     READINESS_REVIEWABLE,
@@ -221,19 +221,23 @@ async def create_case(
             lock_version=1,
         )
         session.add(case)
+        # 清单可配置：默认 4 项 + `REVIEW_CHECKLIST_JSON` 追加项（见 review_checklist）
+        checklist = load_checklist()
         items = {}
-        for ordinal, item_key in enumerate(REVIEW_ITEM_KEYS, start=1):
+        for ordinal, entry in enumerate(checklist, start=1):
             item = ReviewItem(
                 id=str(uuid.uuid4()),
                 case_id=case.id,
-                item_key=item_key,
+                item_key=entry.key,
                 ordinal=ordinal,
                 status="pending",
             )
             session.add(item)
-            items[item_key] = item
+            items[entry.key] = item
         if case.status == "ready":
-            await _capture_candidates(session, case, items, docs, metas)
+            await _capture_candidates(
+                session, case, items, docs, metas, {e.key: e.keywords for e in checklist}
+            )
         await session.commit()
     except ConflictError:
         raise
@@ -368,6 +372,7 @@ async def _capture_candidates(
     items: dict[str, ReviewItem],
     docs: dict[str, Document],
     metas: dict[str, Any],
+    keywords_by_item: dict[str, tuple[str, ...]] | None = None,
 ) -> None:
     """建案时做一次有界的关键词发现，把命中原文快照成 candidate 证据行。
 
@@ -376,16 +381,18 @@ async def _capture_candidates(
     """
 
     async def _scan_side(side: str) -> None:
-        counters = {key: EVIDENCE_CANDIDATES_PER_ITEM_SIDE for key in REVIEW_ITEM_KEYS}
+        counters = {key: EVIDENCE_CANDIDATES_PER_ITEM_SIDE for key in items}
         async for chunk in iter_chunks(session, docs[side].id, max_chunks=MAX_EVIDENCE_SCAN_CHUNKS):
             quote = chunk_original_text(chunk)
             if quote is None:
                 continue
             lowered = quote.lower()
-            for item_key in REVIEW_ITEM_KEYS:
-                if counters[item_key] <= 0:
+            keyword_source = keywords_by_item or ITEM_KEYWORDS
+            for item_key in items:
+                if counters.get(item_key, 0) <= 0:
                     continue
-                if not any(keyword in lowered for keyword in ITEM_KEYWORDS[item_key]):
+                keywords = keyword_source.get(item_key) or ITEM_KEYWORDS.get(item_key) or ()
+                if not keywords or not any(keyword in lowered for keyword in keywords):
                     continue
                 counters[item_key] -= 1
                 session.add(
