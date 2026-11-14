@@ -63,9 +63,30 @@ for item in items:                      # items 来自固定清单
 
 - 确定性抽取本身**工作正常**：3 处改动里 2 处被准确识别并带证据，且不依赖 LLM（facts 里是
   `events` / `terms` / `chunk_id` 这类结构化字段）。
-- 真正的缺口是**覆盖面**，不是准确率：
-  1. 新增条款检测（revised 有、base 无的条款 → 生成 `change_type=added` 的临时项）
-  2. 清单可配置（不同合同类型需要不同清单，现在写死在代码里）
+- 真正的缺口是**覆盖面**，不是准确率。
+
+### 更新（2026-11-15）：新增条款检测已修复
+
+PR #693 在清单循环之后追加了一步：`detect_added_clauses(base, revised)` 找出「revised 有、
+base 无」的条款，生成 `change_type=added` 的核验项并挂 revised 侧证据，进入人工决策。
+判定是**行级**的（按「第N条」拆行比较）—— 因为小文档常被切成 1 个 chunk，整篇是一个
+Clause，按块比较必然"文本不同 + 条号交集"，会把新增误判成修改。
+
+修复后同一套 V1/V2 的实测输出：
+
+```text
+改动前: items=4  payment_term / start_condition / acceptance_invoice / exception
+改动后: items=5  …同上 4 项完全不变…  + added_0_1  change=added  evidence=1
+```
+
+即：e2（新增第10条 违约金）现在会被识别，且**既有 4 项行为不变**。
+
+### 仍待解决
+
+- 清单可配置（不同合同类型需要不同清单，现在写死在 `EXTRACTORS` 里）
+- `payment_term` 在 base 侧出现 `unit_unclear / ambiguous`（V1 写"30日"未写单位语境），
+  这类"无法判定"目前只体现在 facts 里，界面上如何呈现给审核人值得单独核
+
 
 ## 复现方式
 
