@@ -254,6 +254,12 @@ async def test_case_detail_exposes_documents_items_and_fresh_snapshot(factory):
     assert detail["live_source_stale"] is False
     assert detail["stale_evidence_count"] == 0
 
+    # 详情自带汇总：新案件尚未分析 → 全部 undetermined，界面不得宣称"无差异"
+    summary = detail["summary"]
+    assert summary["item_count"] == len(detail["items"])
+    assert summary["undetermined_count"] == summary["item_count"]
+    assert summary["has_undetermined"] is True
+
     assert [i["item_key"] for i in detail["items"]] == [
         "payment_term",
         "start_condition",
