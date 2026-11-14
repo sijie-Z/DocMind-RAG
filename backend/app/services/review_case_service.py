@@ -886,6 +886,39 @@ def _case_summary(case: ReviewCase, item_stats: dict[str, Any] | None = None) ->
     }
 
 
+def summarize_items(items: list[ReviewItem]) -> dict[str, Any]:
+    """按 change_type 汇总，并给出「能否宣称无差异」的判据。
+
+    `has_undetermined` 为 True 时（存在 unidentified 或尚未分析项），
+    界面/导出**不得**把案件呈现成"没有差异"——那正是把不确定说成没问题。
+    """
+    changed = added = removed = unidentified = undetermined = 0
+    for item in items:
+        change_type = item.change_type
+        if change_type is None:
+            undetermined += 1
+        elif change_type in ("modified", "renumbered"):
+            changed += 1
+        elif change_type == "added":
+            added += 1
+        elif change_type == "removed":
+            removed += 1
+        elif change_type == "unidentified":
+            unidentified += 1
+        else:
+            # 未知取值按"未判定"处理，宁可保守也不当成无变化
+            undetermined += 1
+    return {
+        "item_count": len(items),
+        "changed_count": changed,
+        "added_count": added,
+        "removed_count": removed,
+        "unidentified_count": unidentified,
+        "undetermined_count": undetermined,
+        "has_undetermined": (unidentified + undetermined) > 0,
+    }
+
+
 async def case_detail(session: AsyncSession, case: ReviewCase) -> dict[str, Any]:
     """案件详情：文档快照/readiness + 4 个核验项 + 证据快照 + 实时漂移标记。"""
     items = (
@@ -946,6 +979,7 @@ async def case_detail(session: AsyncSession, case: ReviewCase) -> dict[str, Any]
         "lock_version": case.lock_version,
         "documents": documents,
         "items": [_item_to_dict(item, evidence_by_item.get(item.id, {})) for item in items],
+        "summary": summarize_items(items),
         "live_source_stale": live_source_stale,
         "stale_evidence_count": len(stale_by_evidence),
     }
