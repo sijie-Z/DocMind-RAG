@@ -30,6 +30,7 @@ import re
 import unicodedata
 from dataclasses import dataclass
 from typing import Any
+from uuid import uuid4
 
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
@@ -1785,6 +1786,79 @@ def _semantic_payload(item_key: str, facts: dict[str, Any]) -> Any:
     return tuple(sorted(facts.get("events") or facts.get("terms") or ()))
 
 
+_CLAUSE_NO_IN_LINE = re.compile(r"第\s*(\d+)\s*条")
+
+ADDED_MIN_CHARS = 12
+"""新增条款的最小长度：太短的多为页眉/页码/碎片，收进来只会制造噪音。"""
+
+ADDED_MAX_ITEMS = 10
+"""每次分析最多补充的新增条款数：清单外条款无上限会让核验单失控。"""
+
+
+def _split_clause_segments(clause: Clause) -> list[Clause]:
+    """把块级 Clause 拆成行级片段（按「第X条」逐条比较）。
+
+    小文档常被切成 1 个 chunk，整篇正文落在一个 Clause 里；此时整块文本在 base/revised
+    必然不同、条号又必然有交集，按块比较会把新增条款误判成"修改"，必须下沉到行级。
+    注意 Clause.text 已归一化（空白/换行可能被折叠），行级切分必须基于 raw_text。
+    """
+    source = clause.raw_text or clause.text
+    lines = [line.strip() for line in source.splitlines() if line.strip()]
+    if len(lines) <= 1:
+        return [clause]
+    segments: list[Clause] = []
+    for line in lines:
+        match = _CLAUSE_NO_IN_LINE.search(line)
+        segments.append(
+            Clause(
+                chunk_id=clause.chunk_id,
+                chunk_index=clause.chunk_index,
+                text=line,
+                raw_text=line,
+                clause_no=[int(match.group(1))] if match else list(clause.clause_no),
+                section_no=clause.section_no,
+                page_number=clause.page_number,
+                char_start=clause.char_start,
+                char_end=clause.char_end,
+            )
+        )
+    return segments
+
+
+def detect_added_clauses(
+    base: list[Clause], revised: list[Clause], *, limit: int = ADDED_MAX_ITEMS
+) -> list[Clause]:
+    """找出「revised 有、base 无」的条款（清单外的真正新增）。
+
+    判定规则（逐行比较）：
+    - 归一化文本在 base 里出现过 → 不是新增（只是排版差异）；
+    - 该片段的条号在 base 里已存在 → 属于「修改既有条款」，交给清单抽取器，不重复报；
+    - 太短（< ADDED_MIN_CHARS）或重复文本跳过；最多 limit 条。
+
+    为什么需要：核验原先只跑固定 4 项清单（见 EXTRACTORS），清单之外的**新增条款**
+    （例如 V2 多了「违约金」）完全不会出现在结果里 —— 而多出一条不利条款正是合同核验
+    最主要的风险场景（2026-11-15 实测，docs/review-quality-baseline.md）。
+    """
+    base_segments = [seg for clause in base for seg in _split_clause_segments(clause)]
+    base_norms = {normalize_clause_text(seg.text) for seg in base_segments}
+    base_numbers = {number for seg in base_segments for number in seg.clause_no}
+
+    revised_segments = [seg for clause in revised for seg in _split_clause_segments(clause)]
+    out: list[Clause] = []
+    seen: set[str] = set()
+    for segment in revised_segments:
+        norm = normalize_clause_text(segment.text)
+        if len(norm) < ADDED_MIN_CHARS or norm in base_norms or norm in seen:
+            continue
+        if set(segment.clause_no) & base_numbers:
+            continue
+        seen.add(norm)
+        out.append(segment)
+        if len(out) >= limit:
+            break
+    return out
+
+
 def align_item(
     item_key: str,
     base: dict[str, Any],
@@ -2024,6 +2098,50 @@ async def analyze_case(session: AsyncSession, case: ReviewCase) -> dict[str, Any
                     char_start=clause.char_start,
                     char_end=clause.char_end,
                 )
+        # 清单外的新增条款：生成 change_type=added 的核验项，交给人工决策。
+        # 之前这些条款根本不会出现在结果里（EXTRACTORS 只有 4 个键），
+        # 而"合同里多出一条不利条款"正是核验最主要的风险场景。
+        added_clauses = detect_added_clauses(clauses["base"], clauses["revised"])
+        if added_clauses:
+            existing_keys = {it.item_key for it in items}
+            next_ordinal = max((it.ordinal for it in items), default=0)
+            for idx, clause in enumerate(added_clauses, start=1):
+                item_key = f"added_{clause.chunk_index}_{idx}"[:32]
+                if item_key in existing_keys:
+                    continue
+                added_item = ReviewItem(
+                    id=str(uuid4()),
+                    case_id=case.id,
+                    item_key=item_key,
+                    ordinal=next_ordinal + idx,
+                    change_type="added",
+                    status="pending",
+                    facts={
+                        "extractor_version": EXTRACTOR_VERSION,
+                        "detector": "unlisted_added",
+                        "revised": {
+                            "status": "identified",
+                            "chunk_id": clause.chunk_id,
+                            "source": "unlisted_clause",
+                        },
+                    },
+                )
+                session.add(added_item)
+                if metas["revised"] is not None:
+                    await ensure_candidate_evidence(
+                        session,
+                        case,
+                        added_item,
+                        side="revised",
+                        document_id=side_docs["revised"],
+                        meta=metas["revised"],
+                        chunk_id=clause.chunk_id,
+                        chunk_index=clause.chunk_index,
+                        quote=clause.raw_text,
+                        page_number=clause.page_number,
+                        char_start=clause.char_start,
+                        char_end=clause.char_end,
+                    )
         await session.commit()
     except IntegrityError as exc:
         # 并发两次 analyze 同时补同一 (item, side, chunk)：唯一约束最后兜底。

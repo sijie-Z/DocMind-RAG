@@ -173,19 +173,34 @@ async def test_export_blocked_until_all_items_decided(factory):
     err = excinfo.value
     assert err.error_code == "REVIEW_EXPORT_BLOCKED"
     blocking = err.detail["items"]
-    assert {item["item_key"] for item in blocking} == {
+    blocking_keys = {item["item_key"] for item in blocking}
+    # 固定清单 4 项必须都在；清单外的「新增条款」项（added_*）也应为 undecided
+    assert {
         "payment_term",
         "start_condition",
         "acceptance_invoice",
         "exception",
-    }
+    } <= blocking_keys
+    assert all(
+        key.startswith("added_")
+        or key
+        in {
+            "payment_term",
+            "start_condition",
+            "acceptance_invoice",
+            "exception",
+        }
+        for key in blocking_keys
+    )
     assert all(item["reasons"] == ["undecided"] for item in blocking)
 
     await _decide_all(factory, case)
     async with factory() as db:
         fresh = await db.get(type(case), case.id)
         export = await svc.export_case(db, fresh, user_id=USER_ID)
-    assert export.item_count == 4
+        all_items = await _items(factory, case.id)
+    assert export.item_count == len(all_items)
+    assert export.item_count >= 4
     assert export.schema_version == 1
     assert export.payload_sha256 == svc.payload_sha256(export.payload)
 
@@ -281,7 +296,9 @@ async def test_export_payload_contract(factory):
     assert row["stale"] is False
     assert "【文档背景" not in row["quote"]
     assert row["quote_sha256"]
-    assert export.needs_human_count == 4
+    # 固定清单 4 项均为 needs_human；清单外新增条款项默认 pending，
+    # 由下面 _decide_all 统一决策，因此这里按实际项数断言（>= 4）
+    assert export.needs_human_count >= 4
     assert export.unidentified_count == 1, "exception 项应为 unidentified"
     assert payload["coverage"]["needs_human_items"]
 
