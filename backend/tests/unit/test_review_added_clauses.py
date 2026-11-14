@@ -71,6 +71,7 @@ def test_limit_caps_items() -> None:
     ]
     assert len(detect_added_clauses(BASE, revised, limit=3)) == 3
 
+
 # ── 真实链路补充：小文档常被切成 1 个 chunk，整篇文本落在一个 Clause 里 ──
 # 此时按「条号交集」判定会把整块都当成"修改"而漏掉新增条款，
 # 必须能下沉到行级（第X条）比较。
