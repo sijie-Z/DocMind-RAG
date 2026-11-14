@@ -88,6 +88,8 @@ class DocumentParser:
             ".txt": self._parse_txt,
             ".md": self._parse_txt,
             ".csv": self._parse_txt,
+            ".html": self._parse_html,
+            ".htm": self._parse_html,
             # 位图走 OCR（rapidocr-onnxruntime）；GIF 仅识别首帧（动图逐帧
             # 不在当前范围，帧数在元数据留痕 ocr_gif_frames_total）
             ".png": self._parse_image,
@@ -620,6 +622,55 @@ class DocumentParser:
             "ocr_images": len(blobs),
             "ocr_images_with_text": len(blocks),
             "ocr_avg_score": round(sum(scores) / len(scores), 4) if scores else None,
+        }
+
+    async def _parse_html(self, file_path: str) -> dict[str, Any]:
+        """HTML 解析：抽正文，丢弃脚本/样式/导航/页脚等噪音。
+
+        为什么需要：用户真实语料里有数百个 .html（博客、Confluence 导出、网页存档），
+        以前上传直接 400「不支持的文件格式」，这类资料完全进不了知识库。
+        优先级：`<article>` > `<main>` > `<body>`，避免把侧边栏/评论一起收进来。
+        """
+
+        def _extract() -> tuple[str, str]:
+            from bs4 import BeautifulSoup
+
+            raw = Path(file_path).read_text(encoding="utf-8", errors="ignore")
+            soup = BeautifulSoup(raw, "lxml")
+            title = soup.title.get_text(strip=True) if soup.title else ""
+            for tag in soup(
+                ["script", "style", "noscript", "nav", "footer", "header", "aside", "form", "svg"]
+            ):
+                tag.decompose()
+            root = soup.find("article") or soup.find("main") or soup.body or soup
+            text = root.get_text("\n", strip=True)
+            return title, text
+
+        try:
+            title, text = await asyncio.to_thread(_extract)
+        except ImportError as e:  # 依赖缺失要说清楚，而不是笼统失败
+            raise Exception("HTML解析失败：缺少 beautifulsoup4/lxml 依赖") from e
+        except Exception as e:
+            logger.error(f"HTML 解析失败: {e}")
+            raise Exception(f"HTML解析失败: {e}") from e
+
+        text = re.sub(r"\n{3,}", "\n\n", text).strip()
+        if len(text) < 20:
+            raise Exception(
+                "HTML解析失败：未提取到有效正文（页面可能是纯脚本渲染的空壳，"
+                "或正文全部在 iframe 中）"
+            )
+
+        metadata: dict[str, Any] = {
+            "title": title,
+            "parser": "beautifulsoup4+lxml",
+            "content_length": len(text),
+        }
+        return {
+            "content": text,
+            "content_length": len(text),
+            "metadata": metadata,
+            "chunks": await self._create_contextual_chunks(text),
         }
 
     async def _parse_image(self, file_path: str) -> dict[str, Any]:
