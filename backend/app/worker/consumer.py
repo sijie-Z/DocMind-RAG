@@ -3,6 +3,7 @@ import json
 import logging
 import os
 import sys
+import time
 
 # 确保 backend 目录在 path 中，以便能导入 app 模块
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
@@ -251,12 +252,56 @@ async def consume():
             logger.error(f"Error stopping consumer: {e}")
 
 
-if __name__ == "__main__":
-    try:
-        # Windows 上 asyncio 的 loop policy 问题
-        if sys.platform == "win32":
-            asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+MAX_CONSECUTIVE_HALTS = 5
+HALT_BACKOFF_SECONDS = 3
 
-        asyncio.run(consume())
+
+def supervise(
+    runner,
+    *,
+    max_halts: int = MAX_CONSECUTIVE_HALTS,
+    backoff: float = HALT_BACKOFF_SECONDS,
+    sleep=time.sleep,
+) -> int:
+    """在进程内重投，直到成功或连续失败超预算。
+
+    背景（2026-11-14 实测）：单个坏文档触发 ``RedeliveryHalt`` → 进程退出，
+    原设计假设容器会重启它。没有 supervisor 时（本地、裸进程、崩溃重启被关掉的部署），
+    一份解析失败的文件就会让**该租户所有后续文档永久停在 PENDING**，
+    用户侧只看到一直转圈。实测需手动重启 3 次队列才越过那一个坏文件。
+
+    这里保留位点语义（失败仍不提交偏移），只是把"靠外部重启"变成"进程内重投"：
+    每条消息的重试预算仍由 ``MAX_DELIVERY_ATTEMPTS`` 记账，耗尽后死信跳过，
+    因此连续 halt 次数有天然上限；再加 ``max_halts`` 兜底防止无限循环。
+    """
+    halts = 0
+    while True:
+        try:
+            runner()
+            return 0
+        except RedeliveryHalt as e:
+            halts += 1
+            if halts > max_halts:
+                logger.error(
+                    "[CONSUMER] 连续 %d 次文档处理失败，放弃重投并退出（需人工介入）: %s", halts, e
+                )
+                return 1
+            logger.warning(
+                "[CONSUMER] 文档处理失败，%.0fs 后重投（连续第 %d 次，上限 %d）: %s",
+                backoff,
+                halts,
+                max_halts,
+                e,
+            )
+            sleep(backoff)
+
+
+if __name__ == "__main__":
+    if sys.platform == "win32":
+        # Windows 上 asyncio 的 loop policy 问题
+        asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+
+    try:
+        sys.exit(supervise(lambda: asyncio.run(consume())))
     except KeyboardInterrupt:
         logger.info("Consumer stopped manually")
