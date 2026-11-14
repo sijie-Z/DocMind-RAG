@@ -54,3 +54,37 @@ def test_all_identified_and_no_changes_allows_clean_claim() -> None:
     summary = summarize_items(identified)
     assert summary["has_undetermined"] is False
     assert summary["changed_count"] == 1
+
+
+def _item_with_facts(key: str, change_type: str | None, facts: dict | None) -> ReviewItem:
+    return ReviewItem(
+        id=key, case_id="c1", item_key=key, ordinal=1, change_type=change_type, facts=facts
+    )
+
+
+def test_summary_lists_reasons_for_undetermined_items() -> None:
+    """「如实呈现」要带原因：审核人得知道为什么判不了。"""
+    facts = {
+        "base": {"status": "ambiguous", "reason": "unit_unclear"},
+        "revised": {"status": "not_found"},
+    }
+    items = [
+        _item_with_facts("payment_term", "unidentified", facts),
+        _item_with_facts("confidentiality", None, None),
+        _item_with_facts("exception", "modified", {"base": {"status": "identified"}}),
+    ]
+
+    summary = summarize_items(items)
+
+    reasons = {entry["item_key"]: entry for entry in summary["undetermined_items"]}
+    assert set(reasons) == {"payment_term", "confidentiality"}
+    assert reasons["payment_term"]["reasons"] == [
+        "base:ambiguous:unit_unclear",
+        "revised:not_found",
+    ]
+    assert reasons["confidentiality"]["reasons"] == ["not_analyzed"]
+
+
+def test_summary_undetermined_items_empty_when_all_identified() -> None:
+    items = [_item_with_facts("exception", "modified", {"base": {"status": "identified"}})]
+    assert summarize_items(items)["undetermined_items"] == []

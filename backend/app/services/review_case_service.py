@@ -893,6 +893,7 @@ def summarize_items(items: list[ReviewItem]) -> dict[str, Any]:
     界面/导出**不得**把案件呈现成"没有差异"——那正是把不确定说成没问题。
     """
     changed = added = removed = unidentified = undetermined = 0
+    undetermined_items: list[dict[str, Any]] = []
     for item in items:
         change_type = item.change_type
         if change_type is None:
@@ -908,6 +909,15 @@ def summarize_items(items: list[ReviewItem]) -> dict[str, Any]:
         else:
             # 未知取值按"未判定"处理，宁可保守也不当成无变化
             undetermined += 1
+
+        if change_type is None or change_type == "unidentified":
+            undetermined_items.append(
+                {
+                    "item_key": item.item_key,
+                    "change_type": change_type,
+                    "reasons": _undetermined_reasons(item.facts if change_type else None),
+                }
+            )
     return {
         "item_count": len(items),
         "changed_count": changed,
@@ -916,7 +926,26 @@ def summarize_items(items: list[ReviewItem]) -> dict[str, Any]:
         "unidentified_count": unidentified,
         "undetermined_count": undetermined,
         "has_undetermined": (unidentified + undetermined) > 0,
+        # 带原因：审核人要知道"为什么判不了"，而不是只看到一个数字
+        "undetermined_items": undetermined_items,
     }
+
+
+def _undetermined_reasons(facts: Any) -> list[str]:
+    """从 facts 里提炼"为什么判不了"：`{side}:{status}` 或 `{side}:{status}:{reason}`。"""
+    if not isinstance(facts, dict):
+        return ["not_analyzed"]
+    reasons: list[str] = []
+    for side in ("policy", "base", "revised"):
+        entry = facts.get(side)
+        if not isinstance(entry, dict):
+            continue
+        status = entry.get("status")
+        if not status:
+            continue
+        reason = entry.get("reason")
+        reasons.append(f"{side}:{status}:{reason}" if reason else f"{side}:{status}")
+    return reasons or ["no_reason_recorded"]
 
 
 async def case_detail(session: AsyncSession, case: ReviewCase) -> dict[str, Any]:
