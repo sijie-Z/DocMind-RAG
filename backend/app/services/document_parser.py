@@ -219,6 +219,50 @@ class DocumentParser:
 
         return result
 
+    # 扫描件 PDF 兜底：pypdfium2 渲染当前页 → RapidOCR 识别。
+    _PDF_OCR_DPI = 200
+    _PDF_OCR_MAX_PAGES = 30
+    """最多 OCR 的页数：扫描合同/制度通常 ≤ 30 页；超出部分跳过并在 metadata 留痕，
+    避免整本影印件把单篇解析拖到分钟级。"""
+
+    async def _ocr_pdf_page(self, file_path: str, page_num: int) -> str:
+        """渲染 PDF 指定页并 OCR，返回识别文本；失败或超限返回空串（不抛异常）。
+
+        刻意不抛：单页 OCR 失败不应让整篇 PDF 解析崩掉 —— 其它页仍可能拿到文字。
+        """
+        if page_num > self._PDF_OCR_MAX_PAGES:
+            logger.info(f"📄 页面 {page_num} 超出 OCR 页数上限，跳过")
+            return ""
+        try:
+            import pypdfium2 as pdfium
+
+            engine = _get_ocr_engine()
+
+            def _render_and_ocr() -> str:
+                pdf = pdfium.PdfDocument(file_path)
+                try:
+                    page = pdf[page_num - 1]
+                    bitmap = page.render(scale=self._PDF_OCR_DPI / 72)
+                    pil_img = bitmap.to_pil()
+                finally:
+                    with contextlib.suppress(Exception):
+                        pdf.close()
+
+                # 与图片上传同一降采样上限，避免超大页面把内存吃满
+                long_side = max(pil_img.size)
+                if long_side > _OCR_MAX_IMAGE_SIDE:
+                    ratio = _OCR_MAX_IMAGE_SIDE / long_side
+                    pil_img = pil_img.resize(
+                        (max(1, int(pil_img.width * ratio)), max(1, int(pil_img.height * ratio)))
+                    )
+                ocr_result, _elapse = engine(pil_img)
+                return "\n".join(self._order_ocr_lines(ocr_result)) if ocr_result else ""
+
+            return await asyncio.to_thread(_render_and_ocr)
+        except Exception as e:
+            logger.warning(f"页面 {page_num} OCR 失败: {e}")
+            return ""
+
     async def _parse_pdf(self, file_path: str) -> dict[str, Any]:
         """
         高级 PDF 解析 - 支持文本提取、表格识别与 OCR 兜底
@@ -237,26 +281,16 @@ class DocumentParser:
                     page_text: str = str(extracted_text) if extracted_text else ""
 
                     # 2. 如果文本太少，尝试 OCR (扫描件识别)
+                    #    渲染用 pypdfium2（纯 wheel，无 poppler 依赖），识别用
+                    #    项目既有的 RapidOCR —— 与图片上传/DOCX 内嵌图同一条链路。
+                    #    旧分支依赖 pytesseract + pdf2image，两者在生产环境都未安装，
+                    #    等于扫描件 PDF 永远拿不到文字（实测 2026-11-14）。
                     if len(page_text.strip()) < 50:
-                        try:
-                            import pytesseract
-                            from pdf2image import convert_from_path
-
-                            logger.info(f"📄 页面 {page_num} 文本过少，启动 OCR...")
-                            # 仅转换当前页
-                            images = convert_from_path(
-                                file_path, first_page=page_num, last_page=page_num, dpi=200
-                            )
-                            if images:
-                                ocr_text = pytesseract.image_to_string(
-                                    images[0], lang=getattr(settings, "OCR_LANGUAGE", "chi_sim+eng")
-                                )
-                                if ocr_text.strip():
-                                    page_text = ocr_text
-                                    metadata["ocr_used"] = True
-                                    logger.info(f"✅ OCR 识别成功，长度: {len(page_text)}")
-                        except Exception as ocr_err:
-                            logger.warning(f"OCR 失败: {ocr_err}")
+                        ocr_text = await self._ocr_pdf_page(file_path, page_num)
+                        if ocr_text.strip():
+                            page_text = ocr_text
+                            metadata["ocr_used"] = True
+                            logger.info(f"✅ 页面 {page_num} OCR 识别成功，长度: {len(page_text)}")
 
                     # 3. 提取表格并转换为 Markdown
                     tables = page.extract_tables()
