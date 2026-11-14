@@ -29,6 +29,7 @@ import hashlib
 import re
 import unicodedata
 from dataclasses import dataclass
+from difflib import SequenceMatcher
 from typing import Any
 from uuid import uuid4
 
@@ -1795,6 +1796,15 @@ ADDED_MAX_ITEMS = 10
 """每次分析最多补充的新增条款数：清单外条款无上限会让核验单失控。"""
 
 
+ADDED_SIMILARITY_THRESHOLD = 0.75
+"""与 base 某行相似度达到该值即视为「对既有条款的修改」，不再报为新增。
+
+为什么需要：真实 markdown 类文档没有「第N条」编号，clause_no 为空，行级比较失去
+条号依据；此时凡是文本有差异的行都会被误报为新增（实测：只改了一个数字，却多出
+3 条假新增）。用相似度兜底把「改了几个字」和「真的多了一段」区分开。
+"""
+
+
 def _split_clause_segments(clause: Clause) -> list[Clause]:
     """把块级 Clause 拆成行级片段（按「第X条」逐条比较）。
 
@@ -1842,6 +1852,16 @@ def detect_added_clauses(
     base_segments = [seg for clause in base for seg in _split_clause_segments(clause)]
     base_norms = {normalize_clause_text(seg.text) for seg in base_segments}
     base_numbers = {number for seg in base_segments for number in seg.clause_no}
+    base_norm_list = sorted(base_norms)
+
+    def _is_variant_of_existing(norm: str) -> bool:
+        """与 base 某行高度相似 → 属于修改，不是新增。"""
+        for candidate in base_norm_list:
+            if abs(len(candidate) - len(norm)) > max(len(norm), 24):
+                continue
+            if SequenceMatcher(None, norm, candidate).ratio() >= ADDED_SIMILARITY_THRESHOLD:
+                return True
+        return False
 
     revised_segments = [seg for clause in revised for seg in _split_clause_segments(clause)]
     out: list[Clause] = []
@@ -1851,6 +1871,8 @@ def detect_added_clauses(
         if len(norm) < ADDED_MIN_CHARS or norm in base_norms or norm in seen:
             continue
         if set(segment.clause_no) & base_numbers:
+            continue
+        if _is_variant_of_existing(norm):
             continue
         seen.add(norm)
         out.append(segment)
