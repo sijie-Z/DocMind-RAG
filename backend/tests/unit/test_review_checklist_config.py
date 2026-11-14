@@ -36,7 +36,9 @@ def test_extra_items_are_appended_from_config(monkeypatch: pytest.MonkeyPatch) -
 
 
 def test_invalid_key_is_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("REVIEW_CHECKLIST_JSON", json.dumps([{"key": "Bad-Key!", "keywords": ["x"]}]))
+    monkeypatch.setenv(
+        "REVIEW_CHECKLIST_JSON", json.dumps([{"key": "Bad-Key!", "keywords": ["x"]}])
+    )
     with pytest.raises(ValueError):
         load_checklist()
 
