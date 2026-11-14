@@ -70,7 +70,9 @@ def _parse_extras(raw: str) -> list[ChecklistItem]:
             raise ValueError(f"{ENV_VAR} 的每一项都必须是对象，收到 {type(entry).__name__}")
         key = str(entry.get("key") or "").strip()
         if not KEY_PATTERN.match(key):
-            raise ValueError(f"{ENV_VAR} 中存在非法清单项 key: {key!r}（需匹配 {KEY_PATTERN.pattern}）")
+            raise ValueError(
+                f"{ENV_VAR} 中存在非法清单项 key: {key!r}（需匹配 {KEY_PATTERN.pattern}）"
+            )
         raw_keywords = entry.get("keywords") or []
         if not isinstance(raw_keywords, list) or not raw_keywords:
             raise ValueError(f"{ENV_VAR} 中 {key!r} 的 keywords 必须是非空数组")
