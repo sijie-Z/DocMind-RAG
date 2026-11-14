@@ -102,3 +102,36 @@ def test_detects_added_clause_even_when_whole_doc_is_one_chunk() -> None:
     texts = [c.text for c in added]
     assert len(added) == 1, f"期望 1 条新增，实际 {texts}"
     assert "违约金" in texts[0]
+
+
+# ── 真实文档（无「第N条」编号）场景：不能把"改了数字"误报成"新增条款" ──
+# 实测（2026-11-15）：markdown 类文档没有条款编号，clause_no 为空，
+# 行级比较失去条号依据，凡是文本有差异的行都会被当成新增（真实跑出 3 条假新增，
+# 而实际只加了 1 条、改了 1 处数字）。
+
+
+def _anon_clause(idx: int, text: str) -> Clause:
+    return Clause(
+        chunk_id=f"a{idx}", chunk_index=idx, text=text, raw_text=text, clause_no=[], section_no=[]
+    )
+
+
+def test_number_change_is_not_an_added_clause() -> None:
+    base = [_anon_clause(1, "产品定位：面向中小企业，强调性价比与交付速度。")]
+    revised = [_anon_clause(1, "产品定位：面向大型企业，强调性价比与交付速度。")]
+
+    assert detect_added_clauses(base, revised) == []
+
+
+def test_genuinely_new_paragraph_in_unnumbered_doc_is_added() -> None:
+    base = [_anon_clause(1, "产品定位：面向中小企业，强调性价比与交付速度。")]
+    revised = [
+        _anon_clause(1, "产品定位：面向中小企业，强调性价比与交付速度。"),
+        _anon_clause(
+            2, "违约责任：逾期交付按日万分之五计收违约金，最高不超过合同总额的百分之二十。"
+        ),
+    ]
+
+    added = detect_added_clauses(base, revised)
+    assert len(added) == 1
+    assert "违约金" in added[0].text
