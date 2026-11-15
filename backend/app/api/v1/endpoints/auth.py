@@ -30,8 +30,8 @@ from app.models.user import User
 from app.models.user_audit import UserLoginSession
 from app.schemas.auth import ChangePasswordRequest, UpdateProfileRequest
 from app.services.audit_service import audit_service
-from app.services.permission_service import permission_service
 from app.services.auth_service import _auth_failed, auth_service
+from app.services.permission_service import permission_service
 
 logger = logging.getLogger(__name__)
 
@@ -301,6 +301,11 @@ async def login_json(
             # 与 form 登录、/users/me 同一 admin 判定契约
             "is_superuser": bool(getattr(user, "is_superuser", False)),
             "is_org_admin": await is_org_admin(db, user, user.organization_id),
+            # 前端实际登录路径（loginWithJson）：与 form 登录、/users/me 同源下发
+            # 权限集——漏发会让整页会话内 can() 恒为未知（显隐降级恒可见）
+            "permissions": sorted(
+                await permission_service.get_user_permissions(db, user, user.organization_id)
+            ),
             "preferences": getattr(user, "preferences", None),
         }
         # 与 form 登录一致：只验证 user_info 可 JSON 序列化（响应体防御），

@@ -179,6 +179,8 @@ export const useUserStore = defineStore('user', () => {
         ...(typeof targetIsOrgAdmin === 'boolean'
           ? { is_org_admin: targetIsOrgAdmin }
           : {}),
+        // 权限是 per-org 的：随切换即时更新（否则显隐按旧组织判断，双向错）
+        ...(Array.isArray(payload.permissions) ? { permissions: payload.permissions } : {}),
       }
     }
     organizationVersion.value += 1
