@@ -1,4 +1,64 @@
 export default {
+  about: {
+    tagline: 'ドキュメント質問回答と契約検証プラットフォーム',
+    systemInfo: 'システム情報',
+    labels: {
+      product: '製品',
+      architecture: 'アーキテクチャ',
+      backend: 'バックエンド',
+      frontend: 'フロントエンド',
+      aiEngine: 'AI エンジン',
+      agentSystem: 'Agent システム',
+      security: 'セキュリティ',
+    },
+    values: {
+      product: 'DocMind — ドキュメント質問回答と契約検証プラットフォーム',
+      architecture: 'RAG（検索拡張生成）+ Agent による自律推論',
+      backend: 'FastAPI + SQLAlchemy(非同期) + MySQL 8 + Redis + Elasticsearch 8 + Kafka + MinIO',
+      frontend: 'Vue 3 + TypeScript + Vite + Naive UI + Pinia',
+      aiEngine: 'DeepSeek API + OpenAI 互換 Embedding + LangChain',
+      agentSystem: 'PER 3 フェーズ（計画→実行→振り返り）+ ツールレジストリ + コンテキストエンジン + スキル学習',
+      security: 'JWT + RBAC + 組織レベルのマルチテナント分離',
+    },
+    highlights: {
+      hybridSearch: {
+        title: 'ハイブリッド検索',
+        desc: 'BM25 キーワード検索とベクトル意味検索を組み合わせ、 reciprocal rank fusion (RRF) で再現率を最大化します。',
+      },
+      agentArchitecture: {
+        title: 'Agent アーキテクチャ',
+        desc: '自社開発の PER 3 フェーズ構成（Plan-Execute-Reflect）。Planner がタスクを DAG に分解し、Executor がツールを調整し、Reflector が検証・修正します。',
+      },
+      semanticCache: {
+        title: 'セマンティックキャッシュ',
+        desc: 'Embedding による回答キャッシュで、類似質問の重複 LLM 呼び出しを排除し、レイテンシとコストを削減します。',
+      },
+      circuitBreaker: {
+        title: 'サーキットブレーカー',
+        desc: '外部サービス（LLM・ES・DB）の障害保護。自動で縮退し、連鎖障害を防ぎます。',
+      },
+      multiTenantRbac: {
+        title: 'マルチテナント RBAC',
+        desc: '組織レベルのデータ分離とロールベースのアクセス制御で、きめ細かな権限管理を実現します。',
+      },
+      realtimeStreaming: {
+        title: 'リアルタイムストリーミング',
+        desc: 'WebSocket + SSE のデュアルモードでストリーミング応答と通知のリアルタイム配信を提供します。',
+      },
+    },
+    highlightsTitle: 'アーキテクチャの特長',
+    dataFlowTitle: 'データフロー',
+    flow: {
+      upload: 'アップロード',
+      parseChunk: '解析・分割',
+      embed: 'ベクトル化',
+      userQuestion: 'ユーザーの質問',
+      hybridSearch: 'ハイブリッド検索',
+      rerank: 'リランキング',
+      streamAnswer: 'ストリーミング応答',
+    },
+    footer: 'FastAPI + Vue 3 + Elasticsearch + DeepSeek LLM で構築',
+  },
   app: {
     documentTitle: 'DocMind - ドキュメントQ&Aと契約レビュー',
     metaDescription: 'ドキュメントQ&Aと契約レビュー：回答は出典付き、契約差分は条項ごとに証拠付き。',
