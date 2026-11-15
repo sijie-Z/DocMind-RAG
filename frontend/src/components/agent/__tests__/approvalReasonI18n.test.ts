@@ -18,7 +18,7 @@ import en from '@/locales/en'
 
 const i18n = createI18n({ legacy: false, locale: 'zh', fallbackLocale: 'en', messages: { zh, en } })
 
-function mountCard(props: Record<string, unknown>, locale: 'zh' | 'en' = 'zh') {
+function mountCard(props: Record<string, any>, locale: 'zh' | 'en' = 'zh') {
   const i = createI18n({ legacy: false, locale, fallbackLocale: 'en', messages: { zh, en } })
   return mount(ApprovalCard, { props, global: { plugins: [i] } })
 }
