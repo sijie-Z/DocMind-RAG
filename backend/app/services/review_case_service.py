@@ -892,7 +892,7 @@ def summarize_items(items: list[ReviewItem]) -> dict[str, Any]:
     `has_undetermined` 为 True 时（存在 unidentified 或尚未分析项），
     界面/导出**不得**把案件呈现成"没有差异"——那正是把不确定说成没问题。
     """
-    changed = added = removed = unidentified = undetermined = 0
+    changed = added = removed = unidentified = undetermined = unchanged = 0
     undetermined_items: list[dict[str, Any]] = []
     for item in items:
         change_type = item.change_type
@@ -906,6 +906,11 @@ def summarize_items(items: list[ReviewItem]) -> dict[str, Any]:
             removed += 1
         elif change_type == "unidentified":
             unidentified += 1
+        elif change_type == "unchanged":
+            # 「明确比过、没有差异」是判定结果，**不是**无法判定。
+            # 漏掉这一支会让"已判清楚"的案件被算成 undetermined，
+            # 界面于是对干净案件显示「需人工复核 / N 项无法判定」（逆向误报）。
+            unchanged += 1
         else:
             # 未知取值按"未判定"处理，宁可保守也不当成无变化
             undetermined += 1
@@ -923,6 +928,7 @@ def summarize_items(items: list[ReviewItem]) -> dict[str, Any]:
         "changed_count": changed,
         "added_count": added,
         "removed_count": removed,
+        "unchanged_count": unchanged,
         "unidentified_count": unidentified,
         "undetermined_count": undetermined,
         "has_undetermined": (unidentified + undetermined) > 0,
