@@ -9,6 +9,7 @@ import asyncio
 import logging
 import os
 import socket
+import time
 import uuid
 from collections.abc import Callable
 from contextlib import suppress
@@ -54,15 +55,46 @@ _LOCK_HEARTBEAT_INTERVAL_SECONDS = max(30, _LOCK_TTL_SECONDS // 3)
 # worker 存活键 TTL：2.5 × 心跳 —— 连续错过 2 次续期才判定持有者已死。
 _ALIVE_TTL_SECONDS = int(_LOCK_HEARTBEAT_INTERVAL_SECONDS * 2.5)
 
+# 锁的**绝对最长持有时间**（lease 上限）。
+#
+# 为什么需要：死锁可以由同伴接管（存活键消失），但「活着却卡死」的持有者会一直续期 ——
+# 存活键有效、TTL 也不过期，于是消费端的 DEFERRED 永无终点，整个分区头阻塞且没有尽头
+# （issue #708）。有绝对上限后：到点续期失败 → 持有者在下一个 checkpoint 中止（不再写
+# chunk/ES），同伴可立即 CAS 接管，分区继续推进。
+_LOCK_MAX_HOLD_SECONDS = 1800
+
+
+def _now_ms() -> int:
+    """当前 epoch 毫秒（lease 计算用；与 Redis TTL 同一时钟语义）。"""
+    return int(time.time() * 1000)
+
 
 def _worker_alive_key(worker_id: str | None = None) -> str:
     """worker 存活键：锁的同伴用它判断持有者是否还活着。"""
     return f"worker:{worker_id or _WORKER_ID}:alive"
 
 
-def _lock_value(token: str, worker_id: str | None = None) -> str:
-    """锁值 = `<worker_id>|<token>`：token 保证只续/只删自己的锁，worker_id 供同伴判活。"""
-    return f"{worker_id or _WORKER_ID}|{token}"
+def _lock_value(token: str, worker_id: str | None = None, deadline_ms: int | None = None) -> str:
+    """锁值 = `<worker_id>|<token>|<deadline_ms>`。
+
+    - token：只续/只删自己的锁；
+    - worker_id：同伴据此判断持有者是否存活；
+    - deadline_ms：lease 绝对上限，过期即可被接管（无论持有者是否存活）。
+    """
+    stamp = "" if deadline_ms is None else str(deadline_ms)
+    return f"{worker_id or _WORKER_ID}|{token}|{stamp}"
+
+
+def _parse_lock_value(value: str) -> tuple[str, str, int | None]:
+    """解析锁值，兼容旧的两段式（`worker|token`，无 deadline）。"""
+    parts = str(value).split("|")
+    holder = parts[0] if parts else ""
+    token = parts[1] if len(parts) > 1 else ""
+    deadline: int | None = None
+    if len(parts) > 2 and parts[2].strip():
+        with suppress(ValueError):
+            deadline = int(parts[2])
+    return holder, token, deadline
 
 
 # 只续/只删**自己**的锁：值必须等于本 run 的 token。
@@ -153,18 +185,21 @@ class DocumentProcessor:
         self.parser = document_service
         # document_id -> 本次处理 run 的锁 token（续期/释放时校验归属）
         self._lock_tokens: dict[str, str] = {}
+        # document_id -> lease 绝对上限（epoch ms）：到点必须停手
+        self._lock_deadlines: dict[str, int] = {}
         # 心跳续期发现锁已被接管的 document_id 集合：阶段边界据此中止本 run
         self._lock_lost: set[str] = set()
 
     async def _acquire_processing_lock(self, document_id: str) -> bool | None:
-        """Redis SETNX 并发锁（值 = `<worker_id>|<token>`）。
+        """Redis SETNX 并发锁（值 = `<worker_id>|<token>|<deadline_ms>`）。
 
-        抢不到锁时不直接放弃：先看**持有者是否还活着**（存活键）。持有者已死
-        （进程被 kill / 崩溃）就地接管，避免整个分区被一条死锁头阻塞到 TTL 到期。
+        抢不到锁时按序判断能否接管（都是为了不让一条消息把整个分区堵死）：
+        1. 持有者 **lease 已过期** → 接管（即便它还"活着"：活着但卡死同样必须让路，issue #708）；
+        2. 持有者 worker 的**存活键不存在**（进程已死）→ 接管。
 
         Returns:
-            True  — 拿到锁（含接管死锁；处理完成后需释放）；
-            False — 同一文档有**活着的**处理者在跑，本次**不得**当成功提交；
+            True  — 拿到锁（含接管；处理完成后需释放）；
+            False — 同一文档有**活着的、lease 未过期**的处理者在跑，本次**不得**当成功提交；
             None  — Redis 不可用，降级为不加锁直接处理（与现有容错风格一致）。
         """
         from app.core.redis import get_redis
@@ -177,19 +212,20 @@ class DocumentProcessor:
 
         key = f"doc:{document_id}:processing"
         token = uuid.uuid4().hex
-        value = _lock_value(token)
+        deadline_ms = _now_ms() + _LOCK_MAX_HOLD_SECONDS * 1000
+        value = _lock_value(token, deadline_ms=deadline_ms)
         try:
             acquired = await client.set(key, value, nx=True, ex=_LOCK_TTL_SECONDS)
             if acquired:
-                self._lock_tokens[document_id] = token
+                self._remember_lock(document_id, token, deadline_ms)
                 await self._mark_worker_alive(client)
                 return True
 
             holder = await client.get(key)
-            if holder and await self._takeover_if_holder_dead(
+            if holder and await self._takeover_if_possible(
                 client, key, str(holder), value, document_id
             ):
-                self._lock_tokens[document_id] = token
+                self._remember_lock(document_id, token, deadline_ms)
                 await self._mark_worker_alive(client)
                 return True
             return False
@@ -197,25 +233,33 @@ class DocumentProcessor:
             logger.warning("[DOC_PROC] Redis lock error, processing without lock: %s", e)
             return None
 
+    def _remember_lock(self, document_id: str, token: str, deadline_ms: int) -> None:
+        self._lock_tokens[document_id] = token
+        self._lock_deadlines[document_id] = deadline_ms
+
     async def _mark_worker_alive(self, client) -> None:
         """刷新本 worker 的存活键（锁的同伴据此判断持有者是否还活着）。"""
         with suppress(Exception):
             await client.set(_worker_alive_key(), "1", ex=_ALIVE_TTL_SECONDS)
 
-    async def _takeover_if_holder_dead(
+    async def _takeover_if_possible(
         self, client, key: str, holder_value: str, new_value: str, document_id: str
     ) -> bool:
-        """持有者 worker 的存活键不存在 → CAS 接管；存活键在 / 不确定 → 不抢。"""
-        holder_worker = holder_value.split("|", 1)[0]
+        """lease 过期 或 持有者已死 → CAS 接管；否则不抢。"""
+        holder_worker, _token, deadline_ms = _parse_lock_value(holder_value)
         if not holder_worker or holder_worker == _WORKER_ID:
             # 自己（或无法识别的旧格式值）持有的锁交给 TTL，不做接管
             return False
-        try:
-            alive = await client.exists(_worker_alive_key(holder_worker))
-        except Exception:
-            return False  # 无法确认存活 → 保守不抢
-        if alive:
-            return False
+
+        lease_expired = deadline_ms is not None and deadline_ms < _now_ms()
+        if not lease_expired:
+            try:
+                alive = await client.exists(_worker_alive_key(holder_worker))
+            except Exception:
+                return False  # 无法确认存活 → 保守不抢
+            if alive:
+                return False
+
         stolen = await client.eval(
             _LOCK_STEAL_SCRIPT,
             1,
@@ -226,16 +270,29 @@ class DocumentProcessor:
         )
         if stolen:
             logger.warning(
-                "[DOC_PROC] took over stale lock document_id=%s from dead worker=%s",
+                "[DOC_PROC] took over lock document_id=%s holder=%s reason=%s",
                 document_id,
                 holder_worker,
+                "lease_expired" if lease_expired else "holder_dead",
             )
         return bool(stolen)
 
     async def _renew_processing_lock(self, document_id: str) -> bool:
-        """按 TTL 心跳续期（同时刷新 worker 存活键）；token 不匹配返回 False 并留痕。"""
+        """按 TTL 心跳续期（同时刷新 worker 存活键）；token 不匹配或 lease 到顶返回 False。"""
         token = self._lock_tokens.get(document_id)
         if not token:
+            return False
+        deadline_ms = self._lock_deadlines.get(document_id)
+        if deadline_ms is not None and _now_ms() + _LOCK_TTL_SECONDS * 1000 > deadline_ms:
+            # lease 绝对上限到了：不再续期，标记锁已丢 → 下一个 checkpoint 中止本 run，
+            # 让同伴（或本 worker 的下一次投递）接管，避免"活着但卡死"无限阻塞分区（#708）。
+            self._lock_lost.add(document_id)
+            logger.error(
+                "[DOC_PROC] lease limit reached document_id=%s (max hold=%ss): "
+                "stop renewing, abort at next checkpoint",
+                document_id,
+                _LOCK_MAX_HOLD_SECONDS,
+            )
             return False
         try:
             from app.core.redis import get_redis
@@ -245,7 +302,7 @@ class DocumentProcessor:
                 _LOCK_RENEW_SCRIPT,
                 1,
                 f"doc:{document_id}:processing",
-                _lock_value(token),
+                _lock_value(token, deadline_ms=deadline_ms),
                 str(_LOCK_TTL_SECONDS),
             )
             await self._mark_worker_alive(client)
@@ -278,6 +335,7 @@ class DocumentProcessor:
     async def _release_processing_lock(self, document_id: str) -> None:
         """释放并发锁（token 匹配才删）；释放失败时由 TTL 兜底过期。"""
         token = self._lock_tokens.pop(document_id, None)
+        deadline_ms = self._lock_deadlines.pop(document_id, None)
         try:
             from app.core.redis import get_redis
 
@@ -287,7 +345,7 @@ class DocumentProcessor:
                     _LOCK_RELEASE_SCRIPT,
                     1,
                     f"doc:{document_id}:processing",
-                    _lock_value(token),
+                    _lock_value(token, deadline_ms=deadline_ms),
                 )
             else:  # 兼容旧路径/测试替身：无 token 时按原语义删除键
                 await client.delete(f"doc:{document_id}:processing")

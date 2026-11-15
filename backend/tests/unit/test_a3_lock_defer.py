@@ -220,13 +220,16 @@ class TestLockHeartbeat:
         assert renewal, "续期必须走 compare-and-expire 脚本"
         # 锁值 = `<worker_id>|<token>`：既要带 token（只续自己的锁），也要带 worker 身份
         # （同伴据此判断持有者是否存活并可接管死锁）。
-        assert renewal[-1][3][1] == dp_mod._lock_value(token)
+        assert renewal[-1][3][1] == dp_mod._lock_value(
+            token, deadline_ms=processor._lock_deadlines["doc-1"]
+        )
         assert token in renewal[-1][3][1]
         assert str(dp_mod._LOCK_TTL_SECONDS) in renewal[-1][3]
 
+        deadlines_before_release = processor._lock_deadlines["doc-1"]
         await processor._release_processing_lock("doc-1")
         release = [c for c in fake.calls if c[0] == "eval"][-1]
-        assert release[3][1] == dp_mod._lock_value(token), (
+        assert release[3][1] == dp_mod._lock_value(token, deadline_ms=deadlines_before_release), (
             "释放也必须带完整锁值（worker 身份 + token），不得删掉别人续上的锁"
         )
 
@@ -522,3 +525,95 @@ class TestStaleLockTakeover:
         assert dp_mod._worker_alive_key() in fake.store
         await processor._renew_processing_lock("doc-hb")
         assert dp_mod._worker_alive_key() in fake.store
+
+
+class TestLeaseUpperBound:
+    """锁必须有绝对最长持有时间，否则「活着但卡死」的持有者能无限阻塞分区（#708）。"""
+
+    @pytest.mark.asyncio
+    async def test_lock_value_carries_absolute_deadline(self, monkeypatch):
+        import time as _time
+
+        import app.core.redis as redis_mod
+        import app.worker.doc_processor as dp_mod
+
+        fake = _DictRedis()
+
+        async def fake_get_redis():
+            return fake
+
+        monkeypatch.setattr(redis_mod, "get_redis", fake_get_redis)
+
+        before = _time.time() * 1000
+        processor = dp_mod.DocumentProcessor()
+        assert await processor._acquire_processing_lock("doc-lease") is True
+
+        value = fake.store["doc:doc-lease:processing"]
+        parts = value.split("|")
+        assert len(parts) == 3, f"锁值应为 worker|token|deadline_ms，实际 {value!r}"
+        deadline = int(parts[2])
+        assert deadline > before
+        assert deadline - before <= dp_mod._LOCK_MAX_HOLD_SECONDS * 1000 + 5000
+
+    @pytest.mark.asyncio
+    async def test_renew_refuses_past_absolute_deadline(self, monkeypatch):
+        import app.core.redis as redis_mod
+        import app.worker.doc_processor as dp_mod
+
+        fake = _DictRedis()
+
+        async def fake_get_redis():
+            return fake
+
+        monkeypatch.setattr(redis_mod, "get_redis", fake_get_redis)
+
+        processor = dp_mod.DocumentProcessor()
+        assert await processor._acquire_processing_lock("doc-cap") is True
+        # 把剩余租期压到不足一个 TTL：续期必须拒绝并标记锁已丢
+        processor._lock_deadlines["doc-cap"] = 1
+
+        assert await processor._renew_processing_lock("doc-cap") is False
+        assert "doc-cap" in processor._lock_lost
+
+    @pytest.mark.asyncio
+    async def test_takeover_when_lease_expired_even_if_holder_alive(self, monkeypatch):
+        import time as _time
+
+        import app.core.redis as redis_mod
+        import app.worker.doc_processor as dp_mod
+
+        past = str(int(_time.time() * 1000) - 1000)
+        key = "doc:doc-wedged:processing"
+        fake = _DictRedis(
+            {
+                key: f"wedged-worker|tok|{past}",
+                "worker:wedged-worker:alive": "1",  # 心跳还在续 → 存活键有效
+            }
+        )
+
+        async def fake_get_redis():
+            return fake
+
+        monkeypatch.setattr(redis_mod, "get_redis", fake_get_redis)
+
+        processor = dp_mod.DocumentProcessor()
+        assert await processor._acquire_processing_lock("doc-wedged") is True, (
+            "lease 已过期就必须能接管，否则分区被无限阻塞"
+        )
+
+    @pytest.mark.asyncio
+    async def test_legacy_two_field_lock_is_not_stolen_while_holder_alive(self, monkeypatch):
+        import app.core.redis as redis_mod
+        import app.worker.doc_processor as dp_mod
+
+        key = "doc:doc-legacy:processing"
+        fake = _DictRedis({key: "old-worker|tok", "worker:old-worker:alive": "1"})
+
+        async def fake_get_redis():
+            return fake
+
+        monkeypatch.setattr(redis_mod, "get_redis", fake_get_redis)
+
+        processor = dp_mod.DocumentProcessor()
+        assert await processor._acquire_processing_lock("doc-legacy") is False
+        assert fake.store[key] == "old-worker|tok"
