@@ -133,15 +133,41 @@ summary: {'item_count': 6, 'undetermined_count': 0, 'has_undetermined': True}
 合并计数；有未判定项时显示「需人工复核」+「N 项无法判定」，不再落到"待决策"。
 `has_undetermined=true` 时界面**不呈现为无差异**。
 
+### 更新（2026-11-16 凌晨）：导出呈现已核、两条"疑似缺陷"被证伪、锁加 lease 上限
+
+**① 导出呈现已核实**（守卫测试固定）：核验单**逐项**列出 `unchanged`（标签「无差异」），
+不静默省略；实测导出文本含「未识别」「需人工」，**不含**「无差异」误用。
+→ 原"导出如何呈现无法判定尚未验证"这条**已关闭**。
+
+**② `payment_term` 的 `unit_unclear` 不是缺陷**（原判断有误，此处更正）：
+
+```
+30日  -> status=ambiguous reason=unit_unclear candidate={value:30, unit:None, unit_raw:"日"}
+30天  -> identified unit=day
+30个工作日 -> identified unit=workday
+align(30日, 15日) = modified      ← 变更检测照常工作
+```
+
+- 「日」被刻意保持 `unit: None`，代码注释写明是**有意**的（不擅自断言"自然日 vs 工作日"，
+  避免掩盖歧义）；
+- 而且变更检测走的是 `candidates` 比对，**30日 → 15日 依然判 modified**，
+  不会因为 unit 不明就漏掉真实改动；
+- 只有"一侧识别不到"时才落 `unidentified`（`前后只有一侧有条款`），这是保守但正确的取舍。
+
+**③ worker 锁加绝对 lease 上限**（#708 / #709）：`_LOCK_MAX_HOLD_SECONDS = 1800`。
+死锁可由同伴接管（存活键消失），而「活着却卡死」的持有者此前会一直续期、把整个分区
+无限堵住；现在 lease 到顶即停止续期 → 在下一个 checkpoint 中止 → 同伴按
+`reason=lease_expired` 接管继续推进。
+
 ### 仍待解决
 
 - **通用关键词抽取器只能判 identified/not_found**，不做数值/单位对比；
   需要"改数字"级别的判定时仍得写专用抽取器（可用 `register_extractor` 注册）
 - **无编号文档的附加句可能漏检**：实测在 markdown 里追加一行"保密义务：……"，
   如果没有独立成段（被 chunker 并入相邻段落），行级比较看不到它 → 不产生 added 项
-- `payment_term` 在 base 侧出现 `unit_unclear / ambiguous`（V1 写"30日"未写单位语境），
-  这类"无法判定"已在 facts 里并经 `summary.undetermined_items` 暴露，但**导出文档**里
-  如何排版给审核人尚未验证
+- **`detect_added_clauses` 的排除粒度是 chunk 级**：某 chunk 里若既有清单项已识别的条款、
+  又有真正的新增条款，后者会被一并排除（单 chunk 小文档最容易命中）
+
 
 
 
