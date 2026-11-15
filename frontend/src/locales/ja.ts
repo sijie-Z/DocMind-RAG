@@ -1319,7 +1319,12 @@ export default {
       reject: '✕ 拒否',
       hint: '承認 = 今回の呼び出しのみ許可（同一タスク内で同じ呼び出しは再度確認しません）。拒否 = 呼び出しは実行されず、Agent は構造化された失敗を受け取って計画を調整します。',
       riskHigh: '高リスク',
-      riskMedium: '中リスク',
+      reasons: {
+        highRiskTool: '高リスクツール {tool}（リスク {risk}）は実行前に人の承認が必要です',
+        approvalModeAlways: '承認モード always：ツール {tool}（リスク {risk}）の呼び出しには手動確認が必要です',
+        terminalForced: 'ターミナルツールは承認が必要です（TERMINAL_REQUIRE_APPROVAL=true）',
+        hookAsk: 'セキュリティフックがこのツール呼び出しの人による承認を要求しています',
+      },      riskMedium: '中リスク',
       riskLow: '低リスク',
     },
     plan: {

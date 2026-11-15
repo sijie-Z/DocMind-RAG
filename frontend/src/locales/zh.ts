@@ -1393,7 +1393,12 @@ export default {
       reject: '✕ 拒绝',
       hint: '批准 = 放行这一次调用（相同调用本任务内不再打扰）；拒绝 = 该调用不执行，Agent 会收到结构化失败并调整策略。',
       riskHigh: '高风险',
-      riskMedium: '中风险',
+      reasons: {
+        highRiskTool: '高风险工具 {tool}（风险等级 {risk}）执行前需人工审批',
+        approvalModeAlways: '审批模式 always：调用工具 {tool}（风险 {risk}）需人工确认后执行',
+        terminalForced: '终端工具强制审批（TERMINAL_REQUIRE_APPROVAL=true）',
+        hookAsk: '安全钩子要求对本次工具调用进行人工审批',
+      },      riskMedium: '中风险',
       riskLow: '低风险',
     },
     plan: {

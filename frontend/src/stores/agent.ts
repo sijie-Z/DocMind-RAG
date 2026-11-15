@@ -298,6 +298,8 @@ export const useAgentStore = defineStore('agent', () => {
           // 与线上契约一致。
           risk_level: event.risk_level || 'low',
           reason: event.content,
+          reason_code: event.reason_code,
+          reason_params: event.reason_params,
           step_id: event.plan_step_id,
           plan_id: event.plan_id,
         }
