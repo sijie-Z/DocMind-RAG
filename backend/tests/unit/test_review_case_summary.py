@@ -88,3 +88,33 @@ def test_summary_lists_reasons_for_undetermined_items() -> None:
 def test_summary_undetermined_items_empty_when_all_identified() -> None:
     items = [_item_with_facts("exception", "modified", {"base": {"status": "identified"}})]
     assert summarize_items(items)["undetermined_items"] == []
+
+
+def test_unchanged_is_not_counted_as_undetermined() -> None:
+    """`unchanged` 是明确的判定结果，不是"无法判定"。
+
+    实测（2026-11-15 真栈导出）：5 项里 2 项 change_type='unchanged'，
+    summary 却报 undetermined_count=2、has_undetermined=True，
+    界面因此对"其实已经判清楚了"的案件显示「需人工复核 / N 项无法判定」——反向误报。
+    """
+    items = [
+        _item("payment_term", "modified"),
+        _item("start_condition", "unchanged"),
+        _item("acceptance_invoice", "unchanged"),
+        _item("added_9_1", "added"),
+    ]
+
+    summary = summarize_items(items)
+
+    assert summary["unchanged_count"] == 2
+    assert summary["undetermined_count"] == 0
+    assert summary["has_undetermined"] is False
+    assert summary["undetermined_items"] == []
+
+
+def test_all_unchanged_means_no_difference_confirmed() -> None:
+    items = [_item("payment_term", "unchanged"), _item("exception", "unchanged")]
+    summary = summarize_items(items)
+    assert summary["has_undetermined"] is False
+    assert summary["changed_count"] == 0
+    assert summary["undetermined_items"] == []
