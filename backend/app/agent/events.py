@@ -153,6 +153,11 @@ class AgentEvent:
     action: str | None = None
     elapsed_ms: int | None = None
 
+    # HITL i18n：approval_required 的机器可读理由（reason_code + 词条插值参数）。
+    # 默认空 → 序列化时省略，既有事件载荷零变化（向后兼容）。
+    reason_code: str = ""
+    reason_params: dict[str, Any] = field(default_factory=dict)
+
     # Reflection
     reflection_result: ReflectionResult = "pass"
     retry_attempt: int = 0
@@ -205,6 +210,11 @@ class AgentEvent:
         # 浏览器验收 F3）。其余事件类型维持"非默认值才带"的瘦身契约。
         if self.risk_level != "low" or self.type == "approval_required":
             d["risk_level"] = self.risk_level
+        # HITL i18n：reason_code/reason_params 非空才带（向后兼容瘦身契约）
+        if self.reason_code:
+            d["reason_code"] = self.reason_code
+        if self.reason_params:
+            d["reason_params"] = self.reason_params
         if self.retry_strategy != "auto_retry":
             d["retry_strategy"] = self.retry_strategy
         if self.fallback_tool is not None:

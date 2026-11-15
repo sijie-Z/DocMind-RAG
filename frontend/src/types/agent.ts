@@ -87,6 +87,10 @@ export interface AgentEvent {
   error_type?: string
   /** 机器可读错误码（如 USER_LLM_REQUEST_FAILED）：前端据此本地化，非空才下发 */
   code?: string
+  /** HITL：approval_required 的机器可读理由（agent.approval.reasons.* 词条），非空才下发 */
+  reason_code?: string
+  /** reason_code 的词条插值参数（tool/risk），非空才下发 */
+  reason_params?: Record<string, string | number>
   // Meta
   iteration?: number
   timestamp?: number
@@ -126,6 +130,9 @@ export interface PendingApproval {
   args_hash?: string
   risk_level?: string
   reason?: string
+  /** 机器可读理由（i18n）：前端按 agent.approval.reasons.* 渲染；未知/缺失回退 reason 原文 */
+  reason_code?: string
+  reason_params?: Record<string, string | number>
   step_id?: string
   plan_id?: string
   requested_at?: number

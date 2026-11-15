@@ -441,6 +441,8 @@
         :tool-args="agentStore.pendingApproval.tool_args"
         :risk-level="agentStore.pendingApproval.risk_level"
         :reason="agentStore.pendingApproval.reason"
+        :reason-code="agentStore.pendingApproval.reason_code"
+        :reason-params="agentStore.pendingApproval.reason_params"
         :busy="approvalBusy"
         @decide="handleApprovalDecide"
       />
