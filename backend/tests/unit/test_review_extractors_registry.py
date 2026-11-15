@@ -12,6 +12,7 @@ import pytest
 from app.services.review_analysis_service import (
     EXTRACTORS,
     Clause,
+    align_item,
     make_keyword_extractor,
     register_extractor,
     resolve_extractor,
@@ -93,3 +94,40 @@ class TestGenericExtractorDoesNotInheritExceptionFilter:
         clause = _clause(8, "第8条 例外：验收合格且发票齐全时另行付款。")
         facts = EXTRACTORS["payment_term"]([clause])
         assert facts["status"] == "not_found"
+
+
+_EX = make_keyword_extractor(("赔偿",))
+
+
+class TestConfiguredItemSemanticComparison:
+    """配置项要做**语义级**比较：金额/数值没变时，纯措辞调整不应报 modified（#716）。
+
+    实测（修复前）：`_semantic_payload` 的默认分支只取 terms —— base/revised 关键词相同
+    就落到 text_sha256 对比，任何措辞差异都判 modified。「赔偿上限 10%→20%」报 modified
+    是对的，但「应赔偿→应当赔偿」也报 modified，就是噪音。
+    """
+
+    def _clause(self, text: str) -> Clause:
+        return Clause(
+            chunk_id="c1", chunk_index=1, text=text, raw_text=text, clause_no=[1], section_no=[]
+        )
+
+    def test_amount_change_is_modified(self) -> None:
+        base = _EX([self._clause("违约方应赔偿对方损失，赔偿上限为合同总额的10%。")])
+        revised = _EX([self._clause("违约方应赔偿对方损失，赔偿上限为合同总额的20%。")])
+        assert align_item("confidentiality", base, revised) == "modified"
+
+    def test_pure_wording_change_is_unchanged(self) -> None:
+        base = _EX([self._clause("违约方应赔偿对方损失，赔偿上限为合同总额的10%。")])
+        revised = _EX([self._clause("违约方应当赔偿对方损失，赔偿上限为合同总额的10%。")])
+        assert align_item("confidentiality", base, revised) == "unchanged"
+
+    def test_chinese_percent_change_is_modified(self) -> None:
+        base = _EX([self._clause("赔偿上限为合同总额的百分之十。")])
+        revised = _EX([self._clause("赔偿上限为合同总额的百分之二十。")])
+        assert align_item("confidentiality", base, revised) == "modified"
+
+    def test_chinese_percent_same_wording_change_is_unchanged(self) -> None:
+        base = _EX([self._clause("赔偿上限为合同总额的百分之十。")])
+        revised = _EX([self._clause("违约方应当赔偿，上限为合同总额的百分之十。")])
+        assert align_item("confidentiality", base, revised) == "unchanged"

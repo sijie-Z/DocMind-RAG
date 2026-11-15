@@ -1800,6 +1800,55 @@ def register_extractor(item_key: str, *, replace: bool = False):
     return decorator
 
 
+_NUMBER_RE = re.compile(r"\d+(?:\.\d+)?")
+_CN_PERCENT_RE = re.compile(r"百分之([零一二三四五六七八九十]+)")
+_CN_DIGITS = {
+    "零": 0,
+    "一": 1,
+    "二": 2,
+    "三": 3,
+    "四": 4,
+    "五": 5,
+    "六": 6,
+    "七": 7,
+    "八": 8,
+    "九": 9,
+}
+
+
+def _cn_percent_to_number(text: str) -> list[float]:
+    """「百分之十/二十/三十」→ 10/20/30；「百分之十五」→ 15（十位组合足够合同用语）。"""
+    out: list[float] = []
+    for match in _CN_PERCENT_RE.finditer(text):
+        cn = match.group(1)
+        if cn == "十":
+            out.append(10.0)
+        elif "十" in cn:
+            head, _, tail = cn.partition("十")
+            tens = _CN_DIGITS.get(head, 1) if head else 1
+            ones = _CN_DIGITS.get(tail, 0) if tail else 0
+            out.append(float(tens * 10 + ones))
+        elif cn in _CN_DIGITS:
+            out.append(float(_CN_DIGITS[cn]))
+    return out
+
+
+def _extract_numbers(text: str) -> tuple[float, ...]:
+    """抽取条款里的数值：阿拉伯数字/百分比 + 中文百分比。排序后作为语义对比键之一。"""
+    numbers: list[float] = []
+    seen: set[str] = set()
+    for match in _NUMBER_RE.finditer(text):
+        raw = match.group(0)
+        if raw in seen:
+            continue
+        seen.add(raw)
+        numbers.append(float(raw))
+    for value in _cn_percent_to_number(text):
+        if value not in numbers:
+            numbers.append(value)
+    return tuple(sorted(numbers))
+
+
 def make_keyword_extractor(keywords: tuple[str, ...]) -> Extractor:
     """通用抽取器：命中关键词即 identified，否则 not_found。
 
@@ -1811,7 +1860,17 @@ def make_keyword_extractor(keywords: tuple[str, ...]) -> Extractor:
     terms = tuple(keywords)
 
     def _extract(clauses: list[Clause]) -> dict[str, Any]:
-        return _collect_terms(clauses, terms, item_key="__configured__")
+        facts = _collect_terms(clauses, terms, item_key="__configured__")
+        if facts["status"] == "identified":
+            # 数值进 facts：语义比较用（金额/期限变了才算 modified），
+            # 纯措辞调整（同数值）不再因为 text_sha 不同而误报 modified（issue #716）。
+            # 数值取自**全部命中条款的原文**（`_collect_terms` 不返回 raw）。
+            numbers: list[float] = []
+            for clause in clauses:
+                if any(term in clause.text for term in terms):
+                    numbers.extend(_extract_numbers(clause.text))
+            facts["numbers"] = tuple(sorted(set(numbers)))
+        return facts
 
     return _extract
 
@@ -1841,6 +1900,14 @@ def _semantic_payload(item_key: str, facts: dict[str, Any]) -> Any:
             tuple(sorted(facts.get("cross_refs") or ())),
         )
     # 集合语义：条款/事件的先后顺序不是事实差异（顺序变化由主条款文本哈希体现）。
+    # 配置项（关键词抽取器）：数值 + 词元一起做语义键。
+    # 只有 terms 的话，base/revised 关键词必然相同 → 落到 text_sha 对比，
+    # 纯措辞调整（应赔偿→应当赔偿）也会误报 modified（issue #716）。
+    if "numbers" in facts:
+        return (
+            tuple(sorted(facts.get("terms") or ())),
+            tuple(sorted(facts["numbers"])),
+        )
     return tuple(sorted(facts.get("events") or facts.get("terms") or ()))
 
 
@@ -2082,7 +2149,13 @@ def align_item(
         revised_sha = revised.get("text_sha256")
         if base_sha and revised_sha and base_sha != revised_sha:
             # 事实词元相同但文本变了（否定/主体/限定语）：必须报差异。
-            result = "modified"
+            # 例外：配置项（关键词抽取器）已经把**数值**纳入语义键 —— 数值相同而文本
+            # 不同，多为纯措辞调整（应赔偿→应当赔偿）。此时报 modified 是噪音，
+            # 会让「已判清楚的案件」被标成需人工复核（issue #716）。
+            if "numbers" in base or "numbers" in revised:
+                result = "unchanged"
+            else:
+                result = "modified"
         elif _locator_nos(base) != _locator_nos(revised):
             result = "renumbered"
         else:
