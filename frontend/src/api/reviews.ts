@@ -127,6 +127,24 @@ export interface ReviewItem {
   evidence: Record<ReviewSide, ReviewEvidenceRow[]>
 }
 
+export interface ReviewCaseItemSummaryEntry {
+  item_key: string
+  change_type: string | null
+  reasons: string[]
+}
+
+/** 后端经 summarize_items 汇总的核验计数（含"能否宣称无差异"的判据）。 */
+export interface ReviewCaseItemSummary {
+  item_count: number
+  changed_count: number
+  added_count: number
+  removed_count: number
+  unidentified_count: number
+  undetermined_count: number
+  has_undetermined: boolean
+  undetermined_items: ReviewCaseItemSummaryEntry[]
+}
+
 export interface ReviewCaseDetail {
   id: string
   title: string
@@ -145,6 +163,8 @@ export interface ReviewCaseDetail {
   lock_version: number
   documents: Record<ReviewSide, ReviewDocumentState>
   items: ReviewItem[]
+  /** 后端汇总；配置项没有可用抽取器时 undetermined_count > 0，界面据此提示"需人工复核"。 */
+  summary?: ReviewCaseItemSummary
   live_source_stale: boolean
   stale_evidence_count: number
 }

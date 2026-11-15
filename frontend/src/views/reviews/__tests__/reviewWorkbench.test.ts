@@ -625,6 +625,39 @@ describe('归档出口（Batch 7）', () => {
     return detail
   }
 
+  it('后端 summary 报有未判定项时显示需人工复核，而不是"待决策"', async () => {
+    // 场景：分析已跑完（各项 change_type 非空），但后端 summary 里
+    // undetermined_count > 0（例如配置了清单项却没有可用抽取器）。
+    // 旧实现只看 items 的 unidentified，会落到"待决策"，把不确定当成没问题。
+    const detail = baseDetail({
+      status: 'ready',
+      summary: {
+        item_count: 5,
+        changed_count: 2,
+        added_count: 0,
+        removed_count: 0,
+        unidentified_count: 0,
+        undetermined_count: 1,
+        has_undetermined: true,
+        undetermined_items: [
+          {
+            item_key: 'confidentiality',
+            change_type: null,
+            reasons: ['not_analyzed']
+          }
+        ]
+      }
+    })
+    api.get.mockResolvedValue({ data: { data: detail } } as never)
+
+    const wrapper = mountDetail()
+    await flushPromises()
+
+    const text = wrapper.text()
+    expect(text).toContain('需人工复核')
+    expect(text).toContain('1 项无法判定')
+  })
+
   it('blocked 案件显示归档入口；popconfirm 确认后调用归档接口并刷新', async () => {
     api.get.mockResolvedValue({
       data: {

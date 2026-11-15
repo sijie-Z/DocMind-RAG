@@ -618,6 +618,16 @@ const analyzedAll = computed(
     itemStats.value.total > 0 &&
     (detail.value?.items ?? []).every((item) => item.change_type !== null)
 )
+
+/**
+ * 后端汇总里的"未判定"数量（例如配置了清单项但没有可用抽取器）。
+ * 这类项在 items 里 change_type 可能为 null，只靠 itemStats 会漏掉，
+ * 结果就是"分析跑完了却一直显示未分析"或"把不确定当没问题"。
+ */
+const backendUndeterminedCount = computed(() => detail.value?.summary?.undetermined_count ?? 0)
+const undeterminedCount = computed(
+  () => itemStats.value.unidentified + backendUndeterminedCount.value
+)
 const decisionProgress = computed(() =>
   itemStats.value.total === 0
     ? 0
@@ -672,8 +682,8 @@ const conclusion = computed(() => {
     if (itemStats.value.blockedItems > 0) {
       hints.push(t('reviews.summaryInsufficientHint', { count: itemStats.value.blockedItems }))
     }
-    if (itemStats.value.unidentified > 0) {
-      hints.push(t('reviews.summaryUnidentifiedHint', { count: itemStats.value.unidentified }))
+    if (undeterminedCount.value > 0) {
+      hints.push(t('reviews.summaryUnidentifiedHint', { count: undeterminedCount.value }))
     }
     return {
       tag: 'success' as const,
@@ -681,12 +691,12 @@ const conclusion = computed(() => {
       hint: hints.join(' · ')
     }
   }
-  if (!analyzedAll.value) {
+  if (!analyzedAll.value && backendUndeterminedCount.value === 0) {
     return current.status === 'ready'
       ? { tag: 'info' as const, title: t('reviews.summaryReady'), hint: t('reviews.notAnalyzedHint') }
       : { tag: 'info' as const, title: t('reviews.summaryInReview'), hint: t('reviews.notAnalyzedHint') }
   }
-  if (itemStats.value.needsHuman > 0 || itemStats.value.blockedItems > 0 || itemStats.value.unidentified > 0) {
+  if (itemStats.value.needsHuman > 0 || itemStats.value.blockedItems > 0 || undeterminedCount.value > 0) {
     const hints: string[] = []
     if (itemStats.value.needsHuman > 0) {
       hints.push(t('reviews.summaryNeedsHumanHint', { count: itemStats.value.needsHuman }))
@@ -694,8 +704,8 @@ const conclusion = computed(() => {
     if (itemStats.value.blockedItems > 0) {
       hints.push(t('reviews.summaryInsufficientHint', { count: itemStats.value.blockedItems }))
     }
-    if (itemStats.value.unidentified > 0) {
-      hints.push(t('reviews.summaryUnidentifiedHint', { count: itemStats.value.unidentified }))
+    if (undeterminedCount.value > 0) {
+      hints.push(t('reviews.summaryUnidentifiedHint', { count: undeterminedCount.value }))
     }
     return {
       tag: 'warning' as const,
