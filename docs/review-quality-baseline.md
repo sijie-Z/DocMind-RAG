@@ -165,8 +165,10 @@ align(30日, 15日) = modified      ← 变更检测照常工作
   需要"改数字"级别的判定时仍得写专用抽取器（可用 `register_extractor` 注册）
 - **无编号文档的附加句可能漏检**：实测在 markdown 里追加一行"保密义务：……"，
   如果没有独立成段（被 chunker 并入相邻段落），行级比较看不到它 → 不产生 added 项
-- **`detect_added_clauses` 的排除粒度是 chunk 级**：某 chunk 里若既有清单项已识别的条款、
-  又有真正的新增条款，后者会被一并排除（单 chunk 小文档最容易命中）
+- ~~`detect_added_clauses` 的排除粒度是 chunk 级~~ → **已修**（#711 / #712）：
+  排除改为条款行级 `(chunk_id, clause_no)`，同一 chunk 里的真正新增条款不再被误吞；
+  只有无条款号的文档才退回整块排除（保底，且已在 `_covered_refs` 注释里写明）
+
 
 
 
