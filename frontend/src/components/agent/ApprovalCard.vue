@@ -13,7 +13,7 @@
 
     <pre class="tool-args">{{ argsText }}</pre>
 
-    <p v-if="reason" class="approval-reason">{{ reason }}</p>
+    <p v-if="reasonText" class="approval-reason">{{ reasonText }}</p>
 
     <textarea
       v-model="instruction"
@@ -54,6 +54,9 @@ const props = defineProps<{
   toolArgs?: Record<string, any>
   riskLevel?: string
   reason?: string
+  /** 机器可读理由（i18n）：可映射时按词条渲染；未知/缺失回退 reason 原文 */
+  reasonCode?: string
+  reasonParams?: Record<string, string | number>
   expired?: boolean
   busy?: boolean
 }>()
@@ -65,6 +68,22 @@ const emit = defineEmits<{
 }>()
 
 const instruction = ref('')
+
+// 理由渲染：reason_code 可映射 → 本语词条（插值 reason_params）；否则回退
+// reason 原文（hook 给的人类文案 / 旧后端 / 未知 code）。
+const REASON_KEYS: Record<string, string> = {
+  high_risk_tool: 'agent.approval.reasons.highRiskTool',
+  approval_mode_always: 'agent.approval.reasons.approvalModeAlways',
+  terminal_forced: 'agent.approval.reasons.terminalForced',
+  hook_ask: 'agent.approval.reasons.hookAsk',
+}
+
+const reasonText = computed(() => {
+  const key = props.reasonCode ? REASON_KEYS[props.reasonCode] : undefined
+  if (key && props.reasonParams) return t(key, props.reasonParams)
+  if (key) return t(key)
+  return props.reason || ''
+})
 
 const riskLabel = computed(() => {
   switch (props.riskLevel) {

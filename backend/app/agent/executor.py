@@ -580,6 +580,7 @@ class Executor:
         *,
         skip_objects: set[int] | None = None,
         forced_reasons: dict[int, str] | None = None,
+        forced_reason_codes: dict[str, str] | None = None,
     ) -> AsyncGenerator[AgentEvent, None]:
         """审批门预检（工具前暂停点）。**在本次任何调用执行之前**运行。
 
@@ -628,7 +629,8 @@ class Executor:
                     }
                 )
             return
-        pending: tuple[Any, dict[str, Any], str | None] | None = None
+        # (tc, args, forced_reason, reason_code, reason_params)
+        pending: tuple[Any, dict[str, Any], str | None, str, dict[str, Any]] | None = None
         for tc, args in calls:
             if id(tc) in skip:
                 continue
@@ -640,17 +642,27 @@ class Executor:
                 and not approval.requires_approval(mode, tc.function.name)
             ):
                 continue
+            reason_code = ""
+            reason_params: dict[str, Any] = {}
+            hook_code = (forced_reason_codes or {}).get(id(tc))
+            if hook_code:
+                reason_code = hook_code
             if terminal_forced and forced_reason is None:
                 forced_reason = "terminal 工具强制审批（TERMINAL_REQUIRE_APPROVAL=true）"
+                reason_code = "terminal_forced"
             if approval.find_decision(self.approval_decisions, tc.function.name, args) is not None:
                 continue
             if pending is None:
-                pending = (tc, args, forced_reason)
+                pending = (tc, args, forced_reason, reason_code, reason_params)
         if pending is None:
             return
 
-        tc, args, forced_reason = pending
+        tc, args, forced_reason, reason_code, reason_params = pending
         risk = approval.tool_risk_level(tc.function.name)
+        if not reason_code and not forced_reason:
+            coded = approval.build_approval_reason_code(mode, tc.function.name, risk)
+            reason_code = coded["reason_code"]
+            reason_params = coded["reason_params"]
         ttl = int(getattr(self.config, "approval_timeout_seconds", 0) or 0)
         request = approval.ApprovalRequest(
             tool_name=tc.function.name,
@@ -658,6 +670,8 @@ class Executor:
             tool_call_id=getattr(tc, "id", "") or "",
             risk_level=risk,
             reason=forced_reason or approval.build_approval_reason(mode, tc.function.name, risk),
+            reason_code=reason_code,
+            reason_params=reason_params,
             step_id=step.id if step is not None else "",
             plan_id=plan.id if plan is not None else "",
             expires_at=(time.time() + ttl) if ttl > 0 else None,
@@ -682,6 +696,9 @@ class Executor:
                 risk_level=request.risk_level,
                 plan_id=request.plan_id,
                 plan_step_id=request.step_id,
+                # i18n：事件携带机器可读理由，前端按词条渲染（content 为中文兜底）
+                reason_code=request.reason_code,
+                reason_params=request.reason_params,
             )
             self.pending_control = "approval"
             raise approval.ApprovalRequired(request)
@@ -2047,6 +2064,7 @@ class Executor:
         hooked_args: dict[str, dict[str, Any]] = {}
         hook_denied_reasons: dict[str, str] = {}
         hook_forced_reasons: dict[int, str] = {}
+        hook_reason_codes: dict[str, str] = {}
         hook_forced_call_ids: set[str] = set()
         for tc, parsed_args in gated_calls:
             call_id = call_id_by_obj.get(id(tc), "")
@@ -2083,6 +2101,9 @@ class Executor:
                     hook_forced_reasons[id(tc)] = (
                         decision.reason or "hook 要求对本次工具调用进行人工审批"
                     )
+                    if not decision.reason:
+                        # hook 未给人类文案：前端按 code 渲染本语文案
+                        hook_reason_codes[id(tc)] = "hook_ask"
                     hook_forced_call_ids.add(call_id)
                 else:
                     hook_denied_reasons[call_id] = (
@@ -2101,6 +2122,7 @@ class Executor:
                 id(tc) for tc, _ in gated_calls if call_id_by_obj.get(id(tc)) in hook_denied_reasons
             },
             forced_reasons=hook_forced_reasons,
+            forced_reason_codes=hook_reason_codes,
         ):
             yield gate_event
 

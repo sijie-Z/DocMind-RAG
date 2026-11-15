@@ -177,6 +177,10 @@ class ApprovalRequest:
     tool_call_id: str = ""
     risk_level: str = "high"
     reason: str = ""
+    # 机器可读理由（i18n）：前端按 reason_code 走词条渲染，reason 原文仅作
+    # 旧前端/未知 code 的兜底。reason_params 供词条插值（tool/risk）。
+    reason_code: str = ""
+    reason_params: dict[str, Any] = field(default_factory=dict)
     step_id: str = ""
     plan_id: str = ""
     requested_at: float = field(default_factory=time.time)
@@ -194,6 +198,8 @@ class ApprovalRequest:
             "args_hash": args_fingerprint(self.tool_args),
             "risk_level": self.risk_level,
             "reason": self.reason,
+            "reason_code": self.reason_code,
+            "reason_params": self.reason_params,
             "step_id": self.step_id,
             "plan_id": self.plan_id,
             "requested_at": self.requested_at,
@@ -203,10 +209,27 @@ class ApprovalRequest:
 
 
 def build_approval_reason(mode: str, tool_name: str, risk_level: str) -> str:
-    """人类可读的审批理由（进 SSE content 与任务状态视图）。"""
+    """人类可读的审批理由（进 SSE content 与任务状态视图；中文兜底文本）。
+
+    i18n 主路径是 build_approval_reason_code：前端按 reason_code 渲染本语
+    文案，本函数的中文串仅服务不识别 reason_code 的旧前端/状态视图兜底。
+    """
     if mode == "always":
         return f"审批模式 always：调用工具 {tool_name}（风险 {risk_level}）需人工确认后执行"
     return f"高风险工具 {tool_name}（风险等级 {risk_level}）执行前需人工审批"
+
+
+def build_approval_reason_code(mode: str, tool_name: str, risk_level: str) -> dict[str, Any]:
+    """机器可读审批理由：reason_code + 词条插值参数（见 ApprovalRequest 字段注释）。"""
+    if mode == "always":
+        return {
+            "reason_code": "approval_mode_always",
+            "reason_params": {"tool": tool_name, "risk": risk_level},
+        }
+    return {
+        "reason_code": "high_risk_tool",
+        "reason_params": {"tool": tool_name, "risk": risk_level},
+    }
 
 
 def approval_expired(pending: dict[str, Any] | None, *, now: float | None = None) -> bool:

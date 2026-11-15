@@ -1320,7 +1320,12 @@ export default {
       reject: '✕ Refuser',
       hint: 'Approuver = autoriser cet appel uniquement (les appels identiques de cette tâche ne redemanderont pas) ; Refuser = l\'appel n\'est pas exécuté et l\'Agent reçoit un échec structuré pour ajuster son plan.',
       riskHigh: 'Risque élevé',
-      riskMedium: 'Risque moyen',
+      reasons: {
+        highRiskTool: 'Outil à haut risque {tool} (risque {risk}) : approbation humaine requise avant exécution',
+        approvalModeAlways: 'Mode d\'approbation always : l\'appel de l\'outil {tool} (risque {risk}) requiert une confirmation manuelle',
+        terminalForced: 'Les outils terminal requièrent une approbation (TERMINAL_REQUIRE_APPROVAL=true)',
+        hookAsk: 'Un hook de sécurité requiert une approbation humaine pour cet appel d\'outil',
+      },      riskMedium: 'Risque moyen',
       riskLow: 'Risque faible',
     },
     plan: {

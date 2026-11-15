@@ -1385,7 +1385,12 @@ export default {
       reject: '✕ Reject',
       hint: 'Approve = allow this single call (identical calls in this task will not ask again); Reject = the call is not executed and the Agent receives a structured failure to adjust its plan.',
       riskHigh: 'High risk',
-      riskMedium: 'Medium risk',
+      reasons: {
+        highRiskTool: 'High-risk tool {tool} (risk {risk}) requires human approval before execution',
+        approvalModeAlways: 'Approval mode always: calling tool {tool} (risk {risk}) requires manual confirmation',
+        terminalForced: 'Terminal tools require approval (TERMINAL_REQUIRE_APPROVAL=true)',
+        hookAsk: 'A security hook requires human approval for this tool call',
+      },      riskMedium: 'Medium risk',
       riskLow: 'Low risk',
     },
     plan: {
