@@ -1,4 +1,64 @@
 export default {
+  about: {
+    tagline: 'Plateforme de Q&A documentaire et de vérification de contrats',
+    systemInfo: 'Informations système',
+    labels: {
+      product: 'Produit',
+      architecture: 'Architecture',
+      backend: 'Backend',
+      frontend: 'Frontend',
+      aiEngine: 'Moteur IA',
+      agentSystem: 'Système Agent',
+      security: 'Sécurité',
+    },
+    values: {
+      product: 'DocMind — plateforme de Q&A documentaire et de vérification de contrats',
+      architecture: 'RAG (génération augmentée par récupération) + raisonnement Agent autonome',
+      backend: 'FastAPI + SQLAlchemy (async) + MySQL 8 + Redis + Elasticsearch 8 + Kafka + MinIO',
+      frontend: 'Vue 3 + TypeScript + Vite + Naive UI + Pinia',
+      aiEngine: 'API DeepSeek + Embedding compatible OpenAI + LangChain',
+      agentSystem: 'Boucle PER en trois phases (Plan → Execute → Reflect) + registre d\'outils + moteur de contexte + apprentissage de compétences',
+      security: 'JWT + RBAC + isolation multi-tenant au niveau des organisations',
+    },
+    highlights: {
+      hybridSearch: {
+        title: 'Recherche hybride',
+        desc: 'Recherche par mots-clés BM25 combinée à la recherche sémantique vectorielle, fusionnée par réciproque de rang (RRF) pour maximiser le rappel.',
+      },
+      agentArchitecture: {
+        title: 'Architecture Agent',
+        desc: 'Boucle PER interne en trois phases (Plan-Execute-Reflect). Le Planner décompose en DAG, l\'Executor orchestre les outils, le Reflector vérifie et corrige.',
+      },
+      semanticCache: {
+        title: 'Cache sémantique',
+        desc: 'Cache de réponses basé sur les embeddings : supprime les appels LLM répétés pour des questions similaires, réduit latence et coût.',
+      },
+      circuitBreaker: {
+        title: 'Disjoncteur',
+        desc: 'Protection tolérante aux pannes des services externes (LLM, ES, DB), dégradation automatique contre les défaillances en cascade.',
+      },
+      multiTenantRbac: {
+        title: 'RBAC multi-tenant',
+        desc: 'Isolation des données au niveau organisation + contrôle d\'accès par rôles avec permissions fines.',
+      },
+      realtimeStreaming: {
+        title: 'Streaming temps réel',
+        desc: 'Réponses en flux WebSocket + SSE en double mode, notifications poussées en temps réel.',
+      },
+    },
+    highlightsTitle: 'Points forts de l’architecture',
+    dataFlowTitle: 'Flux de données',
+    flow: {
+      upload: 'Téléversement',
+      parseChunk: 'Analyse & découpage',
+      embed: 'Vectorisation',
+      userQuestion: 'Question de l\'utilisateur',
+      hybridSearch: 'Recherche hybride',
+      rerank: 'Reclassement',
+      streamAnswer: 'Réponse en flux',
+    },
+    footer: 'Construit avec FastAPI + Vue 3 + Elasticsearch + DeepSeek LLM',
+  },
   app: {
     documentTitle: 'DocMind - Q&R documentaire et revue de contrats',
     metaDescription: 'Q&R documentaire et revue de contrats : réponses sourcées, différences clause par clause avec preuves.',

@@ -1,4 +1,64 @@
 export default {
+  about: {
+    tagline: 'Document Q&A and contract verification platform',
+    systemInfo: 'System information',
+    labels: {
+      product: 'Product',
+      architecture: 'Architecture',
+      backend: 'Backend',
+      frontend: 'Frontend',
+      aiEngine: 'AI engine',
+      agentSystem: 'Agent system',
+      security: 'Security',
+    },
+    values: {
+      product: 'DocMind — document Q&A and contract verification platform',
+      architecture: 'RAG (retrieval-augmented generation) + autonomous Agent reasoning',
+      backend: 'FastAPI + SQLAlchemy (async) + MySQL 8 + Redis + Elasticsearch 8 + Kafka + MinIO',
+      frontend: 'Vue 3 + TypeScript + Vite + Naive UI + Pinia',
+      aiEngine: 'DeepSeek API + OpenAI-compatible embedding + LangChain',
+      agentSystem: 'PER three-phase loop (Plan → Execute → Reflect) + tool registry + context engine + skill learning',
+      security: 'JWT + RBAC + organization-level multi-tenant isolation',
+    },
+    highlights: {
+      hybridSearch: {
+        title: 'Hybrid retrieval',
+        desc: 'BM25 keyword search combined with vector semantic search, fused via reciprocal rank fusion (RRF) to maximize recall.',
+      },
+      agentArchitecture: {
+        title: 'Agent architecture',
+        desc: 'In-house PER three-phase loop (Plan-Execute-Reflect). The Planner breaks tasks into a DAG, the Executor schedules tools, the Reflector verifies and corrects.',
+      },
+      semanticCache: {
+        title: 'Semantic cache',
+        desc: 'Embedding-based answer caching that removes repeated LLM calls for similar questions, cutting latency and cost.',
+      },
+      circuitBreaker: {
+        title: 'Circuit breaking',
+        desc: 'Fault protection for external services (LLM, ES, DB) with automatic degradation to prevent cascading failures.',
+      },
+      multiTenantRbac: {
+        title: 'Multi-tenant RBAC',
+        desc: 'Organization-level data isolation plus role-based access control with fine-grained permissions.',
+      },
+      realtimeStreaming: {
+        title: 'Real-time streaming',
+        desc: 'Dual WebSocket + SSE streaming responses with real-time notification push.',
+      },
+    },
+    highlightsTitle: 'Architecture highlights',
+    dataFlowTitle: 'Data flow',
+    flow: {
+      upload: 'Upload',
+      parseChunk: 'Parse & chunk',
+      embed: 'Embed',
+      userQuestion: 'User question',
+      hybridSearch: 'Hybrid search',
+      rerank: 'Rerank',
+      streamAnswer: 'Streamed answer',
+    },
+    footer: 'Built on FastAPI + Vue 3 + Elasticsearch + DeepSeek LLM',
+  },
   app: {
     documentTitle: 'DocMind - Document Q&A and Contract Review',
     metaDescription: 'Document Q&A and contract review: answers cite their source, contract differences come with evidence.',

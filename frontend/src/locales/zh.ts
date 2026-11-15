@@ -1,4 +1,64 @@
 export default {
+  about: {
+    tagline: '文档问答与合同核验平台',
+    systemInfo: '系统信息',
+    labels: {
+      product: '产品',
+      architecture: '架构',
+      backend: '后端',
+      frontend: '前端',
+      aiEngine: 'AI 引擎',
+      agentSystem: 'Agent 系统',
+      security: '安全机制',
+    },
+    values: {
+      product: 'DocMind — 文档问答与合同核验平台',
+      architecture: 'RAG (检索增强生成) + Agent 自主推理',
+      backend: 'FastAPI + SQLAlchemy(异步) + MySQL 8 + Redis + Elasticsearch 8 + Kafka + MinIO',
+      frontend: 'Vue 3 + TypeScript + Vite + Naive UI + Pinia',
+      aiEngine: 'DeepSeek API + OpenAI 兼容 Embedding + LangChain',
+      agentSystem: 'PER 三阶段（规划→执行→反思）+ 工具注册 + 上下文引擎 + 技能学习',
+      security: 'JWT + RBAC + 组织级多租户隔离',
+    },
+    highlights: {
+      hybridSearch: {
+        title: '混合检索',
+        desc: '结合 BM25 关键词搜索与向量语义搜索，使用倒数排名融合 (RRF) 最大化召回率。',
+      },
+      agentArchitecture: {
+        title: 'Agent 架构',
+        desc: '自研 PER 三阶段架构（Plan-Execute-Reflect）。Planner 拆解 DAG、Executor 调度工具、Reflector 检查纠错。',
+      },
+      semanticCache: {
+        title: '语义缓存',
+        desc: '基于 Embedding 的答案缓存，消除相似问题的重复 LLM 调用，降低延迟和成本。',
+      },
+      circuitBreaker: {
+        title: '熔断机制',
+        desc: '外部服务（LLM、ES、DB）的容错保护，自动降级防止级联故障。',
+      },
+      multiTenantRbac: {
+        title: '多租户 RBAC',
+        desc: '组织级数据隔离 + 基于角色的访问控制，支持细粒度权限管理。',
+      },
+      realtimeStreaming: {
+        title: '实时流式',
+        desc: 'WebSocket + SSE 双模式流式响应，实时通知推送。',
+      },
+    },
+    highlightsTitle: '架构亮点',
+    dataFlowTitle: '数据流',
+    flow: {
+      upload: '上传',
+      parseChunk: '解析分块',
+      embed: '向量化',
+      userQuestion: '用户提问',
+      hybridSearch: '混合搜索',
+      rerank: '重排序',
+      streamAnswer: '流式响应',
+    },
+    footer: '基于 FastAPI + Vue 3 + Elasticsearch + DeepSeek LLM 构建',
+  },
   app: {
     documentTitle: 'DocMind - 文档问答与合同核验平台',
     metaDescription: '文档问答与合同核验平台：答案带原文出处，合同差异逐条给证据。',
