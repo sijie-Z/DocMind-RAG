@@ -28,6 +28,7 @@ from __future__ import annotations
 import hashlib
 import re
 import unicodedata
+from collections.abc import Callable
 from dataclasses import dataclass
 from difflib import SequenceMatcher
 from typing import Any
@@ -43,6 +44,7 @@ from app.models.review import ReviewCase, ReviewItem
 from app.rag.source_provenance import SourceProvenanceUnavailableError
 from app.services.clause_refs import extract_clause_fields
 from app.services.review_case_service import case_detail, ensure_candidate_evidence
+from app.services.review_checklist import load_checklist
 from app.services.review_document_service import (
     MAX_EVIDENCE_SCAN_CHUNKS,
     chunk_original_text,
@@ -1770,6 +1772,51 @@ EXTRACTORS = {
     "exception": extract_exception,
 }
 
+Extractor = Callable[[list[Clause]], dict[str, Any]]
+
+
+def register_extractor(item_key: str, *, replace: bool = False):
+    """注册一个专用抽取器（默认 4 项由上面的字典提供，行为不变）。
+
+    给后续"按合同类型扩展清单"留口子：第三方/业务方可以注册自己的抽取器，
+    而不必改这个文件。
+    """
+
+    def decorator(func: Extractor) -> Extractor:
+        if item_key in EXTRACTORS and not replace:
+            raise ValueError(f"抽取器已存在: {item_key}（如需覆盖请传 replace=True）")
+        EXTRACTORS[item_key] = func
+        return func
+
+    return decorator
+
+
+def make_keyword_extractor(keywords: tuple[str, ...]) -> Extractor:
+    """通用抽取器：命中关键词即 identified，否则 not_found。
+
+    为什么需要：`REVIEW_CHECKLIST_JSON` 追加的项没有专用抽取器，
+    以前会被直接跳过、永远 undetermined —— 用户配了项却永远得不到结论。
+    """
+
+    terms = tuple(keywords)
+
+    def _extract(clauses: list[Clause]) -> dict[str, Any]:
+        return _collect_terms(clauses, terms)
+
+    return _extract
+
+
+def resolve_extractor(
+    item_key: str, *, keywords: tuple[str, ...] | None = None
+) -> Extractor | None:
+    """取该项的抽取器：专用优先，其次按键词兜底；都没有返回 None。"""
+    specialized = EXTRACTORS.get(item_key)
+    if specialized is not None:
+        return specialized
+    if keywords:
+        return make_keyword_extractor(tuple(keywords))
+    return None
+
 
 def _semantic_payload(item_key: str, facts: dict[str, Any]) -> Any:
     if facts["status"] != "identified":
@@ -2071,8 +2118,12 @@ async def analyze_case(session: AsyncSession, case: ReviewCase) -> dict[str, Any
         .all()
     )
     try:
+        # 配置项没有专用抽取器时，用它的关键词走通用抽取器（否则永远是 undetermined）
+        checklist_keywords = {entry.key: entry.keywords for entry in load_checklist()}
         for item in items:
-            extractor = EXTRACTORS.get(item.item_key)
+            extractor = resolve_extractor(
+                item.item_key, keywords=checklist_keywords.get(item.item_key)
+            )
             if extractor is None:
                 continue
             facts_by_side = {side: extractor(clauses[side]) for side in side_docs}
