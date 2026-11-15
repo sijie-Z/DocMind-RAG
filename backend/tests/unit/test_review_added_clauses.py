@@ -154,3 +154,53 @@ def test_clause_already_covered_by_checklist_item_is_not_reported_again() -> Non
 
     covered = {both[0].chunk_id}
     assert detect_added_clauses(base, revised, exclude_chunk_ids=covered) == []
+
+
+def _multi_line_clause(chunk_id: str, lines: list[str]) -> Clause:
+    text = "\n".join(lines)
+    return Clause(
+        chunk_id=chunk_id,
+        chunk_index=0,
+        text=text,
+        raw_text=text,
+        clause_no=[],
+        section_no=[],
+    )
+
+
+class TestExclusionGranularity:
+    """排除粒度应是「条款行」，不是整个 chunk。
+
+    实测场景（单 chunk 小文档）：chunk 里既有已被清单项识别的第88条（保密），
+    又有真正新增的第99条（违约金）。按 chunk 排除会把第99条一并吞掉 → 新增条款漏检。
+    """
+
+    def test_new_clause_in_same_chunk_as_covered_clause_is_still_reported(self) -> None:
+        base = [_multi_line_clause("c1", ["第1条 标的：甲方向乙方采购办公设备一批。"])]
+        revised = [
+            _multi_line_clause(
+                "c1",
+                [
+                    "第1条 标的：甲方向乙方采购办公设备一批。",
+                    "第88条 保密义务：双方对商业秘密承担保密责任，泄露方赔偿全部损失。",
+                    "第99条 违约责任：逾期交付按日万分之五计收违约金。",
+                ],
+            )
+        ]
+
+        # 清单项（confidentiality）已识别 chunk c1 的第88条
+        added = detect_added_clauses(base, revised, exclude_refs={("c1", 88)})
+
+        texts = [c.text for c in added]
+        assert any("违约金" in t for t in texts), f"同 chunk 的新增条款被误吞: {texts}"
+        assert not any("保密义务" in t for t in texts), "已识别的条款不应再报为新增"
+
+    def test_whole_chunk_exclusion_still_supported_for_unnumbered(self) -> None:
+        base = [_multi_line_clause("c1", ["标的：采购办公设备一批。"])]
+        revised = [
+            _multi_line_clause(
+                "c1", ["标的：采购办公设备一批。", "违约金：逾期交付按日万分之五计收。"]
+            )
+        ]
+
+        assert detect_added_clauses(base, revised, exclude_refs={("c1", None)}) == []
