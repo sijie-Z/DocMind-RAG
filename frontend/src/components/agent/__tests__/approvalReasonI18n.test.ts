@@ -13,12 +13,15 @@ import { createI18n } from 'vue-i18n'
 import { createPinia, setActivePinia } from 'pinia'
 
 import ApprovalCard from '@/components/agent/ApprovalCard.vue'
+import type { ComponentProps } from 'vue-component-type-helpers'
 import zh from '@/locales/zh'
 import en from '@/locales/en'
 
+type CardProps = ComponentProps<typeof ApprovalCard>
+
 const i18n = createI18n({ legacy: false, locale: 'zh', fallbackLocale: 'en', messages: { zh, en } })
 
-function mountCard(props: Record<string, any>, locale: 'zh' | 'en' = 'zh') {
+function mountCard(props: CardProps, locale: 'zh' | 'en' = 'zh') {
   const i = createI18n({ legacy: false, locale, fallbackLocale: 'en', messages: { zh, en } })
   return mount(ApprovalCard, { props, global: { plugins: [i] } })
 }
@@ -36,7 +39,7 @@ describe('ApprovalCard · 理由按 reason_code 本地化', () => {
       reason: '高风险工具 execute_python（风险等级 high）执行前需人工审批',
       reasonCode: 'high_risk_tool',
       reasonParams: { tool: 'execute_python', risk: 'high' },
-    })
+    } satisfies CardProps)
     expect(w.find('.approval-reason').text()).toBe(
       '高风险工具 execute_python（风险等级 high）执行前需人工审批',
     )
@@ -50,7 +53,7 @@ describe('ApprovalCard · 理由按 reason_code 本地化', () => {
         reason: '中文兜底',
         reasonCode: 'high_risk_tool',
         reasonParams: { tool: 'execute_python', risk: 'high' },
-      },
+      } satisfies CardProps,
       'en',
     )
     expect(w.find('.approval-reason').text()).toBe(
@@ -67,7 +70,7 @@ describe('ApprovalCard · 理由按 reason_code 本地化', () => {
       ['approval_mode_always', 'Approval mode always: calling tool web_search (risk low) requires manual confirmation'],
     ] as Array<[string, string]>) {
       const w = mountCard(
-        { ...BASE, reason: '中文兜底', reasonCode: code, reasonParams: { tool: 'web_search', risk: 'low' } },
+        { ...BASE, reason: '中文兜底', reasonCode: code, reasonParams: { tool: 'web_search', risk: 'low' } } satisfies CardProps,
         'en',
       )
       expect(w.find('.approval-reason').text()).toBe(expected)
@@ -80,14 +83,14 @@ describe('ApprovalCard · 理由按 reason_code 本地化', () => {
       { ...BASE, reason: '审计策略要求人工确认', reasonCode: 'mystery_code', reasonParams: {} },
       { ...BASE, reason: '审计策略要求人工确认' },
     ]) {
-      const w = mountCard(props, 'en')
+      const w = mountCard(props satisfies CardProps, 'en')
       expect(w.find('.approval-reason').text()).toBe('审计策略要求人工确认')
       w.unmount()
     }
   })
 
   it('无 reason 且无 code → 不渲染理由行', () => {
-    const w = mountCard({ ...BASE }, 'en')
+    const w = mountCard({ ...BASE } satisfies CardProps, 'en')
     expect(w.find('.approval-reason').exists()).toBe(false)
     w.unmount()
   })
