@@ -1892,6 +1892,34 @@ def _split_clause_segments(clause: Clause) -> list[Clause]:
     return segments
 
 
+_SENTENCE_BREAK = re.compile(r"[。；;!?！？\n]")
+
+
+def _split_sentences(text: str) -> list[str]:
+    """按句末标点切句（够用即可：中文合同以 。；为主）。"""
+    return [part.strip() for part in _SENTENCE_BREAK.split(text) if part.strip()]
+
+
+def _new_sentences(segment: Clause, base_sentences: list[str]) -> list[str]:
+    """该行里「base 完全没有」的句子（长度与相似度双阈值，避免同义改写噪音）。"""
+    fresh: list[str] = []
+    for sentence in _split_sentences(segment.text):
+        if len(sentence) < ADDED_MIN_CHARS:
+            continue
+        best = 0.0
+        for existing in base_sentences:
+            if abs(len(existing) - len(sentence)) > max(len(sentence), 24):
+                continue
+            ratio = SequenceMatcher(None, sentence, existing).ratio()
+            if ratio > best:
+                best = ratio
+                if best >= ADDED_SIMILARITY_THRESHOLD:
+                    break
+        if best < ADDED_SIMILARITY_THRESHOLD:
+            fresh.append(sentence)
+    return fresh
+
+
 def _covered_refs(items: list[ReviewItem]) -> set[tuple[str, int | None]]:
     """清单项已识别到的位置：`(chunk_id, clause_no)`；无条款号时用 `(chunk_id, None)`。
 
@@ -1947,6 +1975,9 @@ def detect_added_clauses(
                 return True
         return False
 
+    # 句级池：判为「改写」时用它找出行内**真正新增的句子**（issue #714）。
+    base_sentences = [sent for seg in base_segments for sent in _split_sentences(seg.text)]
+
     revised_segments = [seg for clause in revised for seg in _split_clause_segments(clause)]
     excluded = exclude_chunk_ids or set()
     # 条款行级排除：`(chunk_id, clause_no)` 精确排除已识别条款；
@@ -1973,6 +2004,30 @@ def detect_added_clauses(
         if set(segment.clause_no) & base_numbers:
             continue
         if _is_variant_of_existing(norm):
+            # 与 base 高度相似 ≠ 没有新增：新内容常被并入既有段落（…。此外，双方应…）。
+            # 此时只把**句子级**的新增内容报出来，避免把整段旧文本当新增（issue #714）。
+            fresh = _new_sentences(segment, base_sentences)
+            if not fresh:
+                continue
+            text = "。".join(fresh)
+            if text in seen:
+                continue
+            seen.add(text)
+            out.append(
+                Clause(
+                    chunk_id=segment.chunk_id,
+                    chunk_index=segment.chunk_index,
+                    text=text,
+                    raw_text=text,
+                    clause_no=list(segment.clause_no),
+                    section_no=segment.section_no,
+                    page_number=segment.page_number,
+                    char_start=segment.char_start,
+                    char_end=segment.char_end,
+                )
+            )
+            if len(out) >= limit:
+                break
             continue
         seen.add(norm)
         out.append(segment)

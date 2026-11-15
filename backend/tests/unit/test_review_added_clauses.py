@@ -204,3 +204,44 @@ class TestExclusionGranularity:
         ]
 
         assert detect_added_clauses(base, revised, exclude_refs={("c1", None)}) == []
+
+
+LONG_BASE = (
+    "甲方应当在收到乙方开具的增值税专用发票并完成内部审批流程后，"
+    "于验收合格之日起三十日内向乙方支付合同价款，付款方式为银行转账，"
+    "账户信息以合同附件二为准，如账户变更乙方应提前书面通知甲方。"
+)
+NEW_SENTENCE = "保密义务：双方对合同内容及履行中知悉的商业秘密承担保密责任，泄露方赔偿全部损失。"
+REWORDED = (
+    "甲方应在收到乙方开具的增值税专用发票并完成内部审批后，"
+    "于验收合格之日起三十日内向乙方支付合同价款，付款方式为银行转账，"
+    "账户信息以合同附件二为准，如账户变更乙方需提前书面通知甲方。"
+)
+
+
+class TestSentenceLevelNewContent:
+    """并入段落的真正新增内容必须可见（issue #714）。"""
+
+    def test_appended_sentence_inside_same_line_is_reported(self) -> None:
+        base = [_multi_line_clause("c1", [LONG_BASE])]
+        revised = [_multi_line_clause("c1", [LONG_BASE + NEW_SENTENCE])]
+
+        added = detect_added_clauses(base, revised)
+
+        texts = " ".join(c.text for c in added)
+        assert "保密义务" in texts, f"并入段落的新增句被静默吞掉: {[c.text[:20] for c in added]}"
+        # 报出文本只含新句子，不应把整段旧内容再贴一遍
+        assert LONG_BASE[:12] not in texts, f"不应把旧段落内容当作新增: {texts[:60]}"
+
+    def test_appended_sentence_as_separate_line_is_reported(self) -> None:
+        base = [_multi_line_clause("c1", [LONG_BASE])]
+        revised = [_multi_line_clause("c1", [LONG_BASE, NEW_SENTENCE])]
+
+        added = detect_added_clauses(base, revised)
+        assert any("保密义务" in c.text for c in added)
+
+    def test_pure_rewording_produces_no_added_noise(self) -> None:
+        base = [_multi_line_clause("c1", [LONG_BASE])]
+        revised = [_multi_line_clause("c1", [REWORDED])]
+
+        assert detect_added_clauses(base, revised) == [], "同义改写不应产生新增噪音"
