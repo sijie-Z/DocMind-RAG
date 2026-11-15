@@ -1892,12 +1892,35 @@ def _split_clause_segments(clause: Clause) -> list[Clause]:
     return segments
 
 
+def _covered_refs(items: list[ReviewItem]) -> set[tuple[str, int | None]]:
+    """清单项已识别到的位置：`(chunk_id, clause_no)`；无条款号时用 `(chunk_id, None)`。
+
+    用条款行级引用而不是整块，是因为单 chunk 文档里同一块可能既有已识别条款、
+    又有真正新增的条款 —— 整块排除会把新增一起吞掉（issue #711）。
+    """
+    refs: set[tuple[str, int | None]] = set()
+    for item in items:
+        for side_facts in (item.facts or {}).values():
+            if not isinstance(side_facts, dict):
+                continue
+            chunk_id = side_facts.get("chunk_id")
+            if not chunk_id:
+                continue
+            numbers = [n for n in (side_facts.get("clause_no") or []) if isinstance(n, int)]
+            if numbers:
+                refs.update((chunk_id, number) for number in numbers)
+            else:
+                refs.add((chunk_id, None))
+    return refs
+
+
 def detect_added_clauses(
     base: list[Clause],
     revised: list[Clause],
     *,
     limit: int = ADDED_MAX_ITEMS,
     exclude_chunk_ids: set[str] | None = None,
+    exclude_refs: set[tuple[str, int | None]] | None = None,
 ) -> list[Clause]:
     """找出「revised 有、base 无」的条款（清单外的真正新增）。
 
@@ -1926,11 +1949,23 @@ def detect_added_clauses(
 
     revised_segments = [seg for clause in revised for seg in _split_clause_segments(clause)]
     excluded = exclude_chunk_ids or set()
+    # 条款行级排除：`(chunk_id, clause_no)` 精确排除已识别条款；
+    # `(chunk_id, None)` 表示该块无条款号可用，退回整块排除（issue #711）。
+    excluded_refs = exclude_refs or set()
+
+    def _is_excluded(segment: Clause) -> bool:
+        if segment.chunk_id in excluded:
+            return True
+        if (segment.chunk_id, None) in excluded_refs:
+            return True
+        return any((segment.chunk_id, number) in excluded_refs for number in segment.clause_no)
+
     out: list[Clause] = []
     seen: set[str] = set()
     for segment in revised_segments:
-        if segment.chunk_id in excluded:
-            # 该块已被某个清单项识别（例如配置的 confidentiality），不再重复报为新增
+        if _is_excluded(segment):
+            # 该条款已被某个清单项识别（例如配置的 confidentiality），不再重复报为新增；
+            # 但同 chunk 的**其它**条款仍要参与检测，否则真正的新增会被一起吞掉。
             continue
         norm = normalize_clause_text(segment.text)
         if len(norm) < ADDED_MIN_CHARS or norm in base_norms or norm in seen:
@@ -2191,14 +2226,8 @@ async def analyze_case(session: AsyncSession, case: ReviewCase) -> dict[str, Any
                 )
         # 清单外的新增条款：生成 change_type=added 的核验项，交给人工决策。
         # 已被清单项识别过的 chunk 要排除，否则同一条款会在核验单上出现两次。
-        covered_chunks = {
-            side_facts["chunk_id"]
-            for item in items
-            for side_facts in (item.facts or {}).values()
-            if isinstance(side_facts, dict) and side_facts.get("chunk_id")
-        }
         added_clauses = detect_added_clauses(
-            clauses["base"], clauses["revised"], exclude_chunk_ids=covered_chunks
+            clauses["base"], clauses["revised"], exclude_refs=_covered_refs(items)
         )
         if added_clauses:
             existing_keys = {it.item_key for it in items}
