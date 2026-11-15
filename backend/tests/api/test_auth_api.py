@@ -51,7 +51,9 @@ class TestLoginEndpoint:
         # permissions 下发（RBAC 显隐批次）：get_user_permissions 内部
         # `await db.execute(select(Permission.name))` —— MagicMock 的 execute
         # 不是 awaitable，必须换成 AsyncMock 并返回可 scalars().all() 的形状。
-        mock_db.execute = AsyncMock(return_value=MagicMock(scalars=lambda: MagicMock(all=lambda: [])))
+        mock_db.execute = AsyncMock(
+            return_value=MagicMock(scalars=lambda: MagicMock(all=lambda: []))
+        )
 
         async def _override_get_db():
             yield mock_db
