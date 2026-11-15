@@ -104,11 +104,11 @@ def test_request_to_dict_defaults_empty():
 # ── 执行器级：事件携带 code ─────────────────────────────────────────────────
 
 
-async def _drain_precheck(ex, calls, plan, step):
+async def _drain_precheck(ex, calls, plan, step, **kwargs):
     """驱动预检 generator，吞掉暂停时抛出的 ApprovalRequired（事件已 yield）。"""
     out = []
     try:
-        async for ev in ex._approval_precheck(calls, plan, step):
+        async for ev in ex._approval_precheck(calls, plan, step, **kwargs):
             out.append(ev)
     except approval.ApprovalRequired:
         pass
@@ -151,6 +151,10 @@ async def test_event_carries_high_risk_reason_code(monkeypatch):
     assert events_out and events_out[0].type == "approval_required"
     assert events_out[0].reason_code == "high_risk_tool"
     assert events_out[0].reason_params["tool"] == "execute_python"
+    # F3 同款线级钉：SSE 输出必须携带（变异剥 to_sse_dict 两行 → 此处红）
+    wire = events_out[0].to_sse_dict()
+    assert wire["reason_code"] == "high_risk_tool"
+    assert wire["reason_params"] == {"tool": "execute_python", "risk": "high"}
 
 
 @pytest.mark.asyncio
@@ -178,6 +182,63 @@ async def test_event_carries_terminal_forced_code(monkeypatch):
 
     assert events_out and events_out[0].type == "approval_required"
     assert events_out[0].reason_code == "terminal_forced"
+    assert events_out[0].to_sse_dict()["reason_code"] == "terminal_forced"
+
+
+@pytest.mark.asyncio
+async def test_hook_ask_code_passthrough_via_forced_reason_codes(monkeypatch):
+    """预检对 forced_reason_codes 的透传：hook ask 无文案场景在 dispatch 层
+    （executor:2098-2107）打码为 hook_ask 并经 forced_reason_codes 传入；
+    本用例钉住「传入 → 事件携带 code 且线级可见」这半段契约。
+
+    变异点：删 _approval_precheck 的 hook_code 分支 → 红。
+    """
+    _fake_registry_calls(monkeypatch)
+    ex = _make_executor("never")
+    captured: list = []
+
+    async def _check(request):
+        captured.append(request)
+        return "paused"
+
+    ex.approval_check = _check
+
+    plan = Plan(id="p1", goal="g", steps=[])
+    step = PlanStep(
+        id="s1",
+        description="d",
+        dependencies=[],
+        tool_hint="web_search",
+        status="running",
+        retry_count=0,
+    )
+    tc = _tc("web_search", '{"query": "q"}', "c3")
+
+    out = await _drain_precheck(
+        ex,
+        [(tc, {"query": "q"})],
+        plan,
+        step,
+        forced_reasons={id(tc): "hook 要求对本次工具调用进行人工审批"},
+        forced_reason_codes={id(tc): "hook_ask"},
+    )
+    assert out and out[0].type == "approval_required"
+    assert out[0].reason_code == "hook_ask"
+    assert out[0].to_sse_dict()["reason_code"] == "hook_ask"
+    # content 仍为中文兜底（reason=forced_reason），前端按 code 渲染本语
+    assert out[0].content == "hook 要求对本次工具调用进行人工审批"
+    assert captured[-1].reason_code == "hook_ask"
+
+
+def test_event_without_code_omits_reason_fields_on_wire():
+    """无码事件线级零变化：不带 reason_code/params 键（瘦身契约）。"""
+    from app.agent.events import AgentEvent
+
+    ev = AgentEvent(type="approval_required", content="中文兜底", tool_name="x")
+    wire = ev.to_sse_dict()
+    assert "reason_code" not in wire
+    assert "reason_params" not in wire
+    assert wire["content"] == "中文兜底"
 
 
 def _tc(name: str, args_json: str, cid: str):
