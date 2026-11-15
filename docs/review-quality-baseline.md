@@ -159,12 +159,26 @@ align(30日, 15日) = modified      ← 变更检测照常工作
 无限堵住；现在 lease 到顶即停止续期 → 在下一个 checkpoint 中止 → 同伴按
 `reason=lease_expired` 接管继续推进。
 
+### 更新（2026-11-16）：配置项数值纳入语义键，「通用抽取器不做数值对比」已解决
+
+上一条「通用关键词抽取器只能判 identified/not_found」**已收口**（#716）：
+
+```text
+「赔偿上限 10%」 vs 「赔偿上限 20%」        -> modified   ✅ 金额变了必须报
+「应赔偿」      vs 「应当赔偿」（同 10%）    -> unchanged  ✅ 纯措辞调整不再误报
+「百分之十」    vs 「百分之二十」           -> modified   ✅ 中文百分比也能比
+```
+
+- 新增 `_extract_numbers`：阿拉伯数字/百分比 + 中文百分比（「百分之十/二十/三十」「十五」）
+- 配置项语义键 = `(terms, numbers)`；`align_item` 在「键同 sha 异」时对配置项判 `unchanged`
+- 默认 4 项路径不变（181 条 analysis 用例全绿）
+
 ### 仍待解决
 
-- **通用关键词抽取器只能判 identified/not_found**，不做数值/单位对比；
-  需要"改数字"级别的判定时仍得写专用抽取器（可用 `register_extractor` 注册）
 - **无编号文档的附加句可能漏检**：实测在 markdown 里追加一行"保密义务：……"，
   如果没有独立成段（被 chunker 并入相邻段落），行级比较看不到它 → 不产生 added 项
+  （注：**句级比对已修**"长段落+并入句"的形态，#715；剩下的漏检只发生在
+  "被 chunker 完全合并进相邻 chunk"时，那是 chunk 边界问题，不是比对问题）
 - ~~`detect_added_clauses` 的排除粒度是 chunk 级~~ → **已修**（#711 / #712）：
   排除改为条款行级 `(chunk_id, clause_no)`，同一 chunk 里的真正新增条款不再被误吞；
   只有无条款号的文档才退回整块排除（保底，且已在 `_covered_refs` 注释里写明）
