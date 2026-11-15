@@ -1687,6 +1687,15 @@ def refine_primary_locator(
         facts[key] = locator[key]
 
 
+EXCEPTION_FILTERED_ITEMS = frozenset({"payment_term", "start_condition", "acceptance_invoice"})
+"""需要跳过「例外/暂缓」条款的项。
+
+这些项的语义是"主条款"：`例外：验收合格且发票齐全时另行付款` 里的付款字样不应成为
+主付款/验收项的事实词元。**配置项不在此列** —— 通用关键词抽取器若继承这个过滤器，
+只要命中文字出现在标题含「例外/暂缓/除外」的条款里就会被报成 not_found（假阴性）。
+"""
+
+
 def _collect_terms(
     clauses: list[Clause],
     terms: tuple[str, ...],
@@ -1696,7 +1705,7 @@ def _collect_terms(
     for clause in clauses:
         # 例外条款的术语归 exception 项：它的「验收合格/发票」是顺延条件，
         # 不应成为验收/起算项的事实词元（否则新增例外会误报 modified）。
-        if item_key != "exception" and _is_exception_article(clause):
+        if item_key in EXCEPTION_FILTERED_ITEMS and _is_exception_article(clause):
             continue
         for term in _dedupe_terms(clause.text, terms):
             if all(hit["term"] != term for hit in hits):
@@ -1708,7 +1717,7 @@ def _collect_terms(
         clause
         for clause in clauses
         if any(term in clause.text for term in terms)
-        and (item_key == "exception" or not _is_exception_article(clause))
+        and (item_key not in EXCEPTION_FILTERED_ITEMS or not _is_exception_article(clause))
     ]
     primary_clause = _primary_term_hit(hits, all_term_clauses, terms)
     # 验收项：同术语的第二条款也要参与变更检测（S1）；独立例外条款归例外项，
@@ -1796,12 +1805,13 @@ def make_keyword_extractor(keywords: tuple[str, ...]) -> Extractor:
 
     为什么需要：`REVIEW_CHECKLIST_JSON` 追加的项没有专用抽取器，
     以前会被直接跳过、永远 undetermined —— 用户配了项却永远得不到结论。
+    传入 `item_key` 是为了**不继承**「主条款」的例外条款过滤器（见 EXCEPTION_FILTERED_ITEMS）。
     """
 
     terms = tuple(keywords)
 
     def _extract(clauses: list[Clause]) -> dict[str, Any]:
-        return _collect_terms(clauses, terms)
+        return _collect_terms(clauses, terms, item_key="__configured__")
 
     return _extract
 

@@ -12,6 +12,7 @@ import pytest
 from app.services.review_analysis_service import (
     EXTRACTORS,
     Clause,
+    make_keyword_extractor,
     register_extractor,
     resolve_extractor,
 )
@@ -66,3 +67,29 @@ class TestRegisterExtractor:
     def test_duplicate_registration_rejected_by_default(self) -> None:
         with pytest.raises(ValueError):
             register_extractor("payment_term")(lambda clauses: {"status": "not_found"})
+
+
+class TestGenericExtractorDoesNotInheritExceptionFilter:
+    """通用抽取器不该套用支付项的"例外条款"过滤器。
+
+    `_collect_terms` 原有过滤器是为 payment_term/start_condition/acceptance_invoice 设计的：
+    "例外：…验收合格…" 不应被当成主验收条款。但配置项（如 confidentiality）继承它以后，
+    只要命中文字出现在标题含「例外/暂缓/除外」的条款里，就会被报成 not_found —— 假阴性。
+    """
+
+    def test_configured_item_finds_term_inside_exception_clause(self) -> None:
+        extractor = make_keyword_extractor(("保密",))
+        clause = _clause(8, "第8条 例外：下列情形不适用保密义务，包括已公开信息。")
+
+        facts = extractor([clause])
+
+        assert facts["status"] == "identified", f"例外条款里的保密字样被漏掉: {facts}"
+        assert "保密" in (facts.get("terms") or [])
+
+    def test_payment_item_still_skips_exception_clause(self) -> None:
+        # 行为保持：默认项仍跳过例外条款（避免把"例外"当成主付款条款）
+        from app.services.review_analysis_service import EXTRACTORS
+
+        clause = _clause(8, "第8条 例外：验收合格且发票齐全时另行付款。")
+        facts = EXTRACTORS["payment_term"]([clause])
+        assert facts["status"] == "not_found"
