@@ -766,3 +766,45 @@ def test_markdown_export_meta_and_utc_times():
     naive_markdown = svc.render_markdown(naive_payload)
     assert "2026-11-07 15:43:30 UTC" in naive_markdown
     assert "导出编号" not in naive_markdown
+
+
+def test_markdown_lists_unchanged_items_without_difference_label():
+    """核验单必须**逐项**列出「无差异」，不能只列差异项。
+
+    否则读者无法区分"这项比过、确实一致"与"这项没检查"——静默省略等于制造歧义。
+    （本用例是对既有行为的守卫：2026-11-15 实测导出的未验证项，现以纯函数固定。）
+    """
+    payload = {
+        "schema_version": 1,
+        "case": {"id": "c1", "title": "守卫用例", "checklist_version": "v1"},
+        "documents": {},
+        "items": [
+            {
+                "item_key": "payment_term",
+                "change_type": "unchanged",
+                "status": "verified",
+                "decided_by": 1,
+                "decided_at": "2026-11-15T00:00:00+08:00",
+                "decision_note": "ok",
+                "facts": {},
+                "evidence": {"policy": [], "base": [], "revised": []},
+            },
+            {
+                "item_key": "exception",
+                "change_type": "unidentified",
+                "status": "verified",
+                "decided_by": 1,
+                "decided_at": "2026-11-15T00:00:00+08:00",
+                "decision_note": "ok",
+                "facts": {},
+                "evidence": {"policy": [], "base": [], "revised": []},
+            },
+        ],
+        "coverage": {},
+        "disclaimer": "测试免责声明",
+    }
+
+    markdown = svc.render_markdown(payload)
+
+    assert "无差异" in markdown, "无差异项必须出现在核验单里"
+    assert "未识别" in markdown
