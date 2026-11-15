@@ -135,3 +135,22 @@ def test_genuinely_new_paragraph_in_unnumbered_doc_is_added() -> None:
     added = detect_added_clauses(base, revised)
     assert len(added) == 1
     assert "违约金" in added[0].text
+
+
+# ── 避免重复报同一处：清单项已识别的 chunk，不要再作为"新增条款"重复出现 ──
+# 实测（2026-11-15）：配置项 confidentiality 已识别第88条，同时 added_4_1 又报了一遍，
+# 审核人会在核验单上看到同一条款两次。
+
+
+def test_clause_already_covered_by_checklist_item_is_not_reported_again() -> None:
+    base = [_anon_clause(1, "标的：采购办公设备一批。")]
+    revised = [
+        _anon_clause(1, "标的：采购办公设备一批。"),
+        _clause(4, "第88条 保密义务：双方对商业秘密承担保密责任，泄露方赔偿全部损失。"),
+    ]
+
+    both = detect_added_clauses(base, revised)
+    assert len(both) == 1, "未排除时应该报出来"
+
+    covered = {both[0].chunk_id}
+    assert detect_added_clauses(base, revised, exclude_chunk_ids=covered) == []

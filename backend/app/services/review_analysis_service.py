@@ -1883,7 +1883,11 @@ def _split_clause_segments(clause: Clause) -> list[Clause]:
 
 
 def detect_added_clauses(
-    base: list[Clause], revised: list[Clause], *, limit: int = ADDED_MAX_ITEMS
+    base: list[Clause],
+    revised: list[Clause],
+    *,
+    limit: int = ADDED_MAX_ITEMS,
+    exclude_chunk_ids: set[str] | None = None,
 ) -> list[Clause]:
     """找出「revised 有、base 无」的条款（清单外的真正新增）。
 
@@ -1911,9 +1915,13 @@ def detect_added_clauses(
         return False
 
     revised_segments = [seg for clause in revised for seg in _split_clause_segments(clause)]
+    excluded = exclude_chunk_ids or set()
     out: list[Clause] = []
     seen: set[str] = set()
     for segment in revised_segments:
+        if segment.chunk_id in excluded:
+            # 该块已被某个清单项识别（例如配置的 confidentiality），不再重复报为新增
+            continue
         norm = normalize_clause_text(segment.text)
         if len(norm) < ADDED_MIN_CHARS or norm in base_norms or norm in seen:
             continue
@@ -2172,9 +2180,16 @@ async def analyze_case(session: AsyncSession, case: ReviewCase) -> dict[str, Any
                     char_end=clause.char_end,
                 )
         # 清单外的新增条款：生成 change_type=added 的核验项，交给人工决策。
-        # 之前这些条款根本不会出现在结果里（EXTRACTORS 只有 4 个键），
-        # 而"合同里多出一条不利条款"正是核验最主要的风险场景。
-        added_clauses = detect_added_clauses(clauses["base"], clauses["revised"])
+        # 已被清单项识别过的 chunk 要排除，否则同一条款会在核验单上出现两次。
+        covered_chunks = {
+            side_facts["chunk_id"]
+            for item in items
+            for side_facts in (item.facts or {}).values()
+            if isinstance(side_facts, dict) and side_facts.get("chunk_id")
+        }
+        added_clauses = detect_added_clauses(
+            clauses["base"], clauses["revised"], exclude_chunk_ids=covered_chunks
+        )
         if added_clauses:
             existing_keys = {it.item_key for it in items}
             next_ordinal = max((it.ordinal for it in items), default=0)
