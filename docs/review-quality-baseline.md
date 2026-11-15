@@ -108,14 +108,41 @@ export REVIEW_CHECKLIST_JSON='[{"key":"confidentiality","label":"保密义务","
 
 `has_undetermined=true` 时界面/导出**不得**呈现为"没有差异"。
 
+### 更新（2026-11-15 深夜）：配置项真正参与判定 + 前端消费 summary
+
+**① 抽取器可注册，配置项不再永远 undetermined**（`review_analysis_service`）：
+
+```python
+register_extractor(item_key, *, replace=False)   # 注册专用抽取器
+make_keyword_extractor(keywords)                 # 通用关键词抽取器
+resolve_extractor(item_key, *, keywords=None)    # 专用优先，否则按关键词兜底
+```
+
+默认 4 项仍是各自专用抽取器（有断言 `resolve_extractor("payment_term") is EXTRACTORS["payment_term"]`）。
+真实验证（真实 md 构造 V1/V2，revised 追加一条保密条款）：
+
+```text
+confidentiality  change=modified  facts={'base': {'terms': ['泄露'], 'status': 'identified', 'chunk_id': ...}}
+summary: {'item_count': 6, 'undetermined_count': 0, 'has_undetermined': True}
+```
+
+**② 同一条款不再重复报**：清单项（如 confidentiality）已识别的 chunk，不再被
+`detect_added_clauses` 二次报成 `added_*`（实测曾出现同一条款两个核验项）。
+
+**③ 前端消费 summary**：详情页把 `items.unidentified + summary.undetermined_count`
+合并计数；有未判定项时显示「需人工复核」+「N 项无法判定」，不再落到"待决策"。
+`has_undetermined=true` 时界面**不呈现为无差异**。
+
 ### 仍待解决
 
-- 清单项目前的 keywords 只用于**候选证据抓取**，判定仍依赖 `EXTRACTORS` 里的专用抽取器；
-  配置项要真正参与判定，需要可插拔抽取器（下一步）
+- **通用关键词抽取器只能判 identified/not_found**，不做数值/单位对比；
+  需要"改数字"级别的判定时仍得写专用抽取器（可用 `register_extractor` 注册）
 - **无编号文档的附加句可能漏检**：实测在 markdown 里追加一行"保密义务：……"，
   如果没有独立成段（被 chunker 并入相邻段落），行级比较看不到它 → 不产生 added 项
 - `payment_term` 在 base 侧出现 `unit_unclear / ambiguous`（V1 写"30日"未写单位语境），
-  这类"无法判定"目前只体现在 facts 里，界面上如何呈现给审核人值得单独核
+  这类"无法判定"已在 facts 里并经 `summary.undetermined_items` 暴露，但**导出文档**里
+  如何排版给审核人尚未验证
+
 
 
 ## 复现方式
