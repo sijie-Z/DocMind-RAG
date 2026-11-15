@@ -57,7 +57,7 @@
               {{ t('router.knowledgeGraph') }}
             </n-button>
             <n-button
-              v-if="stats.failed > 0"
+              v-if="stats.failed > 0 && showRebuild"
               secondary
               round
               size="medium"
@@ -254,9 +254,9 @@
                              </template>
                              {{ t('knowledge.actionView') }}
                            </n-tooltip>
-                           <n-tooltip v-if="item.status === 'failed'" trigger="hover">
+                           <n-tooltip v-if="showRebuild && item.status === 'failed'" trigger="hover">
                              <template #trigger>
-                               <n-button size="tiny" quaternary circle type="primary" :aria-label="t('knowledge.actionRebuild')" @click.stop="handleRebuild(item)">
+                               <n-button v-if="showRebuild" size="tiny" quaternary circle type="primary" :aria-label="t('knowledge.actionRebuild')" @click.stop="handleRebuild(item)">
                                  <template #icon><n-icon><RefreshOutline /></n-icon></template>
                                </n-button>
                              </template>
@@ -348,7 +348,7 @@
                        <td class="p-4 text-right">
                           <div class="flex justify-end gap-2 kb-row-actions">
                              <n-button size="tiny" secondary circle :aria-label="t('knowledge.actionView')" @click="viewKnowledge(item)"><template #icon><n-icon><EyeOutline /></n-icon></template></n-button>
-                             <n-button v-if="item.status === 'failed'" size="tiny" secondary circle type="primary" :aria-label="t('knowledge.actionRebuild')" @click="handleRebuild(item)"><template #icon><n-icon><RefreshOutline /></n-icon></template></n-button>
+                             <n-button v-if="showRebuild && item.status === 'failed'" size="tiny" secondary circle type="primary" :aria-label="t('knowledge.actionRebuild')" @click="handleRebuild(item)"><template #icon><n-icon><RefreshOutline /></n-icon></template></n-button>
                              <n-button size="tiny" secondary circle type="error" :aria-label="t('knowledge.actionDelete')" @click="deleteKnowledge(item)"><template #icon><n-icon><TrashOutline /></n-icon></template></n-button>
                           </div>
                        </td>
@@ -484,6 +484,11 @@ const dialog = useDialog()
 const router = useRouter()
 const { t, locale } = useI18n()
 const userStore = useUserStore()
+
+// P1-1：后端对重建要求 knowledge_base:rebuild_index 权限（无权限 403）。
+// permissions 已下发时按权限隐藏入口；字段缺失（旧后端）→ null = 未知，保持可见。
+const canRebuild = computed(() => userStore.can('knowledge_base:rebuild_index'))
+const showRebuild = computed(() => canRebuild.value !== false)
 const loading = ref(false)
 const loadError = ref(false)
 const loadErrorMsg = ref('')

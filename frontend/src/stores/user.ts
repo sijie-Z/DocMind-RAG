@@ -130,6 +130,18 @@ export const useUserStore = defineStore('user', () => {
   //   users.role 只是展示标签，不再作为授权信号。
   // 菜单过滤（layouts）与路由守卫（router）都消费这同一个计算属性。
   const isSuperuser = computed(() => userInfo.value?.is_superuser === true)
+  // RBAC 显隐（登录态即知的权限集）：后端 /users/me 与登录 user_info 下发
+  // permissions: string[]。字段缺失（旧后端）→ 未知，调用方应保持可见（诚实降级）。
+  const permissions = computed<string[] | null>(() => {
+    const p = userInfo.value?.permissions
+    return Array.isArray(p) ? p : null
+  })
+  /** 是否拥有某权限；permissions 未下发时返回 null（未知，勿据此隐藏入口） */
+  const can = (perm: string): boolean | null => {
+    if (permissions.value === null) return null
+    if (isSuperuser.value) return true
+    return permissions.value.includes(perm)
+  }
   const isOrgAdmin = computed(() => userInfo.value?.is_org_admin === true)
   const isAdmin = computed(() => isSuperuser.value || isOrgAdmin.value)
   const currentOrgId = computed(() => currentOrganizationId.value || userInfo.value?.organization_id || null)
@@ -479,6 +491,8 @@ export const useUserStore = defineStore('user', () => {
     isLoggedIn,
     isAdmin,
     isSuperuser,
+    permissions,
+    can,
     isOrgAdmin,
     currentOrgId,
 

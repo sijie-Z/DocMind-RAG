@@ -583,6 +583,13 @@ async def get_user_profile(
             "created_at": current_user.created_at,
             "last_login_at": current_user.last_login_at,
             "preferences": current_user.preferences,
+            # 前端按 RBAC 显隐入口（如知识库「重新解析」）：登录态即知的权限集，
+            # 缺权限按钮时前端隐藏（诚实降级：字段缺失 = 前端保持可见）。
+            "permissions": sorted(
+                await permission_service.get_user_permissions(
+                    db, current_user, current_user.organization_id
+                )
+            ),
             # 安全加固：只返回掩码，不泄露完整 API Key
             "api_key": _mask_api_key(current_user.api_key),
         }

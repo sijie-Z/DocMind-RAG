@@ -30,6 +30,7 @@ from app.models.user import User
 from app.models.user_audit import UserLoginSession
 from app.schemas.auth import ChangePasswordRequest, UpdateProfileRequest
 from app.services.audit_service import audit_service
+from app.services.permission_service import permission_service
 from app.services.auth_service import _auth_failed, auth_service
 
 logger = logging.getLogger(__name__)
@@ -177,6 +178,10 @@ async def login(
             # W0-1：平台管理员只认显式 is_superuser（users.role 不再参与鉴权）
             "is_superuser": bool(getattr(user, "is_superuser", False)),
             "is_org_admin": await is_org_admin(db, user, user.organization_id),
+            # 前端按 RBAC 显隐入口：登录即下发权限集（见 GET /users/me 同字段）
+            "permissions": sorted(
+                await permission_service.get_user_permissions(db, user, user.organization_id)
+            ),
             "preferences": getattr(user, "preferences", None),
         }
         # 确保 user_info 可 JSON 序列化（响应体防御：存在不可序列化的字段时
