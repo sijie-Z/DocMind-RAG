@@ -133,7 +133,6 @@ describe('知识库 · 重建入口按 RBAC 显隐', () => {
     seedUser(useUserStore(), ['knowledge_base:read', 'knowledge_base:rebuild_index'])
     const w = await mountView()
 
-    const txt = w.text()
     expect(visibleRebuildButtons(w), '有权限应渲染重建入口').toBeGreaterThan(0)
     w.unmount()
   })
