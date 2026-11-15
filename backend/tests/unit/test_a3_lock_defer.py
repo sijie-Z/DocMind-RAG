@@ -218,12 +218,17 @@ class TestLockHeartbeat:
         assert await processor._renew_processing_lock("doc-1") is True
         renewal = [c for c in fake.calls if c[0] == "eval"]
         assert renewal, "续期必须走 compare-and-expire 脚本"
-        assert token in renewal[-1][3]
+        # 锁值 = `<worker_id>|<token>`：既要带 token（只续自己的锁），也要带 worker 身份
+        # （同伴据此判断持有者是否存活并可接管死锁）。
+        assert renewal[-1][3][1] == dp_mod._lock_value(token)
+        assert token in renewal[-1][3][1]
         assert str(dp_mod._LOCK_TTL_SECONDS) in renewal[-1][3]
 
         await processor._release_processing_lock("doc-1")
         release = [c for c in fake.calls if c[0] == "eval"][-1]
-        assert token in release[3], "释放也必须校验 token（不得删掉别人续上的锁）"
+        assert release[3][1] == dp_mod._lock_value(token), (
+            "释放也必须带完整锁值（worker 身份 + token），不得删掉别人续上的锁"
+        )
 
     @pytest.mark.asyncio
     async def test_heartbeat_task_renews_until_cancelled(self, monkeypatch):
@@ -414,3 +419,106 @@ class TestLockHeartbeat:
         assert state == {"started": True, "cancelled": True}, (
             "持锁期间必须运行心跳；process 退出时必须取消心跳任务"
         )
+
+
+class _DictRedis:
+    """最小 Redis 假实现：支持 set(nx/ex)/get/exists/eval/delete。"""
+
+    def __init__(self, initial: dict[str, str] | None = None):
+        self.store = dict(initial or {})
+        self.calls: list[tuple] = []
+
+    async def set(self, key, value, nx=False, ex=None):
+        self.calls.append(("set", key, value, nx, ex))
+        if nx and key in self.store:
+            return None
+        self.store[key] = value
+        return True
+
+    async def get(self, key):
+        return self.store.get(key)
+
+    async def exists(self, key):
+        return 1 if key in self.store else 0
+
+    async def delete(self, key):
+        self.store.pop(key, None)
+        return 1
+
+    async def eval(self, script, numkeys, *args):
+        self.calls.append(("eval", script, numkeys, args))
+        key, *rest = args
+        # setnx-with-expire（抢锁）：当前值与 ARGV[1] 相同才覆盖
+        if "redis.call('set'" in script:
+            if self.store.get(key) == rest[0]:
+                self.store[key] = rest[1]
+                return 1
+            return 0
+        # renew：当前值等于 token 才续期
+        if self.store.get(key) == rest[0]:
+            return 1
+        return 0
+
+
+class TestStaleLockTakeover:
+    """持有者进程已死时，锁不该阻塞分区直到 TTL 到期（实测 600s 头阻塞）。"""
+
+    @pytest.mark.asyncio
+    async def test_steals_lock_when_holder_worker_is_dead(self, monkeypatch):
+        import app.core.redis as redis_mod
+        import app.worker.doc_processor as dp_mod
+
+        doc_id = "doc-dead"
+        key = f"doc:{doc_id}:processing"
+        fake = _DictRedis({key: "dead-worker-1|oldtoken"})  # 无 worker:...:alive
+
+        async def fake_get_redis():
+            return fake
+
+        monkeypatch.setattr(redis_mod, "get_redis", fake_get_redis)
+
+        processor = dp_mod.DocumentProcessor()
+        assert await processor._acquire_processing_lock(doc_id) is True
+        assert fake.store[key].startswith(dp_mod._WORKER_ID.split("|")[0])
+        assert "|" in fake.store[key], "锁值必须带 worker 身份，否则同伴无法判断持有者是否存活"
+
+    @pytest.mark.asyncio
+    async def test_defers_when_holder_worker_is_alive(self, monkeypatch):
+        import app.core.redis as redis_mod
+        import app.worker.doc_processor as dp_mod
+
+        doc_id = "doc-alive"
+        key = f"doc:{doc_id}:processing"
+        fake = _DictRedis(
+            {
+                key: "live-worker-9|token9",
+                "worker:live-worker-9:alive": "1",
+            }
+        )
+
+        async def fake_get_redis():
+            return fake
+
+        monkeypatch.setattr(redis_mod, "get_redis", fake_get_redis)
+
+        processor = dp_mod.DocumentProcessor()
+        assert await processor._acquire_processing_lock(doc_id) is False, "活着的持有者绝不能被抢"
+        assert fake.store[key] == "live-worker-9|token9"
+
+    @pytest.mark.asyncio
+    async def test_renew_also_refreshes_worker_liveness(self, monkeypatch):
+        import app.core.redis as redis_mod
+        import app.worker.doc_processor as dp_mod
+
+        fake = _DictRedis()
+
+        async def fake_get_redis():
+            return fake
+
+        monkeypatch.setattr(redis_mod, "get_redis", fake_get_redis)
+
+        processor = dp_mod.DocumentProcessor()
+        assert await processor._acquire_processing_lock("doc-hb") is True
+        assert dp_mod._worker_alive_key() in fake.store
+        await processor._renew_processing_lock("doc-hb")
+        assert dp_mod._worker_alive_key() in fake.store
