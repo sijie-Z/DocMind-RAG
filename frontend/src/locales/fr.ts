@@ -59,6 +59,26 @@ export default {
     },
     footer: 'Construit avec FastAPI + Vue 3 + Elasticsearch + DeepSeek LLM',
   },
+  audit: {
+    searchPlaceholder: 'Rechercher un utilisateur ou une action...',
+    actionFilter: 'Type d’action',
+    search: 'Rechercher',
+    export: 'Exporter en CSV',
+    columns: {
+      time: 'Date',
+      user: 'Utilisateur',
+      action: 'Type d’action',
+      target: 'Type de cible',
+      detail: 'Détails'
+    },
+    actionTypes: {
+      login: 'Connexion',
+      upload: 'Téléversement de document',
+      delete: 'Suppression',
+      roleChange: 'Changement de rôle',
+      passwordReset: 'Réinitialisation du mot de passe'
+    }
+  },
   app: {
     documentTitle: 'DocMind - Q&R documentaire et revue de contrats',
     metaDescription: 'Q&R documentaire et revue de contrats : réponses sourcées, différences clause par clause avec preuves.',
@@ -73,6 +93,7 @@ export default {
     skipToContent: 'Aller au contenu principal',
   },
   common: {
+    copySuccess: 'Copié',
     save: 'Enregistrer',
     cancel: 'Annuler',
     confirm: 'Confirmer',
@@ -313,6 +334,16 @@ export default {
     title: 'Organigramme',
     subtitle: 'Gérer la structure et la hiérarchie du système',
     searchPlaceholder: 'Rechercher une organisation...',
+    adjustFailed: 'Échec de l’ajustement',
+    adjustSuccess: 'Ajustement effectué',
+    batchDeleteSuccess: 'Suppression groupée effectuée',
+    createSuccess: 'Création effectuée',
+    deleteFailed: 'Échec de la suppression',
+    deleted: 'Supprimé',
+    loadDetailsFailed: 'Échec du chargement des détails',
+    loadFailed: 'Échec du chargement',
+    saveFailed: 'Échec de l’enregistrement',
+    updateSuccess: 'Mise à jour effectuée',
     create: 'Nouvelle Organisation',
     edit: 'Modifier l\'Organisation',
     deleteConfirm: 'Êtes-vous sûr de vouloir supprimer cette organisation ? Cette action est irréversible.',
@@ -361,6 +392,8 @@ export default {
     id: 'ID',
   },
   chat: {
+    defaultTitle: 'Nouvelle conversation',
+    confirmDelete: 'Supprimer cette conversation ?',
     modeSwitchAria: 'Mode de conversation',
     modeQuick: 'Réponse rapide',
     modeDeep: 'Analyse approfondie',
@@ -592,6 +625,21 @@ export default {
       openFromPreview: 'Ouvrir la page du document'
     },
     searchPlaceholder: 'Rechercher dans la base...',
+    stats: {
+      total: 'Total de documents',
+      completed: 'Indexés',
+      processing: 'En cours',
+      failed: 'En échec'
+    },
+    rebuildSuccess: 'Tâche de reconstruction de l’index envoyée',
+    rebuildFailed: 'Échec de la reconstruction de l’index',
+    rebuildSubmitted: 'Reconstruction envoyée : {title}',
+    rebuildSubmitFailed: 'Échec de l’envoi de la reconstruction',
+    noFailedDocs: 'Aucun document en échec actuellement',
+    previewLoadFailed: 'Les détails du document sont affichés, mais le chargement de l’aperçu a échoué',
+    unknownError: 'Erreur inconnue',
+    deleteFailed: 'Échec de la suppression',
+    batchDeleteConfirm: 'Supprimer les {count} documents sélectionnés ? Cette action est irréversible.',
     pageScope: 'cette page',
     rebuildLatestFailed: 'Reconstruire le dernier document en échec',
     actionView: 'Voir',
@@ -621,6 +669,9 @@ export default {
     },
     graph: {
       subtitle: 'Entités et relations extraites des documents indexés',
+      emptyTitle: 'Aucune donnée de graphe',
+      emptyDesc: 'Téléversez des documents : une fois l’indexation terminée, le graphe de connaissances est construit automatiquement',
+      loadFailed: 'Échec du chargement du graphe, veuillez réessayer plus tard',
       zoomIn: 'Zoom avant',
       zoomOut: 'Zoom arrière',
       fitView: 'Réinitialiser la vue'
@@ -677,6 +728,7 @@ export default {
   prompts: {
     subtitle: 'Gérez les prompts système et le style de réponse de l’assistant IA',
     fillToChat: 'Insérer dans la saisie',
+    create: 'Créer un modèle',
     addTemplate: 'Nouveau modèle',
     editTemplate: 'Modifier le modèle',
     empty: 'Aucun modèle de prompt',
