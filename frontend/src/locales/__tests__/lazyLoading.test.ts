@@ -23,15 +23,16 @@ describe('E5 · locales 按需加载', () => {
     expect(i18n.global.getLocaleMessage('fr')).toEqual({})
   })
 
-  it('ensureLocale(ja)：ja 词条与 en 兜底包一并就绪，缺口回退英文而非裸键', async () => {
+  it('ensureLocale(ja)：ja 词条与 en 兜底包一并就绪，词条按语言渲染', async () => {
     await ensureLocale('ja')
     expect(i18n.global.getLocaleMessage('ja')).not.toEqual({})
-    // ja 缺 53 键（completeness 基线）——兜底包必须同批就绪
+    // 兜底包仍随批就绪（en 100% 完备是 fallbackLocale 的前提）
     expect(i18n.global.getLocaleMessage('en')).not.toEqual({})
 
     await setLanguage('ja')
-    // audit.actionFilter 为 ja 缺口之一：取 en 译文 'Action Type'，而不是键名本身
-    expect(i18n.global.t('audit.actionFilter')).toBe('Action Type')
+    // audit.actionFilter 曾是 ja 缺口（回退英文 'Action Type'）；缺口收敛后
+    // 应渲染日文词条——本断言同时验证「不裸键」与「不再误回退」
+    expect(i18n.global.t('audit.actionFilter')).toBe('操作タイプ')
   })
 
   it('回归：setLanguage 四语切换，词条按语言正确渲染且持久化', async () => {

@@ -59,6 +59,26 @@ export default {
     },
     footer: 'FastAPI + Vue 3 + Elasticsearch + DeepSeek LLM で構築',
   },
+  audit: {
+    searchPlaceholder: 'ユーザーまたは操作を検索...',
+    actionFilter: '操作タイプ',
+    search: '検索',
+    export: 'CSV エクスポート',
+    columns: {
+      time: '日時',
+      user: 'ユーザー',
+      action: '操作タイプ',
+      target: '対象タイプ',
+      detail: '詳細'
+    },
+    actionTypes: {
+      login: 'ログイン',
+      upload: 'ドキュメントアップロード',
+      delete: '削除操作',
+      roleChange: 'ロール変更',
+      passwordReset: 'パスワードリセット'
+    }
+  },
   app: {
     documentTitle: 'DocMind - ドキュメントQ&Aと契約レビュー',
     metaDescription: 'ドキュメントQ&Aと契約レビュー：回答は出典付き、契約差分は条項ごとに証拠付き。',
@@ -73,6 +93,7 @@ export default {
     skipToContent: 'メインコンテンツへスキップ',
   },
   common: {
+    copySuccess: 'コピーしました',
     save: '保存',
     cancel: 'キャンセル',
     confirm: '確認',
@@ -313,6 +334,16 @@ export default {
     title: '組織図',
     subtitle: 'システムの組織構造と階層を管理します',
     searchPlaceholder: '組織を検索...',
+    adjustFailed: '調整に失敗しました',
+    adjustSuccess: '調整しました',
+    batchDeleteSuccess: '一括削除しました',
+    createSuccess: '作成しました',
+    deleteFailed: '削除に失敗しました',
+    deleted: '削除済み',
+    loadDetailsFailed: '詳細の読み込みに失敗しました',
+    loadFailed: '読み込みに失敗しました',
+    saveFailed: '保存に失敗しました',
+    updateSuccess: '更新しました',
     create: '新規組織',
     edit: '組織を編集',
     deleteConfirm: 'この組織を削除してもよろしいですか？この操作は取り消せません。',
@@ -361,6 +392,8 @@ export default {
     id: 'ID',
   },
   chat: {
+    defaultTitle: '新しい会話',
+    confirmDelete: 'この会話を削除しますか？',
     modeSwitchAria: '対話モード',
     modeQuick: 'クイック回答',
     modeDeep: '深層分析',
@@ -591,6 +624,21 @@ export default {
       openFromPreview: 'ドキュメントページを開く'
     },
     searchPlaceholder: 'ナレッジベースを検索...',
+    stats: {
+      total: 'ドキュメント総数',
+      completed: '索引済み',
+      processing: '処理中',
+      failed: '処理失敗'
+    },
+    rebuildSuccess: 'インデックス再構築タスクを送信しました',
+    rebuildFailed: 'インデックス再構築に失敗しました',
+    rebuildSubmitted: '再構築を送信しました：{title}',
+    rebuildSubmitFailed: '再構築の送信に失敗しました',
+    noFailedDocs: '現在失敗したドキュメントはありません',
+    previewLoadFailed: 'ドキュメント詳細は表示済みですが、プレビュー内容の読み込みに失敗しました',
+    unknownError: '不明なエラー',
+    deleteFailed: '削除に失敗しました',
+    batchDeleteConfirm: '選択した {count} 件のドキュメントを削除しますか？この操作は元に戻せません。',
     pageScope: 'このページ',
     rebuildLatestFailed: '直近の失敗ドキュメントを再構築',
     actionView: '表示',
@@ -620,6 +668,9 @@ export default {
     },
     graph: {
       subtitle: 'インデックス済みドキュメントから抽出したエンティティと関係',
+      emptyTitle: 'グラフデータはまだありません',
+      emptyDesc: 'ドキュメントをアップロードして索引が完了すると、ナレッジグラフが自動的に構築されます',
+      loadFailed: 'グラフデータの読み込みに失敗しました。しばらくしてから再試行してください',
       zoomIn: '拡大',
       zoomOut: '縮小',
       fitView: '表示をリセット'
@@ -676,6 +727,7 @@ export default {
   prompts: {
     subtitle: 'AIアシスタントのシステムプロンプトと応答スタイルを管理します',
     fillToChat: '入力欄に挿入',
+    create: 'テンプレートを作成',
     addTemplate: 'テンプレート追加',
     editTemplate: 'テンプレート編集',
     empty: 'プロンプトテンプレートがありません',
