@@ -245,3 +245,106 @@ class TestSentenceLevelNewContent:
         revised = [_multi_line_clause("c1", [REWORDED])]
 
         assert detect_added_clauses(base, revised) == [], "同义改写不应产生新增噪音"
+
+
+# ── 编号条款内追加的新增句 ──
+# 缺口（2026-11-16 演示实测）：只要该行条号在 base 里已存在就整行 `continue`，
+# 句子级检测（#714）根本不会执行 —— 被追加进「第X条」的新义务既不在 4 项清单
+# 覆盖范围内，也不作为新增报出，等于对审核人静默隐藏。
+
+NUMBERED_PAYMENT_BASE = "第5条 付款期限：验收合格后30日内支付货款。"
+NUMBERED_PAYMENT_APPENDED = (
+    "第5条 付款期限：验收合格后30日内支付货款。此外，逾期未对账的视为甲方确认本期货款无误。"
+)
+
+
+class TestNumberedClauseAppendedSentence:
+    """条号已存在 ≠ 没有新增：改写顺带追加的新义务必须可见。"""
+
+    def test_sentence_appended_to_numbered_clause_is_reported(self) -> None:
+        base = [
+            _clause(1, "第1条 标的：甲方向乙方采购办公设备一批。"),
+            _clause(5, NUMBERED_PAYMENT_BASE),
+        ]
+        revised = [
+            _clause(1, "第1条 标的：甲方向乙方采购办公设备一批。"),
+            _clause(5, NUMBERED_PAYMENT_APPENDED),
+        ]
+
+        added = detect_added_clauses(base, revised)
+
+        texts = " ".join(c.text for c in added)
+        assert "对账" in texts, f"编号条款内追加的义务被静默吞掉: {[c.text for c in added]}"
+        # 只报新句，不能把整条旧条款再贴一遍
+        assert "验收合格后30日内支付货款" not in texts, f"不应把旧条款内容当作新增: {texts}"
+
+    def test_appended_sentence_keeps_clause_locator(self) -> None:
+        base = [_clause(5, NUMBERED_PAYMENT_BASE)]
+        revised = [_clause(5, NUMBERED_PAYMENT_APPENDED)]
+
+        added = detect_added_clauses(base, revised)
+
+        assert len(added) == 1, [c.text for c in added]
+        # 引用定位要落在原条款上，审核人才能回溯到原文
+        assert added[0].clause_no == [5]
+        assert added[0].chunk_id == "c5"
+
+    def test_numbered_clause_value_change_is_still_not_added(self) -> None:
+        # 纯数值修改（30日→15日）走清单抽取器判 modified，不能在这里重复报成新增
+        base = [_clause(5, "第5条 付款期限：验收合格后30日内支付货款。")]
+        revised = [_clause(5, "第5条 付款期限：验收合格后15日内支付货款。")]
+
+        assert detect_added_clauses(base, revised) == []
+
+    def test_punctuation_split_in_numbered_clause_is_not_added(self) -> None:
+        # 同一句只改了标点（，→。）：拆出来的两段都是 base 原文的子串，不是新增。
+        # 没有子串守卫时这两段相似度都会掉到阈值以下，被误报成 2 条新增。
+        base = [
+            _clause(
+                5,
+                "第5条 乙方应当对本合同项下全部商业秘密承担保密义务，"
+                "保密期限为五年，期满后仍应继续承担保密义务。",
+            )
+        ]
+        revised = [
+            _clause(
+                5,
+                "第5条 乙方应当对本合同项下全部商业秘密承担保密义务。"
+                "保密期限为五年，期满后仍应继续承担保密义务。",
+            )
+        ]
+
+        assert detect_added_clauses(base, revised) == [], "仅改标点不应报新增"
+
+    def test_identical_numbered_clause_is_not_added(self) -> None:
+        base = [_clause(5, NUMBERED_PAYMENT_BASE)]
+        assert detect_added_clauses(base, base) == []
+
+    def test_covered_numbered_clause_is_not_reported_twice(self) -> None:
+        # 该条款已被清单项识别（exclude_refs 含 (chunk_id, clause_no)）：
+        # 追加句由那条清单项判 modified，核验单上不能再多出一条 added
+        base = [_clause(5, NUMBERED_PAYMENT_BASE)]
+        revised = [_clause(5, NUMBERED_PAYMENT_APPENDED)]
+
+        assert detect_added_clauses(base, revised, exclude_refs={("c5", 5)}) == []
+
+    def test_uncovered_numbered_clause_append_is_reported(self) -> None:
+        # 追加义务落在清单未覆盖的条款（第12条 对账）→ 必须报出来，
+        # 这正是「清单之外的风险内容」的典型形态
+        base = [
+            _clause(5, NUMBERED_PAYMENT_BASE),
+            _clause(12, "第12条 双方应于每月十日前完成对账。"),
+        ]
+        revised = [
+            _clause(5, NUMBERED_PAYMENT_BASE),
+            _clause(
+                12,
+                "第12条 双方应于每月十日前完成对账。逾期未对账的，视为甲方确认本期货款无误。",
+            ),
+        ]
+
+        added = detect_added_clauses(base, revised, exclude_refs={("c5", 5)})
+
+        texts = " ".join(c.text for c in added)
+        assert "逾期未对账" in texts, [c.text for c in added]
+        assert "每月十日前完成对账" not in texts, f"不应把旧条款内容当作新增: {texts}"
