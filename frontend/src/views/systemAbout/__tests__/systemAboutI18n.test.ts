@@ -64,7 +64,7 @@ describe('关于页 · 四语化', () => {
     expect(text).toContain('文档问答与合同核验平台')
     // 反向断言：tagline 若被写死英文，values.product 的同串会遮蔽上面的
     // toContain——这条负责抓「硬编码英文」类回归（评审 B 变异实证）
-    expect(text, 'tagline 被写死英文').not.toContain('Document Q&A and contract verification platform')
+    expect(text, 'tagline 被写死英文').not.toContain('Document Q&A and Contract Review platform')
     expect(text).toContain('系统信息')
     expect(text).toContain('架构亮点')
     expect(text).toContain('混合检索')
@@ -77,7 +77,7 @@ describe('关于页 · 四语化', () => {
   it('en：同页挂载即为英文（词条四语齐备）', async () => {
     const { w } = await mountPage('en')
     const text = w.text()
-    expect(text).toContain('Document Q&A and contract verification platform')
+    expect(text).toContain('Document Q&A and Contract Review platform')
     expect(text).toContain('System information')
     expect(text).toContain('Architecture highlights')
     expect(text, '亮点标题未跟随语言').toContain('Hybrid retrieval')
