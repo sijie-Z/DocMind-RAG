@@ -2009,6 +2009,35 @@ def _covered_refs(items: list[ReviewItem]) -> set[tuple[str, int | None]]:
     return refs
 
 
+def _fresh_sentences_in_existing_clause(
+    segment: Clause,
+    base_numbers: set[int],
+    base_sents_by_no: dict[int, list[str]],
+    base_texts_by_no: dict[int, list[str]],
+) -> list[str]:
+    """条号已存在的行里，「base 完全没有」的句子（issue #722）。
+
+    命中条号只说明「这是被改写的既有条款」，不等于「没有新增内容」：新义务经常
+    被直接追加到既有条款里（…。此外，逾期未对账的视为确认。）。整行按改写跳过，
+    这些义务就既不在清单覆盖内、也不作为新增报出，等于对审核人静默隐藏。
+
+    只报句子级新内容，因为整行报出去等于把旧条款再贴一遍。
+
+    子串守卫：改写标点（，→。）会把一句拆成两句，两段都是 base 原文的**子串** ——
+    它们不是新增，只是排版不同；单靠相似度阈值拦不住（拆短后相似度会掉到阈值以下）。
+    """
+    numbers = set(segment.clause_no) & base_numbers
+    pool = [sent for number in numbers for sent in base_sents_by_no.get(number, ())]
+    texts = [text for number in numbers for text in base_texts_by_no.get(number, ())]
+    if not pool:
+        return []
+    return [
+        sentence
+        for sentence in _new_sentences(segment, pool)
+        if not any(sentence in text for text in texts)
+    ]
+
+
 def detect_added_clauses(
     base: list[Clause],
     revised: list[Clause],
@@ -2045,6 +2074,14 @@ def detect_added_clauses(
     # 句级池：判为「改写」时用它找出行内**真正新增的句子**（issue #714）。
     base_sentences = [sent for seg in base_segments for sent in _split_sentences(seg.text)]
 
+    # 按条号归集的 base 句子池/原文：条号已存在的行要判断「是改写还是追加」（issue #722）。
+    base_sents_by_no: dict[int, list[str]] = {}
+    base_texts_by_no: dict[int, list[str]] = {}
+    for seg in base_segments:
+        for number in seg.clause_no:
+            base_sents_by_no.setdefault(number, []).extend(_split_sentences(seg.text))
+            base_texts_by_no.setdefault(number, []).append(seg.text)
+
     revised_segments = [seg for clause in revised for seg in _split_clause_segments(clause)]
     excluded = exclude_chunk_ids or set()
     # 条款行级排除：`(chunk_id, clause_no)` 精确排除已识别条款；
@@ -2068,24 +2105,39 @@ def detect_added_clauses(
         norm = normalize_clause_text(segment.text)
         if len(norm) < ADDED_MIN_CHARS or norm in base_norms or norm in seen:
             continue
+
+        # 需要作为「句子级新增」报出的文本；None 表示整行都是新增。
+        fresh_text: str | None = None
         if set(segment.clause_no) & base_numbers:
-            continue
-        if _is_variant_of_existing(norm):
+            # 条号已存在 → 属于「改写既有条款」，交给清单抽取器；
+            # 但改写可能顺带追加新义务，句子级新内容仍要报出（issue #722）。
+            fresh = _fresh_sentences_in_existing_clause(
+                segment, base_numbers, base_sents_by_no, base_texts_by_no
+            )
+            if not fresh:
+                continue
+            fresh_text = "。".join(fresh)
+        elif _is_variant_of_existing(norm):
             # 与 base 高度相似 ≠ 没有新增：新内容常被并入既有段落（…。此外，双方应…）。
             # 此时只把**句子级**的新增内容报出来，避免把整段旧文本当新增（issue #714）。
             fresh = _new_sentences(segment, base_sentences)
             if not fresh:
                 continue
-            text = "。".join(fresh)
-            if text in seen:
+            fresh_text = "。".join(fresh)
+
+        if fresh_text is None:
+            seen.add(norm)
+            out.append(segment)
+        else:
+            if fresh_text in seen:
                 continue
-            seen.add(text)
+            seen.add(fresh_text)
             out.append(
                 Clause(
                     chunk_id=segment.chunk_id,
                     chunk_index=segment.chunk_index,
-                    text=text,
-                    raw_text=text,
+                    text=fresh_text,
+                    raw_text=fresh_text,
                     clause_no=list(segment.clause_no),
                     section_no=segment.section_no,
                     page_number=segment.page_number,
@@ -2093,11 +2145,6 @@ def detect_added_clauses(
                     char_end=segment.char_end,
                 )
             )
-            if len(out) >= limit:
-                break
-            continue
-        seen.add(norm)
-        out.append(segment)
         if len(out) >= limit:
             break
     return out
