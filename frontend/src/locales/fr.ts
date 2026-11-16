@@ -1,6 +1,6 @@
 export default {
   about: {
-    tagline: 'Plateforme de Q&A documentaire et de vérification de contrats',
+    tagline: 'Plateforme de Q&R documentaire et de revue de contrats',
     systemInfo: 'Informations système',
     labels: {
       product: 'Produit',
@@ -12,7 +12,7 @@ export default {
       security: 'Sécurité',
     },
     values: {
-      product: 'DocMind — plateforme de Q&A documentaire et de vérification de contrats',
+      product: 'DocMind — plateforme de Q&R documentaire et de revue de contrats',
       architecture: 'RAG (génération augmentée par récupération) + raisonnement Agent autonome',
       backend: 'FastAPI + SQLAlchemy (async) + MySQL 8 + Redis + Elasticsearch 8 + Kafka + MinIO',
       frontend: 'Vue 3 + TypeScript + Vite + Naive UI + Pinia',

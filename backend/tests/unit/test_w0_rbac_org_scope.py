@@ -653,6 +653,32 @@ async def test_admin_flags_exposed_for_frontend_gating(api):
 
 
 @pytest.mark.asyncio
+async def test_permissions_exposed_for_frontend_visibility(api):
+    """RBAC 显隐（PR #720）：登录与 /users/me 下发 permissions: string[]。
+
+    - OrgAdmin 的权限集含 knowledge_base:rebuild_index（OrgAdmin 角色默认权限）；
+    - 普通成员不含该键；
+    - 两条登录路径（form/json）与 /users/me 同源同形（排序数组）。
+    变异点：删 users.py/auth.py 任一 permissions 字段 → 对应断言红。
+    """
+    r = await _call(api, ORG_A_ADMIN, "GET", "/api/v1/users/me")
+    assert r.status_code == 200, r.text
+    admin_perms = r.json()["permissions"]
+    assert isinstance(admin_perms, list)
+    assert "knowledge_base:rebuild_index" in admin_perms
+    assert admin_perms == sorted(admin_perms)
+
+    r = await _call(api, ORG_A_MEMBER, "GET", "/api/v1/users/me")
+    member_perms = r.json()["permissions"]
+    assert isinstance(member_perms, list)
+    assert "knowledge_base:rebuild_index" not in member_perms
+
+    # 登录两路径与 switch 的 permissions 下发由 tests/api/test_auth_api.py 与
+    # tests/api/test_admin_claim_contract.py 的 mock 链路覆盖（真 DB 路径在本
+    # 套件以 api.state.user 注入身份，不走凭据登录）；此处钉 /users/me 真源。
+
+
+@pytest.mark.asyncio
 async def test_org_admin_cannot_reparent_organization(api):
     """组织层级（parent_id）是平台级结构写，组织管理员只能改展示/排序字段。"""
     r = await _call(
