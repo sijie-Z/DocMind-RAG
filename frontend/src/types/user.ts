@@ -27,6 +27,7 @@ export interface UserInfo {
   role?: string
   is_superuser?: boolean // Backend field：true 即平台管理员（users.role 只是展示标签）
   is_org_admin?: boolean // Backend field：当前组织的 OrgAdmin 角色（per-org）
+  permissions?: string[] // Backend field：RBAC 权限名集（缺失 = 旧后端，前端保持可见）
   organization_id?: number
   createdAt: string
   organizations: Organization[]

@@ -48,6 +48,8 @@ def test_users_me_exposes_is_superuser(is_superuser: bool):
     user = _superuser_probe(is_superuser)
     db = MagicMock()
     db.get = AsyncMock(return_value=user)
+    # permissions 下发（RBAC 批次）：/users/me 内部 await db.execute(...)
+    db.execute = AsyncMock(return_value=MagicMock(scalars=lambda: MagicMock(all=lambda: [])))
 
     async def _override_db():
         yield db
@@ -83,6 +85,7 @@ def test_login_payload_exposes_is_superuser(route: str, is_superuser: bool):
     db.flush = AsyncMock()
     db.commit = AsyncMock()
     db.rollback = AsyncMock()
+    db.execute = AsyncMock(return_value=MagicMock(scalars=lambda: MagicMock(all=lambda: [])))
 
     async def _override_db():
         yield db

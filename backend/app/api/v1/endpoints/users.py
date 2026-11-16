@@ -583,6 +583,13 @@ async def get_user_profile(
             "created_at": current_user.created_at,
             "last_login_at": current_user.last_login_at,
             "preferences": current_user.preferences,
+            # 前端按 RBAC 显隐入口（如知识库「重新解析」）：登录态即知的权限集，
+            # 缺权限按钮时前端隐藏（诚实降级：字段缺失 = 前端保持可见）。
+            "permissions": sorted(
+                await permission_service.get_user_permissions(
+                    db, current_user, current_user.organization_id
+                )
+            ),
             # 安全加固：只返回掩码，不泄露完整 API Key
             "api_key": _mask_api_key(current_user.api_key),
         }
@@ -698,6 +705,11 @@ async def switch_my_organization(
         # W0-1：切换后前端需要立即知道目标组织的 per-org 管理身份，
         # 否则组织管理菜单要等下一次 /users/me 才刷新。
         is_org_admin_for_target = await is_org_admin(db, user, organization_id)
+        # W0-1 同模式：目标组织的权限集随切换即时下发——权限是 per-org 的，
+        # 沿用旧组织的会让显隐判断双向错（有权被误藏 / 无权仍可见）。
+        permissions_for_target = sorted(
+            await permission_service.get_user_permissions(db, user, organization_id)
+        )
         await _log_user_activity(
             db,
             user.id,
@@ -716,6 +728,7 @@ async def switch_my_organization(
                 "organization_id": organization_id,
                 "organization": organization_payload,
                 "is_org_admin": is_org_admin_for_target,
+                "permissions": permissions_for_target,
             },
         }
     except (AppError, NotFoundError, ValidationError, AuthorizationError, ConflictError):
