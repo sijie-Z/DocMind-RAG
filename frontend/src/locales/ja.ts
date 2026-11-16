@@ -1,6 +1,6 @@
 export default {
   about: {
-    tagline: 'ドキュメント質問回答と契約検証プラットフォーム',
+    tagline: 'ドキュメントQ&Aと契約レビュープラットフォーム',
     systemInfo: 'システム情報',
     labels: {
       product: '製品',
@@ -12,7 +12,7 @@ export default {
       security: 'セキュリティ',
     },
     values: {
-      product: 'DocMind — ドキュメント質問回答と契約検証プラットフォーム',
+      product: 'DocMind — ドキュメントQ&Aと契約レビュープラットフォーム',
       architecture: 'RAG（検索拡張生成）+ Agent による自律推論',
       backend: 'FastAPI + SQLAlchemy(非同期) + MySQL 8 + Redis + Elasticsearch 8 + Kafka + MinIO',
       frontend: 'Vue 3 + TypeScript + Vite + Naive UI + Pinia',
@@ -23,7 +23,7 @@ export default {
     highlights: {
       hybridSearch: {
         title: 'ハイブリッド検索',
-        desc: 'BM25 キーワード検索とベクトル意味検索を組み合わせ、 reciprocal rank fusion (RRF) で再現率を最大化します。',
+        desc: 'BM25 キーワード検索とベクトル意味検索を組み合わせ、reciprocal rank fusion (RRF) で再現率を最大化します。',
       },
       agentArchitecture: {
         title: 'Agent アーキテクチャ',

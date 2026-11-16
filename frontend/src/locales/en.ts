@@ -1,6 +1,6 @@
 export default {
   about: {
-    tagline: 'Document Q&A and contract verification platform',
+    tagline: 'Document Q&A and Contract Review platform',
     systemInfo: 'System information',
     labels: {
       product: 'Product',
@@ -12,7 +12,7 @@ export default {
       security: 'Security',
     },
     values: {
-      product: 'DocMind — document Q&A and contract verification platform',
+      product: 'DocMind — Document Q&A and Contract Review platform',
       architecture: 'RAG (retrieval-augmented generation) + autonomous Agent reasoning',
       backend: 'FastAPI + SQLAlchemy (async) + MySQL 8 + Redis + Elasticsearch 8 + Kafka + MinIO',
       frontend: 'Vue 3 + TypeScript + Vite + Naive UI + Pinia',
