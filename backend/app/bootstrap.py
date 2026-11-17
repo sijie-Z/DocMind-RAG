@@ -1434,11 +1434,17 @@ def build_app(
     # 系统信息端点
     @app.get("/info")
     async def system_info():
-        """系统信息"""
+        """系统信息。
+
+        `description` / `features` 是服务对外声明"我是什么"，必须与 `APP_NAME`、
+        README、首屏 `tagline`、`docs/product-definition.md` 同一口径。
+        原先这里写的是「基于DeepSeek的AI知识库系统」—— 与同一响应里的 `name`
+        （「文档问答与合同核验平台」）自相矛盾，且用的是已经下线的旧定位。
+        """
         return {
             "name": settings.APP_NAME,
             "version": settings.APP_VERSION,
-            "description": "基于DeepSeek的AI知识库系统",
+            "description": "文档问答与合同核验平台：混合检索 + PER Agent + 合同核验，回答带出处、核验带证据",
             "features": [
                 "文档上传与管理",
                 "多格式文档解析",
@@ -1446,6 +1452,8 @@ def build_app(
                 "混合搜索（关键词+向量）",
                 "知识问答",
                 "多轮对话",
+                "合同核验（版本身份 + 证据快照 + 差异对齐）",
+                "PER Agent（规划-执行-反思，工具调用）",
                 "TextToSQL",
                 "WebSocket实时通信",
             ],
