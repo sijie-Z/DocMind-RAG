@@ -255,6 +255,32 @@ async def _fresh_pools():
         pass
 
 
+def _ensure_surface_columns(sync_conn):
+    """幂等补列：历史 test_db 缺迁移列时（表已存在 → create_all 不补），按
+    ORM 当前定义逐表补齐缺失列。仅本套件用；生产 schema 由 Alembic 负责。"""
+    from sqlalchemy import text
+
+    for table in Base.metadata.tables.values():
+        existing = {
+            row[0]
+            for row in sync_conn.execute(
+                text(
+                    "SELECT COLUMN_NAME FROM information_schema.COLUMNS "
+                    "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = :t"
+                ),
+                {"t": table.name},
+            ).fetchall()
+        }
+        if not existing:
+            continue  # 表不存在 → create_all 会建
+        for column in table.columns:
+            if column.name in existing:
+                continue
+            col_type = column.type.compile(sync_conn.dialect)
+            ddl = f"ALTER TABLE {table.name} ADD COLUMN {column.name} {col_type}"
+            sync_conn.execute(text(ddl))
+
+
 @pytest_asyncio.fixture
 async def seeded_identity():
     """建一个真实超管 + 组织行（扫描后连副作用行一起清理）。
@@ -265,6 +291,11 @@ async def seeded_identity():
     """
     try:
         async with engine.connect() as conn:
+            # create_all 只建缺失的表，不会给已存在的表补列（历史 test_db 常缺
+            # 后续迁移新增的列，如 chat_sessions.messages_cleared_at）→ ORM 与
+            # 实际 schema 漂移时扫描出假 5xx。轻量兜底：对本套件涉及的表按需
+            # 加列（幂等），保持「无迁移依赖的独立可跑」承诺。
+            await conn.run_sync(_ensure_surface_columns)
             await conn.run_sync(Base.metadata.create_all)
     except Exception as exc:  # 数据库不可达（如本机未设 DATABASE_URL 指向真实库）
         pytest.skip(f"数据库不可达，跳过 API 表面扫描：{type(exc).__name__}: {exc}")
