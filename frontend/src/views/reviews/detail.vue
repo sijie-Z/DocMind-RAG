@@ -959,6 +959,11 @@ function factText(item: ReviewItem, side: ReviewSide): string {
   const status = String(fact.status || '')
   if (status === 'identified') {
     const parts: string[] = []
+    // 清单外新增条款（后端 added 项）的 facts 带的是精确到条/句的新增原文；
+    // 没有这一支，新增项在核验单上只能显示「— → 无」，审核人看不出新增了什么。
+    if (typeof fact.text === 'string' && fact.text) {
+      parts.push(fact.text)
+    }
     if (fact.value !== undefined && fact.value !== null) {
       parts.push(t('reviews.factsValue', { value: fact.value, unit: unitLabel(fact.unit as string) }))
     }
