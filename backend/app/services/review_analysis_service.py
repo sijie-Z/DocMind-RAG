@@ -1911,8 +1911,6 @@ def _semantic_payload(item_key: str, facts: dict[str, Any]) -> Any:
     return tuple(sorted(facts.get("events") or facts.get("terms") or ()))
 
 
-_CLAUSE_NO_IN_LINE = re.compile(r"第\s*(\d+)\s*条")
-
 ADDED_MIN_CHARS = 12
 """新增条款的最小长度：太短的多为页眉/页码/碎片，收进来只会制造噪音。"""
 
@@ -1935,6 +1933,12 @@ def _split_clause_segments(clause: Clause) -> list[Clause]:
     小文档常被切成 1 个 chunk，整篇正文落在一个 Clause 里；此时整块文本在 base/revised
     必然不同、条号又必然有交集，按块比较会把新增条款误判成"修改"，必须下沉到行级。
     注意 Clause.text 已归一化（空白/换行可能被折叠），行级切分必须基于 raw_text。
+
+    行级条号**复用 `extract_clause_fields`**（#188：条号解析全仓单一来源），不再自带
+    一套正则。原先用 ``第\\s*(\\d+)\\s*条`` 只认阿拉伯数字，中文条号（「第九条」）匹配不到
+    就继承整个 chunk 的条号 —— 于是「第九条 违约金」被标成 chunk 里所有条号（实测得到
+    ``[1, 9]``），审核人拿这个定位回溯不到原文。正文中间的引用（「依据第7条」）也不会
+    再被误当成定义位。
     """
     source = clause.raw_text or clause.text
     lines = [line.strip() for line in source.splitlines() if line.strip()]
@@ -1942,15 +1946,16 @@ def _split_clause_segments(clause: Clause) -> list[Clause]:
         return [clause]
     segments: list[Clause] = []
     for line in lines:
-        match = _CLAUSE_NO_IN_LINE.search(line)
+        fields = extract_clause_fields(line)
         segments.append(
             Clause(
                 chunk_id=clause.chunk_id,
                 chunk_index=clause.chunk_index,
                 text=line,
                 raw_text=line,
-                clause_no=[int(match.group(1))] if match else list(clause.clause_no),
-                section_no=clause.section_no,
+                # 该行没有条号定义位（续行）时沿用整块的条号，保持"挂在同一块上"的语义
+                clause_no=fields["clause_no"] or list(clause.clause_no),
+                section_no=fields["section_no"] or list(clause.section_no),
                 page_number=clause.page_number,
                 char_start=clause.char_start,
                 char_end=clause.char_end,
@@ -2407,6 +2412,8 @@ async def analyze_case(session: AsyncSession, case: ReviewCase) -> dict[str, Any
         if added_clauses:
             existing_keys = {it.item_key for it in items}
             next_ordinal = max((it.ordinal for it in items), default=0)
+            # chunk_id -> 该 chunk 的 parser 原文：证据快照必须用它（见下）。
+            raw_by_chunk = {clause.chunk_id: clause.raw_text for clause in clauses["revised"]}
             for idx, clause in enumerate(added_clauses, start=1):
                 item_key = f"added_{clause.chunk_index}_{idx}"[:32]
                 if item_key in existing_keys:
@@ -2425,11 +2432,24 @@ async def analyze_case(session: AsyncSession, case: ReviewCase) -> dict[str, Any
                             "status": "identified",
                             "chunk_id": clause.chunk_id,
                             "source": "unlisted_clause",
+                            # 新增了什么、在哪一条：没有这两项，核验单只能显示
+                            # 「— → 无」且没有定位，审核人看不出到底新增了什么
+                            # （2026-11-18 实测：added 项 facts 只有 status/chunk_id）。
+                            "text": clause.text,
+                            "clause_no": list(clause.clause_no),
+                            "section_no": list(clause.section_no),
+                            "page_number": clause.page_number,
                         },
                     },
                 )
                 session.add(added_item)
                 if metas["revised"] is not None:
+                    # 证据 quote 必须是**所在 chunk 的 parser 原文**，不能用行级/句级片段：
+                    # ① 片段不是「原文」，标 parser_original 属于来源谎报；
+                    # ② char 区间取自整个 chunk，片段与之自相矛盾；
+                    # ③ `evidence_detail` 用 `sha256(chunk.original_text)` 比对 quote 哈希，
+                    #    片段永远对不上 → 新增条款的证据恒定显示「原文已变更」。
+                    # 精确到条/句的新增内容放在 facts.revised.text，不进 quote。
                     await ensure_candidate_evidence(
                         session,
                         case,
@@ -2439,11 +2459,12 @@ async def analyze_case(session: AsyncSession, case: ReviewCase) -> dict[str, Any
                         meta=metas["revised"],
                         chunk_id=clause.chunk_id,
                         chunk_index=clause.chunk_index,
-                        quote=clause.raw_text,
+                        quote=raw_by_chunk.get(clause.chunk_id, clause.raw_text),
                         page_number=clause.page_number,
                         char_start=clause.char_start,
                         char_end=clause.char_end,
                     )
+
         await session.commit()
     except IntegrityError as exc:
         # 并发两次 analyze 同时补同一 (item, side, chunk)：唯一约束最后兜底。

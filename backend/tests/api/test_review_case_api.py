@@ -969,3 +969,60 @@ async def test_evidence_permalink_partial_drift_keeps_quote_match(factory):
         assert "document_version_changed" in data["replay"]["warnings"]
         assert data["replay"]["quote_unchanged"] is True
         assert data["replay"]["can_highlight_current_chunk"] is True
+
+
+# ── 清单外新增条款项：必须可读、且证据不得误报「原文已变更」 ──
+# 现场（2026-11-18）：`analyze_case` 为 added 项快照的 quote 是**行级片段**
+# （`_split_clause_segments` 的某一行，或句级拼接的新句），但 char 区间却是**整个 chunk**
+# 的范围；而 `evidence_detail` 用 `sha256(chunk.original_text)` 与 quote 哈希比对 ——
+# 片段永远对不上，于是新增条款的证据恒定显示「原文已变更」，且 facts 里没有 text/clause_no，
+# 核验单上只显示「— → 无」、没有定位。
+ADDED_VIOLATION = "第九条 乙方逾期交付的，应按合同总金额的百分之五支付违约金。"
+
+
+@pytest.mark.asyncio
+async def test_added_item_is_readable_and_its_evidence_is_truthful(factory):
+    """新增条款项：核验单要读出「新增了什么/在哪」，证据要能对上原文。"""
+    # 真实分块形态：一个 chunk 里有多行条款，新增的是其中一行。
+    async with factory() as db:
+        original = "第一条 付款期限为60天，自收到发票之日起算。\n" + ADDED_VIOLATION
+        db.add(
+            DocumentChunk(
+                id=str(uuid.uuid4()),
+                document_id=REVISED,
+                chunk_index=1,
+                chunk_text=f"【文档背景：摘要】{original}",
+                original_text=original,
+                chunk_length=len(original),
+                page_number=1,
+                meta_data={"text_provenance": "parser_original"},
+            )
+        )
+        await db.commit()
+
+    async with _Ctx(_user(superuser=True), factory) as ac:
+        case = await _create_case(ac)
+        r = await ac.post(f"/api/v1/reviews/{case['id']}/analyze")
+        assert r.status_code == 200, r.text
+        added = [i for i in r.json()["data"]["items"] if i["change_type"] == "added"]
+        assert added, "应检出清单外的新增条款"
+
+        item = added[0]
+        facts = item["facts"]["revised"]
+        # ① 可读：要说得出新增内容与条款定位
+        assert "违约金" in str(facts.get("text") or ""), f"新增项没有可读文本：{facts}"
+        assert facts.get("clause_no") == [9], f"新增项缺少条款定位：{facts}"
+
+        # ② 真实：证据快照的 quote 必须是该 chunk 的 parser 原文，
+        #    否则 permalink 的 sha256 比对永远不等 —— 等于对审核人说「原文变了」。
+        evidence = item["evidence"]["revised"][0]
+        permalink = await ac.get(f"/api/v1/reviews/evidence/{evidence['id']}")
+        assert permalink.status_code == 200, permalink.text
+        data = permalink.json()["data"]
+        assert data["evidence"]["quote"] == original, (
+            f"证据 quote 不是所在 chunk 的原文（片段会被判成「原文已变更」）："
+            f"{data['evidence']['quote']!r}"
+        )
+        assert data["live_chunk"]["matches_snapshot"] is True
+        assert data["replay"]["quote_unchanged"] is True
+        assert data["replay"]["warnings"] == [], f"新增项不该有漂移警告：{data['replay']}"

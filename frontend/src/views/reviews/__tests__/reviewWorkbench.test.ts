@@ -960,6 +960,50 @@ describe('证据行 → 原文深链（单侧文档缺失）', () => {
 })
 
 
+describe('清单外新增条款项', () => {
+  const baseItem = makeDetail().items[0]
+
+  it('added 项要显示新增原文与条款定位，而不是「— → 无」', async () => {
+    api.get.mockResolvedValue({
+      data: {
+        data: makeDetail({
+          items: [
+            {
+              ...baseItem,
+              id: 'item-added',
+              item_key: 'added_1_1',
+              ordinal: 9,
+              change_type: 'added',
+              facts: {
+                revised: {
+                  status: 'identified',
+                  chunk_id: 'chunk-r',
+                  source: 'unlisted_clause',
+                  text: '第九条 乙方逾期交付的，应按合同总金额的百分之五支付违约金。',
+                  clause_no: [9],
+                  section_no: [],
+                  page_number: 2
+                }
+              },
+              evidence: { ...baseItem.evidence, base: [], policy: [] }
+            }
+          ]
+        })
+      }
+    } as never)
+    const wrapper = mountDetail()
+    await flushPromises()
+
+    const diff = wrapper.find('[data-testid="item-diff"]')
+    expect(diff.exists()).toBe(true)
+    expect(diff.text()).toContain('违约金')
+    // 没有 text 之前这里渲染的是 reviews.factsNone（「无」）
+    expect(diff.text()).not.toContain(zh.reviews.factsNone)
+    // 条款定位必须出现，审核人才回得到原文
+    expect(wrapper.text()).toContain(zh.reviews.evidenceClause.replace('{clause}', '9'))
+  })
+})
+
 describe('证据永久链接（复制）', () => {
   it('复制按钮写入 ?evidence= 链接且不请求文档正文', async () => {
     const writeText = vi.fn().mockResolvedValue(undefined)

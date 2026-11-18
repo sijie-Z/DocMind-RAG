@@ -203,6 +203,52 @@ G  「…分两期支付。」 + 「此外，逾期未对账…」       -> adde
 - `test_review_added_clauses.py` 14 → 19 条（5 条新用例：追加句可见、条号保留、
   数值修改不重复报、标点拆分不误报、完全一致不报）
 
+### 更新（2026-11-18）：新增条款项在核验单上可读，且证据不再误报「原文已变更」
+
+上一轮把「新增条款**检测**」补全后，端到端跑真实 API 才发现：**检测到了，但审核人看不出来**。
+
+```text
+核验单上的 added 项：
+  facts.revised = {status, chunk_id, source}      ← 没有 text、没有 clause_no
+  差异条渲染                     = 「仅修订版有:  — → 无」
+  证据 permalink 的徽标          = 「原文已变更」(chunk_text_changed)   ← 恒为真
+```
+
+三个原因（同一条链上的三处自相矛盾）：
+
+1. `facts.revised` 只有 `status/chunk_id/source`，没有新增原文与条号 → 界面 `factText()`
+   取不到任何可用字段，只能回落到 `factsNone`（「无」），`factLocator()` 也拿不到定位。
+2. added 项快照的 `quote` 是**行级片段**（`_split_clause_segments` 的某一行）或**句级拼接**
+   （#714/#722 的新句），却标了 `text_provenance = parser_original` —— 拼接句并不是原文。
+3. `ReviewEvidence.char_start/char_end` 取自**整个 chunk**，与片段 quote 自相矛盾；
+   而 `evidence_detail` 用 `sha256(chunk.original_text) == quote_sha256` 判定是否漂移，
+   片段永远对不上 → 每一处新增条款的证据都恒定显示「原文已变更」。
+
+修法（让三者对齐到同一个口径：**证据 = chunk 级 parser 原文，精确内容 = facts**）：
+
+- `facts.revised` 补 `text`（精确到条/句的新增原文）、`clause_no`、`section_no`、`page_number`
+- added 项的证据 `quote` 改为**所在 chunk 的 parser 原文**（用 `chunk_id → raw_text` 映射），
+  `char_start/char_end` 与该原文一致
+- `_split_clause_segments` 的行级条号改为复用 `extract_clause_fields`（#188「条号解析单一来源」）：
+  原先自带的 `第\s*(\d+)\s*条` 只认阿拉伯数字，「第九条」匹配不到就继承整个 chunk 的条号
+  （实测得到 `[1, 9]`），定位回不到原文；顺带也不再把握手式引用（「依据第7条」）当定义位
+
+```text
+真实 API 实测（tests/api/test_review_case_api.py）：
+  修复前  AssertionError: 新增项没有可读文本：{'status': 'identified', 'chunk_id': ..., 'source': 'unlisted_clause'}
+  修复前  facts.revised.clause_no = [1, 9]      ← 中文条号「第九条」丢失，继承了整块条号
+  修复后  text = 「第九条 乙方逾期交付的…违约金」 / clause_no = [9] / quote = 整块原文
+          live_chunk.matches_snapshot = True, replay.warnings = []
+```
+
+端到端用例 `test_added_item_is_readable_and_its_evidence_is_truthful`（先红后绿）；
+前端 `reviewWorkbench.test.ts` 新增一条（撤掉 fix 后实测红：
+`expected '仅修订版有:  — → 无' to contain '违约金'`）。
+
+**已知限制**：本次修复前已经分析过的案件，其 added 项快照仍是片段 quote、facts 也没有 `text`。
+`analyze` 对已存在的 `item_key` 是跳过而非覆盖，因此这些历史案件不会被自动回填 ——
+需要重新建案分析。不自动改写既有证据快照是刻意的（快照一旦落库就不该被悄悄替换）。
+
 ### 仍待解决
 
 - **无编号文档的附加句可能漏检**：实测在 markdown 里追加一行"保密义务：……"，
