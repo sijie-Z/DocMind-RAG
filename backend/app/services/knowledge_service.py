@@ -255,12 +255,15 @@ class KnowledgeService:
     ) -> list[str]:
         """获取搜索建议（best-effort：自动补全不应把检索故障扩大成 5xx）。"""
         try:
+            # viewer 仅在真实用户上下文时传；内部/旧调用方（如单测替身）
+            # 不接受该 kwarg，保持既有 best-effort 降级语义。
+            viewer_kwargs = {"viewer_user_id": viewer_user_id} if viewer_user_id else {}
             results = await self.search_knowledge(
                 query,
                 organization_id,
                 top_k=limit,
                 search_mode="keyword",
-                viewer_user_id=viewer_user_id,
+                **viewer_kwargs,
             )
         except RetrievalUnavailableError as e:
             # issue #292：降级为空数组（与「没有建议」同形是此类补全接口可接受的

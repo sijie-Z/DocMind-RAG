@@ -292,7 +292,7 @@ def test_readme_module_counts_match_code():
     assert counts == {
         "endpoints": 28,
         "routers": 29,
-        "services": 33,
+        "services": 34,
         "models": 21,
         "views": 24,
         "route_records": 37,
@@ -359,7 +359,7 @@ def test_readme_module_counts_match_code():
             "29 个端点模块",
             "注册 29 个模块",
             "29 个文件",
-            "33 个服务",
+            "34 个服务",
             "21 个模型文件",
             "24 个页面模块，37 条路由记录 / 32 条具名路由",
             "37 条路由记录（32 条具名路由",
