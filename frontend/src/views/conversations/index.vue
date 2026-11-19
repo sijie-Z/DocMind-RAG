@@ -6,20 +6,20 @@
         <div class="flex items-center justify-between">
           <div>
             <h1 class="text-2xl font-bold text-gray-800 dark:text-white">{{ t('menu.conversations') }}</h1>
-            <p class="text-gray-500 dark:text-gray-400 text-sm mt-1">查看和管理对话记录</p>
+            <p class="text-gray-500 dark:text-gray-400 text-sm mt-1">{{ t('conversations.subtitle') }}</p>
           </div>
           <n-button type="primary" @click="startNewChat">
             <template #icon><n-icon><AddOutline /></n-icon></template>
-            新对话
+            {{ t('conversations.newChat') }}
           </n-button>
         </div>
 
         <!-- 搜索 -->
         <div class="mt-4 flex gap-3">
-          <n-input v-model:value="searchText" placeholder="搜索对话..." clearable @clear="loadConversations" @keydown.enter="loadConversations">
+          <n-input v-model:value="searchText" :placeholder="t('conversations.searchPlaceholder')" clearable @clear="loadConversations" @keydown.enter="loadConversations">
             <template #prefix><n-icon><SearchOutline /></n-icon></template>
           </n-input>
-          <n-button @click="loadConversations" :loading="loading">
+          <n-button @click="loadConversations" :loading="loading" :aria-label="t('common.refresh')">
             <template #icon><n-icon><RefreshOutline /></n-icon></template>
           </n-button>
         </div>
@@ -28,7 +28,7 @@
       <!-- 列表 -->
       <n-spin :show="loading">
         <template #description>
-          <span>加载中...</span>
+          <span>{{ t('conversations.loading') }}</span>
         </template>
 
         <!-- Skeleton loading state -->
@@ -50,18 +50,18 @@
 
         <!-- Error state -->
         <div v-if="!loading && loadError" class="py-16 text-center">
-          <n-result status="error" title="加载失败" :description="loadErrorMsg">
+          <n-result status="error" :title="t('conversations.loadFailedShort')" :description="t('conversations.loadFailedShort')">
             <template #footer>
-              <n-button type="primary" @click="loadConversations">重试</n-button>
+              <n-button type="primary" @click="loadConversations">{{ t('conversations.retry') }}</n-button>
             </template>
           </n-result>
         </div>
 
         <!-- Empty state -->
         <div v-else-if="!loadError && conversations.length === 0 && !loading" class="py-16 text-center">
-          <n-empty description="暂无对话记录">
+          <n-empty :description="t('conversations.noData')">
             <template #extra>
-              <n-button type="primary" @click="startNewChat">开始新对话</n-button>
+              <n-button type="primary" @click="startNewChat">{{ t('conversations.startNewBtn') }}</n-button>
             </template>
           </n-empty>
         </div>
@@ -78,19 +78,19 @@
                 <n-icon size="20" class="text-blue-600 dark:text-blue-400"><ChatbubblesOutline /></n-icon>
               </div>
               <div class="flex-1 min-w-0">
-                <h3 class="font-medium text-gray-800 dark:text-gray-100 truncate">{{ item.title || '未命名对话' }}</h3>
+                <h3 class="font-medium text-gray-800 dark:text-gray-100 truncate">{{ item.title || t('conversations.untitled') }}</h3>
                 <div class="flex items-center gap-3 text-xs text-gray-400 mt-1">
                   <!-- updated_at 可为空串（chat.py:191 `isoformat() if s.updated_at else ""`），
                        dayjs('') → "Invalid Date"——空串/非法值不渲染时间（B31） -->
                   <span v-if="formatDate(item.updated_at)">{{ formatDate(item.updated_at) }}</span>
-                  <span>{{ item.message_count || 0 }} 条消息</span>
+                  <span>{{ t('conversations.messages', { count: item.message_count || 0 }, item.message_count || 0) }}</span>
                 </div>
               </div>
             </div>
 
             <div class="flex items-center gap-2 conv-actions">
-              <n-button size="small" quaternary @click.stop="viewConversation(item)">继续</n-button>
-              <n-button size="small" quaternary type="error" @click.stop="deleteItem(item)">
+              <n-button size="small" quaternary @click.stop="viewConversation(item)">{{ t('conversations.continueBtn') }}</n-button>
+              <n-button size="small" quaternary type="error" @click.stop="deleteItem(item)" :aria-label="t('common.delete')">
                 <template #icon><n-icon><TrashOutline /></n-icon></template>
               </n-button>
             </div>
@@ -141,7 +141,6 @@ const dialog = useDialog()
 const router = useRouter()
 const loading = ref(false)
 const loadError = ref(false)
-const loadErrorMsg = ref('')
 const searchText = ref('')
 const conversations = ref<Conversation[]>([])
 
@@ -164,9 +163,8 @@ const loadConversations = async () => {
     }
     loadError.value = false
   } catch (error) {
-    message.error('加载失败')
+    message.error(t('conversations.loadFailedShort'))
     loadError.value = true
-    loadErrorMsg.value = '加载失败'
   } finally {
     loading.value = false
   }
@@ -193,17 +191,17 @@ const startNewChat = () => {
 
 const deleteItem = (item: Conversation) => {
   dialog.warning({
-    title: t('common.confirm') || '确认删除',
-    content: t('chat.confirmDelete') || '确定要删除此对话吗？删除后无法恢复。',
+    title: t('common.confirm'),
+    content: t('chat.confirmDelete'),
     positiveText: t('common.confirm'),
     negativeText: t('common.cancel'),
     onPositiveClick: async () => {
       try {
         await deleteConversation(item.id)
-        message.success('删除成功')
+        message.success(t('conversations.deleteSuccess'))
         loadConversations()
       } catch (error) {
-        message.error('删除失败')
+        message.error(t('conversations.deleteFailed'))
       }
     }
   })
