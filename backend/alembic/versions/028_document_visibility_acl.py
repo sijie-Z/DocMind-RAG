@@ -12,8 +12,8 @@ import sqlalchemy as sa
 
 from alembic import op
 
-revision = "027_document_visibility_acl"
-down_revision = "026_drop_redundant_pk_indexes"
+revision = "028_document_visibility_acl"
+down_revision = "027_documents_is_enabled"
 branch_labels = None
 depends_on = None
 
