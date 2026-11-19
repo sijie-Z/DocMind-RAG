@@ -5,8 +5,10 @@
  * 分类筛选、版本历史、回滚确认框全部写死中文；`prompts.*` 命名空间
  * 里其实已有大量词条，只是页面没用。切到 en/ja/fr 后整页中文。
  *
- * 变异点：任一模板文案退回硬编码中文 → en 用例红；
- * 改 en 词条值 → 下拉/标签断言红（字面值断言，不 import 词条）。
+ * 覆盖边界（如实）：本文件只覆盖「页头/搜索/新建入口/分类标签」的
+ * 模板与 computed；抽屉内表单 label、回滚 dialog、版本历史、校验消息
+ * **不被本文件保护**——它们由 hardcodedCjk 棘轮（中文）与人工评审兜底。
+ * 变异点（已实测）：页头「新增模板」退回硬编码 → en 与切语言两例红。
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
