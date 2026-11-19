@@ -47,7 +47,7 @@ from app.agent.events import AgentEvent, FinalAnswerAccumulator
 from app.agent.registry import tool_registry
 from app.agent.replay.engine import ReplayEngine
 from app.agent.service import agent_service, notify_task_terminal
-from app.agent.skills import get_skill_manager, skill_manager
+from app.agent.skills import get_skill_manager
 from app.core.config import settings
 from app.core.database import AsyncSessionLocal, get_db
 from app.core.error_mapping import (
@@ -1560,7 +1560,8 @@ async def list_skills(
 ):
     """List learned agent skills（仅当前组织）。"""
     organization_id = await require_organization(current_user, db)
-    manager = get_skill_manager(organization_id) if not current_user.is_superuser else skill_manager
+    # 超管也必须走组织命名空间：新数据只写 org key，全局实例看不到
+    manager = get_skill_manager(organization_id)
     await manager.load()
     skills = manager.list_skills()
     return {
