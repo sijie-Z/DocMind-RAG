@@ -118,7 +118,12 @@ class KnowledgeService:
         return await processor.process(document_id)
 
     async def search_knowledge(
-        self, query: str, organization_id: str | int, top_k: int = 5, search_mode: str | None = None
+        self,
+        query: str,
+        organization_id: str | int,
+        top_k: int = 5,
+        search_mode: str | None = None,
+        viewer_user_id: int | None = None,
     ) -> list[dict[str, Any]]:
         """搜索知识库（兼容入口：只要结果，不要诊断信息）。"""
         results, _ = await self.search_knowledge_with_meta(
@@ -128,6 +133,7 @@ class KnowledgeService:
             search_mode=search_mode,
             document_ids=None,
             debug=False,
+            viewer_user_id=viewer_user_id,
         )
         return results
 
@@ -263,6 +269,7 @@ class KnowledgeService:
                 organization_id,
                 top_k=limit,
                 search_mode="keyword",
+                viewer_user_id=viewer_user_id,
             )
         except RetrievalUnavailableError as e:
             # issue #292：降级为空数组（与「没有建议」同形是此类补全接口可接受的

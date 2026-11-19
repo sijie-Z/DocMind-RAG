@@ -207,6 +207,7 @@ async def deep_research(
             "search_knowledge_base",
             {"query": query, "top_k": 5},
             organization_id=organization_id,
+            user_id=user_id,
             run_context=run_context,
         )
         # "No relevant ..." 是 search_knowledge_base 成功态的固有空结果哨兵
@@ -356,6 +357,7 @@ async def document_comparison(
             "cross_document_analysis",
             {"document_ids": doc_ids, "analysis_type": "comprehensive"},
             organization_id=organization_id,
+            user_id=user_id,
             run_context=run_context,
         )
         if ok:
@@ -439,6 +441,7 @@ async def knowledge_analysis(
             "search_knowledge_base",
             {"query": query, "top_k": 3},
             organization_id=organization_id,
+            user_id=user_id,
             run_context=run_context,
         )
         # "No relevant ..." 是 search_knowledge_base 成功态的固有空结果哨兵
