@@ -247,12 +247,20 @@ class KnowledgeService:
             return [], None
 
     async def get_search_suggestions(
-        self, query: str, organization_id: str, limit: int = 5
+        self,
+        query: str,
+        organization_id: str,
+        limit: int = 5,
+        viewer_user_id: int | None = None,
     ) -> list[str]:
         """获取搜索建议（best-effort：自动补全不应把检索故障扩大成 5xx）。"""
         try:
             results = await self.search_knowledge(
-                query, organization_id, top_k=limit, search_mode="keyword"
+                query,
+                organization_id,
+                top_k=limit,
+                search_mode="keyword",
+                viewer_user_id=viewer_user_id,
             )
         except RetrievalUnavailableError as e:
             # issue #292：降级为空数组（与「没有建议」同形是此类补全接口可接受的

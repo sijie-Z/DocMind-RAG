@@ -437,7 +437,10 @@ async def get_search_suggestions(
 
     try:
         suggestions = await knowledge_service.get_search_suggestions(
-            query=q, organization_id=effective_org_id, limit=limit
+            query=q,
+            organization_id=effective_org_id,
+            limit=limit,
+            viewer_user_id=current_user.id,
         )
 
         return {
