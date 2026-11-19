@@ -247,3 +247,19 @@ describe('useWorkflowStore', () => {
     expect('animated' in flowData.edges[0]).toBe(false)
   })
 })
+
+describe('执行失败状态（SSE error 帧的判别性测试）', () => {
+  it('markExecutionFailed 在已完成节点之后仍写入 failed 结果（executionStatus 据此判失败）', () => {
+    const store = useWorkflowStore()
+    store.startExecution()
+    store.updateNodeExecution({ nodeId: 'n1', nodeType: 'input', status: 'completed' })
+    store.setExecutionComplete(null)
+    // executionStatus = executionResults.some(failed) ? failed : ...
+    expect(store.executionResults.every(r => r.status === 'completed')).toBe(true)
+
+    store.markExecutionFailed('条件分支无匹配目标')
+    expect(store.finalOutput).toBeNull()
+    expect(store.isExecuting).toBe(false)
+    expect(store.executionResults.some(r => r.status === 'failed')).toBe(true)
+  })
+})

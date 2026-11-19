@@ -134,6 +134,18 @@ export const useWorkflowStore = defineStore('workflow', () => {
     finalOutput.value = output
   }
 
+  /** 整次执行失败：写入一条失败结果，让 executionStatus 判为 failed。 */
+  const markExecutionFailed = (error: string) => {
+    isExecuting.value = false
+    finalOutput.value = null
+    updateNodeExecution({
+      nodeId: '__workflow__',
+      nodeType: 'workflow',
+      status: 'failed',
+      error,
+    })
+  }
+
   const resetExecution = () => {
     isExecuting.value = false
     executionResults.value = []
@@ -185,6 +197,7 @@ export const useWorkflowStore = defineStore('workflow', () => {
     addExecutionLog,
     updateNodeExecution,
     setExecutionComplete,
+    markExecutionFailed,
     resetExecution,
     getFlowData
   }

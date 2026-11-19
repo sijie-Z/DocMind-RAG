@@ -953,8 +953,9 @@ const executeWorkflow = async () => {
             // （workflow_engine.py:1008-1016）；success=false 时带 error 摘要
             const engineResult = (data ?? {}) as { success?: boolean; output?: unknown; error?: string }
             if (engineResult.success === false) {
-              workflowStore.setExecutionComplete(null)
-              workflowStore.addExecutionLog(`❌ 执行失败: ${engineResult.error || '工作流节点执行失败'}`)
+              const errorText = engineResult.error || t('workflow.editor.executionFailed')
+              workflowStore.markExecutionFailed(errorText)
+              workflowStore.addExecutionLog(`❌ 执行失败: ${errorText}`)
               message.error('执行失败')
             } else {
               const finalOut = engineResult.output !== undefined ? engineResult.output : null
@@ -965,12 +966,12 @@ const executeWorkflow = async () => {
             break
           }
           case 'error': {
-            // 后端错误收口帧（#281：error 后必补 done）。执行失败必须在此收尾：
-            // 上游节点已 node_complete=completed，若只等 done/onClose，UI 会据
-            // executionStatus 误判为成功（执行记录却是 failed）。
+            // 执行失败必须写入 executionResults：executionStatus 只由该数组计算，
+            // 仅 setExecutionComplete(null) 会让已完成的 upstream 节点让 UI 误判成功。
             const d = (data ?? {}) as { error?: string }
-            workflowStore.setExecutionComplete(null)
-            workflowStore.addExecutionLog(`❌ 执行失败: ${d.error || '未知错误'}`)
+            const errorText = d.error || t('workflow.editor.unknownError')
+            workflowStore.markExecutionFailed(errorText)
+            workflowStore.addExecutionLog(`❌ 执行失败: ${errorText}`)
             message.error('执行失败')
             break
           }
