@@ -66,6 +66,42 @@ def merge_lists(left: list, right: list) -> list:
     return left + right
 
 
+def resolve_conditional_target(targets: list[dict], state: WorkflowState) -> str:
+    """决定多目标条件分支的下一节点（fail-closed，不静默走第一条边）。
+
+    匹配优先级：
+    1. ``route_result`` 是 RouterNodeExecutor 的 routes[].target（节点 id），
+       可直接按 edge.target 命中；
+    2. ``route_result`` / ``condition_result`` 与 edge.label 大小写无关匹配；
+    3. 存在 ``label="default"`` 的边时走默认分支；
+    4. 都不匹配 → 抛错（执行记录标失败），不再静默选第一条边。
+
+    label 为 None 的边只参与 target 精确匹配，绝不调用 ``.lower()``。
+    """
+    context = state.get("context", {}) or {}
+    route = context.get("route_result")
+    condition = context.get("condition_result")
+
+    for edge in targets:
+        if route and str(route).lower() == str(edge.get("target") or "").lower():
+            return edge["target"]
+
+    for value in (route, condition):
+        if not value:
+            continue
+        for edge in targets:
+            label = edge.get("label")
+            if isinstance(label, str) and label.lower() == str(value).lower():
+                return edge["target"]
+
+    for edge in targets:
+        label = edge.get("label")
+        if isinstance(label, str) and label.lower() == "default":
+            return edge["target"]
+
+    raise ValueError("条件分支无匹配目标：请为分支连线设置 label 或 default 边")
+
+
 def _to_jsonable(value: Any) -> Any:
     """把值递归规整为可 JSON 化形态（issue #281）。
 
@@ -1031,27 +1067,7 @@ class WorkflowEngine:
                 # 多目标：条件分支
                 def make_router(src: str, tgts: list[dict]):
                     async def router(state: WorkflowState) -> str:
-                        condition_result = state.get("context", {}).get(
-                            "condition_result", "default"
-                        )
-                        route_result = state.get("context", {}).get("route_result", "default")
-
-                        # 优先使用路由结果
-                        if route_result != "default":
-                            for edge in tgts:
-                                if edge.get("label", "").lower() == route_result.lower():
-                                    return edge["target"]
-
-                        # 使用条件结果
-                        for edge in tgts:
-                            if (
-                                edge.get("label")
-                                and edge["label"].lower() == condition_result.lower()
-                            ):
-                                return edge["target"]
-
-                        # 默认返回第一个目标
-                        return tgts[0]["target"]
+                        return resolve_conditional_target(tgts, state)
 
                     return router
 
