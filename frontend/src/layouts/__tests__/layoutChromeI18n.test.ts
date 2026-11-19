@@ -14,10 +14,12 @@ import { createI18n } from 'vue-i18n'
 import { defineComponent } from 'vue'
 import naive from 'naive-ui'
 import en from '@/locales/en'
+import fr from '@/locales/fr'
 
-vi.mock('@/utils/message', () => ({
-  useDedupedMessage: () => ({ error: vi.fn(), success: vi.fn(), info: vi.fn(), warning: vi.fn(), loading: vi.fn() }),
+const { messageSpies } = vi.hoisted(() => ({
+  messageSpies: { error: vi.fn(), success: vi.fn(), info: vi.fn(), warning: vi.fn(), loading: vi.fn() },
 }))
+vi.mock('@/utils/message', () => ({ useDedupedMessage: () => messageSpies }))
 
 vi.mock('@/utils/notificationSocket', () => ({
   notificationSocket: {
@@ -49,7 +51,7 @@ import Layouts from '../index.vue'
 import { useUserStore } from '@/stores/user'
 import { useNotificationStore } from '@/stores/notification'
 
-const i18n = createI18n({ legacy: false, locale: 'en', missingWarn: false, fallbackWarn: false, messages: { en } })
+const i18n = createI18n({ legacy: false, locale: 'en', missingWarn: false, fallbackWarn: false, messages: { en, fr } })
 
 let currentWrapper: { unmount: () => void } | null = null
 
@@ -102,5 +104,26 @@ describe('布局顶栏 · 通知下拉 i18n', () => {
     const bodyText = document.body.innerText || document.body.textContent || ''
     expect(bodyText, '不应出现硬编码「删除」').not.toContain('删除')
     expect(bodyText, '删除按钮应走 common.delete → Delete').toContain('Delete')
+
+    // 第二语言：fr 下必须是 Supprimer —— 硬编码英文（>Delete<）在这里会露馅（评审 B 变异 2）
+    ;(i18n.global.locale as unknown as { value: string }).value = 'fr'
+    await flushPromises()
+    const frText = document.body.innerText || document.body.textContent || ''
+    expect(frText, 'fr 下删除按钮应走词条 → Supprimer').toContain('Supprimer')
+    expect(frText, '硬编码英文 Delete 不应出现在 fr 界面').not.toContain('Delete')
+  })
+
+  it('errors.pageLoadFailed 四语齐备（错误提示所用词条存在）', async () => {
+    const zh = (await import('@/locales/zh')).default
+    const en = (await import('@/locales/en')).default
+    const ja = (await import('@/locales/ja')).default
+    const fr = (await import('@/locales/fr')).default
+    const zhVal = (zh.errors as Record<string, string>).pageLoadFailed
+    expect(zhVal, 'zh.errors.pageLoadFailed 应存在').toBeTruthy()
+    for (const [loc, msgs] of [['en', en], ['ja', ja], ['fr', fr]] as const) {
+      const v = (msgs.errors as Record<string, string>).pageLoadFailed
+      expect(v, `${loc}.errors.pageLoadFailed 应存在`).toBeTruthy()
+      expect(v, `${loc}.errors.pageLoadFailed 不得照抄中文`).not.toBe(zhVal)
+    }
   })
 })
