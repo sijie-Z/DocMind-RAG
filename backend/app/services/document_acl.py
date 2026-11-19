@@ -69,11 +69,12 @@ async def get_blocked_document_ids(
             if row.uploaded_by != viewer_user_id and row.id not in granted
         ]
     except Exception as exc:  # noqa: BLE001 — fail closed，不把 ACL 故障变成越权
+        # 只记异常类型：异常对象可能夹带查询串/用户数据，不能明文入日志
         logger.warning(
-            "文档 ACL 查询失败，按 fail-closed 屏蔽私有文档（org=%s, user=%s）: %s",
+            "文档 ACL 查询失败，按 fail-closed 屏蔽私有文档（org=%s, user=%s, error=%s）",
             organization_id,
             viewer_user_id,
-            exc,
+            type(exc).__name__,
         )
         try:
             from app.models.document import Document

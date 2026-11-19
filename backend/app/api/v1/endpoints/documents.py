@@ -926,7 +926,12 @@ async def put_document_authorized_users(
                 db=db,
             )
         except Exception as audit_err:
-            logger.warning("文档授权审计写入失败（doc=%s）: %s", document_id, audit_err)
+            # 只记异常类型：审计异常可能回显请求体中的 user_ids，避免日志注入
+            logger.warning(
+                "文档授权审计写入失败（doc=%s, error=%s）",
+                document_id,
+                type(audit_err).__name__,
+            )
 
         return await get_document_authorized_users(document_id, db, current_user)
     except (NotFoundError, AuthorizationError):
