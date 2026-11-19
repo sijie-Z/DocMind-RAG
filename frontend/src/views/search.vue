@@ -174,7 +174,7 @@
                   >#{{ result.rank ?? index + 1 }}</span>
                   <div class="min-w-0">
                     <h3 class="truncate font-semibold text-slate-800 transition-colors group-hover:text-blue-700 dark:text-slate-100 dark:group-hover:text-blue-400">
-                      {{ filenameOf(result) || t('search.unknownFile', '未知文件') }}
+                      {{ filenameOf(result) || t('search.unknownFile') }}
                     </h3>
                     <div class="mt-1 flex flex-wrap items-center gap-1.5 text-xs text-slate-500 dark:text-slate-400">
                       <n-tag v-if="rerankScoreOf(result)" :bordered="false" size="small" round type="success">
@@ -212,7 +212,7 @@
                 <div class="flex min-w-0 flex-wrap items-center gap-2">
                   <n-button size="tiny" secondary round type="primary" class="result-action" @click.stop="askAI(result)">
                     <template #icon><n-icon><ChatbubblesOutline /></n-icon></template>
-                    {{ t('search.askAI', '问问 AI') }}
+                    {{ t('search.askAI') }}
                   </n-button>
                   <n-button
                     size="tiny"
@@ -231,8 +231,8 @@
                   quaternary
                   circle
                   class="result-action shrink-0 ml-auto"
-                  :aria-label="t('common.copy', '复制内容')"
-                  :title="t('common.copy', '复制内容')"
+                  :aria-label="t('common.copy')"
+                  :title="t('common.copy')"
                   @click.stop="copyResultContent(result)"
                 >
                   <template #icon><n-icon><CopyOutline /></n-icon></template>
@@ -347,11 +347,11 @@
         <div class="flex justify-end gap-3 border-t border-slate-100 pt-4 dark:border-slate-800">
           <n-button round secondary @click="copyResultContent(selectedResult)">
             <template #icon><n-icon><CopyOutline /></n-icon></template>
-            {{ t('common.copy', '复制内容') }}
+            {{ t('common.copy') }}
           </n-button>
           <n-button type="primary" round @click="askAI(selectedResult)">
             <template #icon><n-icon><ChatbubblesOutline /></n-icon></template>
-            {{ t('search.askAI', '问问 AI') }}
+            {{ t('search.askAI') }}
           </n-button>
         </div>
       </div>
