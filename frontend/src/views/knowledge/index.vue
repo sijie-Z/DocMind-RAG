@@ -23,7 +23,7 @@
               @click="handleBatchDelete"
             >
               <template #icon><n-icon><TrashOutline /></n-icon></template>
-              {{ t('common.batchDelete') || '批量删除' }} ({{ selectedIds.length }})
+              {{ t('common.batchDelete') }} ({{ selectedIds.length }})
             </n-button>
             <div class="w-56 shrink-0 md:w-72">
               <n-input
@@ -78,7 +78,7 @@
               </div>
               <div>
                 <p class="text-2xl font-bold text-slate-800 dark:text-slate-100">{{ loadError ? '—' : pageTotal }}</p>
-                <p class="text-xs text-slate-500 dark:text-slate-400">{{ t('knowledge.stats.total') || '文档总数' }}</p>
+                <p class="text-xs text-slate-500 dark:text-slate-400">{{ t('knowledge.stats.total') }}</p>
               </div>
             </div>
           </div>
@@ -693,7 +693,7 @@ const toggleSelectAll = (checked: boolean) => {
 const handleBatchDelete = () => {
   if (selectedIds.value.length === 0) return
   dialog.warning({
-    title: t('common.confirm') || '确认删除',
+    title: t('common.confirm'),
     content: t('knowledge.batchDeleteConfirm', { count: selectedIds.value.length }),
     positiveText: t('common.confirm'),
     negativeText: t('common.cancel'),
@@ -924,7 +924,7 @@ const viewKnowledge = async (item: KnowledgeBase) => {
 }
 
 const showErrorDetail = (errorText: string) => {
-  currentErrorDetail.value = errorText || '未知解析错误'
+  currentErrorDetail.value = errorText || t('knowledge.unknownParseError')
   showErrorModal.value = true
 }
 
@@ -944,10 +944,10 @@ const handleToggleEnabled = async (item: KnowledgeBase) => {
 const handleRebuild = async (item: KnowledgeBase) => {
   try {
     await rebuildKnowledgeBase(item.id, { silent: true })
-    message.success(t('knowledge.rebuildSuccess') || '开始重新构建索引')
+    message.success(t('knowledge.rebuildSuccess'))
     await loadKnowledgeBases()
   } catch (error: unknown) {
-    message.error((t('knowledge.rebuildFailed') || '重新构建失败') + '：' + getErrorMessage(error, t('common.tryAgain')))
+    message.error(t('knowledge.rebuildFailed') + '：' + getErrorMessage(error, t('common.tryAgain')))
   }
 }
 
@@ -968,7 +968,7 @@ const handleRebuildLatestFailedDoc = async () => {
 
 const deleteKnowledge = (item: KnowledgeBase) => {
   dialog.warning({
-    title: t('common.confirm') || '确认删除',
+    title: t('common.confirm'),
     content: t('knowledge.deleteConfirm'),
     positiveText: t('common.confirm'),
     negativeText: t('common.cancel'),
