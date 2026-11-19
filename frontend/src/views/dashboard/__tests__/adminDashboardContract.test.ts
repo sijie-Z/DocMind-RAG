@@ -443,4 +443,28 @@ describe('AdminDashboard · R1 收口', () => {
     expect(zero!.classes()).toContain('text-red-600')
     expect(zero!.classes()).not.toContain('text-emerald-700')
   })
+
+  it('审计表头（auditColumns）随语言切换实时更新（computed 守卫）', async () => {
+    // 用本用例专属实例，避免共享 i18n 单例被其它用例影响
+    type Cols = Array<{ title?: string }>
+    vi.mocked(getAuditLogs).mockResolvedValue({ data: { items: [], total: 0 } } as never)
+    const localI18n = createI18n({ legacy: false, locale: 'zh', messages: { zh, en } })
+    const wrapper = mount(AdminDashboard, {
+      global: {
+        plugins: [localI18n as unknown as I18nInstance],
+        mocks: { $router: { push: vi.fn() } },
+        stubs: { Tag: SlotStub('Tag') },
+      },
+    })
+    await flushPromises()
+    await nextTick()
+    const cols = () => (wrapper.findComponent(AdminDashboard).vm as unknown as { auditColumns: Cols }).auditColumns
+    expect(cols().map((c) => c.title)).toContain(zh.dashboard.time)
+
+    ;(localI18n.global.locale as unknown as { value: string }).value = 'en'
+    await nextTick()
+    await flushPromises()
+    expect(cols().map((c) => c.title), 'en 表头应为 Time').toContain(en.dashboard.time)
+    expect(cols().map((c) => c.title), '不应残留中文表头').not.toContain(zh.dashboard.time)
+  })
 })

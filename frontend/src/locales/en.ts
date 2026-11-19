@@ -727,6 +727,8 @@ export default {
   },
   prompts: {
     subtitle: 'Manage system prompts and response styles for the AI assistant',
+    pageSubtitle: 'Prompt templates directly shape how the AI answers',
+    init: 'Initialize',
     fillToChat: 'Fill chat input',
     addTemplate: 'New Template',
     create: 'Create Template',
@@ -782,7 +784,26 @@ export default {
       restoreFailed: 'Failed to restore version',
       seedSuccess: 'Initialized successfully',
       seedFailed: 'Initialization failed'
-    }
+    },
+    allCategories: 'All',
+
+    searchPlaceholder: 'Search templates...',
+    categoryPlaceholder: 'Category',
+    loading: 'Loading...',
+    changeNote: 'Change note',
+    changeNotePlaceholder: 'Briefly describe this change (optional)',
+    namePlaceholder: 'Name this template',
+    contentPlaceholderLong: 'Enter prompt content — this directly shapes AI responses...',
+    save: 'Save',
+    createShort: 'Create',
+    versionHistory: 'Version history',
+    versionEmpty: 'No version history',
+    currentVersion: 'Current version',
+    rollback: 'Roll back to this version',
+    rollbackTitle: 'Confirm rollback',
+    rollbackConfirm: 'Roll back the template to v{version}? Current content will be saved as a new version.',
+    rollbackSuccess: 'Rolled back to v{version}',
+    copySuffix: ' (copy)'
   },
   error: {
     '404': {

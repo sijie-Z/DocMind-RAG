@@ -16,8 +16,6 @@
     "views/knowledge/graph.vue": 20,
     "views/knowledge/index.vue": 5,
     "views/organizations/index.vue": 18,
-    "views/prompts/index.vue": 45,
-    "views/search.vue": 6,
     "views/workflow/composables/useWorkflowEditor.ts": 92,
     "views/workflow/editor.vue": 116,
     "views/workflow/index.vue": 13,
