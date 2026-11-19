@@ -37,6 +37,18 @@
       <n-tooltip trigger="hover">
         <template #trigger>
           <n-button
+            quaternary circle size="small" data-testid="chat-share-toggle"
+            :aria-label="t('chat.share.title')" @click="$emit('share')" class="text-gray-500 dark:text-gray-400"
+            :disabled="!hasConversation"
+          >
+            <template #icon><n-icon><ShareOutline /></n-icon></template>
+          </n-button>
+        </template>
+        {{ t('chat.share.title') }}
+      </n-tooltip>
+      <n-tooltip trigger="hover">
+        <template #trigger>
+          <n-button
             quaternary circle size="small"
             :aria-label="debugEnabled ? t('chat.closeDebug') : t('chat.openDebug')"
             :type="debugEnabled ? 'warning' : 'default'"
@@ -70,7 +82,7 @@
 
 <script setup lang="ts">
 import { useI18n } from 'vue-i18n'
-import { ChatbubblesOutline, CloseOutline, TrashOutline, AttachOutline, DownloadOutline, BugOutline } from '@vicons/ionicons5'
+import { ChatbubblesOutline, CloseOutline, TrashOutline, AttachOutline, DownloadOutline, BugOutline, ShareOutline } from '@vicons/ionicons5'
 import DocMindMark from '@/components/brand/DocMindMark.vue'
 
 const { t } = useI18n()
@@ -88,6 +100,7 @@ defineEmits<{
   clearChat: []
   unbind: []
   exportChat: []
+  share: []
   toggleDebug: []
 }>()
 </script>

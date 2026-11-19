@@ -1,7 +1,9 @@
 import asyncio
+import hashlib
 import json
 import logging
 import os
+import secrets
 import uuid
 from datetime import UTC, datetime
 
@@ -490,6 +492,170 @@ async def delete_conversation(
         await db.rollback()
         logger.error(f"Delete conversation error: {e}")
         raise ValidationError(f"删除失败: {str(e)}")
+
+
+# ============================================================
+# 会话只读分享链接（read-only snapshot）
+#
+# 取舍：公开端点只凭 token 授权，**超管也不绕过私有会话**——没有 token
+# 就没有任何读取途径，包括超管；token 即完整权限，但权限范围被严格限制为
+# 一次性的只读消息快照（无反馈、无文件、无 Agent、无原会话写入）。
+# 原会话的管理始终走 require_scope + load_accessible_session；分享管理
+# 则额外收紧为 session.user_id == current_user.id，超管同样需要是所有者。
+# ============================================================
+
+
+def _share_digest(token: str) -> str:
+    """分享 token 的稳定摘要；不记录原文，避免日志/数据库泄露链接。"""
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
+async def _load_owned_session(
+    db: AsyncSession, conversation_id: str, current_user: User
+) -> ChatSession:
+    """严格按所有者取会话：非所有者（含超管）一律 404，不泄露存在性。"""
+    session = (
+        await db.execute(
+            select(ChatSession).where(
+                ChatSession.id == conversation_id,
+                ChatSession.user_id == current_user.id,
+            )
+        )
+    ).scalar_one_or_none()
+    if not session:
+        raise NotFoundError("会话不存在或无权分享")
+    return session
+
+
+@router.post(
+    "/conversations/{conversation_id}/share",
+    response_model=dict,
+    dependencies=[Depends(get_current_user)],
+)
+async def create_conversation_share(
+    conversation_id: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """创建/轮换只读分享链接；原文 token 仅本次响应返回。"""
+    session = await _load_owned_session(db, conversation_id, current_user)
+    token = secrets.token_urlsafe(24)
+    session.share_token_hash = _share_digest(token)
+    session.share_created_at = datetime.now(UTC)
+    await db.commit()
+    return {
+        "success": True,
+        "message": "分享链接已创建",
+        "data": {
+            "token": token,
+            "url": f"/share/{token}",
+            "createdAt": session.share_created_at.isoformat(),
+        },
+    }
+
+
+@router.get(
+    "/conversations/{conversation_id}/share",
+    response_model=dict,
+    dependencies=[Depends(get_current_user)],
+)
+async def get_conversation_share_status(
+    conversation_id: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """查询本人会话的分享状态（不返回 token，token 仅在创建时给一次）。"""
+    session = await _load_owned_session(db, conversation_id, current_user)
+    return {
+        "success": True,
+        "message": "获取成功",
+        "data": {
+            "shared": session.share_token_hash is not None,
+            "createdAt": session.share_created_at.isoformat() if session.share_created_at else None,
+        },
+    }
+
+
+@router.delete(
+    "/conversations/{conversation_id}/share",
+    response_model=dict,
+    dependencies=[Depends(get_current_user)],
+)
+async def revoke_conversation_share(
+    conversation_id: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """撤销分享；撤销后旧 token 立即失效（包括已打开的页面刷新时）。"""
+    session = await _load_owned_session(db, conversation_id, current_user)
+    session.share_token_hash = None
+    session.share_created_at = None
+    await db.commit()
+    return {"success": True, "message": "分享已撤销", "data": {"shared": False}}
+
+
+@router.get(
+    "/shares/{token}",
+    response_model=dict,
+)
+async def get_shared_conversation(
+    token: str,
+    db: AsyncSession = Depends(get_db),
+):
+    """匿名只读快照。唯一入口是 token；不存在/已撤销/会话已删除均为 404。"""
+    if not token or len(token) > 128:
+        raise NotFoundError("分享链接不存在或已失效")
+    # 只对摘要做等值查询，token 原文不进入 SQL 绑定参数以外的任何位置。
+    session = (
+        await db.execute(
+            select(ChatSession).where(ChatSession.share_token_hash == _share_digest(token))
+        )
+    ).scalar_one_or_none()
+    if not session:
+        raise NotFoundError("分享链接不存在或已失效")
+
+    messages = (
+        (
+            await db.execute(
+                select(ChatMessage)
+                .where(ChatMessage.session_id == session.id)
+                .order_by(ChatMessage.seq.asc(), ChatMessage.created_at.asc())
+            )
+        )
+        .scalars()
+        .all()
+    )
+
+    snapshot = []
+    for msg in messages:
+        item = {
+            "id": msg.id,
+            "content": msg.content,
+            "messageType": msg.message_type.value,
+            "createdAt": msg.created_at.isoformat() if msg.created_at else "",
+            # 只带已是消息自身的检索来源；不带 feedback / files / user_id，
+            # 避免把私有的文档附件名或评价信息暴露给链接持有者。
+            "sources": [],
+        }
+        if msg.meta_data and msg.message_type == MessageType.ASSISTANT:
+            try:
+                meta = json.loads(msg.meta_data)
+                if isinstance(meta, dict) and isinstance(meta.get("sources"), list):
+                    item["sources"] = meta["sources"]
+            except (TypeError, ValueError):
+                pass
+        snapshot.append(item)
+
+    return {
+        "success": True,
+        "message": "获取成功",
+        "data": {
+            "id": session.id,
+            "title": session.title,
+            "messages": snapshot,
+            "createdAt": session.created_at.isoformat() if session.created_at else "",
+        },
+    }
 
 
 @router.post(

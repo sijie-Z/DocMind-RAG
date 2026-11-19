@@ -141,6 +141,13 @@ class ChatSession(Base):
         String(128), comment="reuse 模式的会话键（payload.session_key）"
     )
 
+    # ɷ½ʽѶȣshare_token ֻԭʼ·عͻȡʱ˵һΡ
+    # ļ¼ SHA-256 ժҪtoken ¼/־
+    share_token_hash: Mapped[str | None] = mapped_column(
+        String(64), index=True, comment="ɷ_token SHA-256 ժҪ"
+    )
+    share_created_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), comment="ɷʱ")
+
     # 时间戳
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), comment="创建时间"
