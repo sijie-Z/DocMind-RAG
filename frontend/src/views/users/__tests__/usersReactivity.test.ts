@@ -29,9 +29,12 @@ vi.mock('@/api/user', async (importOriginal) => {
     updateUser: vi.fn(),
     deleteUser: vi.fn(),
     resetUserPassword: vi.fn(),
-    getOrganizations: vi.fn().mockResolvedValue({ data: { data: { data: [], total: 0 } } }),
   }
 })
+// 视图实际从 @/api/organization 取组织选项（评审 NIT：mock 到对的模块）
+vi.mock('@/api/organization', () => ({
+  getOrganizations: vi.fn().mockResolvedValue({ data: { data: { data: [], total: 0 } } }),
+}))
 
 const mockedGetUsers = vi.mocked(getUsers)
 

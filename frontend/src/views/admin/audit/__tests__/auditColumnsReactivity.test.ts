@@ -22,7 +22,11 @@ import en from '@/locales/en'
 
 vi.mock('@/api/user', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/api/user')>()
-  return { ...actual, getAuditLogs: vi.fn().mockResolvedValue({ data: { success: true, data: { items: [], total: 0 } } }) }
+  return {
+    ...actual,
+    getAuditLogs: vi.fn().mockResolvedValue({ data: { success: true, data: { items: [], total: 0 } } }),
+    getAuditActions: vi.fn().mockResolvedValue({ data: { data: [] } }),
+  }
 })
 vi.mock('@/api/audit', () => ({ downloadAuditLogs: vi.fn() }))
 
@@ -96,6 +100,25 @@ describe('操作审计页 · 表头随语言切换', () => {
     const head = w.find('.dt-head').text()
     expect(head, '表头应收敛到英文').toContain(en.audit.columns.time)
     expect(head, '不应残留中文表头').not.toContain(zh.audit.columns.time)
+    w.unmount()
+  })
+
+  it('「操作类型」下拉选项随语言切换（actionOptions 为 computed）', async () => {
+    // 播种原始行（label 由 computed 派生）
+    type Opt = { label: string; value: string }
+    const vmOf = (w: { findComponent: (c: unknown) => { vm: unknown } }) =>
+      w.findComponent(AuditView).vm as unknown as {
+        actionRows: Array<{ action: string; count: number }>
+        actionOptions: Opt[]
+      }
+    const { w, i18n } = await mountAt('zh')
+    vmOf(w).actionRows = [{ action: 'delete_user', count: 3 }]
+    await nextTick()
+    expect(vmOf(w).actionOptions.map((o) => o.label).join()).toContain(zh.audit.actionTypes.delete)
+
+    ;(i18n.global.locale as unknown as { value: string }).value = 'en'
+    await nextTick()
+    expect(vmOf(w).actionOptions.map((o) => o.label).join()).toContain(en.audit.actionTypes.delete)
     w.unmount()
   })
 })
