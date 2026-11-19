@@ -614,6 +614,8 @@ class DocumentProcessor:
             "text_provenance": text_provenance,
             "organization_id": str(doc.organization_id),
             "document_id": doc.id,
+            # 文档级启停：检索 filter 读这个字段（旧索引无此字段时按 True 兜底）
+            "is_enabled": bool(getattr(doc, "is_enabled", True)),
             "filename": doc.filename,
             "file_type": (
                 doc.file_type.value if hasattr(doc.file_type, "value") else str(doc.file_type)

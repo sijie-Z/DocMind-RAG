@@ -237,6 +237,7 @@ async def list_knowledge_bases(
                     "updated_at": doc.updated_at.isoformat() if doc.updated_at else "",
                     "status": status_map.get(doc_status, "failed"),
                     "raw_status": raw_status,
+                    "is_enabled": bool(getattr(doc, "is_enabled", True)),
                 }
             )
 

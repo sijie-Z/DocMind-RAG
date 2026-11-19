@@ -420,6 +420,30 @@ def _hit_defines_target(hit: dict, target_clauses: set[int], target_sections: se
     return False
 
 
+def build_retrieval_filters(
+    organization_id: int, document_ids: list[str] | None = None
+) -> list[dict]:
+    """构造检索 filter（**唯一出口**，便于单测与口径统一）。
+
+    文档级启停：停用文档不参与召回。必须包在 bool 内（裸 must_not 是非法
+    DSL，实测 ES 8.11 直接 400）；bool.must_not 对「字段缺失」的旧索引文档
+    是匹配的——迁移前写入的 chunk 仍会召回，不漏。
+
+    文档级 ACL（visibility=private）同样在这里收口：私有文档只有
+    is_private_public 标记为 true（索引期按「该 chunk 是否对所有人可见」
+    写入）或被 document_ids 显式指定时才召回——具体收口在 ACL 批次接入。
+    """
+    filters: list[dict] = [
+        {"term": {"organization_id": str(organization_id)}},
+        {"bool": {"must_not": [{"term": {"is_enabled": False}}]}},
+    ]
+    if document_ids:
+        doc_ids = [str(d) for d in document_ids if d]
+        if doc_ids:
+            filters.append({"terms": {"document_id": doc_ids}})
+    return filters
+
+
 class HybridRetriever:
     """Retrieves documents using keyword search, vector search, and RRF fusion."""
 
@@ -1163,12 +1187,7 @@ class HybridRetriever:
         When debug=True, returns intermediate retrieval results for visualization.
         """
         degraded: list[str] = []
-        org_filter = {"term": {"organization_id": str(organization_id)}}
-        filters = [org_filter]
-        if document_ids:
-            doc_ids = [str(d) for d in document_ids if d]
-            if doc_ids:
-                filters.append({"terms": {"document_id": doc_ids}})
+        filters = build_retrieval_filters(organization_id, document_ids)
 
         candidate_size = max(top_k * max(1, settings.RAG_MMR_CANDIDATE_MULTIPLIER), 12)
 

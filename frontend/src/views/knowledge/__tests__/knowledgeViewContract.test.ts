@@ -337,10 +337,12 @@ describe('KnowledgeView · 幽灵降级控件已清除（B17）', () => {
     // 工具栏：幽灵入口不存在
     expect(wrapper.text()).not.toContain('重试全部降级文档')
 
-    // 卡片动作区：只剩 查看 + 删除 两个按钮（旧实现会多出"重试向量化" = 3 个）
+    // 卡片动作区：不得出现幽灵「重试向量化」入口（查看 + 启停 + 删除是合法的 3 个）
     const card = wrapper.findAll('.group').find((g) => g.text().includes('architecture.md'))
     expect(card).toBeTruthy()
-    expect(card!.findAll('button')).toHaveLength(2)
+    const actionLabels = card!.findAll('button').map((b) => (b.attributes('aria-label') || '').trim())
+    expect(actionLabels.some((l) => l.includes('重试向量化'))).toBe(false)
+    expect(card!.findAll('button')).toHaveLength(3)
   })
 })
 
