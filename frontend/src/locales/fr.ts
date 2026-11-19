@@ -546,6 +546,12 @@ export default {
     liked: 'Aimé',
     disliked: 'Pas aimé',
     feedbackFailed: 'Échec de l\'envoi du retour : {message}',
+    // Recherche par titre dans la barre latérale des conversations
+    conversationSearch: {
+      placeholder: 'Rechercher des conversations',
+      clear: 'Effacer la recherche',
+      empty: 'Aucune conversation correspondante. Essayez un autre mot-clé.',
+    },
   },
   validation: {
     required: 'Ce champ est obligatoire',

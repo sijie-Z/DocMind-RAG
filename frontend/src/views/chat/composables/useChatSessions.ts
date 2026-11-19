@@ -1,4 +1,4 @@
-import { ref, computed } from 'vue'
+import { ref, computed, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useDedupedMessage } from '@/utils/message'
 import { useI18n } from 'vue-i18n'
@@ -29,16 +29,28 @@ export function useChatSessions(getGeneration: () => string = () => '') {
   // 的 checkScreenSize 展开。
   const sidebarOpen = ref(false)
 
+  // 会话标题搜索：输入防抖 280ms，查询变更时回到第 1 页；
+  // 空白词直接不带 search 参数（后端把空白视为不过滤，前端保持请求形状干净）。
+  const conversationSearch = ref('')
+  const debouncedSearch = ref('')
+  let debounceTimer: ReturnType<typeof setTimeout> | null = null
+
   const currentConversationId = computed(() => chatStore.currentConversation?.id)
   let listRequestSeq = 0
 
-  const fetchConversations = async () => {
+  // 刷新/删除后重拉时必须沿用当前查询，否则搜索态会被静默重置为全量。
+  const fetchConversations = async (search: string = debouncedSearch.value) => {
     const requestSeq = ++listRequestSeq
     const generation = getGeneration()
     const ownsResponse = () => requestSeq === listRequestSeq && generation === getGeneration()
+    const params = {
+      page: currentPage.value,
+      page_size: 50,
+      ...(search ? { search } : {}),
+    }
     isListLoading.value = true
     try {
-      const res = await getConversations({ page: currentPage.value, page_size: 50 })
+      const res = await getConversations(params)
       if (!ownsResponse()) return
       // 宽容解包（口径见 @/types/common.ts）：真实响应为
       // {success, data: {data: [...], total, page, page_size}} 双层体。
@@ -69,6 +81,34 @@ export function useChatSessions(getGeneration: () => string = () => '') {
     currentPage.value++
     await fetchConversations()
   }
+
+  // 纯函数式防抖：只有最后一次输入会触发请求；clear 走 setConversationSearch('', { immediate: true })
+  // 可跳过等待立即恢复全量。竞态仍由 fetchConversations 的 listRequestSeq 兜底。
+  const setConversationSearch = (value: string, options: { immediate?: boolean } = {}) => {
+    const next = value.trim()
+    if (debounceTimer) {
+      clearTimeout(debounceTimer)
+      debounceTimer = null
+    }
+    conversationSearch.value = value
+    if (options.immediate) {
+      debouncedSearch.value = next
+      currentPage.value = 1
+      void fetchConversations(next)
+      return
+    }
+    debounceTimer = setTimeout(() => {
+      debounceTimer = null
+      if (next === debouncedSearch.value) return
+      debouncedSearch.value = next
+      currentPage.value = 1
+      void fetchConversations(next)
+    }, 280)
+  }
+
+  onUnmounted(() => {
+    if (debounceTimer) clearTimeout(debounceTimer)
+  })
 
   const handleDeleteConversation = async (id: string) => {
     dialog.warning({
@@ -102,7 +142,9 @@ export function useChatSessions(getGeneration: () => string = () => '') {
     hasMore,
     sidebarOpen,
     currentConversationId,
+    conversationSearch,
     fetchConversations,
+    setConversationSearch,
     loadMore,
     handleDeleteConversation
   }

@@ -545,6 +545,12 @@ export default {
     liked: '已点赞',
     disliked: '已点踩',
     feedbackFailed: '反馈失败：{message}',
+    // 会话侧栏按标题搜索
+    conversationSearch: {
+      placeholder: '搜索会话标题',
+      clear: '清除搜索',
+      empty: '没有匹配的会话，试试其他关键词',
+    },
   },
   validation: {
     required: '此项必填',
