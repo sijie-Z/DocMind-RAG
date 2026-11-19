@@ -449,6 +449,21 @@ class ElasticsearchTools:
         return await client.update(index=settings.ELASTICSEARCH_INDEX_NAME, id=doc_id, doc=document)
 
     @staticmethod
+    async def update_documents_by_query(query: dict, script: dict) -> dict:
+        """按查询批量更新（不重写文档、不重算向量，只改字段）。
+
+        文档级启停用它把 ``is_enabled`` 刷到该文档的全部 chunk 上。
+        """
+        client = await get_elasticsearch()
+        return await client.update_by_query(
+            index=settings.ELASTICSEARCH_INDEX_NAME,
+            query=query,
+            script=script,
+            conflicts="proceed",
+            refresh=True,
+        )
+
+    @staticmethod
     async def delete_document(doc_id: str):
         client = await get_elasticsearch()
         return await client.delete(index=settings.ELASTICSEARCH_INDEX_NAME, id=doc_id)

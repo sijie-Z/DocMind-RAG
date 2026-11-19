@@ -206,7 +206,12 @@
                               {{ item.title }}
                             </router-link>
                           </h3>
-                          <p class="text-xs text-gray-500 dark:text-gray-400 truncate">{{ item.file_name }}</p>
+                          <div class="flex items-center gap-1.5">
+                            <p class="text-xs text-gray-500 dark:text-gray-400 truncate">{{ item.file_name }}</p>
+                            <n-tag v-if="item.is_enabled === false" size="tiny" type="warning" :bordered="false">
+                              {{ t('knowledge.enabledBadge') }}
+                            </n-tag>
+                          </div>
                         </div>
                       </div>
 
@@ -276,105 +281,7 @@
                            >
                              <template #icon><n-icon><PersonAddOutline /></n-icon></template>
                            </n-button>
-                           <n-button size="tiny" quaternary circle type="error" :aria-label="t('knowledge.actionDelete')" @click.stop="deleteKnowledge(item)">
-                              <template #icon><n-icon><TrashOutline /></n-icon></template>
-                           </n-button>
-                        </div>
-                        </div>
-                        <div 
-                          v-if="item.status === 'failed' && item.parse_error"
-                          class="mt-2 text-xs leading-4 text-red-600 dark:text-red-400 bg-red-50/70 dark:bg-red-900/20 border border-red-100 dark:border-red-800/50 rounded-md px-2 py-1.5 break-all line-clamp-2 cursor-pointer hover:bg-red-100 dark:hover:bg-red-900/30 transition-colors shadow-sm"
-                          :title="item.parse_error"
-                          @click.stop="showErrorDetail(item.parse_error)"
-                        >
-                          <div class="flex items-center gap-1 mb-0.5">
-                            <n-icon size="12"><AlertCircleOutline /></n-icon>
-                            <span class="font-bold">{{ t('knowledge.parseFailedDetail') }}</span>
-                          </div>
-                          {{ item.parse_error }}
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                </n-gi>
-              </n-grid>
-            </div>
-            
-            <!-- 列表模式 -->
-            <div v-else class="w-full min-w-0 overflow-x-auto rounded-xl border border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-800">
-               <table class="w-full text-left text-sm min-w-[600px]">
-                  <thead class="bg-gray-50 dark:bg-gray-900/50 text-gray-500 dark:text-gray-400 border-b border-gray-200 dark:border-gray-700">
-                    <tr>
-                      <th class="p-4 w-12"><n-checkbox :checked="isAllSelected" @update:checked="toggleSelectAll" /></th>
-                      <th class="p-4 font-medium">{{ t('knowledge.table.name') }}</th>
-                      <th class="p-4 font-medium hidden md:table-cell">{{ t('knowledge.tableTags') }}</th>
-                      <th class="p-4 font-medium">{{ t('knowledge.table.size') }}</th>
-                      <th class="p-4 font-medium hidden sm:table-cell">{{ t('knowledge.table.uploadTime') }}</th>
-                      <th class="p-4 font-medium">{{ t('knowledge.table.status') }}</th>
-                      <th class="p-4 font-medium text-right">{{ t('knowledge.table.actions') }}</th>
-                    </tr>
-                  </thead>
-                  <tbody class="divide-y divide-gray-100 dark:divide-gray-700/50">
-                    <tr v-for="item in filteredKnowledgeBases" :key="item.id" class="hover:bg-blue-50/50 dark:hover:bg-blue-900/10 transition-colors group">
-                       <td class="p-4"><n-checkbox :checked="selectedIds.includes(item.id)" @update:checked="(val: boolean) => toggleSelect(item.id, val)" /></td>
-                       <td class="p-4">
-                         <div class="flex items-center gap-3">
-                            <n-icon size="20" :color="getFileIconColor(item.file_type)">
-                              <DocumentTextOutline v-if="item.file_type === 'pdf'" />
-                              <DocumentOutline v-else-if="item.file_type === 'word'" />
-                              <DocumentAttachOutline v-else />
-                            </n-icon>
-                            <div>
-                              <router-link :to="documentRoute(item)" class="font-medium text-gray-900 no-underline hover:text-blue-700 hover:underline focus-visible:underline dark:text-gray-100 dark:hover:text-blue-400">
-                                {{ item.title }}
-                              </router-link>
-                              <div class="text-xs text-gray-500 dark:text-gray-400">{{ item.file_name }}</div>
-                            </div>
-                         </div>
-                       </td>
-                       <td class="p-4 hidden md:table-cell">
-                          <div class="flex gap-1 flex-wrap">
-                            <n-tag v-if="item.visibility === 'private'" size="tiny" type="warning" :bordered="false">{{ t('knowledge.privateBadge') }}</n-tag>
-                            <n-tag v-for="tag in item.tags.slice(0, 2)" :key="tag" size="tiny" :bordered="false" class="bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300">#{{ tag }}</n-tag>
-                          </div>
-                       </td>
-                       <td class="p-4 text-gray-500 dark:text-gray-400">{{ formatFileSize(item.file_size) }}</td>
-                       <td class="p-4 hidden sm:table-cell text-gray-500 dark:text-gray-400">{{ formatUploadedAt(item.created_at) }}</td>
-                       <td class="p-4">
-                          <div class="space-y-1">
-                            <n-tag 
-                              size="tiny" 
-                              :type="getStatusType(item)" 
-                              :bordered="false"
-                              round
-                            >
-                              {{ getStatusLabel(item) }}
-                            </n-tag>
-                            <div 
-                              v-if="item.status === 'failed' && item.parse_error"
-                              class="text-xs text-red-600 dark:text-red-400 max-w-[220px] truncate cursor-pointer hover:underline decoration-dotted"
-                              :title="item.parse_error"
-                              @click.stop="showErrorDetail(item.parse_error)"
-                            >
-                              {{ item.parse_error }}
-                            </div>
-                          </div>
-                       </td>
-                       <td class="p-4 text-right">
-                          <div class="flex justify-end gap-2 kb-row-actions">
-                             <n-button size="tiny" secondary circle :aria-label="t('knowledge.actionView')" @click="viewKnowledge(item)"><template #icon><n-icon><EyeOutline /></n-icon></template></n-button>
-                             <n-button v-if="showRebuild && item.status === 'failed'" size="tiny" secondary circle type="primary" :aria-label="t('knowledge.actionRebuild')" @click="handleRebuild(item)"><template #icon><n-icon><RefreshOutline /></n-icon></template></n-button>
-                             <n-button
-                               v-if="canManageAcl && item.visibility === 'private'"
-                               size="tiny"
-                               secondary
-                               circle
-                               :aria-label="t('knowledge.actionManageAcl')"
-                               :title="t('knowledge.actionManageAcl')"
-                               @click="openAclModal(item)"
-                             >
-                               <template #icon><n-icon><PersonAddOutline /></n-icon></template>
-                             </n-button>
+<n-button v-if="showToggleEnabled" size="tiny" secondary circle :type="item.is_enabled === false ? 'warning' : 'default'" :aria-label="item.is_enabled === false ? t('knowledge.actionEnable') : t('knowledge.actionDisable')" @click="handleToggleEnabled(item)"><template #icon><n-icon><component :is="item.is_enabled === false ? PlayOutline : PauseOutline" /></n-icon></template></n-button>
                              <n-button size="tiny" secondary circle type="error" :aria-label="t('knowledge.actionDelete')" @click="deleteKnowledge(item)"><template #icon><n-icon><TrashOutline /></n-icon></template></n-button>
                           </div>
                        </td>
@@ -500,6 +407,9 @@ import {
   GitNetworkOutline,
   TimeOutline,
   PersonAddOutline
+TimeOutline,
+  PlayOutline,
+  PauseOutline
 } from '@vicons/ionicons5'
 import type { UploadFileInfo } from 'naive-ui'
 import { 
@@ -512,6 +422,8 @@ import {
   rebuildKnowledgeBase,
   getDocumentAuthorizedUsers,
   setDocumentAuthorizedUsers
+rebuildKnowledgeBase,
+  setKnowledgeEnabled
 } from '@/api/knowledge'
 import type { KnowledgeBase, KnowledgeBaseListResponse, DocumentDetail, DocumentContent } from '@/api/knowledge'
 import { formatDateTime } from '@/utils/format'
@@ -542,6 +454,10 @@ const userStore = useUserStore()
 // permissions 已下发时按权限隐藏入口；字段缺失（旧后端）→ null = 未知，保持可见。
 const canRebuild = computed(() => userStore.can('knowledge_base:rebuild_index'))
 const showRebuild = computed(() => canRebuild.value !== false)
+// 启停是写操作（后端要求 DOCUMENT_UPDATE）；无权限者不显示按钮，
+// 避免点了才 403（与 showRebuild 同口径：权限未知时保持可见，诚实降级）。
+const canToggleEnabled = computed(() => userStore.can('document:update'))
+const showToggleEnabled = computed(() => canToggleEnabled.value !== false)
 const loading = ref(false)
 const loadError = ref(false)
 const loadErrorMsg = ref('')
@@ -1007,6 +923,17 @@ const saveAcl = async () => {
   }
 }
 
+/** 文档级启停：停用后不参与检索（内容与索引保留），对标 RAGFlow/Dify。 */
+const handleToggleEnabled = async (item: KnowledgeBase) => {
+  const next = !(item.is_enabled !== false)
+  try {
+    await setKnowledgeEnabled(item.id, next, { silent: true })
+    item.is_enabled = next
+    message.success(next ? t('knowledge.enableSuccess') : t('knowledge.disableSuccess'))
+  } catch (error: unknown) {
+    message.error(getErrorMessage(error, t('knowledge.enableFailed')))
+  }
+}
 const handleRebuild = async (item: KnowledgeBase) => {
   try {
     await rebuildKnowledgeBase(item.id, { silent: true })

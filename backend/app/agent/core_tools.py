@@ -339,9 +339,11 @@ async def _vector_search_impl(
 
     # issue #509 评审修正：规范入口同时暴露 document_ids，vector 模式不得静默
     # 丢弃它（否则“限定这些文档”实际变成全组织检索）。
-    filters: list[dict[str, Any]] = [{"term": {"organization_id": str(organization_id)}}]
-    if document_ids:
-        filters.append({"terms": {"document_id": list(document_ids)}})
+    # 与主检索共用 build_retrieval_filters：停用文档在 Agent 纯向量模式下同样
+    # 不得召回（此前自建 filters 漏了启停过滤，与 hybrid 口径不一致）。
+    from app.rag.retriever import build_retrieval_filters
+
+    filters: list[dict[str, Any]] = build_retrieval_filters(organization_id, document_ids)
     # 私有文档 ACL：向量臂自建 filters，必须显式带 viewer 可见集
     if viewer_user_id:
         from app.core.database import AsyncSessionLocal

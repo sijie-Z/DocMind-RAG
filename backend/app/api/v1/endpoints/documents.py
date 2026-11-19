@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.database import get_db
+from app.core.elasticsearch import ElasticsearchTools
 from app.core.kafka_client import kafka_producer
 from app.core.minio_client import minio_client, normalize_object_name
 from app.core.security import (
@@ -552,6 +553,76 @@ async def get_document_chunk(
     except Exception as e:
         logger.error(f"Get document chunk failed: {type(e).__name__}: {e}")
         raise AppError("获取文档分块失败") from e
+
+
+class DocumentEnableUpdate(BaseModel):
+    """文档启停请求体。"""
+
+    enabled: bool
+
+
+@router.patch(
+    "/{document_id}/enabled",
+    response_model=dict,
+    dependencies=[
+        Depends(require_scope("knowledge:write")),
+        Depends(permission_required([PermissionType.DOCUMENT_UPDATE])),
+    ],
+)
+async def set_document_enabled(
+    document_id: str,
+    body: DocumentEnableUpdate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """启用 / 停用文档（停用后不参与检索召回，内容与索引保留）。
+
+    对标 RAGFlow / Dify / FastGPT 的文档启停：合同旧版本、过期制度需要
+    「留档但不污染召回」。只改 PostgreSQL/MySQL 的 ``is_enabled`` 与 ES
+    的 chunk 字段，不触碰解析产物与向量。
+    """
+    try:
+        doc = await get_document_for_user(db, current_user, document_id)
+
+        # ES 先行：检索 filter 读的是 **ES 字段**（不是 DB）。若先改 DB 再刷 ES
+        # 而 ES 失败，用户会看到「已停用」但文档仍被召回——正是本功能要消灭的
+        # 状态。故 ES 失败即整体失败（DB 不动），让用户重试。
+        try:
+            await ElasticsearchTools.update_documents_by_query(
+                query={"term": {"document_id": document_id}},
+                script={
+                    "source": "ctx._source.is_enabled = params.enabled",
+                    "params": {"enabled": bool(body.enabled)},
+                },
+            )
+        except Exception as es_err:
+            raise AppError(f"同步检索索引失败，请稍后重试: {es_err}") from es_err
+
+        doc.is_enabled = bool(body.enabled)
+        await db.commit()
+
+        # 清本组织检索缓存：停用/启用必须立刻生效，不能等 10 分钟 TTL。
+        # 与删除/重建路径同口径（知识库删除、worker 重建都会 clear_for_org）。
+        try:
+            from app.rag.cache import RetrievalCache, SemanticCache
+
+            await RetrievalCache().clear_for_org(doc.organization_id)
+            await SemanticCache.for_retrieval(settings.RAG_SOURCE_PROVENANCE_MODE).clear_for_org(
+                doc.organization_id
+            )
+        except Exception as cache_err:
+            logger.warning(
+                "文档启停后清理检索缓存失败（org=%s）: %s", doc.organization_id, cache_err
+            )
+
+        return {
+            "success": True,
+            "data": {"id": document_id, "is_enabled": bool(body.enabled)},
+        }
+    except (AppError, NotFoundError, AuthorizationError):
+        raise
+    except Exception as e:
+        raise AppError(f"更新文档启停状态失败: {str(e)}") from e
 
 
 @router.put(

@@ -6,7 +6,18 @@ import enum
 from datetime import datetime
 from typing import Any, Optional
 
-from sqlalchemy import JSON, DateTime, Enum, ForeignKey, Integer, String, Text, UniqueConstraint
+import sqlalchemy as sa
+from sqlalchemy import (
+    JSON,
+    Boolean,
+    DateTime,
+    Enum,
+    ForeignKey,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
 
@@ -81,6 +92,16 @@ class Document(Base):
         comment="可见性：organization=组织可见，private=上传者+授权人",
     )
 
+    # 文档级启停：停用后不参与检索召回（保留内容与索引，随时可恢复）。
+    # 对标 RAGFlow/Dify/FastGPT 的「禁用/归档文档」能力——合同旧版本、
+    # 过期制度等场景需要「留档但不污染召回」。
+    is_enabled: Mapped[bool] = mapped_column(
+        Boolean,
+        default=True,
+        server_default=sa.text("1"),
+        index=True,
+        comment="是否启用（停用后不参与检索）",
+    )
     # 内容统计
     content_length: Mapped[int | None] = mapped_column(Integer, comment="文本内容长度")
     chunk_count: Mapped[int] = mapped_column(Integer, default=0, comment="分块数量")
