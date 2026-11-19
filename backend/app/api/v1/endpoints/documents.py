@@ -10,10 +10,12 @@ from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, Form, Query, UploadFile, status
 from fastapi.responses import RedirectResponse
+from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.database import get_db
+from app.core.elasticsearch import ElasticsearchTools
 from app.core.kafka_client import kafka_producer
 from app.core.minio_client import minio_client, normalize_object_name
 from app.core.security import (
@@ -525,6 +527,66 @@ async def get_document_chunk(
     except Exception as e:
         logger.error(f"Get document chunk failed: {type(e).__name__}: {e}")
         raise AppError("获取文档分块失败") from e
+
+
+class DocumentEnableUpdate(BaseModel):
+    """文档启停请求体。"""
+
+    enabled: bool
+
+
+@router.patch(
+    "/{document_id}/enabled",
+    response_model=dict,
+    dependencies=[
+        Depends(require_scope("knowledge:write")),
+        Depends(permission_required([PermissionType.DOCUMENT_UPDATE])),
+    ],
+)
+async def set_document_enabled(
+    document_id: str,
+    body: DocumentEnableUpdate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """启用 / 停用文档（停用后不参与检索召回，内容与索引保留）。
+
+    对标 RAGFlow / Dify / FastGPT 的文档启停：合同旧版本、过期制度需要
+    「留档但不污染召回」。只改 PostgreSQL/MySQL 的 ``is_enabled`` 与 ES
+    的 chunk 字段，不触碰解析产物与向量。
+    """
+    try:
+        doc = await get_document_for_user(db, current_user, document_id)
+        doc.is_enabled = bool(body.enabled)
+        await db.commit()
+
+        # 同步 ES：按 document_id 批量更新（不重写向量，只改布尔字段）。
+        try:
+            await ElasticsearchTools.update_documents_by_query(
+                query={"term": {"document_id": document_id}},
+                script={
+                    "source": "ctx._source.is_enabled = params.enabled",
+                    "params": {"enabled": bool(body.enabled)},
+                },
+            )
+        except Exception as es_err:
+            # ES 失败不回滚 DB：检索 filter 以 DB 为准的场景由重建兜底；
+            # 留痕而不是静默。
+            logger.warning(
+                "文档启停同步 ES 失败（document_id=%s, enabled=%s）: %s",
+                document_id,
+                body.enabled,
+                es_err,
+            )
+
+        return {
+            "success": True,
+            "data": {"id": document_id, "is_enabled": bool(body.enabled)},
+        }
+    except (AppError, NotFoundError, AuthorizationError):
+        raise
+    except Exception as e:
+        raise AppError(f"更新文档启停状态失败: {str(e)}") from e
 
 
 @router.put(

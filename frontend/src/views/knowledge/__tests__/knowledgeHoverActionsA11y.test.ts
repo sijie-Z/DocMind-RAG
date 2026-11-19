@@ -159,9 +159,10 @@ describe('KnowledgeView · 操作排键盘/触屏可达（I1）', () => {
     expect(actions.classes()).not.toContain('opacity-0')
     expect(actions.classes().some((c) => c.includes('group-hover:'))).toBe(false)
 
-    // completed 状态：查看 + 删除 = 2 个原生按钮
+    // completed 状态：查看 + 启停 + 删除 = 3 个原生按钮
+    // （文档级启停是竞品对标的补齐项，非幽灵入口：见 knowledgeViewContract）
     const buttons = actions.findAll('button')
-    expect(buttons.length).toBe(2)
+    expect(buttons.length).toBe(3)
     for (const btn of buttons) {
       // 未被移出 tab 序（naive 真实按钮可能显式 tabindex="0"，同样可聚焦）
       expect(btn.attributes('tabindex')).not.toBe('-1')
@@ -206,7 +207,7 @@ describe('KnowledgeView · 操作排键盘/触屏可达（I1）', () => {
     expect(actions.classes().some((c) => c.includes('group-hover:'))).toBe(false)
 
     const buttons = actions.findAll('button')
-    expect(buttons.length).toBe(2)
+    expect(buttons.length).toBe(3)
     ;(buttons[0].element as HTMLButtonElement).focus()
     expect(document.activeElement).toBe(buttons[0].element)
 

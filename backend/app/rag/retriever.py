@@ -1164,7 +1164,10 @@ class HybridRetriever:
         """
         degraded: list[str] = []
         org_filter = {"term": {"organization_id": str(organization_id)}}
-        filters = [org_filter]
+        # 文档级启停：停用文档不参与召回。用 must_not + term(true) 的写法
+        # 兼容旧索引（迁移前写入的 chunk 没有 is_enabled 字段，不得因此漏召回）。
+        enabled_filter = {"must_not": [{"term": {"is_enabled": False}}]}
+        filters = [org_filter, enabled_filter]
         if document_ids:
             doc_ids = [str(d) for d in document_ids if d]
             if doc_ids:

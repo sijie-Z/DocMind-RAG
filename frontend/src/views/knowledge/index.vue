@@ -206,7 +206,12 @@
                               {{ item.title }}
                             </router-link>
                           </h3>
-                          <p class="text-xs text-gray-500 dark:text-gray-400 truncate">{{ item.file_name }}</p>
+                          <div class="flex items-center gap-1.5">
+                            <p class="text-xs text-gray-500 dark:text-gray-400 truncate">{{ item.file_name }}</p>
+                            <n-tag v-if="item.is_enabled === false" size="tiny" type="warning" :bordered="false">
+                              {{ t('knowledge.enabledBadge') }}
+                            </n-tag>
+                          </div>
                         </div>
                       </div>
 
@@ -262,6 +267,14 @@
                              </template>
                              {{ t('knowledge.actionRebuild') }}
                            </n-tooltip>
+                           <n-tooltip trigger="hover">
+                             <template #trigger>
+                               <n-button size="tiny" quaternary circle :type="item.is_enabled === false ? 'warning' : 'default'" :aria-label="item.is_enabled === false ? t('knowledge.actionEnable') : t('knowledge.actionDisable')" @click.stop="handleToggleEnabled(item)">
+                                 <template #icon><n-icon><component :is="item.is_enabled === false ? PlayOutline : PauseOutline" /></n-icon></template>
+                               </n-button>
+                             </template>
+                             {{ item.is_enabled === false ? t('knowledge.actionEnable') : t('knowledge.actionDisable') }}
+                           </n-tooltip>
                            <n-button size="tiny" quaternary circle type="error" :aria-label="t('knowledge.actionDelete')" @click.stop="deleteKnowledge(item)">
                               <template #icon><n-icon><TrashOutline /></n-icon></template>
                            </n-button>
@@ -314,7 +327,12 @@
                               <router-link :to="documentRoute(item)" class="font-medium text-gray-900 no-underline hover:text-blue-700 hover:underline focus-visible:underline dark:text-gray-100 dark:hover:text-blue-400">
                                 {{ item.title }}
                               </router-link>
-                              <div class="text-xs text-gray-500 dark:text-gray-400">{{ item.file_name }}</div>
+                              <div class="flex items-center gap-1.5">
+                                <span class="text-xs text-gray-500 dark:text-gray-400">{{ item.file_name }}</span>
+                                <n-tag v-if="item.is_enabled === false" size="tiny" type="warning" :bordered="false">
+                                  {{ t('knowledge.enabledBadge') }}
+                                </n-tag>
+                              </div>
                             </div>
                          </div>
                        </td>
@@ -349,6 +367,7 @@
                           <div class="flex justify-end gap-2 kb-row-actions">
                              <n-button size="tiny" secondary circle :aria-label="t('knowledge.actionView')" @click="viewKnowledge(item)"><template #icon><n-icon><EyeOutline /></n-icon></template></n-button>
                              <n-button v-if="showRebuild && item.status === 'failed'" size="tiny" secondary circle type="primary" :aria-label="t('knowledge.actionRebuild')" @click="handleRebuild(item)"><template #icon><n-icon><RefreshOutline /></n-icon></template></n-button>
+                             <n-button size="tiny" secondary circle :type="item.is_enabled === false ? 'warning' : 'default'" :aria-label="item.is_enabled === false ? t('knowledge.actionEnable') : t('knowledge.actionDisable')" @click="handleToggleEnabled(item)"><template #icon><n-icon><component :is="item.is_enabled === false ? PlayOutline : PauseOutline" /></n-icon></template></n-button>
                              <n-button size="tiny" secondary circle type="error" :aria-label="t('knowledge.actionDelete')" @click="deleteKnowledge(item)"><template #icon><n-icon><TrashOutline /></n-icon></template></n-button>
                           </div>
                        </td>
@@ -450,7 +469,9 @@ import {
   ListOutline,
   GridOutline,
   GitNetworkOutline,
-  TimeOutline
+  TimeOutline,
+  PlayOutline,
+  PauseOutline
 } from '@vicons/ionicons5'
 import type { UploadFileInfo } from 'naive-ui'
 import { 
@@ -460,7 +481,8 @@ import {
   uploadKnowledgeBase, 
   deleteKnowledgeBase,
   batchDeleteKnowledgeBases,
-  rebuildKnowledgeBase
+  rebuildKnowledgeBase,
+  setKnowledgeEnabled
 } from '@/api/knowledge'
 import type { KnowledgeBase, KnowledgeBaseListResponse, DocumentDetail, DocumentContent } from '@/api/knowledge'
 import { formatDateTime } from '@/utils/format'
@@ -904,6 +926,19 @@ const viewKnowledge = async (item: KnowledgeBase) => {
 const showErrorDetail = (errorText: string) => {
   currentErrorDetail.value = errorText || '未知解析错误'
   showErrorModal.value = true
+}
+
+
+/** 文档级启停：停用后不参与检索（内容与索引保留），对标 RAGFlow/Dify。 */
+const handleToggleEnabled = async (item: KnowledgeBase) => {
+  const next = !(item.is_enabled !== false)
+  try {
+    await setKnowledgeEnabled(item.id, next, { silent: true })
+    item.is_enabled = next
+    message.success(next ? t('knowledge.enableSuccess') : t('knowledge.disableSuccess'))
+  } catch (error: unknown) {
+    message.error(getErrorMessage(error, t('knowledge.enableFailed')))
+  }
 }
 
 const handleRebuild = async (item: KnowledgeBase) => {

@@ -29,6 +29,8 @@ export interface KnowledgeBase {
   // 与详情端点 documents.py:296-303 一致）；'completed' 为收敛前列表旧词
   // （在途分支/旧缓存仍可能到达）—— 两词表均受支持（docDisplay 兼容层统一映射）
   status: 'pending' | 'uploaded' | 'parsing' | 'parsed' | 'completed' | 'indexed' | 'failed'
+  // 文档级启停：false 时该文档不参与检索召回（内容与索引保留）
+  is_enabled?: boolean
 }
 
 export interface KnowledgeBaseListResponse {
@@ -232,6 +234,19 @@ export const rebuildKnowledgeBase = async (
   return request.post(`/knowledge/rebuild/${id}`, undefined, options?.silent ? SILENT_HEADERS : undefined)
 }
 
+
+/** 启用 / 停用文档（停用后不参与检索召回，内容与索引保留）。 */
+export const setKnowledgeEnabled = async (
+  id: string,
+  enabled: boolean,
+  options?: SilentRequestOptions
+): Promise<AxiosResponse<ApiResponse<unknown>>> => {
+  return request.patch(
+    `/documents/${id}/enabled`,
+    { enabled },
+    options?.silent ? SILENT_HEADERS : undefined
+  )
+}
 
 export interface GraphNode {
   id: string
