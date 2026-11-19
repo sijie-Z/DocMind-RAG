@@ -39,12 +39,34 @@ class TestConditionalTargetResolution:
         # 不是条件名；必须能直接按目标 id 命中。
         targets = _targets(("n-a", None), ("n-b", None))
         state = {"context": {"route_result": "n-b"}}
-        assert resolve_conditional_target(targets, state) == "n-b"
+        assert resolve_conditional_target(targets, state, "router") == "n-b"
+
+    def test_stale_router_result_does_not_poison_downstream_condition(self):
+        """评审 A 回归：Router 未命中产出 route_result="default" 残留在共享
+        context；下一个 ConditionNode 产出 translate 时必须走 translate 分支，
+        不能被残留的 default 抢走。"""
+        targets = _targets(("n-default", "default"), ("n-translate", "translate"))
+        state = {"context": {"route_result": "default", "condition_result": "translate"}}
+        assert resolve_conditional_target(targets, state, "condition") == "n-translate"
+
+    def test_stale_router_target_does_not_poison_downstream_condition(self):
+        """更一般情形：Router 命中的节点 id 残留，也不能覆盖 Condition 结果。"""
+        targets = _targets(("n-a", "alpha"), ("n-b", "beta"))
+        state = {"context": {"route_result": "n-a", "condition_result": "beta"}}
+        assert resolve_conditional_target(targets, state, "condition") == "n-b"
 
     def test_none_label_does_not_crash(self):
+        # Router 场景：label 全为 None 时只按 edge.target 命中，不能 .lower() 崩溃
         targets = _targets(("n-a", None), ("n-b", None))
         state = {"context": {"route_result": "n-a", "condition_result": None}}
-        assert resolve_conditional_target(targets, state) == "n-a"
+        assert resolve_conditional_target(targets, state, "router") == "n-a"
+
+    def test_none_label_reaches_label_comparison_without_crash(self):
+        """评审 B 变异 M4：恢复 label.lower() 会让 None label 崩溃。
+        前一条 None 测试被 target 短路，这里强制走到 label 比较路径。"""
+        targets = _targets(("n-a", None), ("n-b", "beta"))
+        state = {"context": {"condition_result": "beta"}}
+        assert resolve_conditional_target(targets, state, "condition") == "n-b"
 
     def test_explicit_default_edge_when_no_specific_match(self):
         targets = _targets(("n-default", "default"), ("n-code", "code"))

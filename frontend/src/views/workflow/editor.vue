@@ -428,7 +428,7 @@
         </div>
         <div v-else-if="!selectedNode" class="text-center text-gray-400 py-8">
           <n-icon size="48" class="mb-2 opacity-30"><LocateOutline /></n-icon>
-          <p>点击节点查看属性</p>
+          <p>{{ t('workflow.editor.emptySelectionHint') }}</p>
         </div>
         <div v-else class="space-y-4">
           <!-- 节点基本信息 -->

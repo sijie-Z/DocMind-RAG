@@ -562,20 +562,22 @@ const onNodeClick = (event: { node: WorkflowNode }) => {
   workflowStore.selectNode(event.node)
 }
 
-const onEdgeClick = (event: { edge: unknown }) => {
-  // Vue Flow 的 GraphEdge.label 可为 VNode/Component；只取字符串形态的 label
-  const raw = event.edge as Record<string, unknown>
-  const label = typeof raw.label === "string" ? raw.label : undefined
+/** Vue Flow GraphEdge → 本仓 WorkflowEdge：label 只取字符串形态。 */
+export const normalizeGraphEdge = (edge: unknown): WorkflowEdge => {
+  const raw = (edge ?? {}) as Record<string, unknown>
   const handle = (value: unknown) => (typeof value === "string" ? value : undefined)
-  const edge: WorkflowEdge = {
+  return {
     id: String(raw.id ?? ""),
     source: String(raw.source ?? ""),
     target: String(raw.target ?? ""),
     sourceHandle: handle(raw.sourceHandle),
     targetHandle: handle(raw.targetHandle),
-    label,
+    label: handle(raw.label),
   }
-  workflowStore.selectEdge(edge)
+}
+
+const onEdgeClick = (event: { edge: unknown }) => {
+  workflowStore.selectEdge(normalizeGraphEdge(event.edge))
 }
 
 const updateEdgeLabel = (label: string) => {
@@ -963,8 +965,11 @@ const executeWorkflow = async () => {
             break
           }
           case 'error': {
-            // 后端错误收口帧（#281：error 后必补 done）——done / onClose 再收尾
+            // 后端错误收口帧（#281：error 后必补 done）。执行失败必须在此收尾：
+            // 上游节点已 node_complete=completed，若只等 done/onClose，UI 会据
+            // executionStatus 误判为成功（执行记录却是 failed）。
             const d = (data ?? {}) as { error?: string }
+            workflowStore.setExecutionComplete(null)
             workflowStore.addExecutionLog(`❌ 执行失败: ${d.error || '未知错误'}`)
             message.error('执行失败')
             break
@@ -1270,6 +1275,7 @@ const getNodeIconComponent = (type: string) => NODE_ICON_MAP[type] || AppsOutlin
   onDrop,
   addNodeFromLibrary,
   onNodeClick,
+  normalizeGraphEdge,
   onEdgeClick,
   onConnect,
   updateEdgeLabel,

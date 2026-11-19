@@ -66,32 +66,43 @@ def merge_lists(left: list, right: list) -> list:
     return left + right
 
 
-def resolve_conditional_target(targets: list[dict], state: WorkflowState) -> str:
+def resolve_conditional_target(
+    targets: list[dict], state: WorkflowState, source_node_type: str | None = None
+) -> str:
     """决定多目标条件分支的下一节点（fail-closed，不静默走第一条边）。
 
+    ``route_result`` 只属于 RouterNodeExecutor，且会残留在共享 context 中：
+    下游 ConditionNodeExecutor 必须只看本次 ``condition_result``，否则
+    Router 未命中时的 ``route_result="default"`` 会抢走 Condition 的分支。
+    因此只有 source_node_type="router" 时才考虑 route_result。
+
     匹配优先级：
-    1. ``route_result`` 是 RouterNodeExecutor 的 routes[].target（节点 id），
-       可直接按 edge.target 命中；
-    2. ``route_result`` / ``condition_result`` 与 edge.label 大小写无关匹配；
+    1. router 节点：route_result 按 edge.target / edge.label 命中；
+    2. condition 节点：condition_result 按 edge.label 命中；
     3. 存在 ``label="default"`` 的边时走默认分支；
     4. 都不匹配 → 抛错（执行记录标失败），不再静默选第一条边。
 
     label 为 None 的边只参与 target 精确匹配，绝不调用 ``.lower()``。
     """
     context = state.get("context", {}) or {}
-    route = context.get("route_result")
-    condition = context.get("condition_result")
+    values: list[str] = []
+    if source_node_type == "router":
+        route = context.get("route_result")
+        # Router 未命中关键词时的 "default" 哨兵不等于任何显式分支标签
+        if route and str(route) != "default":
+            values.append(str(route))
+    else:
+        condition = context.get("condition_result")
+        if condition:
+            values.append(str(condition))
 
-    for edge in targets:
-        if route and str(route).lower() == str(edge.get("target") or "").lower():
-            return edge["target"]
-
-    for value in (route, condition):
-        if not value:
-            continue
+    for value in values:
+        for edge in targets:
+            if str(value).lower() == str(edge.get("target") or "").lower():
+                return edge["target"]
         for edge in targets:
             label = edge.get("label")
-            if isinstance(label, str) and label.lower() == str(value).lower():
+            if isinstance(label, str) and label.lower() == value.lower():
                 return edge["target"]
 
     for edge in targets:
@@ -1066,8 +1077,10 @@ class WorkflowEngine:
             elif len(targets) > 1:
                 # 多目标：条件分支
                 def make_router(src: str, tgts: list[dict]):
+                    source_type = self.nodes.get(src).type if src in self.nodes else None
+
                     async def router(state: WorkflowState) -> str:
-                        return resolve_conditional_target(tgts, state)
+                        return resolve_conditional_target(tgts, state, source_type)
 
                     return router
 
