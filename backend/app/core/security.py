@@ -192,7 +192,45 @@ async def get_document_for_user(
     org_id = get_user_org_id(current_user)
     if org_id is None or document.organization_id != org_id:
         raise AuthorizationError("无权访问该文档")
+
+    # 文档级 ACL：organization 可见性保持旧行为；private 仅上传者或显式
+    # 授权用户可读。超管上面已直接放行（审计需要）。
+    from app.models.document import DocumentVisibility
+
+    visibility = getattr(document, "visibility", None)
+    private = visibility == DocumentVisibility.PRIVATE or (
+        isinstance(visibility, str) and visibility == DocumentVisibility.PRIVATE.value
+    )
+    if private and document.uploaded_by != current_user.id:
+        allowed = await _user_has_document_acl(db, document.id, current_user.id)
+        if not allowed:
+            # 用「不存在」而非 403：私有文档对无权者可枚举也会泄漏元数据
+            raise NotFoundError("文档不存在")
     return document
+
+
+async def _user_has_document_acl(db: AsyncSession, document_id: str, user_id: int) -> bool:
+    """私有文档：当前用户是否在显式授权名单里（上传者不在此表）。
+
+    ``document_acl`` 表来自可见性迁移；旧库未迁移时尚无该表——返回 False，
+    与「无授权」语义一致（不会误放行）。
+    """
+    try:
+        from app.models.document import DocumentAcl
+
+        result = await db.execute(
+            select(DocumentAcl.id)
+            .where(
+                DocumentAcl.document_id == document_id,
+                DocumentAcl.subject_type == "user",
+                DocumentAcl.subject_id == user_id,
+            )
+            .limit(1)
+        )
+        return result.scalar_one_or_none() is not None
+    except Exception:
+        # 表不存在/迁移未执行：fail closed（无权），不把错误包装成 500
+        return False
 
 
 def is_platform_admin(user: User) -> bool:

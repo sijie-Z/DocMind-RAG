@@ -138,6 +138,7 @@ class KnowledgeService:
         search_mode: str | None = None,
         document_ids: list[str] | None = None,
         debug: bool = False,
+        viewer_user_id: int | None = None,
     ) -> tuple[list[dict[str, Any]], dict[str, Any] | None]:
         """
         搜索知识库 - 统一使用 RagService 以获得更强能力
@@ -171,6 +172,7 @@ class KnowledgeService:
                 document_ids=document_ids,
                 search_mode=search_mode,
                 debug=debug,
+                viewer_user_id=viewer_user_id,
             )
 
             # 安全修复：移除检索结果全文日志（原 DEBUG 日志把文档内容写入日志文件，

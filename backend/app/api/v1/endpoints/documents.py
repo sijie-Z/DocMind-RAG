@@ -10,6 +10,9 @@ from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, Form, Query, UploadFile, status
 from fastapi.responses import RedirectResponse
+from pydantic import BaseModel, Field
+from sqlalchemy import delete as sa_delete
+from sqlalchemy import select as sa_select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
@@ -19,6 +22,7 @@ from app.core.minio_client import minio_client, normalize_object_name
 from app.core.security import (
     get_current_user,
     get_document_for_user,
+    is_org_admin,
     permission_required,
     require_organization,
     require_scope,
@@ -32,7 +36,13 @@ from app.exceptions import (
     PayloadTooLargeError,
     ValidationError,
 )
-from app.models.document import Document, DocumentStatus, DocumentType
+from app.models.document import (
+    Document,
+    DocumentAcl,
+    DocumentStatus,
+    DocumentType,
+    DocumentVisibility,
+)
 from app.models.knowledge_job import KnowledgeJobStatus, KnowledgeProcessingJob
 from app.models.rbac import PermissionType
 from app.models.user import User
@@ -53,6 +63,14 @@ from app.services.review_document_service import (
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
+
+
+def _is_private(doc: Document) -> bool:
+    v = getattr(doc, "visibility", None)
+    return v == DocumentVisibility.PRIVATE or (
+        isinstance(v, str) and v == DocumentVisibility.PRIVATE.value
+    )
+
 
 # 与既有 MinIO 默认一致的一小时短签名；新旧下载入口共用，避免过期语义漂移。
 DOCUMENT_DOWNLOAD_URL_EXPIRES = timedelta(hours=1)
@@ -149,6 +167,7 @@ async def upload_document(
     title: str | None = Form(None),
     description: str | None = Form(None),
     tags: str | None = Form(None),
+    visibility: str = Form(DocumentVisibility.ORGANIZATION.value),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -168,6 +187,10 @@ async def upload_document(
         # 不再兜底到最低 ID 的组织或自动创建 Default 组织；
         # 无组织的超管解析到库里真实存在的组织（无组织则 403，issue #168）
         org_id = await require_organization(current_user, db)
+
+        # 文档级 ACL：只接受两种可见性；非法值拒绝，避免静默退化成组织可见
+        if visibility not in (DocumentVisibility.ORGANIZATION.value, DocumentVisibility.PRIVATE.value):
+            raise ValidationError("visibility 必须为 organization 或 private")
 
         # 3. 解析标签为列表
         keywords_list = []
@@ -243,6 +266,7 @@ async def upload_document(
             title=title or file.filename,
             description=description,
             keywords=keywords_list,  # ✅ 已修正字段名！
+            visibility=DocumentVisibility(visibility),
         )
 
         db.add(new_doc)
@@ -699,3 +723,118 @@ async def download_document(
     except Exception as e:
         logger.error(f"Download document failed: {str(e)}")
         raise AppError("下载文档失败")
+
+
+class AuthorizedUsersUpdate(BaseModel):
+    """私有文档的授权名单（全量替换语义，避免并发增删产生竞态）。"""
+
+    user_ids: list[int] = Field(default_factory=list, max_length=200)
+
+
+def _can_manage_document_acl(user: User, doc: Document, is_admin: bool) -> bool:
+    """文档所有者或组织管理员可管理授权名单（超管由 is_admin 覆盖）。"""
+    return bool(is_admin or doc.uploaded_by == user.id)
+
+
+@router.get(
+    "/{document_id}/authorized-users",
+    response_model=dict,
+    dependencies=[
+        Depends(require_scope("knowledge:read")),
+        Depends(permission_required([PermissionType.DOCUMENT_READ])),
+    ],
+)
+async def get_document_authorized_users(
+    document_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """列出私有文档的显式授权用户（公共文档返回空名单）。"""
+    try:
+        doc = await get_document_for_user(db, current_user, document_id)
+        if not _is_private(doc):
+            return {"success": True, "data": {"document_id": document_id, "users": []}}
+        admin = await is_org_admin(db, current_user, doc.organization_id)
+        if not _can_manage_document_acl(current_user, doc, admin):
+            raise AuthorizationError("仅文档所有者或组织管理员可查看授权名单")
+
+        rows = (
+            await db.execute(
+                sa_select(User.id, User.username)
+                .join(DocumentAcl, DocumentAcl.subject_id == User.id)
+                .where(DocumentAcl.document_id == document_id)
+            )
+        ).all()
+        return {
+            "success": True,
+            "data": {
+                "document_id": document_id,
+                "users": [{"id": r.id, "username": r.username} for r in rows],
+            },
+        }
+    except (NotFoundError, AuthorizationError):
+        raise
+    except Exception as e:
+        raise AppError(f"获取文档授权名单失败: {str(e)}") from e
+
+
+@router.put(
+    "/{document_id}/authorized-users",
+    response_model=dict,
+    dependencies=[
+        Depends(require_scope("knowledge:write")),
+        Depends(permission_required([PermissionType.DOCUMENT_UPDATE])),
+    ],
+)
+async def put_document_authorized_users(
+    document_id: str,
+    body: AuthorizedUsersUpdate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """全量替换私有文档的授权用户名单；公共文档拒绝（先切为私有再授权）。"""
+    try:
+        doc = await get_document_for_user(db, current_user, document_id)
+        admin = await is_org_admin(db, current_user, doc.organization_id)
+        if not _can_manage_document_acl(current_user, doc, admin):
+            raise AuthorizationError("仅文档所有者或组织管理员可修改授权名单")
+        if not _is_private(doc):
+            raise AppError("公共文档无需授权，请先将可见性改为私有")
+
+        # 去重 + 排除所有者自身（所有者天然可见，不需要授权行）
+        wanted = {uid for uid in body.user_ids if uid and uid != doc.uploaded_by}
+        existing = set(
+            (
+                await db.execute(
+                    sa_select(DocumentAcl.subject_id).where(DocumentAcl.document_id == document_id)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        to_remove = existing - wanted
+        to_add = wanted - existing
+        if to_remove:
+            await db.execute(
+                sa_delete(DocumentAcl).where(
+                    DocumentAcl.document_id == document_id,
+                    DocumentAcl.subject_id.in_(to_remove),
+                )
+            )
+        for uid in to_add:
+            db.add(
+                DocumentAcl(
+                    id=str(uuid.uuid4()),
+                    document_id=document_id,
+                    subject_type="user",
+                    subject_id=uid,
+                )
+            )
+        await db.commit()
+        return await get_document_authorized_users(document_id, db, current_user)
+    except (NotFoundError, AuthorizationError):
+        raise
+    except AppError:
+        raise
+    except Exception as e:
+        raise AppError(f"更新文档授权名单失败: {str(e)}") from e

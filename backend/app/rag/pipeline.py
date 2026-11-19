@@ -141,8 +141,12 @@ class RAGPipeline:
         document_ids: list[str] | None = None,
         debug: bool = False,
         search_mode: str | None = None,
+        viewer_user_id: int | None = None,
     ) -> tuple[list[dict[str, Any]], dict | None]:
         """检索入口：统一记录「每次检索返回条数」指标（含失败=0 次）。
+
+        viewer_user_id：面向用户的检索必须传；用于从 DB 解析私有文档的
+        ACL 可见集。不传则保持组织级行为（内部任务/对账脚本）。
 
         记录放在 pipeline 最低层而不是 facade：Agent 工作流等路径直接调用本方法，
         若只在 facade 记录，avg_docs_per_query 的人群会小于 retrieval_total。
@@ -155,6 +159,7 @@ class RAGPipeline:
                 document_ids,
                 debug=debug,
                 search_mode=search_mode,
+                viewer_user_id=viewer_user_id,
             )
         except Exception:
             # 失败检索同样计入分母（0 条）：与 retrieval_total 的入口计数同人群。
@@ -179,6 +184,7 @@ class RAGPipeline:
         document_ids: list[str] | None = None,
         debug: bool = False,
         search_mode: str | None = None,
+        viewer_user_id: int | None = None,
     ) -> tuple[list[dict[str, Any]], dict | None]:
         """Retrieve relevant documents with caching and retry.
 
@@ -214,6 +220,20 @@ class RAGPipeline:
 
         debug_info: dict | None = {"stages": {}} if debug else None
 
+        # 文档级 ACL：viewer 可见集从 DB 解析（授权即时生效）。有 viewer 时
+        # **绕过共享缓存**——缓存按 org 分域，A 与 B 同组织会互相命中结果；
+        # 即使结果随后被 ACL 过滤，缓存命中数与 sources 仍会泄漏存在性。
+        blocked_ids: list[str] = []
+        acl_enabled = viewer_user_id is not None
+        if acl_enabled:
+            from app.core.database import AsyncSessionLocal
+            from app.services.document_acl import get_blocked_document_ids
+
+            async with AsyncSessionLocal() as session:
+                blocked_ids = await get_blocked_document_ids(
+                    session, organization_id, viewer_user_id
+                )
+
         try:
             # issue #196：索引配置错误（维度/embedding 模型漂移等）时**拒绝检索**。
             # 写入侧已被 IndexConfigError 拦下，但查询侧若继续用当前模型向量去撞
@@ -234,8 +254,8 @@ class RAGPipeline:
                     settings.RAG_SOURCE_PROVENANCE_MODE
                 )
 
-            # Exact cache (skip for document-specific queries)
-            if not document_ids:
+            # Exact cache (skip for document-scoped or ACL-scoped queries)
+            if not document_ids and not acl_enabled:
                 cached = await self.cache.get(
                     query,
                     organization_id,
@@ -286,7 +306,7 @@ class RAGPipeline:
             # sources 的代价不可接受，故默认路径不再计算语义缓存用的 embedding。
             semantic_cache_enabled = bool(getattr(self.semantic_cache, "enabled", True))
             query_vector = None
-            if document_ids or search_mode or not semantic_cache_enabled:
+            if document_ids or search_mode or acl_enabled or not semantic_cache_enabled:
                 if debug and debug_info is not None:
                     debug_info["cache"] = {
                         "cache_type": "semantic",
@@ -295,6 +315,8 @@ class RAGPipeline:
                         "skipped": (
                             "document_scoped"
                             if document_ids
+                            else "acl_scoped"
+                            if acl_enabled
                             else "explicit_search_mode"
                             if search_mode
                             else "namespace_disabled"
@@ -413,6 +435,7 @@ class RAGPipeline:
                             # #187：帽不早于 rerank——检索层给完整候选，rerank 之后
                             # 再由下方 diversity 截断（条号直查 4/文档、普通 2/文档）。
                             doc_cap=None,
+                            blocked_document_ids=blocked_ids,
                         )
                         if sq_degraded:
                             degraded_reasons.extend(sq_degraded)

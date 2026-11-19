@@ -796,6 +796,7 @@ async def run_rag_pipeline(
                 org_policy.retrieval_top_k if org_policy.retrieval_top_k is not None else 8,
                 document_ids=active_doc_ids,
                 debug=debug,
+                viewer_user_id=user_id,
             )
             if file_ids:
                 await bind_docs_to_session(session, conversation_id, active_doc_ids)

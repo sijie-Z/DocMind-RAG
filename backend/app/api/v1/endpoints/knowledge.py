@@ -295,6 +295,7 @@ async def search_knowledge(
             search_mode=requested_mode,
             document_ids=request.document_ids or None,
             debug=request.debug,
+            viewer_user_id=current_user.id,
         )
         elapsed = time.perf_counter() - _t0
 

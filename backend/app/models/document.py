@@ -6,7 +6,7 @@ import enum
 from datetime import datetime
 from typing import Any, Optional
 
-from sqlalchemy import JSON, DateTime, Enum, ForeignKey, Integer, String, Text
+from sqlalchemy import JSON, DateTime, Enum, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
 
@@ -22,6 +22,13 @@ class DocumentStatus(enum.Enum):
     PARSED = "parsed"  # 解析完成
     INDEXED = "indexed"  # 已索引
     FAILED = "failed"  # 处理失败
+
+
+class DocumentVisibility(enum.Enum):
+    """文档可见性：组织级（默认，行为与旧版一致）或私有（仅上传者+授权人）。"""
+
+    ORGANIZATION = "organization"
+    PRIVATE = "private"
 
 
 class DocumentType(enum.Enum):
@@ -63,6 +70,17 @@ class Document(Base):
     )
     parse_error: Mapped[str | None] = mapped_column(Text, comment="解析错误信息")
 
+    # 文档级可见性（对标 Onyx 的文档 ACL 最小版）：
+    #   organization = 组织内全员可见（默认，行为与旧版一致）
+    #   private      = 仅上传者 + document_acl 中被授权的用户可见
+    visibility: Mapped[DocumentVisibility] = mapped_column(
+        Enum(DocumentVisibility),
+        default=DocumentVisibility.ORGANIZATION,
+        server_default=DocumentVisibility.ORGANIZATION.value,
+        index=True,
+        comment="可见性：organization=组织可见，private=上传者+授权人",
+    )
+
     # 内容统计
     content_length: Mapped[int | None] = mapped_column(Integer, comment="文本内容长度")
     chunk_count: Mapped[int] = mapped_column(Integer, default=0, comment="分块数量")
@@ -101,6 +119,35 @@ class Document(Base):
     # 不在此声明 collation：全库统一继承数据库默认值（canonical =
     # utf8mb4_unicode_ci，由部署配置与 CI 保证），避免迁移路径与 create_all
     # 路径因逐表覆盖而产生分歧。
+
+
+class DocumentAcl(Base):
+    """文档级授权表：private 文档的显式授权名单。
+
+    只对 ``visibility=private`` 的文档生效；``organization`` 文档的检索与
+    访问不查本表（避免无谓 JOIN）。subject 目前只支持 user（部门/组授权
+    留待后续，避免引入未使用的能力）。
+    """
+
+    __tablename__ = "document_acl"
+    __table_args__ = (
+        # 同一文档对同一用户只应有一条授权（幂等 upsert 依赖它）
+        UniqueConstraint("document_id", "subject_id", name="uq_document_acl_doc_subject"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    document_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("documents.id", ondelete="CASCADE"), index=True, comment="文档ID"
+    )
+    subject_type: Mapped[str] = mapped_column(
+        String(20), default="user", comment="授权主体类型（当前仅 user）"
+    )
+    subject_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("users.id", ondelete="CASCADE"), index=True, comment="被授权用户ID"
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), comment="授权时间"
+    )
 
 
 class DocumentChunk(Base):
