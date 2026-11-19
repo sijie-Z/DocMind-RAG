@@ -394,6 +394,7 @@ import {
 } from '@vicons/ionicons5'
 import type { DataTableColumns, TreeSelectOption, FormInst, TreeOption, TreeDropInfo } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
+import { useRoute } from 'vue-router'
 import { formatDate, parseApiDate } from '@/utils/format'
 import { useConfirmDangerousAction } from '@/utils/confirm'
 import { useUserStore } from '@/stores/user'
@@ -913,7 +914,23 @@ const handleSelectionChange = (keys: (string | number)[]) => {
   selectedIds.value = keys.map(k => Number(k))
 }
 
-onMounted(loadOrganizations)
+const route = useRoute()
+
+/** 通知深链：?id=<org_id> → 打开对应组织详情（组织类通知的 target_id 落点）。
+ *  测试环境可能无 router（裸 mount）——访问带守卫，与 agent 页同口径。 */
+const openOrgFromQuery = () => {
+  const raw = route?.query.id
+  const id = typeof raw === 'string' ? Number(raw) : NaN
+  if (!Number.isFinite(id)) return
+  void showOrgDetails(id)
+}
+
+onMounted(async () => {
+  await loadOrganizations()
+  // 通知深链只消费一次（与知识库文档深链同口径：刷新/后退不重复触发由
+  // URL 本身携带，重复打开详情抽屉无副作用）
+  openOrgFromQuery()
+})
 </script>
 
 <style scoped>
