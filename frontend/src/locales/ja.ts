@@ -632,6 +632,7 @@ export default {
     },
     rebuildSuccess: 'インデックス再構築タスクを送信しました',
     rebuildFailed: 'インデックス再構築に失敗しました',
+    unknownParseError: '不明な解析エラー',
     rebuildSubmitted: '再構築を送信しました：{title}',
     rebuildSubmitFailed: '再構築の送信に失敗しました',
     noFailedDocs: '現在失敗したドキュメントはありません',

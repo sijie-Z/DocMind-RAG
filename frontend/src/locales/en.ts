@@ -623,6 +623,7 @@ export default {
     },
     rebuildSuccess: 'Rebuild index job submitted',
     rebuildFailed: 'Failed to rebuild index',
+    unknownParseError: 'Unknown parsing error',
     pageScope: 'this page',
     rebuildLatestFailed: 'Rebuild latest failed document',
     actionView: 'View',

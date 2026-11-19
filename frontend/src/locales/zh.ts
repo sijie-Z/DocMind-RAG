@@ -631,6 +631,7 @@ export default {
     },
     rebuildSuccess: '重建索引任务已提交',
     rebuildFailed: '重建索引失败',
+    unknownParseError: '未知解析错误',
     pageScope: '本页',
     rebuildLatestFailed: '最近失败文档重建',
     actionView: '查看',
