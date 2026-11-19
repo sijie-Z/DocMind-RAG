@@ -9,6 +9,7 @@ condition_result/route_result，label 为 None 时在路由场景可 `.lower()` 
 - 去掉 route_result 与 edge.target 的匹配 → 用例 3 红；
 - 去掉 None 安全处理 → 用例 4 红。
 """
+
 from __future__ import annotations
 
 import pytest
