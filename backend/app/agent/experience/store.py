@@ -39,7 +39,17 @@ class ExperienceStore:
     an empty view for the process lifetime.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, organization_id: int | None = None) -> None:
+        # 经验会进入 planner 提示词：跨组织共享会把 A 组织的失败教训注入 B。
+        self.organization_id = organization_id
+        self.redis_key = (
+            REDIS_KEY if organization_id is None else f"{REDIS_KEY}:org:{organization_id}"
+        )
+        self.local_path = (
+            LOCAL_PATH
+            if organization_id is None
+            else LOCAL_PATH.with_name(f"experiences.org-{organization_id}.json")
+        )
         self._experiences: dict[str, Experience] = {}
         self._loaded = False
 
@@ -374,7 +384,7 @@ class ExperienceStore:
             if not redis_client:
                 logger.debug("ExperienceStore: Redis not configured; skipping Redis load")
                 return None
-            raw = await redis_client.get(REDIS_KEY)
+            raw = await redis_client.get(self.redis_key)
             if not raw:
                 return False
             data = json.loads(raw)
@@ -393,9 +403,9 @@ class ExperienceStore:
         None  = 文件存在但读取/解析失败——"答不出来"，下次重试。
         """
         try:
-            if not LOCAL_PATH.exists():
+            if not self.local_path.exists():
                 return False
-            data = json.loads(LOCAL_PATH.read_text(encoding="utf-8"))
+            data = json.loads(self.local_path.read_text(encoding="utf-8"))
             for item in data:
                 exp = Experience.from_dict(item)
                 self._experiences[exp.id] = exp
@@ -417,7 +427,7 @@ class ExperienceStore:
 
             if redis_client:
                 await redis_client.setex(
-                    REDIS_KEY,
+                    self.redis_key,
                     86400 * 30,
                     json.dumps(data, ensure_ascii=False),
                 )
@@ -428,8 +438,8 @@ class ExperienceStore:
 
     def _save_to_local(self, data: list[dict]) -> bool:
         try:
-            LOCAL_PATH.parent.mkdir(parents=True, exist_ok=True)
-            LOCAL_PATH.write_text(
+            self.local_path.parent.mkdir(parents=True, exist_ok=True)
+            self.local_path.write_text(
                 json.dumps(data, ensure_ascii=False, indent=2),
                 encoding="utf-8",
             )
@@ -454,17 +464,29 @@ class ExperienceStore:
 # ── Singleton ──────────────────────────────────────────────────────────
 
 _store: ExperienceStore | None = None
+_org_stores: dict[int, ExperienceStore] = {}
 
 
-def get_experience_store() -> ExperienceStore:
-    """Return the singleton ExperienceStore instance."""
+def get_experience_store(organization_id: int | None = None) -> ExperienceStore:
+    """Return an ExperienceStore scoped to the organization.
+
+    None 是无组织上下文的默认实例（基准脚本/测试）；面向用户的 Agent 路径
+    必须传 organization_id，避免跨组织经验串味。
+    """
     global _store
-    if _store is None:
-        _store = ExperienceStore()
-    return _store
+    if organization_id is None:
+        if _store is None:
+            _store = ExperienceStore()
+        return _store
+    store = _org_stores.get(organization_id)
+    if store is None:
+        store = ExperienceStore(organization_id=organization_id)
+        _org_stores[organization_id] = store
+    return store
 
 
 def reset_experience_store() -> None:
-    """Reset the singleton (for testing)."""
+    """Reset all stores (for testing)."""
     global _store
     _store = None
+    _org_stores.clear()

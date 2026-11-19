@@ -47,7 +47,7 @@ from app.agent.events import AgentEvent, FinalAnswerAccumulator
 from app.agent.registry import tool_registry
 from app.agent.replay.engine import ReplayEngine
 from app.agent.service import agent_service, notify_task_terminal
-from app.agent.skills import skill_manager
+from app.agent.skills import get_skill_manager, skill_manager
 from app.core.config import settings
 from app.core.database import AsyncSessionLocal, get_db
 from app.core.error_mapping import (
@@ -1556,10 +1556,13 @@ async def list_tools(
 @router.get("/skills")
 async def list_skills(
     current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
 ):
-    """List learned agent skills."""
-    await skill_manager.load()
-    skills = skill_manager.list_skills()
+    """List learned agent skills（仅当前组织）。"""
+    organization_id = await require_organization(current_user, db)
+    manager = get_skill_manager(organization_id) if not current_user.is_superuser else skill_manager
+    await manager.load()
+    skills = manager.list_skills()
     return {
         "success": True,
         "data": [
