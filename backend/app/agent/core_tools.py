@@ -196,6 +196,7 @@ async def search_knowledge_base(
     document_ids: list[str] | None = None,
     mode: str = "hybrid",
     organization_id: int | None = None,
+    user_id: int | None = None,
     **_: Any,
 ) -> str | ToolResult:
     if organization_id is None:
@@ -208,7 +209,9 @@ async def search_knowledge_base(
             code="validation_error", message=f"未知 mode: {mode}（支持 hybrid/vector）"
         )
     if mode_norm == "vector":
-        return await _vector_search_impl(query, top_k, organization_id, document_ids)
+        return await _vector_search_impl(
+            query, top_k, organization_id, document_ids, viewer_user_id=user_id
+        )
 
     from app.core.config import settings
     from app.dependencies import get_rag_pipeline
@@ -223,6 +226,7 @@ async def search_knowledge_base(
             top_k=min(top_k, 20),
             document_ids=document_ids,
             search_mode="hybrid",
+            viewer_user_id=user_id,
         )
     except SourceProvenanceUnavailableError as e:
         return _provenance_failure(e)
@@ -317,6 +321,7 @@ async def _vector_search_impl(
     top_k: int,
     organization_id: int,
     document_ids: list[str] | None = None,
+    viewer_user_id: int | None = None,
 ) -> str | ToolResult:
     """纯向量检索（原 vector_search 实现，issue #509 原样迁入）。"""
     # T6：与姊妹检索工具一致，钳制到 20 以内，避免 ES 请求被调用方无限放大
@@ -337,6 +342,19 @@ async def _vector_search_impl(
     filters: list[dict[str, Any]] = [{"term": {"organization_id": str(organization_id)}}]
     if document_ids:
         filters.append({"terms": {"document_id": list(document_ids)}})
+    # 私有文档 ACL：向量臂自建 filters，必须显式带 viewer 可见集
+    if viewer_user_id:
+        from app.core.database import AsyncSessionLocal
+        from app.services.document_acl import get_blocked_document_ids
+
+        async with AsyncSessionLocal() as acl_session:
+            blocked = await get_blocked_document_ids(
+                acl_session, organization_id, viewer_user_id
+            )
+        if blocked:
+            filters.append(
+                {"bool": {"must_not": [{"terms": {"document_id": blocked}}]}}
+            )
 
     es_query = {
         "size": top_k,
@@ -431,11 +449,14 @@ async def vector_search(
     query: str,
     top_k: int = 5,
     organization_id: int | None = None,
+    user_id: int | None = None,
     **_: Any,
 ) -> str | ToolResult:
     if organization_id is None:
         return _missing_organization_result("vector_search")
-    return await _vector_search_impl(query, top_k, organization_id, None)
+    return await _vector_search_impl(
+        query, top_k, organization_id, None, viewer_user_id=user_id
+    )
 
 
 # ─── Analysis Tools ──────────────────────────────────────────────────────────
