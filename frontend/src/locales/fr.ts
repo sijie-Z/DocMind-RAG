@@ -634,6 +634,7 @@ export default {
     },
     rebuildSuccess: 'Tâche de reconstruction de l’index envoyée',
     rebuildFailed: 'Échec de la reconstruction de l’index',
+    unknownParseError: "Erreur d'analyse inconnue",
     rebuildSubmitted: 'Reconstruction envoyée : {title}',
     rebuildSubmitFailed: 'Échec de l’envoi de la reconstruction',
     noFailedDocs: 'Aucun document en échec actuellement',

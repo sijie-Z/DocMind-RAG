@@ -870,6 +870,7 @@
     "knowledge.tags.tech",
     "knowledge.tags.training",
     "knowledge.unknownError",
+    "knowledge.unknownParseError",
     "knowledge.upload",
     "knowledge.uploadCancelled",
     "knowledge.uploadFailed",
