@@ -91,7 +91,11 @@ async def get_blocked_document_ids(
                 .all()
             )
         except Exception:
-            return []
+            # 二次失败（DB 断连/迁移缺列）：不能放行私有文档。抛检索不可用，
+            # 让上层以「服务不可用」诚实失败，而非静默返回组织级全量结果。
+            from app.rag.errors import RetrievalUnavailableError
+
+            raise RetrievalUnavailableError("文档 ACL 查询失败，检索已拒绝") from exc
 
 
 def with_acl_filter(filters: list[dict[str, Any]], blocked_ids: list[str]) -> list[dict[str, Any]]:

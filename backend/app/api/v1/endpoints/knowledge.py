@@ -912,6 +912,17 @@ async def batch_delete_documents(
         if not current_user.is_superuser and request.organization_id != effective_org_id:
             raise AuthorizationError("无权删除该组织的文档")
 
+        # 文档级 ACL：批量删除必须逐文档校验私有可见性（否则同组织用户
+        # 可借 id 枚举删除他人私有文档，且从结果差异探测存在性）。
+        if not current_user.is_superuser:
+            from app.core.security import get_document_for_user
+
+            for doc_id in request.document_ids:
+                try:
+                    await get_document_for_user(db, current_user, doc_id)
+                except Exception as exc:
+                    raise AuthorizationError(f"无权删除文档 {doc_id}") from exc
+
         results = await knowledge_service.batch_delete_knowledge(
             request.document_ids, effective_org_id
         )
