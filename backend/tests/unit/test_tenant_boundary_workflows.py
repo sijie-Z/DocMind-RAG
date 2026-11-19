@@ -312,7 +312,9 @@ async def test_execution_list_isolated_across_orgs_and_owners():
 
         # 跨组织工作流 id：不能借 workflow_id 参数越权查看
         r = await _call(
-            factory, _user(2, 1, role="user"), "GET",
+            factory,
+            _user(2, 1, role="user"),
+            "GET",
             f"/api/v1/workflows/executions?workflow_id={ids['wf_b']}",
         )
         assert r.status_code == 200, r.text
@@ -333,7 +335,9 @@ async def test_execution_list_filters_by_workflow_id():
     try:
         await _seed_executions(factory, ids)
         r = await _call(
-            factory, _user(1, 1, role="admin"), "GET",
+            factory,
+            _user(1, 1, role="admin"),
+            "GET",
             f"/api/v1/workflows/executions?workflow_id={ids['wf_a_admin']}",
         )
         assert r.status_code == 200, r.text
