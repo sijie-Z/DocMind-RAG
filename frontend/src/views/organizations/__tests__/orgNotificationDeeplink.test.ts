@@ -6,8 +6,10 @@
  * Knowledge 的深链、其它路由统一拼 ?id=，而 Organizations 页不读 query →
  * 点击通知只落到列表、看不到该组织。修复：加载完成后按 ?id= 打开详情。
  *
- * 变异点：删 openOrgFromQuery 调用 → 用例红；把 id 解析写死 → 负例（无 id
- * 或非法 id）红。
+ * 变异点：删 openOrgFromQuery 的 onMounted 调用 / 删深链 watch → 对应用例红；
+ * 把 id 解析写死 → 负例（无 id 或非法 id）红。
+ * 注意：删 Number.isFinite/Number.isInteger 守卫不会让负例红 —— showOrgDetails
+ * 在 findOrgInTree 找不到时提前 return，NaN 请求根本发不出去（等价变异）。
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
@@ -58,6 +60,7 @@ const ORG = {
   parent_id: null, level: 1, sort_order: 0,
   created_at: '2026-10-08T05:40:55', updated_at: '2026-10-08T05:40:55',
 }
+const ORG2 = { ...ORG, id: 5, name: 'Second Org', created_at: '2026-10-08T06:00:00', updated_at: '2026-10-08T06:00:00' }
 
 const i18n = createI18n({ legacy: false, locale: 'zh', messages: { zh } })
 
@@ -104,8 +107,8 @@ const vmOf = (w: Awaited<ReturnType<typeof mountAt>>) =>
 
 beforeEach(() => {
   vi.clearAllMocks()
-  vi.mocked(getOrganizations).mockResolvedValue({ data: { data: { data: [ORG], total: 1 } } } as never)
-  vi.mocked(getOrganizationTree).mockResolvedValue({ data: { data: [ORG] } } as never)
+  vi.mocked(getOrganizations).mockResolvedValue({ data: { data: { data: [ORG, ORG2], total: 2 } } } as never)
+  vi.mocked(getOrganizationTree).mockResolvedValue({ data: { data: [ORG, ORG2] } } as never)
   vi.mocked(getOrganizationMembers).mockResolvedValue({ data: { data: [] } } as never)
   vi.mocked(getOrganizationDocuments).mockResolvedValue({ data: { data: [] } } as never)
 })
@@ -131,6 +134,35 @@ describe('组织页 · 通知深链 ?id=', () => {
     const w = await mountAt('/organizations?id=abc')
     expect(vmOf(w).showDetailDrawer).toBe(false)
     expect(getOrganizationMembers).not.toHaveBeenCalled()
+    w.unmount()
+  })
+
+  it('页面已打开时再点另一条通知（同路由仅 ?id= 变）→ 切到新组织', async () => {
+    // 布局 router-view 的 key 是 route.name：同路由 query 变化不重挂。
+    const router = createRouter({
+      history: createMemoryHistory(),
+      routes: [{ path: '/organizations', name: 'Organizations', component: { template: '<div />' } }],
+    })
+    await router.push('/organizations?id=3')
+    await router.isReady()
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    useUserStore().userInfo = {
+      id: 1, username: 'root', email: 'root@example.com',
+      isAdmin: true, is_superuser: true, createdAt: '', organizations: [],
+    } as never
+    const w = mount(Host, {
+      global: { plugins: [i18n, router, pinia], stubs: { DataTable: DataTableStub, teleport: true } },
+    })
+    await flushPromises()
+    await flushPromises()
+    expect(vmOf(w).selectedOrg?.id).toBe(3)
+
+    await router.push('/organizations?id=5')
+    await flushPromises()
+    await flushPromises()
+    expect(vmOf(w).selectedOrg?.id).toBe(5)
+    expect(getOrganizationMembers).toHaveBeenLastCalledWith(5)
     w.unmount()
   })
 })

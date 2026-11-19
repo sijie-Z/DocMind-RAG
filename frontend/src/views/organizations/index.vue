@@ -376,7 +376,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, onMounted, h } from 'vue'
+import { ref, reactive, computed, onMounted, watch, h } from 'vue'
 import { useDedupedMessage } from '@/utils/message'
 import {
   NSpace, NInput, NIcon, NButton, NSpin, NDataTable,
@@ -916,21 +916,36 @@ const handleSelectionChange = (keys: (string | number)[]) => {
 
 const route = useRoute()
 
+/** 首轮列表是否已加载完成（深链要用 fullTree 找组织，未完成时必须等）。 */
+const listLoaded = ref(false)
+
 /** 通知深链：?id=<org_id> → 打开对应组织详情（组织类通知的 target_id 落点）。
  *  测试环境可能无 router（裸 mount）——访问带守卫，与 agent 页同口径。 */
 const openOrgFromQuery = () => {
-  const raw = route?.query.id
+  const raw = route?.query?.id
   const id = typeof raw === 'string' ? Number(raw) : NaN
-  if (!Number.isFinite(id)) return
+  if (!Number.isInteger(id) || id <= 0) return
+  // 抽屉已展示同一组织则不重复请求（openOrg 回写 URL 不算切换）
+  if (showDetailDrawer.value && selectedOrg.value?.id === id) return
   void showOrgDetails(id)
 }
 
 onMounted(async () => {
   await loadOrganizations()
-  // 通知深链只消费一次（与知识库文档深链同口径：刷新/后退不重复触发由
-  // URL 本身携带，重复打开详情抽屉无副作用）
+  listLoaded.value = true
   openOrgFromQuery()
 })
+
+// 布局 router-view 的 key 是 route.name（layouts/index.vue：同路由仅 query
+// 变化不重挂）——用户已在组织页时再点另一条组织通知只变 ?id=，必须照样
+// 切到新组织（对齐 agent/index.vue 回放深链的 watch 口径）。
+watch(
+  () => route?.query?.id,
+  () => {
+    if (!listLoaded.value) return // 首轮加载期间由 onMounted 消费
+    openOrgFromQuery()
+  },
+)
 </script>
 
 <style scoped>
