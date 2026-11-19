@@ -1242,6 +1242,26 @@ export default {
     confirmDeleteTitle: 'Confirmer la suppression',
     confirmDeleteContent: 'Cette action est irréversible. Supprimer ce workflow ?',
     confirmDeletePositive: 'Supprimer',
+    history: {
+      button: 'Historique des exécutions',
+      title: 'Historique des exécutions',
+      empty: 'Aucune exécution',
+      loadFailed: 'Échec du chargement des exécutions',
+      detailTitle: 'Détails de l’exécution',
+      detailFailed: 'Échec du chargement des détails',
+      startedAt: 'Démarré le',
+      duration: 'Durée',
+      noOutput: 'Aucune sortie',
+      errorLabel: 'Erreur',
+      status: {
+        pending: 'En attente',
+        running: 'En cours',
+        completed: 'Réussi',
+        failed: 'Échoué',
+      },
+      nodeStatus: 'État des nœuds',
+    },
+
     editor: {
       clearConfirmTitle: 'Vider le canevas',
       clearConfirmContent: 'Après le vidage, l\'enregistrement automatique sera ignoré et la version enregistrée ne sera pas écrasée. Vider le canevas ?',

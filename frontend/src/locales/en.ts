@@ -1255,6 +1255,26 @@ export default {
     confirmDeleteTitle: 'Confirm deletion',
     confirmDeleteContent: 'This cannot be undone. Delete this workflow?',
     confirmDeletePositive: 'Delete',
+    history: {
+      button: 'Execution history',
+      title: 'Execution history',
+      empty: 'No executions yet',
+      loadFailed: 'Failed to load executions',
+      detailTitle: 'Execution details',
+      detailFailed: 'Failed to load execution details',
+      startedAt: 'Started at',
+      duration: 'Duration',
+      noOutput: 'No output',
+      errorLabel: 'Error',
+      status: {
+        pending: 'Pending',
+        running: 'Running',
+        completed: 'Succeeded',
+        failed: 'Failed',
+      },
+      nodeStatus: 'Node status',
+    },
+
     editor: {
       clearConfirmTitle: 'Clear canvas',
       clearConfirmContent: 'After clearing, auto-save will be skipped and the saved version will not be overwritten. Clear the canvas?',
