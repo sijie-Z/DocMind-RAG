@@ -35,7 +35,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, h } from 'vue'
+import { ref, computed, onMounted, h } from 'vue'
 import { useDedupedMessage } from '@/utils/message'
 import { useI18n } from 'vue-i18n'
 import { NTag, NButton, NIcon, } from 'naive-ui'
@@ -67,20 +67,26 @@ const ACTION_LABEL_KEYS: Record<string, string> = {
   reset_password: 'audit.actionTypes.passwordReset',
 }
 
-const actionOptions = ref<Array<{ label: string; value: string }>>([])
+// 只存原始 {action,count}；label 由 computed 派生 —— setup 期固化 t()
+// 会让切语言后「操作类型」下拉停留旧语言（与本页 columns 同类）。
+const actionRows = ref<Array<{ action: string; count: number }>>([])
+
+const actionOptions = computed(() =>
+  actionRows.value.map((row) => {
+    const key = ACTION_LABEL_KEYS[row.action]
+    const base = key ? t(key) : row.action
+    return { label: `${base} (${row.count})`, value: row.action }
+  })
+)
 
 const loadAuditActions = async () => {
   try {
     const res = await getAuditActions()
     const rows = ((res.data as unknown as Record<string, unknown>)?.data as Array<{ action: string; count: number }>) || []
-    actionOptions.value = rows.map((row) => {
-      const key = ACTION_LABEL_KEYS[row.action]
-      const base = key ? t(key) : row.action
-      return { label: `${base} (${row.count})`, value: row.action }
-    })
+    actionRows.value = rows
   } catch {
     // 选项加载失败：下拉留空（文本搜索不受影响），不阻塞页面
-    actionOptions.value = []
+    actionRows.value = []
   }
 }
 
@@ -105,7 +111,7 @@ const pagination = ref({
   }
 })
 
-const columns = [
+const columns = computed(() => [
   {
     title: t('audit.columns.time'),
     key: 'created_at',
@@ -150,7 +156,7 @@ const columns = [
     width: 130,
     render: (row: AuditLogEntry) => row.ip_address || '-'
   }
-]
+])
 
 const loadLogs = async () => {
   loading.value = true
