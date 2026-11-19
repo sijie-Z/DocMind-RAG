@@ -13,6 +13,7 @@
 收益低于成本；filter 组装是纯语句级事实，源码断言 + 变异实验已足够
 （已实测：删 enabled_filter 后本条红）。
 """
+
 from __future__ import annotations
 
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -31,7 +32,7 @@ class TestRetrieverEnabledFilter:
         from app.rag import retriever as retriever_mod
 
         src = inspect.getsource(retriever_mod)
-        assert 'must_not' in src, "检索必须用 must_not 排除 is_enabled=False"
+        assert "must_not" in src, "检索必须用 must_not 排除 is_enabled=False"
         assert '"is_enabled": False' in src, "filter 必须针对 is_enabled 字段"
         # 明确排除写法是 must_not（而非 term:true）——后者会让旧索引（无字段）漏召回
         assert '"term": {"is_enabled": True}' not in src, (
