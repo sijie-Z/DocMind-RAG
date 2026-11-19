@@ -278,7 +278,7 @@
               </div>
               <p class="text-xs text-gray-500 mb-1">{{ formatDate(ver.created_at) }}</p>
               <p v-if="ver.change_note" class="text-sm text-gray-700 dark:text-gray-300 italic">
-                「{{ ver.change_note }}」
+                "{{ ver.change_note }}"
               </p>
               <p class="text-xs text-gray-400 mt-1 line-clamp-2">{{ ver.content }}</p>
             </div>
@@ -295,7 +295,7 @@ import { useRouter } from 'vue-router'
 import { useDialog } from 'naive-ui'
 import { useDedupedMessage } from '@/utils/message'
 import { getErrorMessage } from '@/utils/apiError'
-import { parseApiDate } from '@/utils/format'
+import { formatDateTime } from '@/utils/format'
 import { useI18n } from 'vue-i18n'
 import { AddOutline, TrashOutline, CreateOutline, CopyOutline, SparklesOutline, SearchOutline, DocumentTextOutline, PlayOutline, TimeOutline } from '@vicons/ionicons5'
 import { getPrompts, createPrompt, updatePrompt, deletePrompt, seedDefaultPrompts, getPromptVersions, restorePromptVersion, type PromptTemplate, type PromptTemplateVersion } from '@/api/prompt'
@@ -304,7 +304,7 @@ import { useUserStore } from '@/stores/user'
 const router = useRouter()
 const message = useDedupedMessage()
 const dialog = useDialog()
-const { t } = useI18n()
+const { t, locale } = useI18n()
 const userStore = useUserStore()
 
 const loading = ref(false)
@@ -377,15 +377,17 @@ const toggleActive = async (item: PromptTemplate, value: boolean) => {
   }
 }
 
-const rules = {
-  name: { required: true, message: t('prompts.form.namePlaceholder'), trigger: 'blur' },
-  content: { required: true, message: t('prompts.form.contentPlaceholder'), trigger: 'blur' },
-}
+// computed：setup 期求值会让切语言后校验消息停留旧语言
+//（login/index.vue:266 同范式）；这里用四语齐备的 validation.* 专用键
+const rules = computed(() => ({
+  name: { required: true, message: t('prompts.validation.name'), trigger: 'blur' },
+  content: { required: true, message: t('prompts.validation.content'), trigger: 'blur' },
+}))
 
 const categories = computed(() => [
   { label: t('prompts.allCategories'), value: null },
   { label: t('prompts.category.general'), value: 'general' },
-  { label: 'RAG', value: 'rag' },
+  { label: t('prompts.category.rag'), value: 'rag' },
   { label: t('prompts.category.translate'), value: 'translate' },
   { label: t('prompts.category.summary'), value: 'summary' },
   { label: t('prompts.category.code'), value: 'code' },
@@ -438,11 +440,7 @@ const getCategoryLabel = (category: string) => {
   return map[category] || category
 }
 
-const formatDate = (dateStr: string) => {
-  const d = parseApiDate(dateStr)
-  if (!d) return ''
-  return d.toLocaleString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
-}
+const formatDate = (dateStr: string) => formatDateTime(dateStr, locale.value)
 
 const loadPrompts = async () => {
   loading.value = true

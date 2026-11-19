@@ -801,8 +801,8 @@ export default {
     currentVersion: 'Version actuelle',
     rollback: 'Revenir à cette version',
     rollbackTitle: 'Confirmer le retour',
-    rollbackConfirm: 'Revenir le modèle à la v{version} ? Le contenu actuel sera conservé comme nouvelle version.',
-    rollbackSuccess: 'Revenu à la v{version}',
+    rollbackConfirm: 'Rétablir le modèle en v{version} ? Le contenu actuel sera conservé comme nouvelle version.',
+    rollbackSuccess: 'Rétabli en v{version}',
     copySuffix: ' (copie)'
   },
   error: {
