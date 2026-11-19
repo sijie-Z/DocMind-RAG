@@ -226,7 +226,7 @@ async def search_knowledge_base(
             top_k=min(top_k, 20),
             document_ids=document_ids,
             search_mode="hybrid",
-            viewer_user_id=user_id,
+            **({"viewer_user_id": user_id} if user_id else {}),
         )
     except SourceProvenanceUnavailableError as e:
         return _provenance_failure(e)

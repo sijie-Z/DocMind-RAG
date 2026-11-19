@@ -68,7 +68,6 @@ def upgrade() -> None:
                 "subject_type",
                 sa.String(20),
                 nullable=False,
-                server_default="user",
                 comment="授权主体类型（当前仅 user）",
             ),
             sa.Column(
@@ -81,6 +80,7 @@ def upgrade() -> None:
             sa.Column(
                 "created_at",
                 sa.DateTime(timezone=True),
+                nullable=False,
                 server_default=sa.func.now(),
                 comment="授权时间",
             ),

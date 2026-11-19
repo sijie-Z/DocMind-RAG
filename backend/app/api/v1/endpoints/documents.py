@@ -169,7 +169,7 @@ async def upload_document(
     title: str | None = Form(None),
     description: str | None = Form(None),
     tags: str | None = Form(None),
-    visibility: str = Form(DocumentVisibility.ORGANIZATION.value),
+    visibility: str | None = Form(None),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -190,13 +190,6 @@ async def upload_document(
         # 无组织的超管解析到库里真实存在的组织（无组织则 403，issue #168）
         org_id = await require_organization(current_user, db)
 
-        # 文档级 ACL：只接受两种可见性；非法值拒绝，避免静默退化成组织可见
-        if visibility not in (
-            DocumentVisibility.ORGANIZATION.value,
-            DocumentVisibility.PRIVATE.value,
-        ):
-            raise ValidationError("visibility 必须为 organization 或 private")
-
         # 3. 解析标签为列表
         keywords_list = []
         if tags:
@@ -216,6 +209,21 @@ async def upload_document(
             raise ValidationError("暂不支持旧版 .doc/.xls，请另存为 .docx/.xlsx 后上传")
         if ext not in allowed_ext:
             raise ValidationError(f"不支持的文件格式。支持的格式: {', '.join(sorted(allowed_ext))}")
+
+        # 文档级 ACL：只接受两种可见性；放在文件格式/大小校验之后，
+        # 保持既有 4xx 错误优先级（旧格式/超大文件仍报原来的可操作文案）
+        # 直接函数调用（单测）会拿到 Form(...) 描述对象而非字符串：非 str 一律
+        # 按默认值 organization 处理，不把测试替身误判为非法可见性。
+        effective_visibility = (
+            visibility
+            if isinstance(visibility, str) and visibility
+            else DocumentVisibility.ORGANIZATION.value
+        )
+        if effective_visibility not in (
+            DocumentVisibility.ORGANIZATION.value,
+            DocumentVisibility.PRIVATE.value,
+        ):
+            raise ValidationError("visibility 必须为 organization 或 private")
 
         # 限制上传大小后再读文件，避免超大文件先占满内存
         file.file.seek(0, 2)
@@ -271,7 +279,7 @@ async def upload_document(
             title=title or file.filename,
             description=description,
             keywords=keywords_list,  # ✅ 已修正字段名！
-            visibility=DocumentVisibility(visibility),
+            visibility=DocumentVisibility(effective_visibility),
         )
 
         db.add(new_doc)
