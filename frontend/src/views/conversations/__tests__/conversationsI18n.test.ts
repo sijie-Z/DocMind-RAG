@@ -102,6 +102,17 @@ describe('会话历史页 · i18n', () => {
     expect(text).not.toMatch(/[㐀-䶿一-鿿]/)
   })
 
+  it('空态分支同样走 i18n（en 下空态文案与按钮无中文）', async () => {
+    vi.mocked(getConversations).mockResolvedValue({
+      data: { data: { data: [], total: 0, page: 1, page_size: 10 } },
+    } as never)
+    const { wrapper } = await mountWith('en')
+    const text = wrapper.text()
+    expect(text).toContain('No chat history found')
+    expect(text).toContain('New Chat')
+    expect(text).not.toMatch(/[㐀-䶿一-鿿]/)
+  })
+
   it('加载失败提示同样走 i18n（en 下 message.error 与错误态都用英文）', async () => {
     vi.mocked(getConversations).mockRejectedValue(new Error('boom'))
     const { wrapper } = await mountWith('en')
