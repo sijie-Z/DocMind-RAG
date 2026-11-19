@@ -50,6 +50,7 @@ from app.models.user import User
 from app.rag.source_provenance import SourceProvenanceUnavailableError
 from app.schemas.knowledge import DocumentDownloadUrl, DocumentDownloadUrlResponse
 from app.schemas.review import ReviewMetaUpsert
+from app.services.audit_service import audit_service
 from app.services.document_preview import load_document_chunk, load_document_preview_text
 from app.services.file_service import file_service
 from app.services.review_document_service import (
@@ -905,6 +906,20 @@ async def put_document_authorized_users(
                 )
             )
         await db.commit()
+
+        # 授权变更必须留痕（管理员可替换他人私有文档的授权名单，需可审计）
+        try:
+            await audit_service.log_activity(
+                user_id=current_user.id,
+                action="update_document_acl",
+                target_type="document",
+                target_id=document_id,
+                detail=f"authorized_user_ids={sorted(wanted)}",
+                db=db,
+            )
+        except Exception as audit_err:
+            logger.warning("文档授权审计写入失败（doc=%s）: %s", document_id, audit_err)
+
         return await get_document_authorized_users(document_id, db, current_user)
     except (NotFoundError, AuthorizationError):
         raise
