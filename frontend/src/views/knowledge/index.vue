@@ -267,14 +267,18 @@
                              </template>
                              {{ t('knowledge.actionRebuild') }}
                            </n-tooltip>
-                           <n-tooltip trigger="hover">
-                             <template #trigger>
-                               <n-button size="tiny" quaternary circle :type="item.is_enabled === false ? 'warning' : 'default'" :aria-label="item.is_enabled === false ? t('knowledge.actionEnable') : t('knowledge.actionDisable')" @click.stop="handleToggleEnabled(item)">
-                                 <template #icon><n-icon><component :is="item.is_enabled === false ? PlayOutline : PauseOutline" /></n-icon></template>
-                               </n-button>
-                             </template>
-                             {{ item.is_enabled === false ? t('knowledge.actionEnable') : t('knowledge.actionDisable') }}
-                           </n-tooltip>
+                           <n-button
+                             v-if="showToggleEnabled"
+                             size="tiny"
+                             quaternary
+                             circle
+                             :type="item.is_enabled === false ? 'warning' : 'default'"
+                             :aria-label="item.is_enabled === false ? t('knowledge.actionEnable') : t('knowledge.actionDisable')"
+                             :title="item.is_enabled === false ? t('knowledge.actionEnable') : t('knowledge.actionDisable')"
+                             @click.stop="handleToggleEnabled(item)"
+                           >
+                             <template #icon><n-icon><component :is="item.is_enabled === false ? PlayOutline : PauseOutline" /></n-icon></template>
+                           </n-button>
                            <n-button size="tiny" quaternary circle type="error" :aria-label="t('knowledge.actionDelete')" @click.stop="deleteKnowledge(item)">
                               <template #icon><n-icon><TrashOutline /></n-icon></template>
                            </n-button>
@@ -367,7 +371,7 @@
                           <div class="flex justify-end gap-2 kb-row-actions">
                              <n-button size="tiny" secondary circle :aria-label="t('knowledge.actionView')" @click="viewKnowledge(item)"><template #icon><n-icon><EyeOutline /></n-icon></template></n-button>
                              <n-button v-if="showRebuild && item.status === 'failed'" size="tiny" secondary circle type="primary" :aria-label="t('knowledge.actionRebuild')" @click="handleRebuild(item)"><template #icon><n-icon><RefreshOutline /></n-icon></template></n-button>
-                             <n-button size="tiny" secondary circle :type="item.is_enabled === false ? 'warning' : 'default'" :aria-label="item.is_enabled === false ? t('knowledge.actionEnable') : t('knowledge.actionDisable')" @click="handleToggleEnabled(item)"><template #icon><n-icon><component :is="item.is_enabled === false ? PlayOutline : PauseOutline" /></n-icon></template></n-button>
+                             <n-button v-if="showToggleEnabled" size="tiny" secondary circle :type="item.is_enabled === false ? 'warning' : 'default'" :aria-label="item.is_enabled === false ? t('knowledge.actionEnable') : t('knowledge.actionDisable')" @click="handleToggleEnabled(item)"><template #icon><n-icon><component :is="item.is_enabled === false ? PlayOutline : PauseOutline" /></n-icon></template></n-button>
                              <n-button size="tiny" secondary circle type="error" :aria-label="t('knowledge.actionDelete')" @click="deleteKnowledge(item)"><template #icon><n-icon><TrashOutline /></n-icon></template></n-button>
                           </div>
                        </td>
@@ -511,6 +515,10 @@ const userStore = useUserStore()
 // permissions 已下发时按权限隐藏入口；字段缺失（旧后端）→ null = 未知，保持可见。
 const canRebuild = computed(() => userStore.can('knowledge_base:rebuild_index'))
 const showRebuild = computed(() => canRebuild.value !== false)
+// 启停是写操作（后端要求 DOCUMENT_UPDATE）；无权限者不显示按钮，
+// 避免点了才 403（与 showRebuild 同口径：权限未知时保持可见，诚实降级）。
+const canToggleEnabled = computed(() => userStore.can('document:update'))
+const showToggleEnabled = computed(() => canToggleEnabled.value !== false)
 const loading = ref(false)
 const loadError = ref(false)
 const loadErrorMsg = ref('')

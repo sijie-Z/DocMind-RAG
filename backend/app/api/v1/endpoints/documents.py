@@ -557,10 +557,10 @@ async def set_document_enabled(
     """
     try:
         doc = await get_document_for_user(db, current_user, document_id)
-        doc.is_enabled = bool(body.enabled)
-        await db.commit()
 
-        # 同步 ES：按 document_id 批量更新（不重写向量，只改布尔字段）。
+        # ES 先行：检索 filter 读的是 **ES 字段**（不是 DB）。若先改 DB 再刷 ES
+        # 而 ES 失败，用户会看到「已停用」但文档仍被召回——正是本功能要消灭的
+        # 状态。故 ES 失败即整体失败（DB 不动），让用户重试。
         try:
             await ElasticsearchTools.update_documents_by_query(
                 query={"term": {"document_id": document_id}},
@@ -570,13 +570,23 @@ async def set_document_enabled(
                 },
             )
         except Exception as es_err:
-            # ES 失败不回滚 DB：检索 filter 以 DB 为准的场景由重建兜底；
-            # 留痕而不是静默。
+            raise AppError(f"同步检索索引失败，请稍后重试: {es_err}") from es_err
+
+        doc.is_enabled = bool(body.enabled)
+        await db.commit()
+
+        # 清本组织检索缓存：停用/启用必须立刻生效，不能等 10 分钟 TTL。
+        # 与删除/重建路径同口径（知识库删除、worker 重建都会 clear_for_org）。
+        try:
+            from app.rag.cache import RetrievalCache, SemanticCache
+
+            await RetrievalCache().clear_for_org(doc.organization_id)
+            await SemanticCache.for_retrieval(settings.RAG_SOURCE_PROVENANCE_MODE).clear_for_org(
+                doc.organization_id
+            )
+        except Exception as cache_err:
             logger.warning(
-                "文档启停同步 ES 失败（document_id=%s, enabled=%s）: %s",
-                document_id,
-                body.enabled,
-                es_err,
+                "文档启停后清理检索缓存失败（org=%s）: %s", doc.organization_id, cache_err
             )
 
         return {
