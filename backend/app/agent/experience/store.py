@@ -45,13 +45,16 @@ class ExperienceStore:
         self.redis_key = (
             REDIS_KEY if organization_id is None else f"{REDIS_KEY}:org:{organization_id}"
         )
-        self.local_path = (
-            LOCAL_PATH
-            if organization_id is None
-            else LOCAL_PATH.with_name(f"experiences.org-{organization_id}.json")
-        )
         self._experiences: dict[str, Experience] = {}
         self._loaded = False
+
+    @property
+    def local_path(self):
+        """惰性解析本地路径：org=None 时跟随模块 LOCAL_PATH（兼容既有测试的
+        monkeypatch），org 指定时按组织分文件。"""
+        if self.organization_id is None:
+            return LOCAL_PATH
+        return LOCAL_PATH.with_name(f"experiences.org-{self.organization_id}.json")
 
     # ── CRUD ──
 
