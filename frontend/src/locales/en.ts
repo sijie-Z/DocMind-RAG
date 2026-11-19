@@ -1180,8 +1180,15 @@ export default {
     startNew: 'Start a new chat to get started',
     startNewBtn: 'New Chat',
     untitled: 'Untitled Chat',
-    messages: 'messages',
-    loadFailed: 'Failed to load conversation list'
+    messages: '{count} message | {count} messages',
+    loadFailed: 'Failed to load conversation list',
+    loadFailedShort: 'Failed to load',
+    retry: 'Retry',
+    loading: 'Loading...',
+    continueBtn: 'Continue',
+    newChat: 'New Chat',
+    deleteSuccess: 'Deleted',
+    deleteFailed: 'Delete failed',
   },
   audit: {
     searchPlaceholder: 'Search users or actions...',
