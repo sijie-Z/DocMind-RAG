@@ -311,6 +311,7 @@
           :connection-line-style="{ strokeWidth: 2, stroke: '#3b82f6' }"
           :default-edge-options="defaultEdgeOptions"
           @node-click="onNodeClick"
+          @edge-click="onEdgeClick"
           @connect="onConnect"
           class="bg-gray-100 dark:bg-gray-900"
           ref="vueFlowRef"
@@ -400,14 +401,32 @@
       <div class="p-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
         <h3 class="font-semibold text-gray-800 dark:text-white flex items-center gap-2">
           <n-icon><SettingsOutline /></n-icon>
-          节点属性
+          {{ selectedEdge ? t('workflow.editor.edgeProperties') : t('workflow.editor.nodeProperties') }}
         </h3>
         <n-button v-if="isNarrow" quaternary size="small" data-testid="workflow-panel-close" @click="closePropertyPanel">
           <template #icon><n-icon><CloseOutline /></n-icon></template>
         </n-button>
       </div>
       <div class="flex-1 overflow-y-auto p-4">
-        <div v-if="!selectedNode" class="text-center text-gray-400 py-8">
+        <div v-if="selectedEdge" class="space-y-3" data-testid="workflow-edge-properties">
+          <div class="text-xs text-gray-500 dark:text-gray-400">
+            ID: {{ selectedEdge.id }}
+          </div>
+          <div>
+            <label class="text-sm font-medium text-gray-700 dark:text-gray-300">
+              {{ t('workflow.editor.edgeLabel') }}
+            </label>
+            <n-input
+              :value="selectedEdge.label || ''"
+              :placeholder="t('workflow.editor.edgeLabel')"
+              size="small"
+              data-testid="workflow-edge-label"
+              @update:value="updateEdgeLabel"
+            />
+            <p class="mt-1 text-xs text-gray-400">{{ t('workflow.editor.edgeLabelHint') }}</p>
+          </div>
+        </div>
+        <div v-else-if="!selectedNode" class="text-center text-gray-400 py-8">
           <n-icon size="48" class="mb-2 opacity-30"><LocateOutline /></n-icon>
           <p>点击节点查看属性</p>
         </div>
@@ -1012,7 +1031,10 @@ const {
   onDrop,
   addNodeFromLibrary,
   onNodeClick,
+  onEdgeClick,
   onConnect,
+  updateEdgeLabel,
+  selectedEdge,
   addLlmInputParam,
   removeLlmInputParam,
   addInputParam,

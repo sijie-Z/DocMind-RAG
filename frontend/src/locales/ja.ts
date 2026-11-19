@@ -1261,7 +1261,11 @@ export default {
       leaveConfirmPositive: '離れる',
       leaveConfirmNegative: 'キャンセル',
       togglePanel: 'プロパティパネル',
-      clickToAddHint: 'クリックまたはドラッグでノードを追加',
+            nodeProperties: 'ノードのプロパティ',
+      edgeProperties: '接続のプロパティ',
+      edgeLabel: '分岐ラベル',
+      edgeLabelHint: '複数分岐はこのラベルで分岐します：translate / summarize / code / analyze / default',
+      clickToAddHint: 'クリックまたはドラッグしてノードを追加',
     },
   },
   notifications: {

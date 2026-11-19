@@ -220,6 +220,21 @@ describe('useWorkflowStore', () => {
     expect(flowData.edges[0].source).toBe('a')
   })
 
+  it('selectEdge + updateEdge 更新分支 label（条件路由接线）', () => {
+    const store = useWorkflowStore()
+    const edge = makeEdge('e-cond', 'cond', 'out')
+    store.addEdge(edge)
+    store.selectEdge(edge)
+    expect(store.selectedEdge?.id).toBe('e-cond')
+    // 选中边时清空节点选择，属性面板不会同时展示两套表单
+    expect(store.selectedNode).toBeNull()
+
+    store.updateEdge('e-cond', { label: 'translate' })
+    expect(store.edges.find(e => e.id === 'e-cond')?.label).toBe('translate')
+    expect(store.selectedEdge?.label).toBe('translate')
+    expect(store.getFlowData().edges[0].label).toBe('translate')
+  })
+
   it('getFlowData 保留边 label（条件路由键，B12）；不携带后端将剥离的 animated（B13）', () => {
     const store = useWorkflowStore()
     store.setEdges([{ ...makeEdge('e1', 'a', 'b'), label: 'yes' }])

@@ -275,6 +275,7 @@ const edges = computed({
 
 const selectedNodeId = computed(() => workflowStore.selectedNode?.id)
 const selectedNode = computed(() => workflowStore.selectedNode)
+const selectedEdge = computed(() => workflowStore.selectedEdge)
 const nodeData = computed(() => (selectedNode.value?.data ?? {}) as Record<string, any>)
 const executionResults = computed(() => workflowStore.executionResults)
 const executionLogs = computed(() => workflowStore.executionLogs)
@@ -559,6 +560,27 @@ const addNodeFromLibrary = (node: NodeDefinition | Record<string, unknown>) => {
 
 const onNodeClick = (event: { node: WorkflowNode }) => {
   workflowStore.selectNode(event.node)
+}
+
+const onEdgeClick = (event: { edge: unknown }) => {
+  // Vue Flow 的 GraphEdge.label 可为 VNode/Component；只取字符串形态的 label
+  const raw = event.edge as Record<string, unknown>
+  const label = typeof raw.label === "string" ? raw.label : undefined
+  const handle = (value: unknown) => (typeof value === "string" ? value : undefined)
+  const edge: WorkflowEdge = {
+    id: String(raw.id ?? ""),
+    source: String(raw.source ?? ""),
+    target: String(raw.target ?? ""),
+    sourceHandle: handle(raw.sourceHandle),
+    targetHandle: handle(raw.targetHandle),
+    label,
+  }
+  workflowStore.selectEdge(edge)
+}
+
+const updateEdgeLabel = (label: string) => {
+  if (!selectedEdge.value) return
+  workflowStore.updateEdge(selectedEdge.value.id, { label })
 }
 
 const onConnect = (params: Connection) => {
@@ -1228,6 +1250,7 @@ const getNodeIconComponent = (type: string) => NODE_ICON_MAP[type] || AppsOutlin
   edges,
   selectedNodeId,
   selectedNode,
+  selectedEdge,
   nodeData,
   executionResults,
   executionLogs,
@@ -1247,7 +1270,9 @@ const getNodeIconComponent = (type: string) => NODE_ICON_MAP[type] || AppsOutlin
   onDrop,
   addNodeFromLibrary,
   onNodeClick,
+  onEdgeClick,
   onConnect,
+  updateEdgeLabel,
   addLlmInputParam,
   removeLlmInputParam,
   addInputParam,
