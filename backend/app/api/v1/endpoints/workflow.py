@@ -154,10 +154,14 @@ async def list_executions(
 
     total = (await db.execute(select(func.count()).select_from(stmt.subquery()))).scalar() or 0
     rows = (
-        await db.execute(
-            stmt.order_by(desc(WorkflowExecution.created_at)).offset(skip).limit(limit)
+        (
+            await db.execute(
+                stmt.order_by(desc(WorkflowExecution.created_at)).offset(skip).limit(limit)
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
 
     return {
         "success": True,

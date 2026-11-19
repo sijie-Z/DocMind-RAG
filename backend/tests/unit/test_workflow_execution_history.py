@@ -10,6 +10,7 @@
 变异点：删端点 → 404；把端点放到 /{workflow_id} 之后 → 422；
 去掉 workflow scope → 越权可见（用例 2 红）。
 """
+
 from __future__ import annotations
 
 
@@ -34,12 +35,11 @@ class TestExecutionListQuery:
     """列表端点的查询构造（不依赖 DB 的纯逻辑验证）。"""
 
     def test_scope_helper_limits_to_own_workflows(self):
-        from app.api.v1.endpoints.workflow import _apply_workflow_scope
-
         # 用最小替身验证 scope 语义：普通用户只看到 created_by 匹配的 workflow
         from types import SimpleNamespace
 
         import app.api.v1.endpoints.workflow as workflow_ep
+        from app.api.v1.endpoints.workflow import _apply_workflow_scope
 
         original = workflow_ep.is_org_admin
 
@@ -49,6 +49,7 @@ class TestExecutionListQuery:
         workflow_ep.is_org_admin = not_admin
         try:
             user = SimpleNamespace(is_superuser=False, id=7)
+
             # stmt 只是被 .where 拼接，用可记录调用的替身即可
             class FakeStmt:
                 def __init__(self):
@@ -59,9 +60,7 @@ class TestExecutionListQuery:
                     return self
 
             stmt = FakeStmt()
-            out = __import__("asyncio").run(
-                _apply_workflow_scope(None, stmt, user, 3)
-            )
+            out = __import__("asyncio").run(_apply_workflow_scope(None, stmt, user, 3))
             assert out is stmt
             # 组织条件 + 创建者条件，两层过滤缺一不可
             assert len(stmt.calls) == 2
