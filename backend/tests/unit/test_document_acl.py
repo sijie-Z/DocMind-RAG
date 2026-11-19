@@ -8,6 +8,7 @@
 
 变异点：删 ACL 查询 / 改成 fail-open / 去掉访问守门 → 对应用例红。
 """
+
 from __future__ import annotations
 
 from types import SimpleNamespace
@@ -45,7 +46,9 @@ class TestBlockedDocumentIds:
         db.execute = AsyncMock(
             side_effect=[
                 MagicMock(all=MagicMock(return_value=private)),
-                MagicMock(scalars=MagicMock(return_value=MagicMock(all=MagicMock(return_value=["d1"])))),
+                MagicMock(
+                    scalars=MagicMock(return_value=MagicMock(all=MagicMock(return_value=["d1"])))
+                ),
             ]
         )
         assert await get_blocked_document_ids(db, 3, 42) == []
@@ -57,7 +60,9 @@ class TestBlockedDocumentIds:
         db.execute = AsyncMock(
             side_effect=[
                 MagicMock(all=MagicMock(return_value=private)),
-                MagicMock(scalars=MagicMock(return_value=MagicMock(all=MagicMock(return_value=[])))),
+                MagicMock(
+                    scalars=MagicMock(return_value=MagicMock(all=MagicMock(return_value=[])))
+                ),
             ]
         )
         assert await get_blocked_document_ids(db, 3, 42) == ["d1"]
@@ -71,7 +76,9 @@ class TestBlockedDocumentIds:
         db = AsyncMock()
         db.execute = AsyncMock(side_effect=RuntimeError("ACL table missing"))
         fallback = MagicMock()
-        fallback.scalars = MagicMock(return_value=MagicMock(all=MagicMock(return_value=["d1", "d2"])))
+        fallback.scalars = MagicMock(
+            return_value=MagicMock(all=MagicMock(return_value=["d1", "d2"]))
+        )
         db.execute = AsyncMock(side_effect=[RuntimeError("ACL table missing"), fallback])
 
         blocked = await get_blocked_document_ids(db, 3, 42)
@@ -85,7 +92,9 @@ class TestBlockedDocumentIds:
         db.execute = AsyncMock(
             side_effect=[
                 MagicMock(all=MagicMock(return_value=private)),
-                MagicMock(scalars=MagicMock(return_value=MagicMock(all=MagicMock(return_value=[])))),
+                MagicMock(
+                    scalars=MagicMock(return_value=MagicMock(all=MagicMock(return_value=[])))
+                ),
             ]
         )
         assert await get_blocked_document_ids(db, 3, 7) == []

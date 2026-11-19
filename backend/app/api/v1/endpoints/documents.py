@@ -189,7 +189,10 @@ async def upload_document(
         org_id = await require_organization(current_user, db)
 
         # 文档级 ACL：只接受两种可见性；非法值拒绝，避免静默退化成组织可见
-        if visibility not in (DocumentVisibility.ORGANIZATION.value, DocumentVisibility.PRIVATE.value):
+        if visibility not in (
+            DocumentVisibility.ORGANIZATION.value,
+            DocumentVisibility.PRIVATE.value,
+        ):
             raise ValidationError("visibility 必须为 organization 或 private")
 
         # 3. 解析标签为列表

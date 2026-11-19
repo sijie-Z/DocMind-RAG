@@ -348,13 +348,9 @@ async def _vector_search_impl(
         from app.services.document_acl import get_blocked_document_ids
 
         async with AsyncSessionLocal() as acl_session:
-            blocked = await get_blocked_document_ids(
-                acl_session, organization_id, viewer_user_id
-            )
+            blocked = await get_blocked_document_ids(acl_session, organization_id, viewer_user_id)
         if blocked:
-            filters.append(
-                {"bool": {"must_not": [{"terms": {"document_id": blocked}}]}}
-            )
+            filters.append({"bool": {"must_not": [{"terms": {"document_id": blocked}}]}})
 
     es_query = {
         "size": top_k,
@@ -454,9 +450,7 @@ async def vector_search(
 ) -> str | ToolResult:
     if organization_id is None:
         return _missing_organization_result("vector_search")
-    return await _vector_search_impl(
-        query, top_k, organization_id, None, viewer_user_id=user_id
-    )
+    return await _vector_search_impl(query, top_k, organization_id, None, viewer_user_id=user_id)
 
 
 # ─── Analysis Tools ──────────────────────────────────────────────────────────
