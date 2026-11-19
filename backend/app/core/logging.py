@@ -179,7 +179,7 @@ def setup_logging():
 
     # uvicorn access logger keeps its own handlers; attach the same filter so
     # the token inside the public snapshot URL never lands in access logs.
-    logging.getLogger("uvicorn.access").addFilter(redactor)
+    # mutation: uvicorn.access filter removed
 
     logger = logging.getLogger("docmind")
     logger.setLevel(getattr(logging, settings.LOG_LEVEL.upper()))
