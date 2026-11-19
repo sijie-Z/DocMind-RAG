@@ -168,6 +168,7 @@ async def deep_research(
     query: str,
     depth: str = "detailed",
     organization_id: int | None = None,
+    user_id: int | None = None,
     run_context=None,
     **_: Any,
 ) -> str | ToolResult:
@@ -260,6 +261,7 @@ async def document_comparison(
     document_ids: list[str],
     focus: str = "comprehensive",
     organization_id: int | None = None,
+    user_id: int | None = None,
     run_context=None,
     **_: Any,
 ) -> str | ToolResult:
@@ -284,6 +286,7 @@ async def document_comparison(
                 "get_document_info",
                 {"document_id": doc_id},
                 organization_id=organization_id,
+                user_id=user_id,
                 run_context=run_context,
             )
             if ok:
@@ -317,6 +320,7 @@ async def document_comparison(
                     "framework": analysis_framework,
                 },
                 organization_id=organization_id,
+                user_id=user_id,
                 run_context=run_context,
             )
         except Exception as e:
@@ -416,6 +420,7 @@ async def knowledge_analysis(
     framework: str = "comprehensive",
     generate_report: bool = True,
     organization_id: int | None = None,
+    user_id: int | None = None,
     run_context=None,
     **_: Any,
 ) -> str | ToolResult:
@@ -473,6 +478,7 @@ async def knowledge_analysis(
                     "framework": framework if framework != "comprehensive" else "",
                 },
                 organization_id=organization_id,
+                user_id=user_id,
                 run_context=run_context,
             )
         except Exception as e:
@@ -537,6 +543,7 @@ async def knowledge_analysis(
                 "generate_report",
                 {"title": report_title, "sections": sections},
                 organization_id=organization_id,
+                user_id=user_id,
                 run_context=run_context,
             )
             if ok:
