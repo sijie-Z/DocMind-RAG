@@ -11,6 +11,7 @@ import contextlib
 import json
 import logging
 import time
+from types import SimpleNamespace
 from typing import Any
 
 from app.agent.registry import (
@@ -195,6 +196,7 @@ async def search_knowledge_base(
     document_ids: list[str] | None = None,
     mode: str = "hybrid",
     organization_id: int | None = None,
+    user_id: int | None = None,
     **_: Any,
 ) -> str | ToolResult:
     if organization_id is None:
@@ -207,7 +209,9 @@ async def search_knowledge_base(
             code="validation_error", message=f"未知 mode: {mode}（支持 hybrid/vector）"
         )
     if mode_norm == "vector":
-        return await _vector_search_impl(query, top_k, organization_id, document_ids)
+        return await _vector_search_impl(
+            query, top_k, organization_id, document_ids, viewer_user_id=user_id
+        )
 
     from app.core.config import settings
     from app.dependencies import get_rag_pipeline
@@ -222,6 +226,7 @@ async def search_knowledge_base(
             top_k=min(top_k, 20),
             document_ids=document_ids,
             search_mode="hybrid",
+            **({"viewer_user_id": user_id} if user_id else {}),
         )
     except SourceProvenanceUnavailableError as e:
         return _provenance_failure(e)
@@ -279,11 +284,51 @@ async def search_knowledge_base(
     )
 
 
+async def _ensure_document_readable(
+    document_id: str, organization_id: int, user_id: int | None
+) -> ToolResult | None:
+    """Agent 直读工具的 ACL 守门：返回失败结果表示拒绝，None 表示放行。
+
+    user_id 未注入（内部/旧调用）时保持旧行为（组织级），避免破坏后台任务；
+    有 user_id 时按私有文档 ACL 判定。
+    """
+    if not user_id:
+        return None
+    from app.core.database import AsyncSessionLocal
+    from app.core.security import get_document_for_user
+    from app.exceptions import AppError
+
+    try:
+        async with AsyncSessionLocal() as session:
+            # get_user_org_id 读 organization_id：必须带服务端注入的组织，
+            # 否则 MagicMock/SimpleNamespace 缺字段会让合法用户恒被判无权
+            user = SimpleNamespace(
+                id=user_id,
+                is_superuser=False,
+                organization_id=organization_id,
+                token_organization_id=None,
+            )
+            await get_document_for_user(session, user, document_id)
+        return None
+    except AppError:
+        return ToolResult.fail(
+            code="not_found",
+            message=f"Document {document_id} not found or not accessible.",
+        )
+    except Exception:
+        # DB/表未就绪：fail closed（不把私有文档交给工具）
+        return ToolResult.fail(
+            code="not_found",
+            message=f"Document {document_id} not found or not accessible.",
+        )
+
+
 async def _vector_search_impl(
     query: str,
     top_k: int,
     organization_id: int,
     document_ids: list[str] | None = None,
+    viewer_user_id: int | None = None,
 ) -> str | ToolResult:
     """纯向量检索（原 vector_search 实现，issue #509 原样迁入）。"""
     # T6：与姊妹检索工具一致，钳制到 20 以内，避免 ES 请求被调用方无限放大
@@ -306,6 +351,15 @@ async def _vector_search_impl(
     from app.rag.retriever import build_retrieval_filters
 
     filters: list[dict[str, Any]] = build_retrieval_filters(organization_id, document_ids)
+    # 私有文档 ACL：向量臂自建 filters，必须显式带 viewer 可见集
+    if viewer_user_id:
+        from app.core.database import AsyncSessionLocal
+        from app.services.document_acl import get_blocked_document_ids
+
+        async with AsyncSessionLocal() as acl_session:
+            blocked = await get_blocked_document_ids(acl_session, organization_id, viewer_user_id)
+        if blocked:
+            filters.append({"bool": {"must_not": [{"terms": {"document_id": blocked}}]}})
 
     es_query = {
         "size": top_k,
@@ -400,11 +454,12 @@ async def vector_search(
     query: str,
     top_k: int = 5,
     organization_id: int | None = None,
+    user_id: int | None = None,
     **_: Any,
 ) -> str | ToolResult:
     if organization_id is None:
         return _missing_organization_result("vector_search")
-    return await _vector_search_impl(query, top_k, organization_id, None)
+    return await _vector_search_impl(query, top_k, organization_id, None, viewer_user_id=user_id)
 
 
 # ─── Analysis Tools ──────────────────────────────────────────────────────────
@@ -436,10 +491,14 @@ async def summarize_document(
     document_id: str,
     organization_id: int | None = None,
     run_context: RunContext | None = None,
+    user_id: int | None = None,
     **_: Any,
 ) -> str | ToolResult:
     if organization_id is None:
         return _missing_organization_result("summarize_document")
+    denied = await _ensure_document_readable(document_id, organization_id, user_id)
+    if denied:
+        return denied
     return await _summarize_document_impl(document_id, organization_id, run_context)
 
 
@@ -678,10 +737,14 @@ async def extract_insights(
     mode: str = "insights",
     organization_id: int | None = None,
     run_context: RunContext | None = None,
+    user_id: int | None = None,
     **_: Any,
 ) -> str | ToolResult:
     if organization_id is None:
         return _missing_organization_result("extract_insights")
+    denied = await _ensure_document_readable(document_id, organization_id, user_id)
+    if denied:
+        return denied
     # issue #509：summarize_document 合并进本工具（mode=summary）。摘要的
     # 无 LLM / 空正文 / 异常兜底原样保留在 _summarize_document_impl。
     mode_norm = str(mode or "").strip().lower()
@@ -882,10 +945,15 @@ async def cross_document_analysis(
     analysis_type: str = "comprehensive",
     organization_id: int | None = None,
     run_context: RunContext | None = None,
+    user_id: int | None = None,
     **_: Any,
 ) -> str | ToolResult:
     if organization_id is None:
         return _missing_organization_result("cross_document_analysis")
+    for did in document_ids:
+        denied = await _ensure_document_readable(did, organization_id, user_id)
+        if denied:
+            return denied
     if not document_ids or len(document_ids) < 2:
         # issue #301 批次 2：历史 {"error": ...} JSON 出口迁移到结构化失败 ——
         # 旧的"正常 JSON"形态对消费端的小写键检查隐身（trustB 评审现场复现：
@@ -1341,10 +1409,16 @@ async def list_documents(
     tags=["management"],
 )
 async def get_document_info(
-    document_id: str, organization_id: int | None = None, **_: Any
+    document_id: str,
+    organization_id: int | None = None,
+    user_id: int | None = None,
+    **_: Any,
 ) -> str | ToolResult:
     if organization_id is None:
         return _missing_organization_result("get_document_info")
+    denied = await _ensure_document_readable(document_id, organization_id, user_id)
+    if denied:
+        return denied
     from sqlalchemy import select
 
     from app.core.database import AsyncSessionLocal

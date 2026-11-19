@@ -77,6 +77,7 @@ async def build_referenced_document_context(
     query: str,
     organization_id: int,
     pipeline=None,
+    viewer_user_id: int | None = None,
 ) -> tuple[str | None, list[str]]:
     """把用户 @ 引用的知识库文档解析为注入 planner 与 executor 的上下文段。
 
@@ -131,6 +132,14 @@ async def build_referenced_document_context(
         if doc.organization_id != organization_id:
             warnings.append(f"引用文档无权访问（不属于当前组织），已忽略：{did}")
             continue
+        if viewer_user_id:
+            from app.services.document_acl import get_blocked_document_ids
+
+            async with AsyncSessionLocal() as acl_db:
+                blocked = await get_blocked_document_ids(acl_db, organization_id, viewer_user_id)
+            if did in blocked:
+                warnings.append(f"引用文档无权访问（私有文档未授权），已忽略：{did}")
+                continue
 
         title = doc.title or doc.filename or did
         excerpt = ""
@@ -139,11 +148,15 @@ async def build_referenced_document_context(
         provenance_counts = {PARSER_ORIGINAL: 0, LEGACY_UNVERIFIED: 0}
         if pipeline is not None:
             try:
+                retrieval_kwargs: dict[str, object] = {}
+                if viewer_user_id:
+                    retrieval_kwargs["viewer_user_id"] = viewer_user_id
                 results, _ = await pipeline.search_knowledge_base(
                     query,
                     organization_id,
                     top_k=3,
                     document_ids=[did],
+                    **retrieval_kwargs,
                 )
                 excerpt, provenance_counts = _format_referenced_chunks(results[:3])
             except SourceProvenanceUnavailableError as e:
@@ -451,6 +464,7 @@ class AgentService:
                     query,
                     organization_id,
                     pipeline=rag_pipeline,
+                    viewer_user_id=user_id or None,
                 )
                 for w in ref_warnings:
                     warn_event = AgentEvent(type="warning", content=w)
@@ -1045,6 +1059,7 @@ class AgentService:
                 query=query,
                 organization_id=organization_id,
                 top_k=top_k,
+                viewer_user_id=user_id or None,
             )
         except SourceProvenanceUnavailableError as e:
             yield {
