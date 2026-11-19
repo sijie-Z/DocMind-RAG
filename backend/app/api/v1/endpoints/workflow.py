@@ -150,18 +150,17 @@ async def list_executions(
     if not current_user.is_superuser:
         org_id = await require_organization(current_user, db)
         visible = await _apply_workflow_scope(db, select(Workflow.id), current_user, org_id)
+        # 软删工作流（is_active=False）不在列表/不可执行，其历史也不该从
+        # 已知 workflow_id 直接列出（与 get_workflow/list_workflows 同口径）
+        visible = visible.where(Workflow.is_active.is_(True))
         stmt = stmt.where(WorkflowExecution.workflow_id.in_(visible))
 
     total = (await db.execute(select(func.count()).select_from(stmt.subquery()))).scalar() or 0
     rows = (
-        (
-            await db.execute(
-                stmt.order_by(desc(WorkflowExecution.created_at)).offset(skip).limit(limit)
-            )
+        await db.execute(
+            stmt.order_by(desc(WorkflowExecution.created_at)).offset(skip).limit(limit)
         )
-        .scalars()
-        .all()
-    )
+    ).scalars().all()
 
     return {
         "success": True,

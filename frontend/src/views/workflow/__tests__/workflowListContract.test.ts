@@ -162,3 +162,39 @@ describe('workflow 列表页 · 执行历史入口', () => {
     expect(vm.selectedExecution?.node_results?.[0]?.duration).toBe(120)
   })
 })
+
+
+describe('workflow 执行历史 · 错误态与截断提示', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    vi.mocked(getWorkflows).mockResolvedValue({
+      data: { data: { items: [LIST_ITEM], total: 1 } },
+    } as never)
+  })
+
+  it('加载失败不伪装成空态：historyError=true 且显示加载失败文案', async () => {
+    vi.mocked(getExecutions).mockRejectedValue(new Error('network down'))
+    const wrapper = await mountList()
+    const vm = wrapper.findComponent(WorkflowList).vm as unknown as {
+      openHistory: (id: number) => Promise<void>
+      historyError: boolean
+    }
+    await vm.openHistory(3)
+    expect(vm.historyError).toBe(true)
+    expect(document.body.textContent).toContain('workflow.history.loadFailed')
+  })
+
+  it('total 大于已展示条数时显示截断提示', async () => {
+    vi.mocked(getExecutions).mockResolvedValue({
+      data: { data: { items: [EXECUTION], total: 51 } },
+    } as never)
+    const wrapper = await mountList()
+    const vm = wrapper.findComponent(WorkflowList).vm as unknown as {
+      openHistory: (id: number) => Promise<void>
+      historyTotal: number
+    }
+    await vm.openHistory(3)
+    expect(vm.historyTotal).toBe(51)
+    expect(document.body.textContent).toContain('workflow.history.truncated')
+  })
+})

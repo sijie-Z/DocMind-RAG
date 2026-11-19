@@ -1251,6 +1251,7 @@ export default {
       startedAt: '開始時刻',
       duration: '所要時間',
       noOutput: '出力なし',
+      truncated: '最新 {count} 件の実行履歴のみ表示しています',
       errorLabel: 'エラー',
       status: {
         pending: '待機中',

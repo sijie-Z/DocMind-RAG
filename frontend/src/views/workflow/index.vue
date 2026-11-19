@@ -176,8 +176,14 @@
             :row-key="(row: ExecutionSummary) => row.id"
             size="small"
           />
-          <n-empty v-else :description="t('workflow.history.empty')" />
+          <n-empty
+            v-else
+            :description="historyError ? t('workflow.history.loadFailed') : t('workflow.history.empty')"
+          />
         </n-spin>
+        <p v-if="historyTotal > historyRows.length" class="mt-2 text-xs text-gray-400">
+          {{ t('workflow.history.truncated', { count: historyTotal }) }}
+        </p>
         <n-descriptions v-if="selectedExecution" bordered :column="1" class="mt-4">
           <n-descriptions-item :label="t('workflow.history.detailTitle')">
             <n-timeline>
@@ -228,7 +234,7 @@ interface WorkflowItem {
 }
 
 const router = useRouter()
-const { t } = useI18n()
+const { t, locale } = useI18n()
 const dialog = useDialog()
 const message = useDedupedMessage()
 
@@ -241,22 +247,27 @@ const workflows = ref<WorkflowItem[]>([])
 // 执行历史（卡片「执行历史」按钮 → drawer）
 const showHistory = ref(false)
 const historyLoading = ref(false)
+const historyError = ref(false)
 const historyRows = ref<ExecutionSummary[]>([])
 const selectedExecution = ref<{
   node_results?: NodeResultItem[]
 } | null>(null)
+
+const historyTotal = ref(0)
 
 const nodeStatusType = (status: string) =>
   status === 'failed' ? 'error' : status === 'completed' ? 'success' : 'default'
 
 const historyColumns = [
   { title: () => t('workflow.history.startedAt'), key: 'started_at',
-    render: (row: ExecutionSummary) => row.started_at ? formatDateTime(row.started_at) : '-' },
+    render: (row: ExecutionSummary) => row.started_at ? formatDateTime(row.started_at, locale.value) : '-' },
   { title: () => t('workflow.history.nodeStatus'), key: 'status',
-    render: (row: ExecutionSummary) => t(`workflow.history.status.${row.status}`, row.status) },
+    render: (row: ExecutionSummary) => t(`workflow.history.status.${row.status}`) },
   { title: () => t('workflow.history.duration'), key: 'duration',
     render: (row: ExecutionSummary) => row.started_at && row.completed_at
       ? `${Math.round((new Date(row.completed_at).getTime() - new Date(row.started_at).getTime()) / 1000)}s` : '-' },
+  { title: () => t('workflow.history.errorLabel'), key: 'error_message',
+    render: (row: ExecutionSummary) => row.error_message || '-' },
   { title: () => t('common.actions'), key: 'actions',
     render: (row: ExecutionSummary) => h(NButton, { size: 'tiny', quaternary: true,
       onClick: () => openExecutionDetail(row.id) }, { default: () => t('workflow.history.detailTitle') }) },
@@ -355,13 +366,17 @@ const openHistory = async (workflowId: number) => {
   showHistory.value = true
   selectedExecution.value = null
   historyLoading.value = true
+  historyError.value = false
   try {
     const res = await getExecutions({ workflow_id: workflowId, limit: 50 })
-    const data = apiUnwrap<{ items: ExecutionSummary[] } | null>(res)
+    const data = apiUnwrap<{ items: ExecutionSummary[]; total: number } | null>(res)
     historyRows.value = data?.items || []
+    historyTotal.value = data?.total || 0
   } catch (error) {
+    historyError.value = true
     message.error(t('workflow.history.loadFailed') + '：' + getErrorMessage(error, t('common.tryAgain')))
     historyRows.value = []
+    historyTotal.value = 0
   } finally {
     historyLoading.value = false
   }

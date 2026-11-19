@@ -1265,6 +1265,7 @@ export default {
       startedAt: 'Started at',
       duration: 'Duration',
       noOutput: 'No output',
+      truncated: 'Showing only the latest {count} executions',
       errorLabel: 'Error',
       status: {
         pending: 'Pending',

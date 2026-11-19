@@ -1252,6 +1252,7 @@ export default {
       startedAt: 'Démarré le',
       duration: 'Durée',
       noOutput: 'Aucune sortie',
+      truncated: 'Seules les {count} exécutions les plus récentes sont affichées',
       errorLabel: 'Erreur',
       status: {
         pending: 'En attente',

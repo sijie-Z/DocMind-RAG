@@ -1273,6 +1273,7 @@ export default {
       startedAt: '开始时间',
       duration: '耗时',
       noOutput: '无输出',
+      truncated: '仅显示最近 {count} 条执行记录',
       errorLabel: '错误',
       status: {
         pending: '等待中',
