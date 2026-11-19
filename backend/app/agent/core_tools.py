@@ -300,7 +300,14 @@ async def _ensure_document_readable(
 
     try:
         async with AsyncSessionLocal() as session:
-            user = SimpleNamespace(id=user_id, is_superuser=False)
+            # get_user_org_id 读 organization_id：必须带服务端注入的组织，
+            # 否则 MagicMock/SimpleNamespace 缺字段会让合法用户恒被判无权
+            user = SimpleNamespace(
+                id=user_id,
+                is_superuser=False,
+                organization_id=organization_id,
+                token_organization_id=None,
+            )
             await get_document_for_user(session, user, document_id)
         return None
     except AppError:

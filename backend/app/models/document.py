@@ -85,7 +85,11 @@ class Document(Base):
     #   organization = 组织内全员可见（默认，行为与旧版一致）
     #   private      = 仅上传者 + document_acl 中被授权的用户可见
     visibility: Mapped[DocumentVisibility] = mapped_column(
-        Enum(DocumentVisibility),
+        # 与迁移 028 一致：持久化小写 value，而非枚举成员名（大写）
+        Enum(
+            DocumentVisibility,
+            values_callable=lambda enum_cls: [member.value for member in enum_cls],
+        ),
         default=DocumentVisibility.ORGANIZATION,
         server_default=DocumentVisibility.ORGANIZATION.value,
         index=True,

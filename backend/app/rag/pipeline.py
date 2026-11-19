@@ -643,7 +643,9 @@ class RAGPipeline:
                 rerank_info is not None and rerank_info.get("status") == "degraded"
             )
             cache_safe = not failures and not degraded_reasons and not rerank_degraded
-            if not document_ids and result and cache_safe:
+            # 文档级 ACL：带 viewer 的结果绝不写组织级共享缓存——否则 A 的
+            # 私有文档结果会被 B 的无 viewer 请求命中（读侧已跳过，写侧必须对称）
+            if not document_ids and not acl_enabled and result and cache_safe:
                 # issue #225 决策 7A：精确缓存键带模式段（None=自动路由，键与修前逐字节相同）。
                 await self.cache.set(
                     query,
@@ -673,6 +675,7 @@ class RAGPipeline:
                 and cache_safe
                 and not search_mode
                 and not document_ids
+                and not acl_enabled
             ):
                 # 检索缓存条目 answer 为空（仅 sources），写入检索专用命名空间（R4）
                 await self.semantic_cache.set(

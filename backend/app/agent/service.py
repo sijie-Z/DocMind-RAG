@@ -148,12 +148,15 @@ async def build_referenced_document_context(
         provenance_counts = {PARSER_ORIGINAL: 0, LEGACY_UNVERIFIED: 0}
         if pipeline is not None:
             try:
+                retrieval_kwargs: dict[str, object] = {}
+                if viewer_user_id:
+                    retrieval_kwargs["viewer_user_id"] = viewer_user_id
                 results, _ = await pipeline.search_knowledge_base(
                     query,
                     organization_id,
                     top_k=3,
                     document_ids=[did],
-                    viewer_user_id=viewer_user_id,
+                    **retrieval_kwargs,
                 )
                 excerpt, provenance_counts = _format_referenced_chunks(results[:3])
             except SourceProvenanceUnavailableError as e:

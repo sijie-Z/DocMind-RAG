@@ -811,6 +811,7 @@ async def run_rag_pipeline(
                 search_org_id,
                 org_policy.retrieval_top_k if org_policy.retrieval_top_k is not None else 5,
                 debug=debug,
+                viewer_user_id=user_id,
             )
         except SourceProvenanceUnavailableError as e:
             provenance_unavailable = e
