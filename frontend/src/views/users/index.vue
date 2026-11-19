@@ -10,7 +10,7 @@
             {{ t('menu.users') }}
           </h1>
           <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">
-            {{ t('users.subtitle', '管理系统内的所有用户信息及其权限') }}
+            {{ t('users.subtitle') }}
           </p>
         </div>
         
@@ -72,7 +72,7 @@
 
           <!-- Empty state -->
           <div v-else-if="!loadError && filteredUsers.length === 0 && !loading" class="flex items-center justify-center h-full">
-            <n-empty :description="t('users.noData', '暂无用户数据')">
+            <n-empty :description="t('users.noData')">
               <template #extra>
                 <n-button type="primary" round @click="showCreateModal = true">{{ t('users.create') }}</n-button>
               </template>
@@ -115,7 +115,7 @@
             <n-form-item :label="t('profile.nickname')" path="nickname">
               <n-input v-model:value="userForm.nickname" :placeholder="t('profile.placeholder.nickname')" round />
             </n-form-item>
-            <n-form-item v-if="!editingUser" :label="t('users.initialPassword') || '初始密码'" path="password">
+            <n-form-item v-if="!editingUser" :label="t('users.initialPassword')" path="password">
               <n-input v-model:value="userForm.password" type="password" show-password-on="mousedown" round />
             </n-form-item>
             <n-form-item :label="t('profile.email')" path="email">
@@ -137,7 +137,7 @@
             </n-form-item>
           </div>
           <n-form-item :label="t('users.organizations')" path="organization_id">
-            <n-select v-model:value="userForm.organization_id" :options="organizationOptions" :placeholder="t('users.selectOrgs', '请选择所属组织')" />
+            <n-select v-model:value="userForm.organization_id" :options="organizationOptions" :placeholder="t('users.selectOrgs')" />
           </n-form-item>
         </n-form>
       </n-spin>
@@ -524,7 +524,7 @@ const resetPassword = async () => {
 
 const handleDelete = (row: User) => {
   dialog.warning({
-    title: t('common.confirm') || '确认删除',
+    title: t('common.confirm'),
     content: t('users.deleteConfirmWithName', { username: row.username || row.full_name || '' }),
     positiveText: t('common.confirm'),
     negativeText: t('common.cancel'),
