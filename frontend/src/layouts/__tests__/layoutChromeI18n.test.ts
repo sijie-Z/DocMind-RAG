@@ -45,6 +45,8 @@ vi.mock('@/api/user', () => ({
   getUserSettings: vi.fn().mockResolvedValue({ data: { data: { theme: 'light', language: 'en' } } }),
   updateUserSettings: vi.fn(),
   updateUserProfile: vi.fn().mockResolvedValue({ data: {} }),
+  getMyOrganizations: vi.fn().mockResolvedValue({ data: { data: { organizations: [] } } }),
+  switchOrganization: vi.fn().mockResolvedValue({ data: { data: {} } }),
 }))
 
 import Layouts from '../index.vue'
@@ -88,9 +90,9 @@ afterEach(async () => {
 describe('布局顶栏 · 通知下拉 i18n', () => {
   it('en 下通知行末操作按钮渲染 Delete，不含「删除」', async () => {
     const { wrapper, notificationStore } = await mountLayout()
-    // 直接播种 headerItems（与真实加载同数据结构），避免依赖 popover 打开时序
+    // 播种与 @/api/notification 真实形状一致的 snake_case 通知
     notificationStore.headerItems = [
-      { id: 1, title: 'T', content: 'C', type: 'system', isRead: false, createdAt: '2026-10-09T00:00:00Z' },
+      { id: 1, title: 'T', content: 'C', type: 'system', is_read: false, created_at: '2026-10-09T00:00:00Z' },
     ] as never
     await flushPromises()
 
@@ -99,11 +101,15 @@ describe('布局顶栏 · 通知下拉 i18n', () => {
     expect(bell.exists(), '顶栏通知按钮应存在').toBe(true)
     await bell.trigger('click')
     await flushPromises()
+    await flushPromises()
 
     // popover 内容 teleport 到 body：在 document 层面断言
     const bodyText = document.body.innerText || document.body.textContent || ''
     expect(bodyText, '不应出现硬编码「删除」').not.toContain('删除')
-    expect(bodyText, '删除按钮应走 common.delete → Delete').toContain('Delete')
+    const deleteButtons = Array.from(document.querySelectorAll('button')).filter(
+      (b) => (b.textContent || '').trim() === 'Delete',
+    )
+    expect(deleteButtons.length, '删除按钮文本应精确等于 common.delete → Delete').toBeGreaterThan(0)
 
     // 第二语言：fr 下必须是 Supprimer —— 硬编码英文（>Delete<）在这里会露馅（评审 B 变异 2）
     ;(i18n.global.locale as unknown as { value: string }).value = 'fr'
