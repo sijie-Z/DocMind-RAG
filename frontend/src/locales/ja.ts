@@ -726,6 +726,8 @@ export default {
   },
   prompts: {
     subtitle: 'AIアシスタントのシステムプロンプトと応答スタイルを管理します',
+    pageSubtitle: 'プロンプトテンプレートはAIの回答スタイルに直接影響します',
+    init: '初期化',
     fillToChat: '入力欄に挿入',
     create: 'テンプレートを作成',
     addTemplate: 'テンプレート追加',
@@ -781,7 +783,26 @@ export default {
       restoreFailed: 'ロールバックに失敗しました',
       seedSuccess: '初期化に成功しました',
       seedFailed: '初期化に失敗しました'
-    }
+    },
+    allCategories: 'すべて',
+
+    searchPlaceholder: 'テンプレートを検索...',
+    categoryPlaceholder: 'カテゴリ',
+    loading: '読み込み中...',
+    changeNote: '変更メモ',
+    changeNotePlaceholder: '今回の変更内容を簡単に説明してください（任意）',
+    namePlaceholder: 'テンプレートに名前を付ける',
+    contentPlaceholderLong: 'プロンプト内容を入力 — AIの回答スタイルに直接影響します...',
+    save: '保存',
+    createShort: '作成',
+    versionHistory: 'バージョン履歴',
+    versionEmpty: 'バージョン履歴はありません',
+    currentVersion: '現在のバージョン',
+    rollback: 'このバージョンに戻す',
+    rollbackTitle: 'ロールバックの確認',
+    rollbackConfirm: 'テンプレートをv{version}に戻しますか？現在の内容は新しいバージョンとして保存されます。',
+    rollbackSuccess: 'v{version}に戻しました',
+    copySuffix: ' (コピー)'
   },
   error: {
     '404': {

@@ -6,29 +6,29 @@
         <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
           <div>
             <h1 class="text-3xl font-bold text-gray-800 dark:text-white">{{ t('menu.prompts') }}</h1>
-            <p class="text-gray-500 dark:text-gray-400 mt-1 text-sm">提示词模板将直接影响AI的回答方式和风格</p>
+            <p class="text-gray-500 dark:text-gray-400 mt-1 text-sm">{{ t('prompts.pageSubtitle') }}</p>
           </div>
           <div class="flex gap-2">
             <n-button v-if="userStore.isSuperuser" quaternary round @click="handleSeed" :loading="seeding">
               <template #icon><n-icon><SparklesOutline /></n-icon></template>
-              初始化
+              {{ t('prompts.init') }}
             </n-button>
             <n-button type="primary" round @click="handleAdd">
               <template #icon><n-icon><AddOutline /></n-icon></template>
-              新建模板
+              {{ t('prompts.addTemplate') }}
             </n-button>
           </div>
         </div>
 
         <!-- 搜索栏 -->
         <div class="mt-6 flex gap-3">
-          <n-input v-model:value="searchQuery" placeholder="搜索模板..." clearable size="large" round class="flex-1">
+          <n-input v-model:value="searchQuery" :placeholder="t('prompts.searchPlaceholder')" clearable size="large" round class="flex-1">
             <template #prefix><n-icon class="text-gray-400"><SearchOutline /></n-icon></template>
           </n-input>
           <n-select
             v-model:value="activeCategory"
             :options="categories"
-            placeholder="分类"
+            :placeholder="t('prompts.categoryPlaceholder')"
             size="large"
             style="width: 140px"
             clearable
@@ -55,7 +55,7 @@
       <!-- 内容区域 -->
       <n-spin :show="loading">
         <template #description>
-          <span>加载中...</span>
+          <span>{{ t('prompts.loading') }}</span>
         </template>
 
         <!-- Skeleton loading state -->
@@ -110,11 +110,11 @@
 
         <!-- Empty state：空库 → 创建引导 -->
         <div v-else-if="!loadError && filteredPrompts.length === 0 && !loading" class="py-20">
-          <n-empty :description="t('prompts.empty', '暂无提示词模板')">
+          <n-empty :description="t('prompts.empty')">
             <template #extra>
               <n-button type="primary" round @click="handleAdd">
                 <template #icon><n-icon><AddOutline /></n-icon></template>
-                {{ t('prompts.create', '创建模板') }}
+                {{ t('prompts.create') }}
               </n-button>
             </template>
           </n-empty>
@@ -186,16 +186,16 @@
 
     <!-- 编辑抽屉 -->
     <n-drawer v-model:show="showDrawer" :width="620" placement="right">
-      <n-drawer-content :title="editingId ? '编辑模板' : '新建模板'" closable>
+      <n-drawer-content :title="editingId ? t('prompts.editTemplate') : t('prompts.addTemplate')" closable>
         <template #header-extra>
           <n-button v-if="editingId" size="tiny" quaternary @click="openVersionHistory(editingId)">
             <template #icon><n-icon><TimeOutline /></n-icon></template>
-            版本历史
+            {{ t('prompts.versionHistory') }}
           </n-button>
         </template>
         <n-form :model="formModel" ref="formRef" :rules="rules" label-placement="top">
-          <n-form-item label="模板名称" path="name">
-            <n-input v-model:value="formModel.name" placeholder="给模板起个名字" maxlength="50" show-count />
+          <n-form-item :label="t('prompts.form.name')" path="name">
+            <n-input v-model:value="formModel.name" :placeholder="t('prompts.namePlaceholder')" maxlength="50" show-count />
           </n-form-item>
           <n-form-item v-if="!editingId" :label="t('prompts.scopeLabel')">
             <div class="flex flex-col gap-1">
@@ -208,35 +208,35 @@
               <span class="text-xs text-gray-400">{{ t('prompts.scopeHint') }}</span>
             </div>
           </n-form-item>
-          <n-form-item label="分类" path="category">
+          <n-form-item :label="t('prompts.form.category')" path="category">
             <n-radio-group v-model:value="formModel.category" name="categoryGroup">
               <n-space>
                 <n-radio v-for="cat in categoryOptions" :key="cat.value" :value="cat.value">{{ cat.label }}</n-radio>
               </n-space>
             </n-radio-group>
           </n-form-item>
-          <n-form-item label="提示词内容" path="content">
+          <n-form-item :label="t('prompts.form.content')" path="content">
             <n-input
               v-model:value="formModel.content"
               type="textarea"
-              placeholder="输入提示词内容，这会直接影响AI的回答风格..."
+              :placeholder="t('prompts.contentPlaceholderLong')"
               :autosize="{ minRows: 8, maxRows: 16 }"
               maxlength="5000"
               show-count
             />
           </n-form-item>
-          <n-form-item label="变更说明" path="change_note" v-if="editingId">
-            <n-input v-model:value="formModel.change_note" placeholder="简要说明本次变更内容（选填）" maxlength="200" show-count />
+          <n-form-item :label="t('prompts.changeNote')" path="change_note" v-if="editingId">
+            <n-input v-model:value="formModel.change_note" :placeholder="t('prompts.changeNotePlaceholder')" maxlength="200" show-count />
           </n-form-item>
-          <n-form-item label="描述" path="description">
-            <n-input v-model:value="formModel.description" placeholder="可选：描述这个模板的用途" maxlength="200" show-count />
+          <n-form-item :label="t('prompts.form.description')" path="description">
+            <n-input v-model:value="formModel.description" :placeholder="t('prompts.form.descriptionPlaceholder')" maxlength="200" show-count />
           </n-form-item>
         </n-form>
         <template #footer>
           <div class="flex gap-3">
-            <n-button class="flex-1" @click="showDrawer = false">取消</n-button>
+            <n-button class="flex-1" @click="showDrawer = false">{{ t('common.cancel') }}</n-button>
             <n-button class="flex-1" type="primary" :loading="submitting" @click="handleSubmit">
-              {{ editingId ? '保存' : '创建' }}
+              {{ editingId ? t('prompts.save') : t('prompts.createShort') }}
             </n-button>
           </div>
         </template>
@@ -245,10 +245,10 @@
 
     <!-- Version History Drawer -->
     <n-drawer v-model:show="showVersionDrawer" :width="520" placement="right">
-      <n-drawer-content title="版本历史" closable>
+      <n-drawer-content :title="t('prompts.versionHistory')" closable>
         <n-spin :show="versionsLoading">
           <div v-if="versions.length === 0 && !versionsLoading" class="py-10">
-            <n-empty description="暂无版本历史" />
+            <n-empty :description="t('prompts.versionEmpty')" />
           </div>
           <div v-else class="space-y-3">
             <div
@@ -262,7 +262,7 @@
                   <n-tag :type="ver.version === currentVersion ? 'success' : 'default'" size="small" round>
                     v{{ ver.version }}
                   </n-tag>
-                  <span v-if="ver.version === currentVersion" class="text-xs text-green-500">当前版本</span>
+                  <span v-if="ver.version === currentVersion" class="text-xs text-green-500">{{ t('prompts.currentVersion') }}</span>
                 </div>
                 <div class="flex gap-1">
                   <n-button
@@ -272,7 +272,7 @@
                     ghost
                     @click="restoreVersion(ver)"
                   >
-                    回滚到此版本
+                    {{ t('prompts.rollback') }}
                   </n-button>
                 </div>
               </div>
@@ -378,27 +378,27 @@ const toggleActive = async (item: PromptTemplate, value: boolean) => {
 }
 
 const rules = {
-  name: { required: true, message: '请输入模板名称', trigger: 'blur' },
-  content: { required: true, message: '请输入提示词内容', trigger: 'blur' },
+  name: { required: true, message: t('prompts.form.namePlaceholder'), trigger: 'blur' },
+  content: { required: true, message: t('prompts.form.contentPlaceholder'), trigger: 'blur' },
 }
 
 const categories = computed(() => [
-  { label: '全部', value: null },
-  { label: '通用', value: 'general' },
+  { label: t('prompts.allCategories'), value: null },
+  { label: t('prompts.category.general'), value: 'general' },
   { label: 'RAG', value: 'rag' },
-  { label: '翻译', value: 'translate' },
-  { label: '摘要', value: 'summary' },
-  { label: '代码', value: 'code' },
+  { label: t('prompts.category.translate'), value: 'translate' },
+  { label: t('prompts.category.summary'), value: 'summary' },
+  { label: t('prompts.category.code'), value: 'code' },
 ])
 
 const categoryTabs = computed(() => {
   const base = [
-    { label: '全部', value: null, count: prompts.value.length },
-    { label: '通用', value: 'general', count: prompts.value.filter(p => p.category === 'general').length },
+    { label: t('prompts.allCategories'), value: null, count: prompts.value.length },
+    { label: t('prompts.category.general'), value: 'general', count: prompts.value.filter(p => p.category === 'general').length },
     { label: 'RAG', value: 'rag', count: prompts.value.filter(p => p.category === 'rag').length },
-    { label: '翻译', value: 'translate', count: prompts.value.filter(p => p.category === 'translate').length },
-    { label: '摘要', value: 'summary', count: prompts.value.filter(p => p.category === 'summary').length },
-    { label: '代码', value: 'code', count: prompts.value.filter(p => p.category === 'code').length },
+    { label: t('prompts.category.translate'), value: 'translate', count: prompts.value.filter(p => p.category === 'translate').length },
+    { label: t('prompts.category.summary'), value: 'summary', count: prompts.value.filter(p => p.category === 'summary').length },
+    { label: t('prompts.category.code'), value: 'code', count: prompts.value.filter(p => p.category === 'code').length },
   ]
   return base.filter(c => c.value === null || c.count > 0 || activeCategory.value === c.value)
 })
@@ -428,7 +428,13 @@ const clearFilters = () => {
 }
 
 const getCategoryLabel = (category: string) => {
-  const map: Record<string, string> = { general: '通用', rag: 'RAG', translate: '翻译', summary: '摘要', code: '代码' }
+  const map: Record<string, string> = {
+    general: t('prompts.category.general'),
+    rag: t('prompts.category.rag'),
+    translate: t('prompts.category.translate'),
+    summary: t('prompts.category.summary'),
+    code: t('prompts.category.code'),
+  }
   return map[category] || category
 }
 
@@ -469,7 +475,7 @@ const handleEdit = (item: PromptTemplate) => {
 }
 
 const handleCopy = (item: PromptTemplate) => {
-  formModel.value = { name: item.name + ' (副本)', content: item.content, description: item.description || '', category: item.category, is_active: true, scope: item.scope === 'personal' ? 'personal' : 'organization', change_note: '' }
+  formModel.value = { name: item.name + t('prompts.copySuffix'), content: item.content, description: item.description || '', category: item.category, is_active: true, scope: item.scope === 'personal' ? 'personal' : 'organization', change_note: '' }
   editingId.value = null
   showDrawer.value = true
 }
@@ -529,14 +535,14 @@ const openVersionHistory = async (promptId: number) => {
 
 const restoreVersion = async (ver: PromptTemplateVersion) => {
   dialog.warning({
-    title: '确认回滚',
-    content: `确定要将模板回滚到 v${ver.version} 吗？当前内容将被保存为一个新版本。`,
-    positiveText: '确认回滚',
-    negativeText: '取消',
+    title: t('prompts.rollbackTitle'),
+    content: t('prompts.rollbackConfirm', { version: ver.version }),
+    positiveText: t('prompts.rollbackTitle'),
+    negativeText: t('common.cancel'),
     onPositiveClick: async () => {
       try {
         await restorePromptVersion(ver.prompt_id, ver.version)
-        message.success(`已回滚到 v${ver.version}`)
+        message.success(t('prompts.rollbackSuccess', { version: ver.version }))
         showVersionDrawer.value = false
         loadPrompts()
       } catch (error) {
@@ -548,7 +554,7 @@ const restoreVersion = async (ver: PromptTemplateVersion) => {
 
 const handleDelete = (id: number) => {
   dialog.warning({
-    title: t('common.confirm') || '确认删除',
+    title: t('common.confirm'),
     content: t('prompts.confirmDelete'),
     positiveText: t('common.confirm'),
     negativeText: t('common.cancel'),
