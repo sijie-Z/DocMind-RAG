@@ -144,6 +144,7 @@ export default {
     networkFailed: 'ネットワーク接続に失敗しました。バックエンドサービスの稼働を確認してください',
     withRequestId: '{message}（リクエストID: {requestId}）',
     httpStatus: 'HTTPエラー: {status}',
+    pageLoadFailed: 'ページの読み込みに失敗しました。再読み込みしてください',
     wsNoCredentials: 'ログイン情報が見つかりません。再度ログインしてください',
     wsConnectFailed: 'WebSocket 接続エラー',
   },

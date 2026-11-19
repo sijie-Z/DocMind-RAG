@@ -144,6 +144,7 @@ export default {
     networkFailed: 'Échec de la connexion réseau. Vérifiez que le service backend est démarré.',
     withRequestId: '{message} (ID de requête : {requestId})',
     httpStatus: 'Erreur HTTP : {status}',
+    pageLoadFailed: 'Échec du chargement de la page. Veuillez actualiser.',
     wsNoCredentials: 'Aucun identifiant trouvé. Veuillez vous reconnecter.',
     wsConnectFailed: 'Erreur de connexion WebSocket',
   },
