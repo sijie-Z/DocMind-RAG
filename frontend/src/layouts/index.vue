@@ -271,7 +271,7 @@
                       <div class="text-xs text-gray-500 mt-1 line-clamp-2">{{ notification.content }}</div>
                       <div class="text-xs text-gray-400 mt-1">{{ formatDate(notification.created_at) }}</div>
                     </div>
-                    <n-button text size="tiny" @click.stop="handleDeleteNotification(notification.id)">删除</n-button>
+                    <n-button text size="tiny" @click.stop="handleDeleteNotification(notification.id)">{{ t('common.delete') }}</n-button>
                   </div>
                 </n-list-item>
                 <div v-if="notificationStore.headerLoading && notifications.length === 0" class="py-8 text-center text-gray-400 text-sm">
@@ -769,7 +769,7 @@ const handleMenuSelect = async (key: string) => {
     await router.push({ name: key })
   } catch {
     // 页面加载失败
-    message.error('页面加载失败，请尝试刷新页面')
+    message.error(t('errors.pageLoadFailed'))
   }
 }
 

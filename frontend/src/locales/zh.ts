@@ -126,6 +126,7 @@ export default {
     networkFailed: '网络连接失败，请检查后端服务',
     withRequestId: '{message}（请求ID: {requestId}）',
     httpStatus: 'HTTP错误: {status}',
+    pageLoadFailed: '页面加载失败，请尝试刷新页面',
     wsNoCredentials: '未找到登录凭证，请重新登录',
     wsConnectFailed: 'WebSocket连接错误',
   },

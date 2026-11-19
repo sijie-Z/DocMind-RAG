@@ -124,6 +124,7 @@ export default {
     networkFailed: 'Network connection failed. Check that the backend service is running.',
     withRequestId: '{message} (Request ID: {requestId})',
     httpStatus: 'HTTP error: {status}',
+    pageLoadFailed: 'Failed to load the page. Please try refreshing.',
     wsNoCredentials: 'No credentials found. Please sign in again.',
     wsConnectFailed: 'WebSocket connection error',
   },
