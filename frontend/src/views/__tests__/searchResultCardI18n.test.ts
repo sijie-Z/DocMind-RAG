@@ -102,10 +102,29 @@ beforeEach(() => {
 })
 
 describe('搜索页 · 结果卡词条', () => {
-  it('结果项无文件名 → 显示 unknownFile 词条（en 下为 Unknown file）', async () => {
-    const w = await mountAndSearch('en', [{ ...RESULT, metadata: { snippet: 'alpha' }, source: { document_id: 'doc-1' } } as SearchResult])
-    expect(w.text()).toContain(en.search.unknownFile)
-    expect(w.text()).not.toContain('未知文件')
+  it('结果项无文件名 → 显示 unknownFile 词条（zh/en 双向锁）', async () => {
+    const noName = [{ ...RESULT, metadata: { snippet: 'alpha' }, source: { document_id: 'doc-1' } } as SearchResult]
+    const zhW = await mountAndSearch('zh', noName)
+    expect(zhW.text()).toContain('未知文件')
+    zhW.unmount()
+
+    const enW = await mountAndSearch('en', noName)
+    expect(enW.text()).toContain('Unknown file')
+    expect(enW.text()).not.toContain('未知文件')
+    enW.unmount()
+  })
+
+  it('结果详情弹窗 footer 的复制/问AI按钮走词条（en 下 Copy / Ask AI）', async () => {
+    const w = await mountAndSearch('en')
+    // 打开详情：点结果卡主体（showResultDetail）
+    const cardTrigger = w.findAll('.group').find((n) => n.text().includes('alpha.md'))
+    expect(cardTrigger, '结果卡应在屏').toBeTruthy()
+    await cardTrigger!.trigger('click')
+    await flushPromises()
+    const modalCopy = document.querySelector('[data-testid="search-modal-copy"]')
+    expect(modalCopy, '弹窗复制按钮应在屏').toBeTruthy()
+    expect((modalCopy!.textContent || '').trim()).toBe('Copy')
+    expect(document.body.textContent || '').not.toContain('复制')
     w.unmount()
   })
 

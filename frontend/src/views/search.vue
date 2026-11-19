@@ -346,7 +346,7 @@
         </div>
 
         <div class="flex justify-end gap-3 border-t border-slate-100 pt-4 dark:border-slate-800">
-          <n-button round secondary data-testid="search-result-copy" @click="copyResultContent(selectedResult)">
+          <n-button round secondary data-testid="search-modal-copy" @click="copyResultContent(selectedResult)">
             <template #icon><n-icon><CopyOutline /></n-icon></template>
             {{ t('common.copy') }}
           </n-button>
