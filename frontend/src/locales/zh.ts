@@ -729,6 +729,8 @@ export default {
   },
   prompts: {
     subtitle: '管理 AI 助手的系统提示词与回复风格',
+    pageSubtitle: '提示词模板将直接影响AI的回答方式和风格',
+    init: '初始化',
     fillToChat: '填入对话输入框',
     create: '创建模板',
     addTemplate: '新增模板',
@@ -784,7 +786,26 @@ export default {
       restoreFailed: '回滚失败',
       seedSuccess: '初始化成功',
       seedFailed: '初始化失败'
-    }
+    },
+    allCategories: '全部',
+
+    searchPlaceholder: '搜索模板...',
+    categoryPlaceholder: '分类',
+    loading: '加载中...',
+    changeNote: '变更说明',
+    changeNotePlaceholder: '简要说明本次变更内容（选填）',
+    namePlaceholder: '给模板起个名字',
+    contentPlaceholderLong: '输入提示词内容，这会直接影响AI的回答风格...',
+    save: '保存',
+    createShort: '创建',
+    versionHistory: '版本历史',
+    versionEmpty: '暂无版本历史',
+    currentVersion: '当前版本',
+    rollback: '回滚到此版本',
+    rollbackTitle: '确认回滚',
+    rollbackConfirm: '确定要将模板回滚到 v{version} 吗？当前内容将被保存为一个新版本。',
+    rollbackSuccess: '已回滚到 v{version}',
+    copySuffix: ' (副本)'
   },
   error: {
     '404': {

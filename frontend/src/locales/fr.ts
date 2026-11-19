@@ -729,6 +729,8 @@ export default {
   },
   prompts: {
     subtitle: 'Gérez les prompts système et le style de réponse de l’assistant IA',
+    pageSubtitle: 'Les modèles de prompt influencent directement le style de réponse de l’IA',
+    init: 'Initialiser',
     fillToChat: 'Insérer dans la saisie',
     create: 'Créer un modèle',
     addTemplate: 'Nouveau modèle',
@@ -784,7 +786,26 @@ export default {
       restoreFailed: 'Échec du retour à la version',
       seedSuccess: 'Initialisation réussie',
       seedFailed: 'Échec de l’initialisation'
-    }
+    },
+    allCategories: 'Tous',
+
+    searchPlaceholder: 'Rechercher des modèles...',
+    categoryPlaceholder: 'Catégorie',
+    loading: 'Chargement...',
+    changeNote: 'Note de modification',
+    changeNotePlaceholder: 'Décrivez brièvement cette modification (facultatif)',
+    namePlaceholder: 'Nommer ce modèle',
+    contentPlaceholderLong: 'Saisissez le contenu du prompt — cela influence directement les réponses de l’IA...',
+    save: 'Enregistrer',
+    createShort: 'Créer',
+    versionHistory: 'Historique des versions',
+    versionEmpty: 'Aucun historique de versions',
+    currentVersion: 'Version actuelle',
+    rollback: 'Revenir à cette version',
+    rollbackTitle: 'Confirmer le retour',
+    rollbackConfirm: 'Rétablir le modèle en v{version} ? Le contenu actuel sera conservé comme nouvelle version.',
+    rollbackSuccess: 'Rétabli en v{version}',
+    copySuffix: ' (copie)'
   },
   error: {
     '404': {
