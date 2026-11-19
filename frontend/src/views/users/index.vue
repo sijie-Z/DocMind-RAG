@@ -269,10 +269,11 @@ const resetPasswordForm = ref({
   confirmPassword: ''
 })
 
-const roleOptions = [
+// computed：setup 期求值会让切语言后角色下拉停留旧语言（与 formRules 同口径）
+const roleOptions = computed(() => [
   { label: t('users.roleUser'), value: 'user' },
   { label: t('users.roleAdmin'), value: 'admin' }
-]
+])
 
 // T8：组织选项动态拉取（此前硬编码「技术部/产品部」两条，与库内真实组织
 // 毫不相干——真实组织：Default / Tester Org / tester2 的空间 / ...）。
@@ -351,7 +352,7 @@ const pagination = reactive({
 
 // 列定义（绑定真实字段：全名 ← full_name（可空），状态 ← is_active 布尔；
 // 原 phone 列因列表接口不返回该字段已移除）
-const columns: DataTableColumns<User> = [
+const columns = computed<DataTableColumns<User>>(() => [
   { type: 'selection', width: 50 },
   { title: t('profile.username'), key: 'username', width: 120, fixed: 'left' },
   {
@@ -416,7 +417,7 @@ const columns: DataTableColumns<User> = [
       })
     }
   }
-]
+])
 
 // 业务逻辑
 const loadUsers = async () => {
