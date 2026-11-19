@@ -1186,7 +1186,7 @@ export default {
     startNew: 'Commencez une nouvelle discussion pour commencer',
     startNewBtn: 'Nouveau chat',
     untitled: 'Chat sans titre',
-    messages: 'messages',
+    messages: '{count} message | {count} messages',
     loadFailed: 'Échec du chargement de la liste de conversation',
     loadFailedShort: 'Échec du chargement',
     retry: 'Réessayer',
@@ -1194,8 +1194,7 @@ export default {
     continueBtn: 'Continuer',
     newChat: 'Nouveau chat',
     deleteSuccess: 'Supprimé',
-    deleteFailed: 'Suppression échouée',
-
+    deleteFailed: 'Échec de la suppression',
   },
   workflow: {
     description: 'Décomposez les tâches IA complexes en pipelines par étapes avec des métriques unifiées et une gestion d\'état.',

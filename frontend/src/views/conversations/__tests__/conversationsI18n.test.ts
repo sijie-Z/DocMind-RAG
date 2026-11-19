@@ -102,6 +102,21 @@ describe('会话历史页 · i18n', () => {
     expect(text).not.toMatch(/[㐀-䶿一-鿿]/)
   })
 
+  it('单复数：en 下 1 条消息渲染 "1 message"（非 "1 messages"）', async () => {
+    vi.mocked(getConversations).mockResolvedValue({
+      data: {
+        data: {
+          data: [{ id: 'c9', title: 'One', message_count: 1, last_message: 'x', created_at: '2026-10-09T13:49:00', updated_at: '2026-10-09T13:49:00' }],
+          total: 1, page: 1, page_size: 10,
+        },
+      },
+    } as never)
+    const { wrapper } = await mountWith('en')
+    const text = wrapper.text()
+    expect(text).toContain('1 message')
+    expect(text).not.toContain('1 messages')
+  })
+
   it('空态分支同样走 i18n（en 下空态文案与按钮无中文）', async () => {
     vi.mocked(getConversations).mockResolvedValue({
       data: { data: { data: [], total: 0, page: 1, page_size: 10 } },

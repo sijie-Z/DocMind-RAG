@@ -19,7 +19,7 @@
           <n-input v-model:value="searchText" :placeholder="t('conversations.searchPlaceholder')" clearable @clear="loadConversations" @keydown.enter="loadConversations">
             <template #prefix><n-icon><SearchOutline /></n-icon></template>
           </n-input>
-          <n-button @click="loadConversations" :loading="loading">
+          <n-button @click="loadConversations" :loading="loading" :aria-label="t('common.refresh')">
             <template #icon><n-icon><RefreshOutline /></n-icon></template>
           </n-button>
         </div>
@@ -50,7 +50,7 @@
 
         <!-- Error state -->
         <div v-if="!loading && loadError" class="py-16 text-center">
-          <n-result status="error" :title="t('conversations.loadFailedShort')" :description="loadErrorMsg">
+          <n-result status="error" :title="t('conversations.loadFailedShort')" :description="t('conversations.loadFailedShort')">
             <template #footer>
               <n-button type="primary" @click="loadConversations">{{ t('conversations.retry') }}</n-button>
             </template>
@@ -83,14 +83,14 @@
                   <!-- updated_at 可为空串（chat.py:191 `isoformat() if s.updated_at else ""`），
                        dayjs('') → "Invalid Date"——空串/非法值不渲染时间（B31） -->
                   <span v-if="formatDate(item.updated_at)">{{ formatDate(item.updated_at) }}</span>
-                  <span>{{ item.message_count || 0 }} {{ t('conversations.messages') }}</span>
+                  <span>{{ t('conversations.messages', { count: item.message_count || 0 }, item.message_count || 0) }}</span>
                 </div>
               </div>
             </div>
 
             <div class="flex items-center gap-2 conv-actions">
               <n-button size="small" quaternary @click.stop="viewConversation(item)">{{ t('conversations.continueBtn') }}</n-button>
-              <n-button size="small" quaternary type="error" @click.stop="deleteItem(item)">
+              <n-button size="small" quaternary type="error" @click.stop="deleteItem(item)" :aria-label="t('common.delete')">
                 <template #icon><n-icon><TrashOutline /></n-icon></template>
               </n-button>
             </div>
@@ -141,7 +141,6 @@ const dialog = useDialog()
 const router = useRouter()
 const loading = ref(false)
 const loadError = ref(false)
-const loadErrorMsg = ref('')
 const searchText = ref('')
 const conversations = ref<Conversation[]>([])
 
@@ -166,7 +165,6 @@ const loadConversations = async () => {
   } catch (error) {
     message.error(t('conversations.loadFailedShort'))
     loadError.value = true
-    loadErrorMsg.value = t('conversations.loadFailedShort')
   } finally {
     loading.value = false
   }

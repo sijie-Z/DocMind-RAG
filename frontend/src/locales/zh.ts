@@ -1187,7 +1187,7 @@ export default {
     startNew: '开启一个新对话来开始吧',
     startNewBtn: '开始新对话',
     untitled: '未命名会话',
-    messages: '条消息',
+    messages: '{count} 条消息',
     loadFailed: '加载会话列表失败',
     loadFailedShort: '加载失败',
     retry: '重试',
