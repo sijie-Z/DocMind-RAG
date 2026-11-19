@@ -84,6 +84,8 @@ class Orchestrator:
         trace_id = trace_id or uuid.uuid4().hex[:12]
         start_time = time.perf_counter()
         ctx = ExecutionContext(query=query)
+        # 与 PERAgentLoop 同口径：技能/经验按组织隔离
+        ctx.organization_id = getattr(self, "_organization_id", None)
 
         # ── Step 1: Send plan_request → Planner ───────────────────────
         planner_msg = AgentMessage.plan_request(trace_id, query)

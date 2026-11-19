@@ -242,6 +242,10 @@ class ExecutionContext:
     # to_dict / to_checkpoint_dict 都不序列化它）。
     request_id: str | None = None
 
+    # 组织上下文：只服务于「按租户隔离的技能/经验」查找，不进 to_dict()
+    # （replay/SSE 既有键集契约不许动），仅随 checkpoint 快照往返。
+    organization_id: int | None = None
+
     # ── Convenience methods ──
 
     def record_llm_call(
@@ -444,6 +448,7 @@ class ExecutionContext:
             {
                 "v": 1,
                 "current_step_id": self.current_step_id,
+                "organization_id": self.organization_id,
                 # T14：@引用摘要段随快照恢复（键缺失的旧快照 → 读侧默认空串）。
                 "document_context": self.document_context,
                 "artifacts": _normalize_artifact_values(self.artifacts, source="snapshot-write"),
@@ -466,6 +471,8 @@ class ExecutionContext:
         ctx.goal = data.get("goal") or ""
         ctx.plan_summary = data.get("plan_summary") or ""
         ctx.current_step_id = data.get("current_step_id")
+        raw_org = data.get("organization_id")
+        ctx.organization_id = raw_org if type(raw_org) is int else None
         # T14：@引用摘要段的读侧值级闸门（与 partial_output 同口径）——坏形状
         # 降级为空串并留 warning，绝不把坏值带进运行态/下一次快照。
         raw_document_context = data.get("document_context")
