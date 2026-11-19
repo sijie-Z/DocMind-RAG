@@ -1185,8 +1185,15 @@ export default {
     startNew: '新しいチャットを開始して始めましょう',
     startNewBtn: '新しいチャット',
     untitled: '無題のチャット',
-    messages: '件のメッセージ',
-    loadFailed: '対話リストの読み込みに失敗しました'
+    messages: '{count} 件のメッセージ',
+    loadFailed: '対話リストの読み込みに失敗しました',
+    loadFailedShort: '読み込みに失敗しました',
+    retry: '再試行',
+    loading: '読み込み中...',
+    continueBtn: '続ける',
+    newChat: '新しいチャット',
+    deleteSuccess: '削除しました',
+    deleteFailed: '削除に失敗しました',
   },
   workflow: {
     description: '複雑なAIタスクを段階的なパイプラインに分解し、統一されたメトリクスと状態管理で実行品質を監視します。',
