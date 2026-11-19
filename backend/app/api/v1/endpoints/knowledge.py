@@ -185,6 +185,15 @@ async def list_knowledge_bases(
         if search:
             conditions.append(Document.title.contains(search))
 
+        # 文档级 ACL：私有文档对无权者连标题/文件名都不暴露（与详情端点
+        # 返回 404 的口径一致）。超管保留审计可见性。
+        if not current_user.is_superuser:
+            from app.services.document_acl import get_blocked_document_ids
+
+            blocked = await get_blocked_document_ids(db, effective_org_id, current_user.id)
+            if blocked:
+                conditions.append(Document.id.notin_(blocked))
+
         # 2. 查询总数
         total_query = select(func.count(Document.id)).where(*conditions)
         total_result = await db.execute(total_query)
@@ -238,6 +247,12 @@ async def list_knowledge_bases(
                     "status": status_map.get(doc_status, "failed"),
                     "raw_status": raw_status,
                     "is_enabled": bool(getattr(doc, "is_enabled", True)),
+                    # 前端据此渲染私有徽标；枚举与迁移 028 一致存小写 value
+                    "visibility": (
+                        doc.visibility.value
+                        if hasattr(doc.visibility, "value")
+                        else str(getattr(doc, "visibility", "organization"))
+                    ),
                 }
             )
 
