@@ -668,7 +668,7 @@ let ragChart: EChartsType | null = null
 
 const SENSITIVE_ACTIONS = ['delete_user', 'delete_document', 'reset_password', 'update_role', 'delete_organization', 'api_key_revoked']
 
-const auditColumns = [
+const auditColumns = computed(() => [
   {
     title: t('dashboard.time'),
     key: 'created_at',
@@ -705,7 +705,7 @@ const auditColumns = [
     width: 120,
     render: (row: AuditLogEntry) => h('code', { class: 'text-xs text-gray-500' }, row.ip_address || '-')
   }
-]
+])
 
 function highlightSensitiveRow(row: AuditLogEntry) {
   const isSensitive = SENSITIVE_ACTIONS.some(a => row.action?.includes(a))

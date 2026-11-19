@@ -35,7 +35,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, h } from 'vue'
+import { ref, computed, onMounted, h } from 'vue'
 import { useDedupedMessage } from '@/utils/message'
 import { useI18n } from 'vue-i18n'
 import { NTag, NButton, NIcon, } from 'naive-ui'
@@ -105,7 +105,7 @@ const pagination = ref({
   }
 })
 
-const columns = [
+const columns = computed(() => [
   {
     title: t('audit.columns.time'),
     key: 'created_at',
@@ -150,7 +150,7 @@ const columns = [
     width: 130,
     render: (row: AuditLogEntry) => row.ip_address || '-'
   }
-]
+])
 
 const loadLogs = async () => {
   loading.value = true
