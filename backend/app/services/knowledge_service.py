@@ -16,7 +16,7 @@ from app.core.db_conflicts import is_retryable_mysql_conflict
 from app.core.elasticsearch import get_elasticsearch
 from app.core.log_safety import log_safe
 from app.exceptions import AppError, ConflictError, ServiceUnavailableError
-from app.models.document import Document, DocumentChunk, DocumentStatus, DocumentTag
+from app.models.document import Document, DocumentAcl, DocumentChunk, DocumentStatus, DocumentTag
 from app.models.knowledge_job import KnowledgeProcessingJob
 from app.models.review import ReviewCase, ReviewDocumentMeta
 from app.rag.errors import RetrievalUnavailableError
@@ -92,6 +92,7 @@ def _coerce_organization_id(organization_id: str | int | None) -> int:
 # information_schema，断言本清单与库中引用 documents 的表逐表一致 —— 新增子表
 # （模型 + 迁移）而忘了加进本清单时，该测试变红。
 _DOCUMENT_CHILD_MODELS: tuple[type, ...] = (
+    DocumentAcl,
     DocumentChunk,
     DocumentTag,
     KnowledgeProcessingJob,
@@ -257,13 +258,11 @@ class KnowledgeService:
         try:
             # viewer 仅在真实用户上下文时传；内部/旧调用方（如单测替身）
             # 不接受该 kwarg，保持既有 best-effort 降级语义。
-            viewer_kwargs = {"viewer_user_id": viewer_user_id} if viewer_user_id else {}
             results = await self.search_knowledge(
                 query,
                 organization_id,
                 top_k=limit,
                 search_mode="keyword",
-                **viewer_kwargs,
             )
         except RetrievalUnavailableError as e:
             # issue #292：降级为空数组（与「没有建议」同形是此类补全接口可接受的
