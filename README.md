@@ -229,7 +229,7 @@ DocMind/
 │   └── docker-compose.yml           # 基础设施与全量编排
 ├── frontend/
 │   └── src/
-│       ├── views/                   # 页面（24 个页面模块，38 条路由记录 / 33 条具名路由）
+│       ├── views/                   # 页面（25 个页面模块，38 条路由记录 / 33 条具名路由）
 │       ├── components/ · api/ · stores/ · router/ · composables/ · locales/
 └── docs/                            # 架构页 / 使用手册 / 决策记录 / 指标口径
 ```

@@ -230,7 +230,7 @@ DocMind/
 │   └── docker-compose.yml
 ├── frontend/
 │   └── src/
-│       ├── views/                   # pages (24 page modules, 38 route records / 33 named routes)
+│       ├── views/                   # pages (25 page modules, 38 route records / 33 named routes)
 │       ├── components/ · api/ · stores/ · router/ · composables/ · locales/
 └── docs/                            # architecture page / user guide / ADRs / metrics
 ```

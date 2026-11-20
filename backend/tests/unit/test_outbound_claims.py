@@ -294,9 +294,9 @@ def test_readme_module_counts_match_code():
         "routers": 29,
         "services": 34,
         "models": 21,
-        "views": 24,
-        "route_records": 37,
-        "route_names": 32,
+        "views": 25,
+        "route_records": 38,
+        "route_names": 33,
     }, f"代码侧计数已漂移: {counts}；请同步 README 与本测试"
 
     def _api_table_data_rows(rel: str, start: str) -> int:
@@ -350,7 +350,9 @@ def test_readme_module_counts_match_code():
             "20 个模型文件",
             "19 个模块，21 条路由",
             "24 个页面模块，36 条路由记录 / 31 条具名路由",
+            "24 个页面模块，37 条路由记录 / 32 条具名路由",
             "36 条路由记录（31 条具名路由",
+            "37 条路由记录（32 条具名路由",
         ],
     )
     _assert_present(
@@ -361,8 +363,8 @@ def test_readme_module_counts_match_code():
             "29 个文件",
             "34 个服务",
             "21 个模型文件",
-            "24 个页面模块，37 条路由记录 / 32 条具名路由",
-            "37 条路由记录（32 条具名路由",
+            "25 个页面模块，38 条路由记录 / 33 条具名路由",
+            "38 条路由记录（33 条具名路由",
         ],
     )
     _assert_absent(
@@ -404,7 +406,9 @@ def test_readme_module_counts_match_code():
             "20 model files",
             "19 modules, 21 routes",
             "24 page modules, 36 route records / 31 named routes",
+            "24 page modules, 37 route records / 32 named routes",
             "36 route records (31 named routes",
+            "37 route records (32 named routes",
         ],
     )
     _assert_present(
@@ -415,8 +419,8 @@ def test_readme_module_counts_match_code():
             "29 files",
             "33 services",
             "21 model files",
-            "24 page modules, 37 route records / 32 named routes",
-            "37 route records (32 named routes",
+            "25 page modules, 38 route records / 33 named routes",
+            "38 route records (33 named routes",
         ],
     )
 
