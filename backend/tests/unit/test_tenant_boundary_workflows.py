@@ -296,3 +296,54 @@ async def test_execution_detail_isolated_across_orgs_and_owners():
         assert r.status_code == 200, r.text
     finally:
         await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_execution_list_isolated_across_orgs_and_owners():
+    """列表端点级租户/属主隔离（变异守卫：删 _apply_workflow_scope → 红）。"""
+    engine, factory, ids = await _setup()
+    try:
+        await _seed_executions(factory, ids)
+        # org A 普通用户：只看到自己创建工作流的执行 102
+        r = await _call(factory, _user(2, 1, role="user"), "GET", "/api/v1/workflows/executions")
+        assert r.status_code == 200, r.text
+        exec_ids = {item["id"] for item in r.json()["data"]["items"]}
+        assert exec_ids == {102}, exec_ids
+
+        # 跨组织工作流 id：不能借 workflow_id 参数越权查看
+        r = await _call(
+            factory,
+            _user(2, 1, role="user"),
+            "GET",
+            f"/api/v1/workflows/executions?workflow_id={ids['wf_b']}",
+        )
+        assert r.status_code == 200, r.text
+        assert r.json()["data"]["items"] == [], r.text
+        assert r.json()["data"]["total"] == 0
+
+        # 同组织 admin：看到 101/102，不含 org B 的 103
+        r = await _call(factory, _user(1, 1, role="admin"), "GET", "/api/v1/workflows/executions")
+        assert {item["id"] for item in r.json()["data"]["items"]} == {101, 102}
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_execution_list_filters_by_workflow_id():
+    """workflow_id 过滤的端点级守卫（变异：忽略过滤 → 红）。"""
+    engine, factory, ids = await _setup()
+    try:
+        await _seed_executions(factory, ids)
+        r = await _call(
+            factory,
+            _user(1, 1, role="admin"),
+            "GET",
+            f"/api/v1/workflows/executions?workflow_id={ids['wf_a_admin']}",
+        )
+        assert r.status_code == 200, r.text
+        data = r.json()["data"]
+        assert data["total"] == 1
+        assert [item["id"] for item in data["items"]] == [101]
+        assert all(item["workflow_id"] == ids["wf_a_admin"] for item in data["items"])
+    finally:
+        await engine.dispose()

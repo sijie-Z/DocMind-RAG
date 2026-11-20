@@ -153,6 +153,9 @@
                   <template #icon><n-icon><CreateOutline /></n-icon></template>
                   编辑
                 </n-button>
+                <n-button size="small" :aria-label="t('workflow.history.button')" :title="t('workflow.history.button')" @click="openHistory(item.id)">
+                  <template #icon><n-icon><TimeOutline /></n-icon></template>
+                </n-button>
                 <n-button size="small" @click="duplicateWorkflow(item)">
                   <template #icon><n-icon><CopyOutline /></n-icon></template>
                 </n-button>
@@ -162,6 +165,44 @@
         </div>
       </n-spin>
     </div>
+
+    <n-drawer v-model:show="showHistory" :width="560" placement="right">
+      <n-drawer-content :title="t('workflow.history.title')" closable>
+        <n-spin :show="historyLoading">
+          <n-data-table
+            v-if="historyRows.length"
+            :columns="historyColumns"
+            :data="historyRows"
+            :row-key="(row: ExecutionSummary) => row.id"
+            size="small"
+          />
+          <n-empty
+            v-else
+            :description="historyError ? t('workflow.history.loadFailed') : t('workflow.history.empty')"
+          />
+        </n-spin>
+        <p v-if="historyTotal > historyRows.length" class="mt-2 text-xs text-gray-400">
+          {{ t('workflow.history.truncated', { count: historyTotal }) }}
+        </p>
+        <n-descriptions v-if="selectedExecution" bordered :column="1" class="mt-4">
+          <n-descriptions-item :label="t('workflow.history.detailTitle')">
+            <n-timeline>
+              <n-timeline-item
+                v-for="(node, idx) in (selectedExecution.node_results || [])"
+                :key="idx"
+                :type="nodeStatusType(node.status)"
+                :title="node.node_name || node.node_type"
+              >
+                <div class="text-xs text-gray-500" v-if="node.duration != null">
+                  {{ t('workflow.history.duration') }}: {{ node.duration }}ms
+                </div>
+                <div class="text-xs text-red-500" v-if="node.error">{{ node.error }}</div>
+              </n-timeline-item>
+            </n-timeline>
+          </n-descriptions-item>
+        </n-descriptions>
+      </n-drawer-content>
+    </n-drawer>
   </div>
 </template>
 
@@ -169,17 +210,17 @@
 import { ref, computed, onMounted, h } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
-import { NIcon, NButton, NSpin, NTag, NInput, NDropdown, useDialog } from 'naive-ui'
+import { NIcon, NButton, NSpin, NTag, NInput, NDropdown, NDrawer, NDrawerContent, NTimeline, NTimelineItem, NDataTable, NDescriptions, NDescriptionsItem, useDialog } from 'naive-ui'
 import { useDedupedMessage } from '@/utils/message'
 import { getErrorMessage } from '@/utils/apiError'
-import { parseApiDate } from '@/utils/format'
+import { formatDateTime, parseApiDate } from '@/utils/format'
 import {
   AddOutline, CreateOutline, TrashOutline, GitBranchOutline, SearchOutline,
   TimeOutline, GitNetworkOutline, CheckmarkCircleOutline, EllipsisVertical, CopyOutline, ServerOutline,
   HardwareChipOutline, ChatbubbleEllipsesOutline, VolumeHighOutline, EnterOutline, ExitOutline,
   CompassOutline, AppsOutline
 } from '@vicons/ionicons5'
-import { getWorkflows, getWorkflow, deleteWorkflow as deleteWorkflowApi, createWorkflow, type WorkflowConfig } from '@/api/workflow'
+import { getWorkflows, getWorkflow, deleteWorkflow as deleteWorkflowApi, createWorkflow, getExecutions, getExecution, type WorkflowConfig, type ExecutionSummary, type NodeResultItem } from '@/api/workflow'
 import { apiUnwrap } from '@/utils/apiUnwrap'
 import dayjs from 'dayjs'
 
@@ -193,7 +234,7 @@ interface WorkflowItem {
 }
 
 const router = useRouter()
-const { t } = useI18n()
+const { t, locale } = useI18n()
 const dialog = useDialog()
 const message = useDedupedMessage()
 
@@ -202,6 +243,35 @@ const loadError = ref(false)
 const loadErrorMsg = ref('')
 const searchKeyword = ref('')
 const workflows = ref<WorkflowItem[]>([])
+
+// 执行历史（卡片「执行历史」按钮 → drawer）
+const showHistory = ref(false)
+const historyLoading = ref(false)
+const historyError = ref(false)
+const historyRows = ref<ExecutionSummary[]>([])
+const selectedExecution = ref<{
+  node_results?: NodeResultItem[]
+} | null>(null)
+
+const historyTotal = ref(0)
+
+const nodeStatusType = (status: string) =>
+  status === 'failed' ? 'error' : status === 'completed' ? 'success' : 'default'
+
+const historyColumns = [
+  { title: () => t('workflow.history.startedAt'), key: 'started_at',
+    render: (row: ExecutionSummary) => row.started_at ? formatDateTime(row.started_at, locale.value) : '-' },
+  { title: () => t('workflow.history.nodeStatus'), key: 'status',
+    render: (row: ExecutionSummary) => t(`workflow.history.status.${row.status}`) },
+  { title: () => t('workflow.history.duration'), key: 'duration',
+    render: (row: ExecutionSummary) => row.started_at && row.completed_at
+      ? `${Math.round((new Date(row.completed_at).getTime() - new Date(row.started_at).getTime()) / 1000)}s` : '-' },
+  { title: () => t('workflow.history.errorLabel'), key: 'error_message',
+    render: (row: ExecutionSummary) => row.error_message || '-' },
+  { title: () => t('common.actions'), key: 'actions',
+    render: (row: ExecutionSummary) => h(NButton, { size: 'tiny', quaternary: true,
+      onClick: () => openExecutionDetail(row.id) }, { default: () => t('workflow.history.detailTitle') }) },
+]
 
 const filteredWorkflows = computed(() => {
   if (!searchKeyword.value) return workflows.value
@@ -289,6 +359,36 @@ const duplicateWorkflow = async (item: WorkflowItem) => {
     loadWorkflows()
   } catch (error: unknown) {
     message.error(t('workflow.duplicateFailed') + '：' + getErrorMessage(error, t('common.tryAgain')))
+  }
+}
+
+const openHistory = async (workflowId: number) => {
+  showHistory.value = true
+  selectedExecution.value = null
+  historyLoading.value = true
+  historyError.value = false
+  try {
+    const res = await getExecutions({ workflow_id: workflowId, limit: 50 })
+    const data = apiUnwrap<{ items: ExecutionSummary[]; total: number } | null>(res)
+    historyRows.value = data?.items || []
+    historyTotal.value = data?.total || 0
+  } catch (error) {
+    historyError.value = true
+    message.error(t('workflow.history.loadFailed') + '：' + getErrorMessage(error, t('common.tryAgain')))
+    historyRows.value = []
+    historyTotal.value = 0
+  } finally {
+    historyLoading.value = false
+  }
+}
+
+const openExecutionDetail = async (executionId: number) => {
+  try {
+    const res = await getExecution(executionId)
+    const data = apiUnwrap<{ node_results?: NodeResultItem[] } | null>(res)
+    selectedExecution.value = data || null
+  } catch (error) {
+    message.error(t('workflow.history.detailFailed') + '：' + getErrorMessage(error, t('common.tryAgain')))
   }
 }
 

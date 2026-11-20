@@ -1255,6 +1255,27 @@ export default {
     confirmDeleteTitle: '削除の確認',
     confirmDeleteContent: '削除すると復元できません。このワークフローを削除しますか？',
     confirmDeletePositive: '削除',
+    history: {
+      button: '実行履歴',
+      title: '実行履歴',
+      empty: '実行履歴がありません',
+      loadFailed: '実行履歴の読み込みに失敗しました',
+      detailTitle: '実行の詳細',
+      detailFailed: '実行詳細の読み込みに失敗しました',
+      startedAt: '開始時刻',
+      duration: '所要時間',
+      noOutput: '出力なし',
+      truncated: '最新 {count} 件の実行履歴のみ表示しています',
+      errorLabel: 'エラー',
+      status: {
+        pending: '待機中',
+        running: '実行中',
+        completed: '成功',
+        failed: '失敗',
+      },
+      nodeStatus: 'ノードの状態',
+    },
+
     editor: {
       clearConfirmTitle: 'キャンバスをクリア',
       clearConfirmContent: 'クリア後、自動保存はスキップされ、保存済みのバージョンは上書きされません。キャンバスをクリアしますか？',
