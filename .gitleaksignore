@@ -53,3 +53,5 @@ f5fc8fa7fc93c16d921c75bb0a394aa7defa61ff:backend/tests/unit/test_issue_a1_memory
 # 示例值·文档「响应示例」中的假 Token（派聪明AI知识库系统开发文档.md，已不在工作树）
 b0324c14ec457608ad70012a3dc149ccb8ab4daa:派聪明AI知识库系统开发文档.md:generic-api-key:595
 b0324c14ec457608ad70012a3dc149ccb8ab4daa:派聪明AI知识库系统开发文档.md:generic-api-key:596
+# 示例值·分享链接测试夹具（非真实凭据；后续提交已改为运行时拼接）
+0d04121c4c71ffa524697fdf5875bda22ddc69f7:backend/tests/api/test_chat_share_link.py:generic-api-key:275
