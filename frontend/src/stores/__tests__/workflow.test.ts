@@ -220,6 +220,21 @@ describe('useWorkflowStore', () => {
     expect(flowData.edges[0].source).toBe('a')
   })
 
+  it('selectEdge + updateEdge 更新分支 label（条件路由接线）', () => {
+    const store = useWorkflowStore()
+    const edge = makeEdge('e-cond', 'cond', 'out')
+    store.addEdge(edge)
+    store.selectEdge(edge)
+    expect(store.selectedEdge?.id).toBe('e-cond')
+    // 选中边时清空节点选择，属性面板不会同时展示两套表单
+    expect(store.selectedNode).toBeNull()
+
+    store.updateEdge('e-cond', { label: 'translate' })
+    expect(store.edges.find(e => e.id === 'e-cond')?.label).toBe('translate')
+    expect(store.selectedEdge?.label).toBe('translate')
+    expect(store.getFlowData().edges[0].label).toBe('translate')
+  })
+
   it('getFlowData 保留边 label（条件路由键，B12）；不携带后端将剥离的 animated（B13）', () => {
     const store = useWorkflowStore()
     store.setEdges([{ ...makeEdge('e1', 'a', 'b'), label: 'yes' }])
@@ -230,5 +245,21 @@ describe('useWorkflowStore', () => {
     // animated：后端 WorkflowEdge 无该字段（无 extra=allow，保存即剥离），
     // 渲染侧由 VueFlow defaultEdgeOptions 兜底 —— 序列化不再伪装可持久化
     expect('animated' in flowData.edges[0]).toBe(false)
+  })
+})
+
+describe('执行失败状态（SSE error 帧的判别性测试）', () => {
+  it('markExecutionFailed 在已完成节点之后仍写入 failed 结果（executionStatus 据此判失败）', () => {
+    const store = useWorkflowStore()
+    store.startExecution()
+    store.updateNodeExecution({ nodeId: 'n1', nodeType: 'input', status: 'completed' })
+    store.setExecutionComplete(null)
+    // executionStatus = executionResults.some(failed) ? failed : ...
+    expect(store.executionResults.every(r => r.status === 'completed')).toBe(true)
+
+    store.markExecutionFailed('条件分支无匹配目标')
+    expect(store.finalOutput).toBeNull()
+    expect(store.isExecuting).toBe(false)
+    expect(store.executionResults.some(r => r.status === 'failed')).toBe(true)
   })
 })
