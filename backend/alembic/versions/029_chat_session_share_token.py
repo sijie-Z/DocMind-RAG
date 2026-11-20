@@ -11,8 +11,8 @@ import sqlalchemy as sa
 
 from alembic import op
 
-revision = "028_chat_session_share_token"
-down_revision = "027_documents_is_enabled"
+revision = "029_chat_session_share_token"
+down_revision = "028_document_visibility_acl"
 branch_labels = None
 depends_on = None
 

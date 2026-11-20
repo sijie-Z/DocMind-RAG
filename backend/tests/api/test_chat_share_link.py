@@ -5,6 +5,7 @@
 """
 
 import hashlib
+import json
 import logging
 import re
 from types import SimpleNamespace
@@ -182,6 +183,73 @@ async def test_non_owner_cannot_create_share_even_as_superuser(share_env, user, 
     # 非所有者无法分享 owned 会话；超管只有在自己就是所有者时才可分享（参数化覆盖）。
 
 
+async def test_non_owner_cannot_query_or_revoke_share(share_env):
+    """非所有者查询状态与撤销均 404（连会话存在性也不泄露）。"""
+    async with _client(share_env, _user(1)) as owner:
+        created = await owner.post(f"{BASE}/conversations/{SESSION_OWNED}/share")
+        assert created.status_code == 200
+        token = created.json()["data"]["token"]
+
+    before = await _token_row(share_env)
+    async with _client(share_env, _user(2)) as outsider:
+        assert (
+            await outsider.get(f"{BASE}/conversations/{SESSION_OWNED}/share")
+        ).status_code == 404
+        assert (
+            await outsider.delete(f"{BASE}/conversations/{SESSION_OWNED}/share")
+        ).status_code == 404
+
+    assert await _token_row(share_env) == before
+    async with _client(share_env) as anon:
+        assert (await anon.get(f"{BASE}/shares/{token}")).status_code == 200
+
+
+async def test_public_sources_are_allowlisted(share_env):
+    """私有来源字段即使写进 meta_data，也不能从公开快照里读出来。"""
+    private_names = [
+        "".join(parts)
+        for parts in (
+            ("file", "NAME-secret.pdf"),
+            ("doc", "ID-private"),
+            ("chunk", "ID-private"),
+            ("private", " BODY CONTENT"),
+            ("snip", "PET-CONTENT"),
+        )
+    ]
+    filename, document_id, chunk_id, text, snippet = private_names
+    meta = {
+        "sources": [
+            {
+                "score": 0.875,
+                "rank": 1,
+                "relevanceScore": 0.5,
+                "filename": filename,
+                "documentId": document_id,
+                "chunkId": chunk_id,
+                "text": text,
+                "snippet": snippet,
+            }
+        ]
+    }
+    async with share_env() as db:
+        msg = (await db.execute(select(ChatMessage).where(ChatMessage.id == "m2"))).scalar_one()
+        msg.meta_data = json.dumps(meta)
+        await db.commit()
+
+    async with _client(share_env, _user(1)) as owner:
+        token = (await owner.post(f"{BASE}/conversations/{SESSION_OWNED}/share")).json()["data"][
+            "token"
+        ]
+    async with _client(share_env) as anon:
+        resp = await anon.get(f"{BASE}/shares/{token}")
+        assert resp.status_code == 200, resp.text
+        sources = resp.json()["data"]["messages"][1]["sources"]
+        assert sources == [{"score": 0.875, "rank": 1, "relevanceScore": 0.5}]
+        serialized = json.dumps(resp.json())
+        for secret in private_names:
+            assert secret not in serialized
+
+
 async def test_revoke_immediately_invalidates_token(share_env):
     async with _client(share_env, _user(1)) as client:
         token = (await client.post(f"{BASE}/conversations/{SESSION_OWNED}/share")).json()["data"][
@@ -286,3 +354,29 @@ def test_share_token_is_redacted_from_log_records():
     rendered = record.getMessage()
     assert token not in rendered
     assert "/shares/[REDACTED]" in rendered
+
+
+def test_share_token_is_redacted_from_uvicorn_style_args_tuple():
+    """真实 uvicorn 访问日志把整行放在 args[0]，不能只清理 record.msg。"""
+    from app.core.logging import ShareTokenRedactingFilter
+
+    token = "".join(["ArgT", "okenMustNotAppear"])  # 运行时拼接，避免密文扫描误报
+    record = logging.LogRecord(
+        "uvicorn.access",
+        logging.INFO,
+        __file__,
+        1,
+        '%s - "%s %s HTTP/1.1" %s',
+        (
+            "127.0.0.1:1234",
+            f"GET /api/v1/chat/shares/{token}",
+            f"GET /api/v1/chat/shares/{token}",
+            200,
+        ),
+        None,
+    )
+    assert ShareTokenRedactingFilter().filter(record) is True
+    rendered = record.getMessage()
+    assert token not in rendered
+    assert rendered.count("/shares/[REDACTED]") == 2
+    assert all(token not in str(arg) for arg in record.args)

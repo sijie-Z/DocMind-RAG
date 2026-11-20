@@ -141,12 +141,14 @@ class ChatSession(Base):
         String(128), comment="reuse 模式的会话键（payload.session_key）"
     )
 
-    # ɷ½ʽѶȣshare_token ֻԭʼ·عͻȡʱ˵һΡ
-    # ļ¼ SHA-256 ժҪtoken ¼/־
+    # 分享链接：token 原文只在创建/轮换响应中返回一次。
+    # 数据库只保存 SHA-256 摘要，日志与审计记录不落 token 原文。
     share_token_hash: Mapped[str | None] = mapped_column(
-        String(64), index=True, comment="ɷ_token SHA-256 ժҪ"
+        String(64), index=True, comment="分享 token SHA-256 摘要"
     )
-    share_created_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), comment="ɷʱ")
+    share_created_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), comment="分享链接创建时间"
+    )
 
     # 时间戳
     created_at: Mapped[datetime] = mapped_column(

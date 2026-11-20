@@ -504,6 +504,10 @@ async def delete_conversation(
 # 则额外收紧为 session.user_id == current_user.id，超管同样需要是所有者。
 # ============================================================
 
+# 公开分享快照中检索来源的字段白名单：只保留排序信号，不携带任何可定位私有
+# 文档的信息（filename / documentId / chunkId）或正文片段（text / snippet）。
+_PUBLIC_SOURCE_FIELDS = frozenset({"score", "rank", "relevanceScore"})
+
 
 def _share_digest(token: str) -> str:
     """分享 token 的稳定摘要；不记录原文，避免日志/数据库泄露链接。"""
@@ -633,15 +637,20 @@ async def get_shared_conversation(
             "content": msg.content,
             "messageType": msg.message_type.value,
             "createdAt": msg.created_at.isoformat() if msg.created_at else "",
-            # 只带已是消息自身的检索来源；不带 feedback / files / user_id，
-            # 避免把私有的文档附件名或评价信息暴露给链接持有者。
+            # 只带已是消息自身的检索来源，且只保留无隐私的排序信号：
+            # 生产者 meta_data.sources 含 filename / documentId / chunkId 与正文
+            # 片段，必须按字段 allowlist 过滤后再给链接持有者。
             "sources": [],
         }
         if msg.meta_data and msg.message_type == MessageType.ASSISTANT:
             try:
                 meta = json.loads(msg.meta_data)
                 if isinstance(meta, dict) and isinstance(meta.get("sources"), list):
-                    item["sources"] = meta["sources"]
+                    item["sources"] = [
+                        {k: v for k, v in source.items() if k in _PUBLIC_SOURCE_FIELDS}
+                        for source in meta["sources"]
+                        if isinstance(source, dict)
+                    ]
             except (TypeError, ValueError):
                 pass
         snapshot.append(item)
