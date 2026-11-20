@@ -1311,6 +1311,11 @@ export default {
   agent: {
     sessionSelectorLabel: 'Agent セッションを選択',
     stepResult: 'ステップ結果',
+    step: {
+      tokens: 'トークン',
+      latency: '所要時間',
+      unavailable: 'データなし',
+    },
     newSessionOption: '+ 新規セッション',
     untitledSession: '無題',
     backToChat: 'チャットに戻る',

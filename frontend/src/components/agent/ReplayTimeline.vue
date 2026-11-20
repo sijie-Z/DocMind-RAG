@@ -5,8 +5,8 @@
       <code class="replay-task-id">{{ timeline?.task_id || taskId }}</code>
       <span v-if="timeline" class="replay-chips">
         <span class="replay-chip">{{ timeline.steps_completed }}/{{ timeline.steps.length }} {{ t('agentReplay.steps') }}</span>
-        <span class="replay-chip">{{ fmtMs(timeline.duration_ms) }}</span>
-        <span class="replay-chip">{{ timeline.total_tokens }} {{ t('agentReplay.tokens') }}</span>
+        <span class="replay-chip">{{ stepMetric(timeline.duration_ms, (ms) => fmtMs(ms)) }}</span>
+        <span class="replay-chip">{{ stepMetric(timeline.total_tokens, (n) => `${n} ${t('agentReplay.tokens')}`) }}</span>
       </span>
       <button class="replay-close" :title="t('agentReplay.close')" @click="emit('close')">✕</button>
     </div>
@@ -46,8 +46,14 @@
               </div>
               <div class="step-meta">
                 <span class="step-status-text">{{ statusLabel(step.status) }}</span>
-                <span v-if="step.duration_ms" class="step-metric">{{ fmtMs(step.duration_ms) }}</span>
-                <span v-if="step.tokens_used" class="step-metric">{{ step.tokens_used }} {{ t('agentReplay.tokens') }}</span>
+                <span class="step-metric" :title="metricTitle(step.duration_ms, t('agent.step.latency'))">
+                  <span class="metric-label">{{ t('agent.step.latency') }}</span>
+                  <span class="metric-value">{{ stepMetric(step.duration_ms, (ms) => fmtMs(ms)) }}</span>
+                </span>
+                <span class="step-metric" :title="metricTitle(step.tokens_used, t('agent.step.tokens'))">
+                  <span class="metric-label">{{ t('agent.step.tokens') }}</span>
+                  <span class="metric-value">{{ stepMetric(step.tokens_used, (n) => String(n)) }}</span>
+                </span>
               </div>
               <div v-if="step.result_summary" class="step-result">{{ step.result_summary }}</div>
               <div v-if="step.error" class="step-error">{{ step.error }}</div>
@@ -97,8 +103,20 @@ const emit = defineEmits<{ close: [] }>()
 
 const { t } = useI18n()
 
+/** 未知（undefined/null/NaN/非数/后端占位 0）一律显示 —，绝不伪造 0 或空串。 */
+function isKnownMetric(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value) && value > 0
+}
+
+function stepMetric(value: unknown, format: (n: number) => string): string {
+  return isKnownMetric(value) ? format(value) : `— (${t('agent.step.unavailable')})`
+}
+
+function metricTitle(value: unknown, label: string): string {
+  return isKnownMetric(value) ? label : `${label} · ${t('agent.step.unavailable')}`
+}
+
 function fmtMs(ms: number): string {
-  if (!ms) return ''
   if (ms < 1000) return `${Math.round(ms)}ms`
   return `${(ms / 1000).toFixed(1)}s`
 }
@@ -301,6 +319,21 @@ function statusLabel(status: string): string {
 
 .step-status-text {
   font-weight: 600;
+}
+
+.step-metric {
+  display: inline-flex;
+  gap: 4px;
+  white-space: nowrap;
+}
+
+.metric-label {
+  /* 标签是信息文字：继承 slate-500 已是白底 ≥4.5:1 的下限，禁止再降透明度 */
+  color: inherit;
+}
+
+.metric-value {
+  font-variant-numeric: tabular-nums;
 }
 
 .step-failed .step-status-text,

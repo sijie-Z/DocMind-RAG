@@ -1312,6 +1312,11 @@ export default {
   agent: {
     sessionSelectorLabel: 'Sélectionner une session Agent',
     stepResult: 'Résultat de l’étape',
+    step: {
+      tokens: 'Jetons',
+      latency: 'Durée',
+      unavailable: 'Indisponible',
+    },
     newSessionOption: '+ Nouvelle session',
     untitledSession: 'Sans titre',
     backToChat: 'Retour au chat',
