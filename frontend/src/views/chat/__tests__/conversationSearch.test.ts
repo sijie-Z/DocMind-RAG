@@ -173,6 +173,36 @@ describe('useChatSessions · 会话标题搜索请求契约', () => {
 
     expect(sessions.conversations.value.map((c) => c.title)).toEqual(['最新结果'])
   })
+
+  it('从后续页发起新查询时把 currentPage 重置为 1（M3 判别）', async () => {
+    vi.mocked(getConversations).mockResolvedValue(pageResponse(['合同审查']) as never)
+    await mountComposable()
+
+    // 制造「当前在第 2 页」的真实状态：hasMore 由首屏 50 条数据推出。
+    const fullPage = Array.from({ length: 50 }, (_, i) => `会话${i}`)
+    vi.mocked(getConversations).mockResolvedValueOnce(pageResponse(fullPage) as never)
+    await sessions.fetchConversations()
+    await sessions.loadMore()
+    expect(sessions.currentPage.value).toBe(2)
+
+    // 查询变更在防抖到期时把 currentPage 重置回 1（变异：去掉重置 → 这里红）。
+    sessions.setConversationSearch('合同')
+    await vi.advanceTimersByTimeAsync(280)
+    await flushPromises()
+    expect(sessions.currentPage.value).toBe(1)
+    expect(getConversations).toHaveBeenLastCalledWith({ page: 1, page_size: 50, search: '合同' })
+  })
+
+  it('查询词 trim 后存储，UI 显示值与请求 search 保持一致', async () => {
+    vi.mocked(getConversations).mockResolvedValue(pageResponse(['合同审查']) as never)
+    await mountComposable()
+
+    sessions.setConversationSearch('  合同  ')
+    expect(sessions.conversationSearch.value).toBe('合同')
+    await vi.advanceTimersByTimeAsync(280)
+    await flushPromises()
+    expect(getConversations).toHaveBeenLastCalledWith({ page: 1, page_size: 50, search: '合同' })
+  })
 })
 
 // n-input 替身：把 Naive UI 的 v-model / clear 事件落成原生 DOM 事件，便于断言侧栏接线。

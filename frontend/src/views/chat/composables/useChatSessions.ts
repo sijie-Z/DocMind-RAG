@@ -90,7 +90,8 @@ export function useChatSessions(getGeneration: () => string = () => '') {
       clearTimeout(debounceTimer)
       debounceTimer = null
     }
-    conversationSearch.value = value
+    // UI 显示值与请求值统一用 trim 后的词，避免空白词在侧栏仍显示清除按钮。
+    conversationSearch.value = next
     if (options.immediate) {
       debouncedSearch.value = next
       currentPage.value = 1
