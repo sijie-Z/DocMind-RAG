@@ -294,8 +294,14 @@ class KnowledgeSearchNodeExecutor(NodeExecutor):
             raise ValueError(
                 "知识库检索缺少组织上下文（organization_id=None），已拒绝执行检索（issue #268）"
             )
+        # 文档级 ACL：workflow 知识检索必须带发起用户，否则私有文档可被
+        # 同组织任意工作流读取（与 chat/agent 检索同口径）
+        viewer_id = getattr(self, "user_id", None)
+        retrieval_kwargs: dict[str, object] = {}
+        if viewer_id:
+            retrieval_kwargs["viewer_user_id"] = viewer_id
         docs, _ = await rag_service.search_knowledge_base(
-            query, organization_id=organization_id, top_k=top_k
+            query, organization_id=organization_id, top_k=top_k, **retrieval_kwargs
         )
 
         # 过滤低相关性结果

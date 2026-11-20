@@ -33,6 +33,7 @@ class RagServiceFacade:
         document_ids: list[str] | None = None,
         search_mode: str | None = None,
         debug: bool = False,
+        viewer_user_id: int | None = None,
     ) -> tuple[list[dict[str, Any]], dict | None]:
         # issue #225 决策 7A：search_mode 此前收下即丢弃（门面静默吞参）——
         # 现在如实透传给 pipeline；None = 自动路由（行为不变）。
@@ -43,6 +44,7 @@ class RagServiceFacade:
             document_ids,
             debug=debug,
             search_mode=search_mode,
+            viewer_user_id=viewer_user_id,
         )
 
     def report_grounded(self, has_sources: bool) -> None:
