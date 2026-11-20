@@ -16,7 +16,7 @@ from app.core.db_conflicts import is_retryable_mysql_conflict
 from app.core.elasticsearch import get_elasticsearch
 from app.core.log_safety import log_safe
 from app.exceptions import AppError, ConflictError, ServiceUnavailableError
-from app.models.document import Document, DocumentChunk, DocumentStatus, DocumentTag
+from app.models.document import Document, DocumentAcl, DocumentChunk, DocumentStatus, DocumentTag
 from app.models.knowledge_job import KnowledgeProcessingJob
 from app.models.review import ReviewCase, ReviewDocumentMeta
 from app.rag.errors import RetrievalUnavailableError
@@ -92,6 +92,7 @@ def _coerce_organization_id(organization_id: str | int | None) -> int:
 # information_schema，断言本清单与库中引用 documents 的表逐表一致 —— 新增子表
 # （模型 + 迁移）而忘了加进本清单时，该测试变红。
 _DOCUMENT_CHILD_MODELS: tuple[type, ...] = (
+    DocumentAcl,
     DocumentChunk,
     DocumentTag,
     KnowledgeProcessingJob,
@@ -117,7 +118,12 @@ class KnowledgeService:
         return await processor.process(document_id)
 
     async def search_knowledge(
-        self, query: str, organization_id: str | int, top_k: int = 5, search_mode: str | None = None
+        self,
+        query: str,
+        organization_id: str | int,
+        top_k: int = 5,
+        search_mode: str | None = None,
+        viewer_user_id: int | None = None,
     ) -> list[dict[str, Any]]:
         """搜索知识库（兼容入口：只要结果，不要诊断信息）。"""
         results, _ = await self.search_knowledge_with_meta(
@@ -127,6 +133,7 @@ class KnowledgeService:
             search_mode=search_mode,
             document_ids=None,
             debug=False,
+            viewer_user_id=viewer_user_id,
         )
         return results
 
@@ -138,6 +145,7 @@ class KnowledgeService:
         search_mode: str | None = None,
         document_ids: list[str] | None = None,
         debug: bool = False,
+        viewer_user_id: int | None = None,
     ) -> tuple[list[dict[str, Any]], dict[str, Any] | None]:
         """
         搜索知识库 - 统一使用 RagService 以获得更强能力
@@ -171,6 +179,7 @@ class KnowledgeService:
                 document_ids=document_ids,
                 search_mode=search_mode,
                 debug=debug,
+                viewer_user_id=viewer_user_id,
             )
 
             # 安全修复：移除检索结果全文日志（原 DEBUG 日志把文档内容写入日志文件，
@@ -245,12 +254,22 @@ class KnowledgeService:
             return [], None
 
     async def get_search_suggestions(
-        self, query: str, organization_id: str, limit: int = 5
+        self,
+        query: str,
+        organization_id: str,
+        limit: int = 5,
+        viewer_user_id: int | None = None,
     ) -> list[str]:
         """获取搜索建议（best-effort：自动补全不应把检索故障扩大成 5xx）。"""
         try:
+            # viewer 仅在真实用户上下文时传；内部/旧调用方（如单测替身）
+            # 不接受该 kwarg，保持既有 best-effort 降级语义。
             results = await self.search_knowledge(
-                query, organization_id, top_k=limit, search_mode="keyword"
+                query,
+                organization_id,
+                top_k=limit,
+                search_mode="keyword",
+                viewer_user_id=viewer_user_id,
             )
         except RetrievalUnavailableError as e:
             # issue #292：降级为空数组（与「没有建议」同形是此类补全接口可接受的

@@ -29,6 +29,8 @@ export interface KnowledgeBase {
   // 与详情端点 documents.py:296-303 一致）；'completed' 为收敛前列表旧词
   // （在途分支/旧缓存仍可能到达）—— 两词表均受支持（docDisplay 兼容层统一映射）
   status: 'pending' | 'uploaded' | 'parsing' | 'parsed' | 'completed' | 'indexed' | 'failed'
+  // 文档级可见性：private 仅上传者与授权用户可见
+  visibility?: 'organization' | 'private'
   // 文档级启停：false 时该文档不参与检索召回（内容与索引保留）
   is_enabled?: boolean
 }
@@ -246,6 +248,20 @@ export const setKnowledgeEnabled = async (
     { enabled },
     options?.silent ? SILENT_HEADERS : undefined
   )
+}
+
+/** 私有文档授权名单（全量替换语义：user_ids 即最终名单）。 */
+export const getDocumentAuthorizedUsers = async (
+  documentId: string
+): Promise<AxiosResponse<ApiResponse<{ document_id: string; users: Array<{ id: number; username: string }> }>>> => {
+  return request.get(`/documents/${documentId}/authorized-users`)
+}
+
+export const setDocumentAuthorizedUsers = async (
+  documentId: string,
+  userIds: number[]
+): Promise<AxiosResponse<ApiResponse<{ document_id: string; users: Array<{ id: number; username: string }> }>>> => {
+  return request.put(`/documents/${documentId}/authorized-users`, { user_ids: userIds })
 }
 
 export interface GraphNode {

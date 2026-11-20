@@ -66,6 +66,53 @@ def merge_lists(left: list, right: list) -> list:
     return left + right
 
 
+def resolve_conditional_target(
+    targets: list[dict], state: WorkflowState, source_node_type: str | None = None
+) -> str:
+    """决定多目标条件分支的下一节点（fail-closed，不静默走第一条边）。
+
+    ``route_result`` 只属于 RouterNodeExecutor，且会残留在共享 context 中：
+    下游 ConditionNodeExecutor 必须只看本次 ``condition_result``，否则
+    Router 未命中时的 ``route_result="default"`` 会抢走 Condition 的分支。
+    因此只有 source_node_type="router" 时才考虑 route_result。
+
+    匹配优先级：
+    1. router 节点：route_result 按 edge.target / edge.label 命中；
+    2. condition 节点：condition_result 按 edge.label 命中；
+    3. 存在 ``label="default"`` 的边时走默认分支；
+    4. 都不匹配 → 抛错（执行记录标失败），不再静默选第一条边。
+
+    label 为 None 的边只参与 target 精确匹配，绝不调用 ``.lower()``。
+    """
+    context = state.get("context", {}) or {}
+    values: list[str] = []
+    if source_node_type == "router":
+        route = context.get("route_result")
+        # Router 未命中关键词时的 "default" 哨兵不等于任何显式分支标签
+        if route and str(route) != "default":
+            values.append(str(route))
+    else:
+        condition = context.get("condition_result")
+        if condition:
+            values.append(str(condition))
+
+    for value in values:
+        for edge in targets:
+            if str(value).lower() == str(edge.get("target") or "").lower():
+                return edge["target"]
+        for edge in targets:
+            label = edge.get("label")
+            if isinstance(label, str) and label.lower() == value.lower():
+                return edge["target"]
+
+    for edge in targets:
+        label = edge.get("label")
+        if isinstance(label, str) and label.lower() == "default":
+            return edge["target"]
+
+    raise ValueError("条件分支无匹配目标：请为分支连线设置 label 或 default 边")
+
+
 def _to_jsonable(value: Any) -> Any:
     """把值递归规整为可 JSON 化形态（issue #281）。
 
@@ -294,8 +341,14 @@ class KnowledgeSearchNodeExecutor(NodeExecutor):
             raise ValueError(
                 "知识库检索缺少组织上下文（organization_id=None），已拒绝执行检索（issue #268）"
             )
+        # 文档级 ACL：workflow 知识检索必须带发起用户，否则私有文档可被
+        # 同组织任意工作流读取（与 chat/agent 检索同口径）
+        viewer_id = getattr(self, "user_id", None)
+        retrieval_kwargs: dict[str, object] = {}
+        if viewer_id:
+            retrieval_kwargs["viewer_user_id"] = viewer_id
         docs, _ = await rag_service.search_knowledge_base(
-            query, organization_id=organization_id, top_k=top_k
+            query, organization_id=organization_id, top_k=top_k, **retrieval_kwargs
         )
 
         # 过滤低相关性结果
@@ -1030,28 +1083,10 @@ class WorkflowEngine:
             elif len(targets) > 1:
                 # 多目标：条件分支
                 def make_router(src: str, tgts: list[dict]):
+                    source_type = self.nodes.get(src).type if src in self.nodes else None
+
                     async def router(state: WorkflowState) -> str:
-                        condition_result = state.get("context", {}).get(
-                            "condition_result", "default"
-                        )
-                        route_result = state.get("context", {}).get("route_result", "default")
-
-                        # 优先使用路由结果
-                        if route_result != "default":
-                            for edge in tgts:
-                                if edge.get("label", "").lower() == route_result.lower():
-                                    return edge["target"]
-
-                        # 使用条件结果
-                        for edge in tgts:
-                            if (
-                                edge.get("label")
-                                and edge["label"].lower() == condition_result.lower()
-                            ):
-                                return edge["target"]
-
-                        # 默认返回第一个目标
-                        return tgts[0]["target"]
+                        return resolve_conditional_target(tgts, state, source_type)
 
                     return router
 
