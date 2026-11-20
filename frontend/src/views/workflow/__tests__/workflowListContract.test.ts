@@ -24,10 +24,12 @@ vi.mock('@/api/workflow', () => ({
   getWorkflow: vi.fn(),
   createWorkflow: vi.fn(),
   deleteWorkflow: vi.fn(),
+  getExecutions: vi.fn(),
+  getExecution: vi.fn(),
 }))
 
 import WorkflowList from '../index.vue'
-import { getWorkflows, getWorkflow, createWorkflow } from '@/api/workflow'
+import { getWorkflows, getWorkflow, createWorkflow, getExecutions, getExecution } from '@/api/workflow'
 
 // T9：列表页主标题改引菜单键（视图接入 useI18n），挂载基座同步补 i18n 插件（空词条即可）。
 const i18n = createI18n({
@@ -109,5 +111,90 @@ describe('workflow 列表页 · flow_data 契约（B7）', () => {
       description: '描述',
       flow_data: DETAIL.flow_data,
     }, { silent: true })
+  })
+})
+
+
+const EXECUTION = {
+  id: 99, workflow_id: 3, status: 'completed', error_message: null,
+  started_at: '2026-10-10T04:44:58', completed_at: '2026-10-10T04:45:08',
+  created_at: '2026-10-10T04:44:58',
+}
+
+describe('workflow 列表页 · 执行历史入口', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    vi.mocked(getWorkflows).mockResolvedValue({
+      data: { data: { items: [LIST_ITEM], total: 1 } },
+    } as never)
+    vi.mocked(getExecutions).mockResolvedValue({
+      data: { data: { items: [EXECUTION], total: 1 } },
+    } as never)
+    vi.mocked(getExecution).mockResolvedValue({
+      data: { data: { ...EXECUTION, node_results: [{ node_id: 'n1', node_type: 'llm', status: 'completed', duration: 120 }] } },
+    } as never)
+  })
+
+  it('点卡片「执行历史」→ 按该工作流 id 拉列表，不乱传 organization_id', async () => {
+    const wrapper = await mountList()
+    expect(getExecutions).not.toHaveBeenCalled()
+    const btn = wrapper.find('button[aria-label="workflow.history.button"]')
+    expect(btn.exists(), '执行历史按钮应存在').toBe(true)
+    await btn.trigger('click')
+    await flushPromises()
+    expect(getExecutions).toHaveBeenCalledWith({ workflow_id: 3, limit: 50 })
+    const vm = wrapper.findComponent(WorkflowList).vm as unknown as {
+      historyRows: typeof EXECUTION[]
+      showHistory: boolean
+    }
+    expect(vm.showHistory).toBe(true)
+    expect(vm.historyRows).toHaveLength(1)
+  })
+
+  it('详情调用 getExecution 并把 node_results 落到 selectedExecution', async () => {
+    const wrapper = await mountList()
+    const vm = wrapper.findComponent(WorkflowList).vm as unknown as {
+      openExecutionDetail: (id: number) => Promise<void>
+      selectedExecution: { node_results?: Array<{ duration?: number }> } | null
+    }
+    await vm.openExecutionDetail(99)
+    expect(getExecution).toHaveBeenCalledWith(99)
+    expect(vm.selectedExecution?.node_results?.[0]?.duration).toBe(120)
+  })
+})
+
+
+describe('workflow 执行历史 · 错误态与截断提示', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    vi.mocked(getWorkflows).mockResolvedValue({
+      data: { data: { items: [LIST_ITEM], total: 1 } },
+    } as never)
+  })
+
+  it('加载失败不伪装成空态：historyError=true 且显示加载失败文案', async () => {
+    vi.mocked(getExecutions).mockRejectedValue(new Error('network down'))
+    const wrapper = await mountList()
+    const vm = wrapper.findComponent(WorkflowList).vm as unknown as {
+      openHistory: (id: number) => Promise<void>
+      historyError: boolean
+    }
+    await vm.openHistory(3)
+    expect(vm.historyError).toBe(true)
+    expect(document.body.textContent).toContain('workflow.history.loadFailed')
+  })
+
+  it('total 大于已展示条数时显示截断提示', async () => {
+    vi.mocked(getExecutions).mockResolvedValue({
+      data: { data: { items: [EXECUTION], total: 51 } },
+    } as never)
+    const wrapper = await mountList()
+    const vm = wrapper.findComponent(WorkflowList).vm as unknown as {
+      openHistory: (id: number) => Promise<void>
+      historyTotal: number
+    }
+    await vm.openHistory(3)
+    expect(vm.historyTotal).toBe(51)
+    expect(document.body.textContent).toContain('workflow.history.truncated')
   })
 })

@@ -1297,6 +1297,27 @@ export default {
     confirmDeleteTitle: '确认删除',
     confirmDeleteContent: '删除后无法恢复，确定要删除此工作流吗？',
     confirmDeletePositive: '删除',
+    history: {
+      button: '执行历史',
+      title: '执行历史',
+      empty: '暂无执行记录',
+      loadFailed: '加载执行记录失败',
+      detailTitle: '执行详情',
+      detailFailed: '加载执行详情失败',
+      startedAt: '开始时间',
+      duration: '耗时',
+      noOutput: '无输出',
+      truncated: '仅显示最近 {count} 条执行记录',
+      errorLabel: '错误',
+      status: {
+        pending: '等待中',
+        running: '执行中',
+        completed: '成功',
+        failed: '失败',
+      },
+      nodeStatus: '节点状态',
+    },
+
     editor: {
       clearConfirmTitle: '清空画布',
       clearConfirmContent: '清空后自动保存将被跳过，已保存版本不会被覆盖。确定要清空画布吗？',
