@@ -8,7 +8,13 @@
 
 from __future__ import annotations
 
-from app.services.review_analysis_service import Clause, detect_added_clauses
+from types import SimpleNamespace
+
+from app.services.review_analysis_service import (
+    Clause,
+    _covered_terms,
+    detect_added_clauses,
+)
 
 
 def _clause(idx: int, text: str) -> Clause:
@@ -204,6 +210,109 @@ class TestExclusionGranularity:
         ]
 
         assert detect_added_clauses(base, revised, exclude_refs={("c1", None)}) == []
+
+
+class TestUnnumberedChunkCoveredByItem:
+    """无编号文档：清单项已命中的 chunk 里，新增的其它义务仍要可见。
+
+    现场（2026-11-20）：无编号文档没有条款号可用，`_covered_refs` 退回
+    `(chunk_id, None)` 整块排除。于是「这个 chunk 里已经识别到验收/付款义务」
+    会把**同 chunk 里新增的违约金条款**一起吞掉 —— 而白纸黑字多出一条不利条款，
+    正是核验最该报出来的事。整块排除只是"拿不到更细依据"时的保底，不该是常态。
+    """
+
+    COVERED = "甲方应在验收合格后三十日内支付货款。"
+    ADDED = "乙方逾期交付的，应按合同总金额的百分之五支付违约金。"
+    TERMS = ("验收", "发票")
+
+    def test_new_obligation_in_covered_unnumbered_chunk_is_reported(self) -> None:
+        base = [_anon_clause(1, self.COVERED)]
+        revised = [_anon_clause(1, self.COVERED + self.ADDED)]
+
+        added = detect_added_clauses(
+            base,
+            revised,
+            exclude_refs={("a1", None)},
+            exclude_terms_by_chunk={"a1": self.TERMS},
+        )
+
+        texts = " ".join(c.text for c in added)
+        assert "违约金" in texts, (
+            f"无编号 chunk 里的新增义务被整块排除吞掉: {[c.text for c in added]}"
+        )
+        assert "验收合格" not in texts, f"已识别的义务不应再报为新增: {texts}"
+
+    def test_without_covered_terms_whole_chunk_exclusion_still_applies(self) -> None:
+        base = [_anon_clause(1, self.COVERED)]
+        revised = [_anon_clause(1, self.COVERED + self.ADDED)]
+
+        # 拿不到命中词 → 退回整块排除（保守：宁可漏，也不做没有依据的重复报）
+        assert detect_added_clauses(base, revised, exclude_refs={("a1", None)}) == []
+
+    def test_punctuation_split_in_covered_unnumbered_chunk_is_not_added(self) -> None:
+        # 同一句只改标点（，→。）：拆出的两段都是 base 原文子串，不是新增。
+        # 没有子串守卫时，两段相似度都会掉到阈值以下 → 被误报成 2 条新增。
+        base = [
+            _anon_clause(
+                1,
+                "乙方应当对本合同项下全部商业秘密承担保密义务，"
+                "保密期限为五年，期满后仍应继续承担保密义务。",
+            )
+        ]
+        revised = [
+            _anon_clause(
+                1,
+                "乙方应当对本合同项下全部商业秘密承担保密义务。"
+                "保密期限为五年，期满后仍应继续承担保密义务。",
+            )
+        ]
+
+        added = detect_added_clauses(
+            base,
+            revised,
+            exclude_refs={("a1", None)},
+            exclude_terms_by_chunk={"a1": self.TERMS},
+        )
+
+        assert added == [], f"仅改标点不应报新增: {[c.text for c in added]}"
+
+
+class TestCoveredTerms:
+    """`_covered_terms` 只收集「无条款号」位置的命中词。
+
+    有条号时行级排除已足够，词表不该被误用（否则会把同块里有条号的新增也按词过滤掉）。
+    """
+
+    @staticmethod
+    def _item(facts):
+        return SimpleNamespace(facts=facts)
+
+    def test_collects_terms_only_for_unnumbered_hits(self) -> None:
+        items = [
+            self._item({"revised": {"status": "identified", "chunk_id": "a1", "terms": ["验收"]}}),
+            # 有条号 → 行级排除负责，不进词表
+            self._item(
+                {
+                    "revised": {
+                        "status": "identified",
+                        "chunk_id": "c9",
+                        "clause_no": [9],
+                        "terms": ["保密"],
+                    }
+                }
+            ),
+        ]
+
+        assert _covered_terms(items) == {"a1": ("验收",)}
+
+    def test_ignores_items_without_chunk_or_terms(self) -> None:
+        items = [
+            self._item({"revised": {"status": "not_found"}}),
+            self._item({"revised": {"status": "identified", "chunk_id": "a1"}}),
+            self._item({"revised": {"status": "identified", "chunk_id": "a2", "terms": []}}),
+        ]
+
+        assert _covered_terms(items) == {}
 
 
 LONG_BASE = (

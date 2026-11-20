@@ -2014,6 +2014,29 @@ def _covered_refs(items: list[ReviewItem]) -> set[tuple[str, int | None]]:
     return refs
 
 
+def _covered_terms(items: list[ReviewItem]) -> dict[str, tuple[str, ...]]:
+    """已识别项在「没有条款号」的 chunk 里命中的词 —— 供句子级排除用（issue #748）。
+
+    只收集**无条款号**的位置：有条号时 `_covered_refs` 已能精确到行，不需要词表。
+    专用抽取器（payment_term 等）不一定给 `terms`；缺词的结果是退回整块排除，
+    与修复前一致（保守方向，不会因此多报）。
+    """
+    terms: dict[str, set[str]] = {}
+    for item in items:
+        for side_facts in (item.facts or {}).values():
+            if not isinstance(side_facts, dict):
+                continue
+            chunk_id = side_facts.get("chunk_id")
+            if not chunk_id:
+                continue
+            if [n for n in (side_facts.get("clause_no") or []) if isinstance(n, int)]:
+                continue
+            hits = [t for t in (side_facts.get("terms") or []) if isinstance(t, str) and t]
+            if hits:
+                terms.setdefault(chunk_id, set()).update(hits)
+    return {chunk_id: tuple(sorted(words)) for chunk_id, words in terms.items()}
+
+
 def _fresh_sentences_in_existing_clause(
     segment: Clause,
     base_numbers: set[int],
@@ -2050,6 +2073,7 @@ def detect_added_clauses(
     limit: int = ADDED_MAX_ITEMS,
     exclude_chunk_ids: set[str] | None = None,
     exclude_refs: set[tuple[str, int | None]] | None = None,
+    exclude_terms_by_chunk: dict[str, tuple[str, ...]] | None = None,
 ) -> list[Clause]:
     """找出「revised 有、base 无」的条款（清单外的真正新增）。
 
@@ -2057,6 +2081,12 @@ def detect_added_clauses(
     - 归一化文本在 base 里出现过 → 不是新增（只是排版差异）；
     - 该片段的条号在 base 里已存在 → 属于「修改既有条款」，交给清单抽取器，不重复报；
     - 太短（< ADDED_MIN_CHARS）或重复文本跳过；最多 limit 条。
+
+    ``exclude_terms_by_chunk``：无编号文档没有条款号可用来做行级排除，
+    ``exclude_refs={ (chunk_id, None) }`` 只能整块排除 —— 于是「该块里已识别到验收/付款义务」
+    会把同块里新增的违约金条款一起吞掉。传入该项在该块命中的词后，排除下沉到**句子级**：
+    只有含命中词的句子算已识别，其余句子仍参与新增检测（issue #748）。
+    拿不到命中词时退回整块排除（保守：宁可漏，也不做没有依据的重复报）。
 
     为什么需要：核验原先只跑固定 4 项清单（见 EXTRACTORS），清单之外的**新增条款**
     （例如 V2 多了「违约金」）完全不会出现在结果里 —— 而多出一条不利条款正是合同核验
@@ -2090,22 +2120,32 @@ def detect_added_clauses(
     revised_segments = [seg for clause in revised for seg in _split_clause_segments(clause)]
     excluded = exclude_chunk_ids or set()
     # 条款行级排除：`(chunk_id, clause_no)` 精确排除已识别条款；
-    # `(chunk_id, None)` 表示该块无条款号可用，退回整块排除（issue #711）。
+    # `(chunk_id, None)` 表示该块无条款号可用（无编号文档）—— 有命中词时下沉到
+    # 句子级排除（见下），拿不到命中词才退回整块排除（issue #711 / #748）。
     excluded_refs = exclude_refs or set()
+    covered_terms = exclude_terms_by_chunk or {}
 
-    def _is_excluded(segment: Clause) -> bool:
+    def _is_line_excluded(segment: Clause) -> bool:
         if segment.chunk_id in excluded:
             return True
-        if (segment.chunk_id, None) in excluded_refs:
-            return True
         return any((segment.chunk_id, number) in excluded_refs for number in segment.clause_no)
+
+    # base 全文：句子若**原样**出现在 base 任意位置，就不是新增（标点拆分守卫）。
+    # 只改标点（，→。）会把一句拆成两段，两段都是 base 原文的子串；拆短后相似度会掉到
+    # 0.75 以下，单靠 `_new_sentences` 的阈值拦不住。
+    base_corpus = "".join(seg.text for seg in base_segments)
 
     out: list[Clause] = []
     seen: set[str] = set()
     for segment in revised_segments:
-        if _is_excluded(segment):
+        if _is_line_excluded(segment):
             # 该条款已被某个清单项识别（例如配置的 confidentiality），不再重复报为新增；
             # 但同 chunk 的**其它**条款仍要参与检测，否则真正的新增会被一起吞掉。
+            continue
+        covered = covered_terms.get(segment.chunk_id) or ()
+        chunk_wide_excluded = (segment.chunk_id, None) in excluded_refs
+        if chunk_wide_excluded and not covered:
+            # 无编号块且拿不到命中词：保底整块排除
             continue
         norm = normalize_clause_text(segment.text)
         if len(norm) < ADDED_MIN_CHARS or norm in base_norms or norm in seen:
@@ -2113,7 +2153,18 @@ def detect_added_clauses(
 
         # 需要作为「句子级新增」报出的文本；None 表示整行都是新增。
         fresh_text: str | None = None
-        if set(segment.clause_no) & base_numbers:
+        if chunk_wide_excluded:
+            # 无编号块命中了清单项：只有「含命中词」的句子算已识别，
+            # 其余句子若 base 里完全没有，就是真正的新增（issue #748）。
+            fresh = [
+                sentence
+                for sentence in _new_sentences(segment, base_sentences)
+                if not any(term in sentence for term in covered) and sentence not in base_corpus
+            ]
+            if not fresh:
+                continue
+            fresh_text = "。".join(fresh)
+        elif set(segment.clause_no) & base_numbers:
             # 条号已存在 → 属于「改写既有条款」，交给清单抽取器；
             # 但改写可能顺带追加新义务，句子级新内容仍要报出（issue #722）。
             fresh = _fresh_sentences_in_existing_clause(
@@ -2407,7 +2458,10 @@ async def analyze_case(session: AsyncSession, case: ReviewCase) -> dict[str, Any
         # 清单外的新增条款：生成 change_type=added 的核验项，交给人工决策。
         # 已被清单项识别过的 chunk 要排除，否则同一条款会在核验单上出现两次。
         added_clauses = detect_added_clauses(
-            clauses["base"], clauses["revised"], exclude_refs=_covered_refs(items)
+            clauses["base"],
+            clauses["revised"],
+            exclude_refs=_covered_refs(items),
+            exclude_terms_by_chunk=_covered_terms(items),
         )
         if added_clauses:
             existing_keys = {it.item_key for it in items}
