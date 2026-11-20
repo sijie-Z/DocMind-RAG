@@ -26,7 +26,14 @@ from sqlalchemy.pool import StaticPool
 import app.services.knowledge_service as ks_mod
 from app.core.database import Base
 from app.exceptions import AppError, ConflictError, ServiceUnavailableError
-from app.models.document import Document, DocumentChunk, DocumentStatus, DocumentTag, DocumentType
+from app.models.document import (
+    Document,
+    DocumentAcl,
+    DocumentChunk,
+    DocumentStatus,
+    DocumentTag,
+    DocumentType,
+)
 from app.models.knowledge_job import KnowledgeProcessingJob
 from app.models.review import ReviewCase, ReviewDocumentMeta
 from app.rag.cache import RetrievalCache, SemanticCache
@@ -199,6 +206,7 @@ async def delete_harness(monkeypatch):
     engine = create_async_engine("sqlite+aiosqlite://", poolclass=StaticPool)
     tables = [
         Document.__table__,
+        DocumentAcl.__table__,
         DocumentChunk.__table__,
         DocumentTag.__table__,
         KnowledgeProcessingJob.__table__,

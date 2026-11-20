@@ -39,6 +39,7 @@ class FakeRag:
         document_ids=None,
         search_mode=None,
         debug=False,
+        viewer_user_id=None,
     ):
         self.search_calls.append(
             {

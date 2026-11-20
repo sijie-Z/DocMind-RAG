@@ -62,9 +62,18 @@ class Skill:
 
 
 class SkillManager:
-    """Manages agent skills — creation, matching, and lifecycle."""
+    """Manages agent skills — creation, matching, and lifecycle.
 
-    def __init__(self):
+    ``organization_id`` 决定 Redis 命名空间：学习到的技能不得跨组织复用
+    （竞品对标 P0：此前全局 key 让 A 组织的技能提示注入 B 组织的规划）。
+    None 保留旧 key，仅用于基准脚本/测试等无组织上下文。
+    """
+
+    def __init__(self, organization_id: int | None = None):
+        self.organization_id = organization_id
+        self.redis_key = (
+            "agent:skills" if organization_id is None else f"agent:skills:org:{organization_id}"
+        )
         self._skills: dict[str, Skill] = {}
         self._loaded = False
 
@@ -78,7 +87,7 @@ class SkillManager:
             if redis_client is None:
                 self._loaded = True
                 return
-            raw = await redis_client.get("agent:skills")
+            raw = await redis_client.get(self.redis_key)
             if raw:
                 data = json.loads(raw)
                 for skill_data in data:
@@ -100,7 +109,7 @@ class SkillManager:
                 return
             data = [s.to_dict() for s in self._skills.values()]
             await redis_client.setex(
-                "agent:skills",
+                self.redis_key,
                 30 * 24 * 3600,  # 30 day TTL
                 json.dumps(data, ensure_ascii=False),
             )
@@ -236,5 +245,17 @@ class SkillManager:
         )
 
 
-# Global singleton
+# 无组织上下文的默认实例（仅基准脚本/向后兼容调用方）；面向用户的路径必须
+# 用 get_skill_manager(organization_id) 取组织隔离实例。
 skill_manager = SkillManager()
+
+_skill_managers: dict[int, SkillManager] = {}
+
+
+def get_skill_manager(organization_id: int) -> SkillManager:
+    """按组织返回 SkillManager 实例（学习到的技能不跨租户复用）。"""
+    manager = _skill_managers.get(organization_id)
+    if manager is None:
+        manager = SkillManager(organization_id=organization_id)
+        _skill_managers[organization_id] = manager
+    return manager

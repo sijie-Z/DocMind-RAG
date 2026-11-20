@@ -11,8 +11,9 @@ RAG 缓存（RetrievalCache / SemanticCache）。
    ``DELETE /api/v1/knowledge/document/{id}`` 同一条统一链路，内部即
    ``delete_knowledge_thoroughly``），入参携带文档所属 org；旧
    ``file_service.delete_document`` 不再被调用。
-2. 统一链路的清理序列：document_chunks → document_tags →
-   knowledge_processing_jobs → documents，随后 commit；ES 按 document_id
+2. 统一链路的清理序列：document_acl → document_chunks → document_tags →
+   knowledge_processing_jobs → review_document_meta → documents，随后 commit；
+   ES 按 document_id
    删索引；RetrievalCache / SemanticCache 按 org 清缓存。
 3. ``FileDeleteResponse`` 契约（success / message）不变；AppError 失败原因
    原样上抛，不被 ``except Exception`` 重包；NotFoundError 保持 404 类型。
@@ -189,6 +190,7 @@ async def test_unified_chain_cleans_children_es_and_caches_in_order(monkeypatch)
     # 2. 子表清单与顺序 —— 漏掉任一张都会在 MySQL 被 NO ACTION 外键挡住（#174/W0-4）
     deleted_tables = [stmt.table.name for stmt in session.deletes]
     assert deleted_tables == [
+        "document_acl",
         "document_chunks",
         "document_tags",
         "knowledge_processing_jobs",
@@ -197,7 +199,7 @@ async def test_unified_chain_cleans_children_es_and_caches_in_order(monkeypatch)
     ]
     # 3. 全部子表删完才 commit
     assert session.commit_count == 1
-    assert session.deletes_before_commit == 5
+    assert session.deletes_before_commit == 6
 
     # 4. ES 按 document_id 清索引
     assert fake_es.delete_calls == [

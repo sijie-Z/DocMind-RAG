@@ -38,7 +38,7 @@ from app.agent.registry import canonical_tool_name, tool_registry
 from app.agent.reviewer import Reviewer
 from app.agent.run_report import build_run_report, render_run_report_text
 from app.agent.skill_prompt import build_skills_index
-from app.agent.skills import skill_manager
+from app.agent.skills import get_skill_manager
 from app.agent.usage import record_llm_call_error, record_llm_usage
 from app.core.config import ai as ai_config
 from app.core.llm_failures import (
@@ -206,7 +206,8 @@ class PERAgentLoop:
         self.user_id = user_id
         self._execution_mode = execution_mode
         # 技能学习闭环（issue #200）：此前 SkillManager 全仓零调用者
-        self.skill_manager = skill_manager
+        # 技能学习按组织隔离（A 组织学到的技能不得注入 B 组织的规划）
+        self.skill_manager = get_skill_manager(organization_id)
 
         # Checkpoint / resume（issue #201 最小版）：run() 起始处重置两者，
         # 这里只是类型占位——loop 实例可能被复用，不得泄露上一轮的状态。
@@ -638,6 +639,8 @@ class PERAgentLoop:
             ctx = ExecutionContext(query=query)
         if task_id:
             ctx.task_id = task_id
+        # 组织上下文只走 checkpoint 快照，不进 to_dict()/SSE 既有契约
+        ctx.organization_id = self.organization_id
         # issue #510 第二步：request_id 属于"当前请求"而非 run；resume 由新请求
         # 续跑时如实使用新请求的编号（不落快照，不伪造跨请求的"统一 trace"）。
         ctx.request_id = request_id
@@ -2399,7 +2402,8 @@ class PERAgentLoop:
             extract_from_runtime_success,
         )
 
-        store = get_experience_store()
+        # 经验按组织隔离（A 组织的失败教训不得注入 B 组织的 planner）
+        store = get_experience_store(self.organization_id)
         query = ctx.query or plan.goal
 
         # 失败 → 错误经验。extractor 内部按错误特征匹配，匹配不上就返回 None。

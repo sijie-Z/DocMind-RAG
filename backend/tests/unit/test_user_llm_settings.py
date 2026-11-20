@@ -614,7 +614,14 @@ class _FakeRag:
         return None
 
     async def search_knowledge_base(
-        self, query, organization_id, top_k, document_ids=None, search_mode=None, debug=False
+        self,
+        query,
+        organization_id,
+        top_k,
+        document_ids=None,
+        search_mode=None,
+        debug=False,
+        viewer_user_id=None,
     ):
         return [], None
 

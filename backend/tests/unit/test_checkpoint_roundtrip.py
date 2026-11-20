@@ -103,9 +103,15 @@ def test_to_dict_contract_keyset_is_frozen():
     ctx = ExecutionContext(query="q")
     assert set(ctx.to_dict().keys()) == _TO_DICT_KEYS
     extra = set(ctx.to_checkpoint_dict().keys()) - _TO_DICT_KEYS
-    assert extra == {"v", "current_step_id", "artifacts", "document_context"}, (
-        "checkpoint 只允许在 to_dict 之上做加法"
-    )
+    # organization_id 是为技能/经验按组织隔离新增的 checkpoint-only 字段；
+    # to_dict()/SSE/replay 键集不变，仍是冻结契约。
+    assert extra == {
+        "v",
+        "current_step_id",
+        "artifacts",
+        "document_context",
+        "organization_id",
+    }, "checkpoint 只允许在 to_dict 之上做加法"
 
 
 def test_plan_checkpoint_roundtrip_preserves_results_and_retry():
