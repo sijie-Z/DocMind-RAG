@@ -537,6 +537,12 @@ export default {
     liked: 'Liked',
     disliked: 'Disliked',
     feedbackFailed: 'Feedback failed: {message}',
+    // Conversation sidebar title search
+    conversationSearch: {
+      placeholder: 'Search conversation titles',
+      clear: 'Clear search',
+      empty: 'No matching conversations. Try another keyword.',
+    },
   },
   validation: {
     required: 'This field is required',

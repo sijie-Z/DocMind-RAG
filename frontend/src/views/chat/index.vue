@@ -37,11 +37,14 @@
       :isListLoading="isListLoading"
       :convLoadError="convLoadError"
       :currentConversationId="currentConversationId"
+      :conversationSearch="conversationSearch"
       @newConversation="newConversation"
-      @refresh="fetchConversations"
+      @refresh="onConversationRefresh"
       @selectConversation="handleSelectConversation"
       @deleteConversation="handleDeleteConversation"
       @close="closeSidebar"
+      @searchChange="onConversationSearchChange"
+      @searchClear="onConversationSearchClear"
     />
 
     <main
@@ -231,8 +234,14 @@ const {
 
 const {
   conversations, isListLoading, sidebarOpen, currentConversationId,
+  conversationSearch, setConversationSearch,
   fetchConversations, handleDeleteConversation, convLoadError
 } = useChatSessions(getConversationOwner)
+
+const onConversationSearchChange = (value: string) => setConversationSearch(value)
+const onConversationSearchClear = () => setConversationSearch('', { immediate: true })
+// n-button 的 click 事件不能直接透传给 fetchConversations（会被当成 search 字符串）。
+const onConversationRefresh = () => fetchConversations()
 
 const sidebarRef = ref<InstanceType<typeof ChatSidebar> | null>(null)
 // 收起时无论桌面/移动端都把会话列表移出 tab 序（视觉上已不可见）。

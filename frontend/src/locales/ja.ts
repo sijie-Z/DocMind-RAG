@@ -545,6 +545,12 @@ export default {
     liked: '高評価済み',
     disliked: '低評価済み',
     feedbackFailed: 'フィードバックに失敗しました：{message}',
+    // 会話サイドバーのタイトル検索
+    conversationSearch: {
+      placeholder: '会話タイトルを検索',
+      clear: '検索をクリア',
+      empty: '一致する会話がありません。別のキーワードをお試しください',
+    },
   },
   validation: {
     required: 'この項目は必須です',
