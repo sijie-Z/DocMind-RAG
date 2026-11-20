@@ -90,8 +90,10 @@ export function useChatSessions(getGeneration: () => string = () => '') {
       clearTimeout(debounceTimer)
       debounceTimer = null
     }
-    // UI 显示值与请求值统一用 trim 后的词，避免空白词在侧栏仍显示清除按钮。
-    conversationSearch.value = next
+    // 输入框是受控组件（:value=conversationSearch），这里必须保留原始输入，
+    // 否则用户键入中间的空格会被立即 trim 掉（例如「合同 审查」打不出来）。
+    // 请求侧统一用 trim 后的 next；空白词由 ChatSidebar 的 hasSearch(trim) 判定。
+    conversationSearch.value = value
     if (options.immediate) {
       debouncedSearch.value = next
       currentPage.value = 1

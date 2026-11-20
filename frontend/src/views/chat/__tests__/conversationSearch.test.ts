@@ -193,14 +193,17 @@ describe('useChatSessions · 会话标题搜索请求契约', () => {
     expect(getConversations).toHaveBeenLastCalledWith({ page: 1, page_size: 50, search: '合同' })
   })
 
-  it('查询词 trim 后存储，UI 显示值与请求 search 保持一致', async () => {
+  it('请求用 trim 后的词，显示值保留原始输入（不吞键入空格）', async () => {
     vi.mocked(getConversations).mockResolvedValue(pageResponse(['合同审查']) as never)
     await mountComposable()
 
+    // 输入框是受控组件：conversationSearch 必须保留原始输入，否则用户
+    // 键入「合同 审查」时中间空格会被立即 trim 掉，词打不出来。
     sessions.setConversationSearch('  合同  ')
-    expect(sessions.conversationSearch.value).toBe('合同')
+    expect(sessions.conversationSearch.value).toBe('  合同  ')
     await vi.advanceTimersByTimeAsync(280)
     await flushPromises()
+    // 但发往 API 的 search 必须是 trim 后的干净词，UI 与请求语义一致。
     expect(getConversations).toHaveBeenLastCalledWith({ page: 1, page_size: 50, search: '合同' })
   })
 })
