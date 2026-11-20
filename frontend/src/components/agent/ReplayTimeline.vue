@@ -117,6 +117,9 @@ function metricTitle(value: unknown, label: string): string {
 }
 
 function fmtMs(ms: number): string {
+  // 亚毫秒真实值经 Math.round 会变成「0ms」，与「未知才显示 —」的语义冲突；
+  // 显示 <1ms 既保留「有值」信息，也不伪造 0。
+  if (ms < 1) return '<1ms'
   if (ms < 1000) return `${Math.round(ms)}ms`
   return `${(ms / 1000).toFixed(1)}s`
 }
@@ -268,7 +271,17 @@ function statusLabel(status: string): string {
   background: rgba(220, 38, 38, 0.05);
 }
 
-.replay-step.step-idle {
+/* 跳过/待执行行只压暗装饰性与状态文字；耗时/Token 指标是信息文字，不参与
+   压暗。整行 opacity: .65 会把 #6b7280 叠成 #9fa3ac（白底 2.53:1），低于
+   DESIGN_SYSTEM.md 对信息文字的 4.5:1 下限；指标保持 .step-meta 原色
+   （#6b7280 白底 4.83:1、暗色 #9ca3af/#111827 约 6.99:1）。 */
+.replay-step.step-idle .step-index,
+.replay-step.step-idle .step-icon,
+.replay-step.step-idle .step-desc,
+.replay-step.step-idle .step-tool,
+.replay-step.step-idle .step-status-text,
+.replay-step.step-idle .step-result,
+.replay-step.step-idle .step-error {
   opacity: 0.65;
 }
 
@@ -328,7 +341,10 @@ function statusLabel(status: string): string {
 }
 
 .metric-label {
-  /* 标签是信息文字：继承 slate-500 已是白底 ≥4.5:1 的下限，禁止再降透明度 */
+  /* 标签是信息文字：颜色继承 .step-meta 的 var(--text-secondary, #6b7280)。
+     该变量全仓没有定义，实际生效的是回退值 #6b7280（Tailwind gray-500），
+     白底 4.83:1；暗色走 .dark .step-meta 的 #9ca3af，对 #111827 约 6.99:1。
+     不要再给标签叠加降低不透明度的样式，否则会跌破 4.5:1。 */
   color: inherit;
 }
 
