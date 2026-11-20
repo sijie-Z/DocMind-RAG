@@ -131,6 +131,61 @@ async def create_workflow(
     }
 
 
+@router.get("/executions", response_model=dict[str, Any])
+async def list_executions(
+    workflow_id: int | None = None,
+    skip: int = 0,
+    limit: int = 20,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """列出执行历史（按工作流过滤；只返回当前用户可见工作流的记录）。
+
+    必须注册在 /{workflow_id} 之前，否则 "executions" 会被当作 int 路径参数。
+    """
+    stmt = select(WorkflowExecution)
+    if workflow_id is not None:
+        stmt = stmt.where(WorkflowExecution.workflow_id == workflow_id)
+
+    if not current_user.is_superuser:
+        org_id = await require_organization(current_user, db)
+        visible = await _apply_workflow_scope(db, select(Workflow.id), current_user, org_id)
+        # 软删工作流（is_active=False）不在列表/不可执行，其历史也不该从
+        # 已知 workflow_id 直接列出（与 get_workflow/list_workflows 同口径）
+        visible = visible.where(Workflow.is_active.is_(True))
+        stmt = stmt.where(WorkflowExecution.workflow_id.in_(visible))
+
+    total = (await db.execute(select(func.count()).select_from(stmt.subquery()))).scalar() or 0
+    rows = (
+        (
+            await db.execute(
+                stmt.order_by(desc(WorkflowExecution.created_at)).offset(skip).limit(limit)
+            )
+        )
+        .scalars()
+        .all()
+    )
+
+    return {
+        "success": True,
+        "data": {
+            "items": [
+                {
+                    "id": e.id,
+                    "workflow_id": e.workflow_id,
+                    "status": e.status,
+                    "error_message": e.error_message,
+                    "started_at": e.started_at.isoformat() if e.started_at else None,
+                    "completed_at": e.completed_at.isoformat() if e.completed_at else None,
+                    "created_at": e.created_at.isoformat(),
+                }
+                for e in rows
+            ],
+            "total": total,
+        },
+    }
+
+
 @router.get("/{workflow_id}", response_model=dict[str, Any])
 async def get_workflow(
     workflow_id: int,

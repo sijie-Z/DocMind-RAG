@@ -59,13 +59,27 @@ export interface NodeDefinition {
 export interface NodeResultItem {
   node_id: string
   node_type: string
+  node_name?: string
   // 引擎成功态为 "completed"（ExecutionStatus，workflow_engine.py:37-42）；
   // 旧类型声明 'success' 属词表漂移（B10/C2）
   status: 'pending' | 'running' | 'completed' | 'failed'
+  input?: unknown
   output?: unknown
   error?: string
+  started_at?: string | null
+  completed_at?: string | null
   // 引擎字段名为 duration（毫秒）（schemas/workflow.py:84-86）；旧声明 duration_ms 为死键
   duration?: number | null
+}
+
+export interface ExecutionSummary {
+  id: number
+  workflow_id: number
+  status: string
+  error_message?: string | null
+  started_at?: string | null
+  completed_at?: string | null
+  created_at: string
 }
 
 export interface ExecutionResult {
@@ -236,4 +250,13 @@ export const getNodeDefinitions = async () => {
 
 export const getExecution = async (executionId: number) => {
   return request.get(`/workflows/executions/${executionId}`)
+}
+
+/** 执行历史列表（按工作流过滤；只返回当前用户可见工作流的记录）。 */
+export const getExecutions = async (params: {
+  workflow_id?: number
+  skip?: number
+  limit?: number
+} = {}) => {
+  return request.get('/workflows/executions', { params })
 }
