@@ -94,7 +94,7 @@ async def test_merged_search_and_summary_aliases_route_to_impl(monkeypatch):
             "vector_search", {"query": "q", "top_k": 5}, organization_id=1
         )
     assert result.success and str(result) == "vector-ok"
-    vector_impl.assert_awaited_once_with("q", 5, 1, None)
+    vector_impl.assert_awaited_once_with("q", 5, 1, None, viewer_user_id=None)
 
     summary_impl = AsyncMock(return_value="summary-ok")
     with patch.object(core_tools, "_summarize_document_impl", summary_impl):
@@ -125,7 +125,7 @@ async def test_search_vector_mode_honors_document_ids(monkeypatch):
 
     captured: dict = {}
 
-    async def _fake_impl(query, top_k, organization_id, document_ids=None):
+    async def _fake_impl(query, top_k, organization_id, document_ids=None, viewer_user_id=None):
         captured.update(
             query=query, top_k=top_k, organization_id=organization_id, document_ids=document_ids
         )

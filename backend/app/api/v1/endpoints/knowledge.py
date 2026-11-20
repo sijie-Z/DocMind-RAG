@@ -185,6 +185,15 @@ async def list_knowledge_bases(
         if search:
             conditions.append(Document.title.contains(search))
 
+        # 文档级 ACL：私有文档对无权者连标题/文件名都不暴露（与详情端点
+        # 返回 404 的口径一致）。超管保留审计可见性。
+        if not current_user.is_superuser:
+            from app.services.document_acl import get_blocked_document_ids
+
+            blocked = await get_blocked_document_ids(db, effective_org_id, current_user.id)
+            if blocked:
+                conditions.append(Document.id.notin_(blocked))
+
         # 2. 查询总数
         total_query = select(func.count(Document.id)).where(*conditions)
         total_result = await db.execute(total_query)
@@ -238,6 +247,12 @@ async def list_knowledge_bases(
                     "status": status_map.get(doc_status, "failed"),
                     "raw_status": raw_status,
                     "is_enabled": bool(getattr(doc, "is_enabled", True)),
+                    # 前端据此渲染私有徽标；枚举与迁移 028 一致存小写 value
+                    "visibility": (
+                        doc.visibility.value
+                        if hasattr(doc.visibility, "value")
+                        else str(getattr(doc, "visibility", "organization"))
+                    ),
                 }
             )
 
@@ -296,6 +311,7 @@ async def search_knowledge(
             search_mode=requested_mode,
             document_ids=request.document_ids or None,
             debug=request.debug,
+            viewer_user_id=current_user.id,
         )
         elapsed = time.perf_counter() - _t0
 
@@ -421,7 +437,10 @@ async def get_search_suggestions(
 
     try:
         suggestions = await knowledge_service.get_search_suggestions(
-            query=q, organization_id=effective_org_id, limit=limit
+            query=q,
+            organization_id=effective_org_id,
+            limit=limit,
+            viewer_user_id=current_user.id,
         )
 
         return {
@@ -910,6 +929,17 @@ async def batch_delete_documents(
         effective_org_id = await require_organization(current_user, db)
         if not current_user.is_superuser and request.organization_id != effective_org_id:
             raise AuthorizationError("无权删除该组织的文档")
+
+        # 文档级 ACL：批量删除必须逐文档校验私有可见性（否则同组织用户
+        # 可借 id 枚举删除他人私有文档，且从结果差异探测存在性）。
+        if not current_user.is_superuser:
+            from app.core.security import get_document_for_user
+
+            for doc_id in request.document_ids:
+                try:
+                    await get_document_for_user(db, current_user, doc_id)
+                except Exception as exc:
+                    raise AuthorizationError(f"无权删除文档 {doc_id}") from exc
 
         results = await knowledge_service.batch_delete_knowledge(
             request.document_ids, effective_org_id

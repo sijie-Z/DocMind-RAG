@@ -151,6 +151,7 @@ async def compare_documents(
     document_ids: list[str],
     aspect: str = "general",
     organization_id: int | None = None,
+    user_id: int | None = None,
     **_: Any,
 ) -> str | ToolResult:
     if not document_ids or len(document_ids) < 2:
@@ -168,6 +169,13 @@ async def compare_documents(
         return ToolResult.fail(
             code="auth_required", message="无法确定组织范围，禁止执行跨组织文档对比。"
         )
+
+    from app.agent.core_tools import _ensure_document_readable
+
+    for did in document_ids:
+        denied = await _ensure_document_readable(did, organization_id, user_id)
+        if denied:
+            return denied
 
     from app.core.elasticsearch import ElasticsearchTools
 
