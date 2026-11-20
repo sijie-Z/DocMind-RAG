@@ -275,6 +275,7 @@ const edges = computed({
 
 const selectedNodeId = computed(() => workflowStore.selectedNode?.id)
 const selectedNode = computed(() => workflowStore.selectedNode)
+const selectedEdge = computed(() => workflowStore.selectedEdge)
 const nodeData = computed(() => (selectedNode.value?.data ?? {}) as Record<string, any>)
 const executionResults = computed(() => workflowStore.executionResults)
 const executionLogs = computed(() => workflowStore.executionLogs)
@@ -559,6 +560,29 @@ const addNodeFromLibrary = (node: NodeDefinition | Record<string, unknown>) => {
 
 const onNodeClick = (event: { node: WorkflowNode }) => {
   workflowStore.selectNode(event.node)
+}
+
+/** Vue Flow GraphEdge → 本仓 WorkflowEdge：label 只取字符串形态。 */
+export const normalizeGraphEdge = (edge: unknown): WorkflowEdge => {
+  const raw = (edge ?? {}) as Record<string, unknown>
+  const handle = (value: unknown) => (typeof value === "string" ? value : undefined)
+  return {
+    id: String(raw.id ?? ""),
+    source: String(raw.source ?? ""),
+    target: String(raw.target ?? ""),
+    sourceHandle: handle(raw.sourceHandle),
+    targetHandle: handle(raw.targetHandle),
+    label: handle(raw.label),
+  }
+}
+
+const onEdgeClick = (event: { edge: unknown }) => {
+  workflowStore.selectEdge(normalizeGraphEdge(event.edge))
+}
+
+const updateEdgeLabel = (label: string) => {
+  if (!selectedEdge.value) return
+  workflowStore.updateEdge(selectedEdge.value.id, { label })
 }
 
 const onConnect = (params: Connection) => {
@@ -929,8 +953,9 @@ const executeWorkflow = async () => {
             // （workflow_engine.py:1008-1016）；success=false 时带 error 摘要
             const engineResult = (data ?? {}) as { success?: boolean; output?: unknown; error?: string }
             if (engineResult.success === false) {
-              workflowStore.setExecutionComplete(null)
-              workflowStore.addExecutionLog(`❌ 执行失败: ${engineResult.error || '工作流节点执行失败'}`)
+              const errorText = engineResult.error || t('workflow.editor.executionFailed')
+              workflowStore.markExecutionFailed(errorText)
+              workflowStore.addExecutionLog(`❌ 执行失败: ${errorText}`)
               message.error('执行失败')
             } else {
               const finalOut = engineResult.output !== undefined ? engineResult.output : null
@@ -941,9 +966,12 @@ const executeWorkflow = async () => {
             break
           }
           case 'error': {
-            // 后端错误收口帧（#281：error 后必补 done）——done / onClose 再收尾
+            // 执行失败必须写入 executionResults：executionStatus 只由该数组计算，
+            // 仅 setExecutionComplete(null) 会让已完成的 upstream 节点让 UI 误判成功。
             const d = (data ?? {}) as { error?: string }
-            workflowStore.addExecutionLog(`❌ 执行失败: ${d.error || '未知错误'}`)
+            const errorText = d.error || t('workflow.editor.unknownError')
+            workflowStore.markExecutionFailed(errorText)
+            workflowStore.addExecutionLog(`❌ 执行失败: ${errorText}`)
             message.error('执行失败')
             break
           }
@@ -1228,6 +1256,7 @@ const getNodeIconComponent = (type: string) => NODE_ICON_MAP[type] || AppsOutlin
   edges,
   selectedNodeId,
   selectedNode,
+  selectedEdge,
   nodeData,
   executionResults,
   executionLogs,
@@ -1247,7 +1276,10 @@ const getNodeIconComponent = (type: string) => NODE_ICON_MAP[type] || AppsOutlin
   onDrop,
   addNodeFromLibrary,
   onNodeClick,
+  normalizeGraphEdge,
+  onEdgeClick,
   onConnect,
+  updateEdgeLabel,
   addLlmInputParam,
   removeLlmInputParam,
   addInputParam,

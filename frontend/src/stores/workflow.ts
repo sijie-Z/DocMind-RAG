@@ -28,8 +28,9 @@ export const useWorkflowStore = defineStore('workflow', () => {
   const nodes = ref<WorkflowNode[]>([])
   const edges = ref<WorkflowEdge[]>([])
 
-  // 选中的节点
+  // 选中的节点 / 边（条件分支 label 编辑入口）
   const selectedNode = ref<WorkflowNode | null>(null)
+  const selectedEdge = ref<WorkflowEdge | null>(null)
 
   // 执行状态
   const isExecuting = ref(false)
@@ -65,6 +66,19 @@ export const useWorkflowStore = defineStore('workflow', () => {
 
   const selectNode = (node: WorkflowNode | null) => {
     selectedNode.value = node
+    if (node) selectedEdge.value = null
+  }
+
+  const selectEdge = (edge: WorkflowEdge | null) => {
+    selectedEdge.value = edge
+    if (edge) selectedNode.value = null
+  }
+
+  const updateEdge = (edgeId: string, patch: Partial<WorkflowEdge>) => {
+    const edge = edges.value.find(e => e.id === edgeId)
+    if (!edge) return
+    Object.assign(edge, patch)
+    if (selectedEdge.value?.id === edgeId) Object.assign(selectedEdge.value, patch)
   }
 
   const updateNodeData = (nodeId: string, data: Partial<WorkflowNode['data']>) => {
@@ -120,6 +134,18 @@ export const useWorkflowStore = defineStore('workflow', () => {
     finalOutput.value = output
   }
 
+  /** 整次执行失败：写入一条失败结果，让 executionStatus 判为 failed。 */
+  const markExecutionFailed = (error: string) => {
+    isExecuting.value = false
+    finalOutput.value = null
+    updateNodeExecution({
+      nodeId: '__workflow__',
+      nodeType: 'workflow',
+      status: 'failed',
+      error,
+    })
+  }
+
   const resetExecution = () => {
     isExecuting.value = false
     executionResults.value = []
@@ -148,6 +174,7 @@ export const useWorkflowStore = defineStore('workflow', () => {
     nodes,
     edges,
     selectedNode,
+    selectedEdge,
     isExecuting,
     executionResults,
     executionLogs,
@@ -161,6 +188,8 @@ export const useWorkflowStore = defineStore('workflow', () => {
     addEdge,
     removeEdge,
     selectNode,
+    selectEdge,
+    updateEdge,
     updateNodeData,
     clearWorkflow,
     loadWorkflow,
@@ -168,6 +197,7 @@ export const useWorkflowStore = defineStore('workflow', () => {
     addExecutionLog,
     updateNodeExecution,
     setExecutionComplete,
+    markExecutionFailed,
     resetExecution,
     getFlowData
   }
