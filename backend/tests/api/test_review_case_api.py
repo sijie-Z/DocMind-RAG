@@ -5,7 +5,7 @@ from types import SimpleNamespace
 
 import pytest
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 import app.models  # noqa: F401
@@ -1026,3 +1026,52 @@ async def test_added_item_is_readable_and_its_evidence_is_truthful(factory):
         assert data["live_chunk"]["matches_snapshot"] is True
         assert data["replay"]["quote_unchanged"] is True
         assert data["replay"]["warnings"] == [], f"新增项不该有漂移警告：{data['replay']}"
+
+
+# ── 无编号文档：清单项已命中的 chunk 里，新增的其它义务仍要报出来 ──
+# 现场（2026-11-20）：无编号文档没有条款号，`_covered_refs` 只能退回 `(chunk_id, None)`
+# 整块排除 —— 于是「这个 chunk 里已经识别到验收义务」会把同 chunk 里新增的违约金
+# 一起吞掉。而多出一条不利条款，正是核验最该报出来的事。
+UNNUMBERED_COVERED = "甲方应在验收合格且收到发票后三十日内支付货款。"
+UNNUMBERED_ADDED = "乙方逾期交付的，应按合同总金额的百分之五支付违约金。"
+
+
+@pytest.mark.asyncio
+async def test_new_obligation_in_covered_unnumbered_chunk_is_reported(factory):
+    """无编号文档：同 chunk 里已识别验收义务，不吞掉新增的违约金义务。"""
+    async with factory() as db:
+        # 换掉夹具里带「第N条」的分块，改造成无编号文档（markdown 类正文的常见形态）
+        await db.execute(
+            delete(DocumentChunk).where(DocumentChunk.document_id.in_([BASE, REVISED]))
+        )
+        base_text = UNNUMBERED_COVERED
+        revised_text = UNNUMBERED_COVERED + UNNUMBERED_ADDED
+        for doc_id, text, idx in ((BASE, base_text, 0), (REVISED, revised_text, 0)):
+            db.add(
+                DocumentChunk(
+                    id=str(uuid.uuid4()),
+                    document_id=doc_id,
+                    chunk_index=idx,
+                    chunk_text=f"【文档背景：摘要】{text}",
+                    original_text=text,
+                    chunk_length=len(text),
+                    page_number=1,
+                    meta_data={"text_provenance": "parser_original"},
+                )
+            )
+        await db.commit()
+
+    async with _Ctx(_user(superuser=True), factory) as ac:
+        case = await _create_case(ac)
+        r = await ac.post(f"/api/v1/reviews/{case['id']}/analyze")
+        assert r.status_code == 200, r.text
+        data = r.json()["data"]
+
+        # 前置确认：验收项确实在这个 chunk 里识别成功（否则本用例没测到该路径）
+        acceptance = next(i for i in data["items"] if i["item_key"] == "acceptance_invoice")
+        assert acceptance["facts"]["revised"]["status"] == "identified"
+
+        added = [i for i in data["items"] if i["change_type"] == "added"]
+        texts = " ".join(str(i["facts"]["revised"].get("text") or "") for i in added)
+        assert "违约金" in texts, f"同 chunk 的新增义务被整块排除吞掉: {texts!r}"
+        assert "验收合格" not in texts, f"已识别的义务不应再报为新增: {texts!r}"
