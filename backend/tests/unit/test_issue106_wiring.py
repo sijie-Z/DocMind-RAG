@@ -22,7 +22,10 @@ def isolated_store(tmp_path, monkeypatch):
     monkeypatch.setattr("app.core.redis.redis_client", None)
     monkeypatch.setattr(store_mod, "LOCAL_PATH", tmp_path / "experiences.json")
     store_mod.reset_experience_store()
-    yield store_mod.get_experience_store()
+    default_store = store_mod.get_experience_store()
+    # loop 按组织取 store：把 org=1 映射到该 fixture，保持既有测试语义
+    monkeypatch.setattr(store_mod, "_org_stores", {1: default_store})
+    yield default_store
     store_mod.reset_experience_store()
 
 

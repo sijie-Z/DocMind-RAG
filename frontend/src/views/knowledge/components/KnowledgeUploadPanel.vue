@@ -58,6 +58,17 @@
             </n-form-item>
 
             <div class="space-y-2">
+              <label class="text-sm font-bold text-gray-700 dark:text-gray-300 ml-1">{{ t('knowledge.visibilityLabel') }}</label>
+              <n-radio-group
+                :value="uploadForm.visibility || 'organization'"
+                @update:value="(v: 'organization' | 'private') => updateForm({ visibility: v })"
+              >
+                <n-radio value="organization">{{ t('knowledge.visibilityOrg') }}</n-radio>
+                <n-radio value="private">{{ t('knowledge.visibilityPrivate') }}</n-radio>
+              </n-radio-group>
+            </div>
+
+            <div class="space-y-2">
               <label class="text-sm font-bold text-gray-700 dark:text-gray-300 ml-1">{{ t('knowledge.fileDesc') }}</label>
               <n-input
                 :value="uploadForm.description"
@@ -211,6 +222,7 @@ interface UploadForm {
   title: string
   tags: string[]
   description: string
+  visibility?: 'organization' | 'private'
   file?: File
 }
 

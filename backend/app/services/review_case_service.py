@@ -126,6 +126,22 @@ async def get_case_for_user(session: AsyncSession, current_user: User, case_id: 
         org_id = get_user_org_id(current_user)
         if org_id is None or case.organization_id != org_id:
             raise AuthorizationError("无权访问该核验案件")
+
+        # 文档级 ACL：案件引用三份文档的原文证据快照，读取/导出都必须
+        # 确认当前用户对三份文档均有可见权（否则可经案件导出拿到他人
+        # 私有条款原文）。文档已删除时快照仍可读，跳过校验。
+        from app.services.document_acl import get_blocked_document_ids
+
+        doc_ids = {
+            case.policy_document_id,
+            case.base_document_id,
+            case.revised_document_id,
+        }
+        blocked = set(
+            await get_blocked_document_ids(session, case.organization_id, current_user.id)
+        )
+        if doc_ids & blocked:
+            raise NotFoundError("核验案件不存在", resource="review_case", resource_id=case_id)
     return case
 
 

@@ -398,6 +398,7 @@ def _stub_retrieve(monkeypatch, pipeline: RAGPipeline, hits: list[dict]):
         debug=False,
         search_mode=None,
         doc_cap=None,
+        blocked_document_ids=None,
     ):
         return [dict(h) for h in hits], [], None, []
 

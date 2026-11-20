@@ -217,6 +217,9 @@
 
                       <!-- 标签 -->
                       <div class="flex flex-wrap gap-1 mb-auto content-start h-12 overflow-hidden">
+                         <n-tag v-if="item.visibility === 'private'" size="tiny" type="warning" :bordered="false">
+                           {{ t('knowledge.privateBadge') }}
+                         </n-tag>
                          <n-tag 
                           v-for="tag in item.tags.slice(0, 3)" 
                           :key="tag" 
@@ -278,6 +281,17 @@
                              @click.stop="handleToggleEnabled(item)"
                            >
                              <template #icon><n-icon><component :is="item.is_enabled === false ? PlayOutline : PauseOutline" /></n-icon></template>
+                           </n-button>
+                           <n-button
+                             v-if="canManageAcl && item.visibility === 'private'"
+                             size="tiny"
+                             quaternary
+                             circle
+                             :aria-label="t('knowledge.actionManageAcl')"
+                             :title="t('knowledge.actionManageAcl')"
+                             @click.stop="openAclModal(item)"
+                           >
+                             <template #icon><n-icon><PersonAddOutline /></n-icon></template>
                            </n-button>
                            <n-button size="tiny" quaternary circle type="error" :aria-label="t('knowledge.actionDelete')" @click.stop="deleteKnowledge(item)">
                               <template #icon><n-icon><TrashOutline /></n-icon></template>
@@ -342,6 +356,7 @@
                        </td>
                        <td class="p-4 hidden md:table-cell">
                           <div class="flex gap-1 flex-wrap">
+                            <n-tag v-if="item.visibility === 'private'" size="tiny" type="warning" :bordered="false">{{ t('knowledge.privateBadge') }}</n-tag>
                             <n-tag v-for="tag in item.tags.slice(0, 2)" :key="tag" size="tiny" :bordered="false" class="bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300">#{{ tag }}</n-tag>
                           </div>
                        </td>
@@ -372,6 +387,17 @@
                              <n-button size="tiny" secondary circle :aria-label="t('knowledge.actionView')" @click="viewKnowledge(item)"><template #icon><n-icon><EyeOutline /></n-icon></template></n-button>
                              <n-button v-if="showRebuild && item.status === 'failed'" size="tiny" secondary circle type="primary" :aria-label="t('knowledge.actionRebuild')" @click="handleRebuild(item)"><template #icon><n-icon><RefreshOutline /></n-icon></template></n-button>
                              <n-button v-if="showToggleEnabled" size="tiny" secondary circle :type="item.is_enabled === false ? 'warning' : 'default'" :aria-label="item.is_enabled === false ? t('knowledge.actionEnable') : t('knowledge.actionDisable')" @click="handleToggleEnabled(item)"><template #icon><n-icon><component :is="item.is_enabled === false ? PlayOutline : PauseOutline" /></n-icon></template></n-button>
+                             <n-button
+                               v-if="canManageAcl && item.visibility === 'private'"
+                               size="tiny"
+                               secondary
+                               circle
+                               :aria-label="t('knowledge.actionManageAcl')"
+                               :title="t('knowledge.actionManageAcl')"
+                               @click="openAclModal(item)"
+                             >
+                               <template #icon><n-icon><PersonAddOutline /></n-icon></template>
+                             </n-button>
                              <n-button size="tiny" secondary circle type="error" :aria-label="t('knowledge.actionDelete')" @click="deleteKnowledge(item)"><template #icon><n-icon><TrashOutline /></n-icon></template></n-button>
                           </div>
                        </td>
@@ -445,6 +471,24 @@
           @open-document="openDocumentPage"
         />
 
+        <n-modal v-model:show="showAclModal" preset="card" :title="t('knowledge.aclTitle')" class="max-w-lg">
+          <p class="text-sm text-gray-500 mb-3">{{ t('knowledge.aclHint') }}</p>
+          <n-select
+            v-model:value="aclSelected"
+            multiple
+            filterable
+            :loading="aclLoading"
+            :options="aclUserOptions"
+            :placeholder="t('knowledge.actionManageAcl')"
+          />
+          <template #footer>
+            <div class="flex justify-end gap-3">
+              <n-button @click="showAclModal = false">{{ t('common.cancel') }}</n-button>
+              <n-button type="primary" :loading="aclSaving" @click="saveAcl">{{ t('common.save') }}</n-button>
+            </div>
+          </template>
+        </n-modal>
+
       </div>
     </div>
   </div>
@@ -486,7 +530,9 @@ import {
   deleteKnowledgeBase,
   batchDeleteKnowledgeBases,
   rebuildKnowledgeBase,
-  setKnowledgeEnabled
+  setKnowledgeEnabled,
+  getDocumentAuthorizedUsers,
+  setDocumentAuthorizedUsers
 } from '@/api/knowledge'
 import type { KnowledgeBase, KnowledgeBaseListResponse, DocumentDetail, DocumentContent } from '@/api/knowledge'
 import { formatDateTime } from '@/utils/format'
@@ -494,6 +540,7 @@ import { apiUnwrap } from '@/utils/apiUnwrap'
 import { getErrorMessage } from '@/utils/apiError'
 import { getRagMetrics, type RagMetrics } from '@/api/rag'
 import { useUserStore } from '@/stores/user'
+import { getUsers } from '@/api/user'
 import { docIconColor, docStatusLabel, docStatusType, isInProgressDoc, computeDocStats } from './docDisplay'
 import KnowledgeUploadPanel from './components/KnowledgeUploadPanel.vue'
 import KnowledgeDetailModals from './components/KnowledgeDetailModals.vue'
@@ -502,6 +549,7 @@ interface UploadForm {
   title: string
   tags: string[]
   description: string
+  visibility?: 'organization' | 'private'
   file?: File
 }
 
@@ -531,6 +579,14 @@ const showUploadModal = ref(false)
 const showTaskList = ref(false)
 // ✅ 新增：控制详情弹窗
 const showDetailModal = ref(false)
+
+// 文档级 ACL 授权管理
+const showAclModal = ref(false)
+const aclDoc = ref<KnowledgeBase | null>(null)
+const aclUserOptions = ref<Array<{ label: string; value: number }>>([])
+const aclSelected = ref<number[]>([])
+const aclLoading = ref(false)
+const aclSaving = ref(false)
 const showErrorModal = ref(false)
 const currentErrorDetail = ref('')
 const currentDoc = ref<KnowledgeBase | null>(null)
@@ -633,7 +689,8 @@ const pagination = ref({
 const uploadForm = ref<UploadForm>({
   title: '',
   tags: [],
-  description: ''
+  description: '',
+  visibility: 'organization'
 })
 
 // Polling for processing items
@@ -817,6 +874,7 @@ const uploadFile = async () => {
     formData.append('title', uploadForm.value.title || file.name)
     formData.append('tags', JSON.stringify(uploadForm.value.tags))
     formData.append('description', uploadForm.value.description)
+    formData.append('visibility', uploadForm.value.visibility || 'organization')
     // 移除硬编码的 organization_id，后端会从 Form 默认值或 User Context 获取
 
     const res = await uploadKnowledgeBase(formData, (progressEvent) => {
@@ -855,7 +913,8 @@ const uploadFile = async () => {
     uploadForm.value = {
       title: '',
       tags: [],
-      description: ''
+      description: '',
+      visibility: 'organization'
     }
     fileList.value = []
 
@@ -946,6 +1005,43 @@ const handleToggleEnabled = async (item: KnowledgeBase) => {
     message.success(next ? t('knowledge.enableSuccess') : t('knowledge.disableSuccess'))
   } catch (error: unknown) {
     message.error(getErrorMessage(error, t('knowledge.enableFailed')))
+  }
+}
+
+const canManageAcl = computed(() => userStore.can('document:update') !== false)
+
+const openAclModal = async (item: KnowledgeBase) => {
+  aclDoc.value = item
+  showAclModal.value = true
+  aclLoading.value = true
+  try {
+    const [aclRes, usersRes] = await Promise.all([
+      getDocumentAuthorizedUsers(item.id),
+      getUsers({ skip: 0, limit: 200 }),
+    ])
+    const aclData = apiUnwrap<{ users: Array<{ id: number; username: string }> } | null>(aclRes)
+    const usersData = apiUnwrap<{ users?: Array<{ id: number; username: string }>; data?: Array<{ id: number; username: string }> } | null>(usersRes)
+    const users = usersData?.users || usersData?.data || []
+    aclUserOptions.value = users.map((u) => ({ label: u.username, value: u.id }))
+    aclSelected.value = aclData?.users?.map((u) => u.id) || []
+  } catch (error) {
+    message.error(getErrorMessage(error))
+  } finally {
+    aclLoading.value = false
+  }
+}
+
+const saveAcl = async () => {
+  if (!aclDoc.value) return
+  aclSaving.value = true
+  try {
+    await setDocumentAuthorizedUsers(aclDoc.value.id, aclSelected.value)
+    message.success(t('knowledge.aclSaved'))
+    showAclModal.value = false
+  } catch (error) {
+    message.error(getErrorMessage(error))
+  } finally {
+    aclSaving.value = false
   }
 }
 

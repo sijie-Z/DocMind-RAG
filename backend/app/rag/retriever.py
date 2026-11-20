@@ -1162,6 +1162,7 @@ class HybridRetriever:
         debug: bool = False,
         search_mode: str | None = None,
         doc_cap: int | None = DOC_CAP_DEFAULT,
+        blocked_document_ids: list[str] | None = None,
     ) -> tuple[list[dict], list[float], dict | None, list[str]]:
         """Execute adaptive retrieval and return (results, query_vector, debug_info, degraded).
 
@@ -1188,6 +1189,12 @@ class HybridRetriever:
         """
         degraded: list[str] = []
         filters = build_retrieval_filters(organization_id, document_ids)
+        # 文档级 ACL：私有文档中 viewer 无权看的 ID 由上层从 DB 解析后传入。
+        # 必须包在 bool 内（裸 must_not 是非法 ES DSL，会 400）。
+        if blocked_document_ids:
+            filters.append(
+                {"bool": {"must_not": [{"terms": {"document_id": blocked_document_ids}}]}}
+            )
 
         candidate_size = max(top_k * max(1, settings.RAG_MMR_CANDIDATE_MULTIPLIER), 12)
 

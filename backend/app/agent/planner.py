@@ -394,7 +394,9 @@ class Planner:
             try:
                 from app.agent.experience import get_experience_store
 
-                store = get_experience_store()
+                # ctx 由 PERAgentLoop 创建，携带服务端组织上下文
+                planner_org_id = getattr(ctx, "organization_id", None)
+                store = get_experience_store(planner_org_id)
                 exp_context = await store.format_for_planner(query, top_k=3)
                 if exp_context:
                     system_prompt += f"\n\n{exp_context}"
