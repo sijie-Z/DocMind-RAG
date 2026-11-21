@@ -12,7 +12,7 @@ import tempfile
 import uuid
 import zipfile
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import docx2txt
 import pandas as pd
@@ -30,6 +30,41 @@ from app.models.document import Document, DocumentChunk, DocumentStatus
 from app.rag.source_provenance import LEGACY_UNVERIFIED, PARSER_ORIGINAL
 
 logger = logging.getLogger(__name__)
+
+# ── 受限解析档位（竞品对标 P0：DeepDoc / Docling force_ocr + accurate table）──
+# 只允许三种值；默认 auto 与旧行为逐字一致。不新增依赖：OCR 复用 rapidocr，
+# 精细表格只用 pdfplumber 自带的 table_settings。
+ParseProfile = Literal["auto", "ocr", "table_accurate"]
+PARSE_PROFILES: tuple[str, ...] = ("auto", "ocr", "table_accurate")
+
+_TABLE_ACCURATE_SETTINGS: dict[str, Any] = {
+    "vertical_strategy": "lines",
+    "horizontal_strategy": "lines",
+    "intersection_tolerance": 3,
+    "snap_tolerance": 3,
+    "join_tolerance": 3,
+    "edge_min_length": 3,
+}
+
+
+def normalize_parse_profile(value: Any) -> ParseProfile:
+    """把上传入口的可选档位收敛为受限枚举；非法值显式拒绝（不静默跑错档）。
+
+    None / 空白串一律 auto，保证旧调用方不传参时行为完全不变；其它类型（如
+    FastAPI 直接函数调用时的 Form 描述对象）也按未指定处理，避免测试替身被
+    误判为非法值。
+    """
+    if value is None:
+        return "auto"
+    if not isinstance(value, str):
+        return "auto"
+    profile = value.strip().lower()
+    if not profile:
+        return "auto"
+    if profile not in PARSE_PROFILES:
+        raise ValueError(f"非法解析档位: {value!r}；允许值为 {', '.join(PARSE_PROFILES)}")
+    return profile  # type: ignore[return-value]
+
 
 # ── 图片 OCR（位图 → 文本 → 现有 chunk/嵌入/索引管道）────────────────
 # 引擎：rapidocr-onnxruntime（onnxruntime 纯 CPU 推理、零系统依赖，
@@ -100,17 +135,24 @@ class DocumentParser:
             ".gif": self._parse_image,
         }
 
-    async def parse_document(self, file_path: str, organization_id: str) -> dict[str, Any]:
+    async def parse_document(
+        self,
+        file_path: str,
+        organization_id: str,
+        parse_profile: str | None = None,
+    ) -> dict[str, Any]:
         """
         解析文档
 
         Args:
             file_path: 文件路径 (可以是本地路径，也可以是 MinIO 对象名称或 URL)
             organization_id: 组织ID
+            parse_profile: 可选档位（auto/ocr/table_accurate），默认 auto=旧行为
 
         Returns:
             解析结果，包含内容 and 元数据
         """
+        profile = normalize_parse_profile(parse_profile)
         import tempfile
 
         from app.core.minio_client import minio_client
@@ -163,15 +205,20 @@ class DocumentParser:
             if extension not in self.supported_extensions:
                 raise ValueError(f"不支持的文件格式: {extension}")
 
-            # 调用对应的解析方法
+            # 调用对应的解析方法；只有 PDF 有档位差异（其它格式本来就是
+            # 固定策略，OCR 位图永远走 OCR），避免给所有 handler 加无用形参。
             parse_method = self.supported_extensions[extension]
-            result = await parse_method(current_file_path)
+            if extension == ".pdf" and profile != "auto":
+                result = await self._parse_pdf(current_file_path, profile)
+            else:
+                result = await parse_method(current_file_path)
 
             # 添加通用元数据
             result["file_name"] = path.name
             result["file_size"] = path.stat().st_size
             result["file_extension"] = extension
             result["organization_id"] = organization_id
+            self._stamp_parse_profile(result, profile)
 
             logger.info(f"文档解析成功: {file_path}")
             return result
@@ -185,12 +232,34 @@ class DocumentParser:
                 with contextlib.suppress(OSError):
                     os.remove(temp_file_path)
 
-    async def parse_local_file(self, file_path: str, organization_id: str) -> dict[str, Any]:
+    @staticmethod
+    def _stamp_parse_profile(result: dict[str, Any], profile: ParseProfile) -> None:
+        """把本次实际解析档位写入结果、metadata 与每个 chunk 的 meta_data。
+
+        DocumentChunk.meta_data 是现有 JSON 列（worker / process_document 都从
+        chunk["metadata"] 写入），复用它即可落库留痕，无需 migration；不污染
+        original_text（证据原文）也不改检索文本。
+        """
+        result["parse_profile_used"] = profile
+        metadata = result.setdefault("metadata", {})
+        metadata["parse_profile"] = profile
+        for chunk in result.get("chunks", []):
+            chunk_meta = chunk.get("metadata")
+            if isinstance(chunk_meta, dict):
+                chunk_meta["parse_profile"] = profile
+
+    async def parse_local_file(
+        self,
+        file_path: str,
+        organization_id: str,
+        parse_profile: str | None = None,
+    ) -> dict[str, Any]:
         """解析本地文件，不经过 MinIO 下载逻辑（用于聊天即时解析）。
 
         W0-6：organization_id 必填，且必须是正整数组织 ID。旧默认值 ``"0"``
         会把漏传组织的解析结果标成 0 号组织（fail-open 哨兵），已删除。
         """
+        profile = normalize_parse_profile(parse_profile)
         org_raw = "" if organization_id is None else str(organization_id).strip()
         try:
             org_id = int(org_raw)
@@ -213,11 +282,15 @@ class DocumentParser:
             raise ValueError(f"不支持的文件格式: {extension}")
 
         parse_method = self.supported_extensions[extension]
-        result = await parse_method(str(path))
+        if extension == ".pdf" and profile != "auto":
+            result = await self._parse_pdf(str(path), profile)
+        else:
+            result = await parse_method(str(path))
         result["file_name"] = path.name
         result["file_size"] = path.stat().st_size
         result["file_extension"] = extension
         result["organization_id"] = str(org_id)
+        self._stamp_parse_profile(result, profile)
 
         return result
 
@@ -265,13 +338,23 @@ class DocumentParser:
             logger.warning(f"页面 {page_num} OCR 失败: {e}")
             return ""
 
-    async def _parse_pdf(self, file_path: str) -> dict[str, Any]:
+    async def _parse_pdf(self, file_path: str, profile: ParseProfile = "auto") -> dict[str, Any]:
         """
         高级 PDF 解析 - 支持文本提取、表格识别与 OCR 兜底
+
+        profile=ocr：每一页都强制 OCR（仍受 30 页上限保护），覆盖"有少量文字
+        但正文在图片里"的扫描合同；auto 只在页面文本 < 50 字时 OCR。
+        profile=table_accurate：表格用 pdfplumber 线框策略 + 容差参数，保留
+        行列结构；auto 保持默认 extract_tables() 参数。
         """
         try:
             text_content = ""
-            metadata: dict[str, Any] = {"pages": [], "tables_count": 0, "ocr_used": False}
+            metadata: dict[str, Any] = {
+                "pages": [],
+                "tables_count": 0,
+                "ocr_used": False,
+                "table_parse_mode": "accurate" if profile == "table_accurate" else "default",
+            }
             # #197：拼接 text_content 时记录每页的字符区间，供切分器把
             # chunk 的起始位置映射成页码（页信息不再只停在文档级 metadata）。
             page_ranges: list[tuple[int, int, int]] = []
@@ -287,15 +370,27 @@ class DocumentParser:
                     #    项目既有的 RapidOCR —— 与图片上传/DOCX 内嵌图同一条链路。
                     #    旧分支依赖 pytesseract + pdf2image，两者在生产环境都未安装，
                     #    等于扫描件 PDF 永远拿不到文字（实测 2026-11-14）。
-                    if len(page_text.strip()) < 50:
+                    # ocr 档位对每一页强制 OCR（有上限保护），auto 仍按 <50 字兜底
+                    if profile == "ocr" or len(page_text.strip()) < 50:
                         ocr_text = await self._ocr_pdf_page(file_path, page_num)
                         if ocr_text.strip():
-                            page_text = ocr_text
+                            if profile == "ocr":
+                                # 强制档：OCR 文本优先，但保留文本层补充（去重拼接）
+                                page_text = (
+                                    ocr_text
+                                    if not page_text.strip()
+                                    else page_text + "\n" + ocr_text
+                                )
+                            else:
+                                page_text = ocr_text
                             metadata["ocr_used"] = True
                             logger.info(f"✅ 页面 {page_num} OCR 识别成功，长度: {len(page_text)}")
 
                     # 3. 提取表格并转换为 Markdown
-                    tables = page.extract_tables()
+                    if profile == "table_accurate":
+                        tables = page.extract_tables(table_settings=_TABLE_ACCURATE_SETTINGS)
+                    else:
+                        tables = page.extract_tables()
                     table_mds = []
                     for table in tables:
                         if table:
