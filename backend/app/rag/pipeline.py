@@ -411,15 +411,18 @@ class RAGPipeline:
                     )
                 except (TimeoutError, Exception) as dec_err:
                     logger.warning(
-                        f"Query decomposition timed out/failed, using original query: {dec_err}"
+                        "Query decomposition failed, using original query: error=%s query_len=%d",
+                        type(dec_err).__name__,
+                        len(query),
                     )
                     decomposed = [query]
                 if len(decomposed) > 1:
                     sub_queries = decomposed
+                    # 安全：查询文本可能含个人信息/凭据，日志只保留长度和子查询数量。
                     logger.info(
-                        "Query decomposition: %s → %s",
-                        query,
-                        sub_queries,
+                        "Query decomposition: query_len=%d sub_queries=%d",
+                        len(query),
+                        len(sub_queries),
                     )
 
             # Retrieve (single or parallel per sub-query)
@@ -427,9 +430,10 @@ class RAGPipeline:
             all_results: list[list[dict]] = []
             # issue #292：逐子查询记录「重试耗尽后仍失败」与「检索臂级降级」——
             # 用于三态判定（正常空 / 服务故障 / 超时）与缓存写入门控。
-            failed_sub_queries: list[tuple[str, BaseException]] = []
+            # 只保留子查询索引和异常，不留存/回显查询原文（可能含个人信息/凭据）。
+            failed_sub_queries: list[tuple[int, BaseException]] = []
             degraded_reasons: list[str] = []
-            for sq in sub_queries:
+            for sq_index, sq in enumerate(sub_queries):
                 sq_result = []
                 sq_error: BaseException | None = None
                 for attempt in range(retries + 1):
@@ -462,18 +466,19 @@ class RAGPipeline:
                         sq_error = e
                         RAG_RETRIEVAL_ERRORS.inc()
                         logger.warning(
-                            "Retrieval attempt %d/%d for sub-query %r failed: %s",
+                            "Retrieval attempt %d/%d for sub-query #%d failed: error=%s query_len=%d",
                             attempt + 1,
                             retries + 1,
-                            sq,
-                            e,
+                            sq_index,
+                            type(e).__name__,
+                            len(sq),
                         )
                         if attempt < retries:
                             await asyncio.sleep(min(1.5, 0.3 * (2**attempt)))
                 if sq_result:
                     all_results.append(sq_result)
                 elif sq_error is not None:
-                    failed_sub_queries.append((sq, sq_error))
+                    failed_sub_queries.append((sq_index, sq_error))
 
             # Merge results from multiple sub-queries (dedup by chunk_id / doc_id)
             result = []
@@ -588,7 +593,7 @@ class RAGPipeline:
             # 三态：正常空结果 / 服务故障（异常）/ 超时。故障或臂级降级发生时，
             # 「最终为空」与「知识库确实没有相关内容」不可区分 —— 绝不回落成
             # 「无内容」语义，如实上抛结构化故障，由上层做诚实降级。
-            failures: list[tuple[str, BaseException]] = list(failed_sub_queries)
+            failures: list[tuple[int, BaseException]] = list(failed_sub_queries)
             # embedding 维度/模型漂移是**配置错误**，不是瞬态故障：即使关键词臂
             # 有命中，也不能返回「看似正常」的结果（#196：漂移不得静默混用）。
             config_reasons = [
@@ -597,8 +602,8 @@ class RAGPipeline:
             if config_reasons:
                 RAG_RETRIEVAL_UNAVAILABLE.labels(state="failed").inc()
                 logger.error(
-                    "RAG retrieval refused by embedding config error: %s",
-                    config_reasons[0],
+                    "RAG retrieval refused by embedding config error: reason=%s",
+                    config_reasons[0].split(":", 1)[0],
                 )
                 raise RetrievalUnavailableError(
                     f"embedding 配置错误，检索结果不可信：{config_reasons[0]}"
@@ -606,8 +611,9 @@ class RAGPipeline:
             if (failures or degraded_reasons) and not result:
                 excs = [e for _, e in failures]
                 kind = "timeout" if excs and all(is_timeout_error(e) for e in excs) else "failed"
-                reasons = [f"sub-query {sq!r}: {type(e).__name__}: {e}" for sq, e in failures[:3]]
-                reasons.extend(degraded_reasons[:3])
+                # 日志只保留子查询索引与异常类型，绝不回显查询文本/异常正文。
+                reasons = [f"sub-query #{index}: {type(e).__name__}" for index, e in failures[:3]]
+                reasons.extend(r.split(":", 1)[0] for r in degraded_reasons[:3])
                 RAG_RETRIEVAL_UNAVAILABLE.labels(state=kind).inc()
                 logger.error(
                     "RAG retrieval unavailable (kind=%s, failed_sub_queries=%d, degraded_arms=%d): %s",
@@ -620,7 +626,8 @@ class RAGPipeline:
                     f"检索后端不可用（{kind}），结果不可知：{'; '.join(reasons) or 'no details'}",
                     kind=kind,
                     attempts=retries + 1,
-                    sub_queries=[sq for sq, _ in failures],
+                    # 索引可定位失败子查询，但不向调用方暴露查询原文。
+                    sub_queries=[f"#{index}" for index, _ in failures],
                 )
             if failures or degraded_reasons:
                 # 部分降级但有结果：可用性优先——返回真实命中，但不得写缓存，
@@ -628,13 +635,13 @@ class RAGPipeline:
                 RAG_RETRIEVAL_UNAVAILABLE.labels(state="degraded").inc()
                 logger.warning(
                     "RAG retrieval degraded: failed_sub_queries=%s, degraded_arms=%s",
-                    [f"{sq}: {type(e).__name__}" for sq, e in failures],
-                    degraded_reasons,
+                    [f"#{index}:{type(e).__name__}" for index, e in failures],
+                    [r.split(":", 1)[0] for r in degraded_reasons],
                 )
                 if debug and debug_info is not None:
                     debug_info["retrieval_degraded"] = [
-                        f"{sq}: {type(e).__name__}: {e}" for sq, e in failures[:3]
-                    ] + degraded_reasons[:3]
+                        f"#{index}:{type(e).__name__}" for index, e in failures[:3]
+                    ] + [r.split(":", 1)[0] for r in degraded_reasons[:3]]
 
             # 评分、重排、doc-cap/top-k 均已按 E 完成；strict 只在证据出口
             # 过滤 legacy，绝不把「未迁移」伪装成正常空结果或写入 cache。
