@@ -127,7 +127,12 @@ async def list_review_candidates(
     try:
         org_id = await require_organization(current_user, db)
         data = await document_service.list_candidates(
-            db, organization_id=org_id, q=q, page=page, page_size=page_size
+            db,
+            organization_id=org_id,
+            viewer_user_id=None if current_user.is_superuser else current_user.id,
+            q=q,
+            page=page,
+            page_size=page_size,
         )
         return {"success": True, "data": data}
     except (NotFoundError, AuthorizationError):
