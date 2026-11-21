@@ -194,16 +194,30 @@ class PERAgentLoop:
         openai_client: AsyncOpenAI,
         config: AgentConfig | None = None,
         organization_id: int | None = None,
-        user_id: int = 0,
+        user_id: int | None = None,
         execution_mode: str = "dag",
+        *,
+        internal_system_task: bool = False,
     ):
         # A2 P0（fail-closed）：PER 运行必须有组织上下文；默认值不再回落到 1 号组织。
         if organization_id is None:
             raise ValueError("PERAgentLoop 缺少 organization_id，拒绝在无组织上下文下运行")
+        # ACL P0（issue #511）：viewer 身份必须显式。缺省 0 只是历史哨兵值，
+        # 绝不能被当作"内部系统任务"来跳过文档 ACL。真实用户路径必须在
+        # user_id 里带正整数的 viewer；确无用户的后台任务必须显式声明
+        # internal_system_task=True。构造函数不拒绝缺省值是为了兼容不涉及
+        # 文档的既有 loop 用法，但所有 ACL 守门点都会 fail closed。
+        if internal_system_task and user_id:
+            raise ValueError("internal_system_task=True 不得同时携带真实 user_id")
         self.client = openai_client
         self.config = config or AgentConfig()
         self.organization_id = organization_id
-        self.user_id = user_id
+        self.user_id = user_id or 0
+        # None = 无 viewer；0 只作下游兼容用，不再具有"内部任务"语义。
+        self.viewer_user_id = user_id
+        # 仅显式标记的系统任务可在无 viewer 时按组织级可见性读取；
+        # 该标记经 executor → RunContext → 工具 ACL 守门向下传递。
+        self.internal_system_task = internal_system_task
         self._execution_mode = execution_mode
         # 技能学习闭环（issue #200）：此前 SkillManager 全仓零调用者
         # 技能学习按组织隔离（A 组织学到的技能不得注入 B 组织的规划）
@@ -254,7 +268,7 @@ class PERAgentLoop:
         self.memory = AgentMemoryBridge(
             agent_id=self.config.agent_id,
             organization_id=organization_id,
-            user_id=user_id,
+            user_id=self.user_id,
         )
 
         # PER components (created on demand)
@@ -873,6 +887,7 @@ class PERAgentLoop:
             if self.config.enable_tools:
                 self.executor.reset_for_request()
                 self._arm_executor_hitl()
+                self.executor.internal_system_task = self.internal_system_task
                 execution_output = ""
                 legacy_chunks: dict[str, list[str]] = {}
                 try:

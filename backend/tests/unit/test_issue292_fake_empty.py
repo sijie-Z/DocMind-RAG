@@ -119,7 +119,8 @@ class TestFailureDoesNotFakeEmpty:
             await pipeline.search_knowledge_base("故障查询", 1, top_k=5)
 
         assert ei.value.kind == "failed", "异常故障必须是 failed 态"
-        assert ei.value.sub_queries == ["故障查询"]
+        # 安全：对外异常只暴露失败子查询索引，不回显查询原文。
+        assert ei.value.sub_queries == ["#0"]
         assert retrieve.await_count >= 1
 
     @pytest.mark.asyncio
@@ -687,3 +688,88 @@ class TestKnowledgeServiceHonesty:
             out = await KnowledgeService().get_search_suggestions("q", "1")
 
         assert out == []
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# 8 · 敏感查询不写明文日志（CodeQL py/clear-text-logging-sensitive-data）
+# ══════════════════════════════════════════════════════════════════════════
+class TestSensitiveQueryNotLogged:
+    """判别性测试：分解/重试日志只含长度、索引、异常类型，不含查询原文。
+
+    变异验证：把 `logger.info("Query decomposition: query_len=%d ...")` 恢复成
+    `"%s → %s"` 原文日志 → `test_decomposition_log_has_no_query_text` 红；
+    把重试 warning 恢复成 `%r` 子查询原文 + `%s` 异常正文 →
+    `test_retry_log_has_no_sub_query_text` 红。
+    """
+
+    _SECRET_QUERY = "敏感查询-SECRET-7f3a9c"
+    _SECRET_SUB_QUERIES = ["子问题甲-SECRET-aa11", "子问题乙-SECRET-bb22"]
+
+    @pytest.mark.asyncio
+    async def test_decomposition_log_has_no_query_text(self, caplog):
+        """分解成功日志：保留 query_len/sub_queries 计数，不回显查询与子查询。"""
+        from app.rag.query_processor import QueryComplexityClassifier
+
+        retrieve = AsyncMock(return_value=([_healthy_doc()], [], None, []))
+        pipeline = _make_pipeline(retrieve)
+        pipeline.openai_client = object()
+
+        with (
+            caplog.at_level("INFO", logger="app.rag.pipeline"),
+            patch(
+                "app.rag.pipeline.decompose_query",
+                new=AsyncMock(return_value=self._SECRET_SUB_QUERIES),
+            ),
+            patch.object(QueryComplexityClassifier, "classify", staticmethod(lambda q: "complex")),
+            _patch_rerank(),
+        ):
+            await pipeline.search_knowledge_base(self._SECRET_QUERY, 1, top_k=5)
+
+        decomposition_logs = [
+            r.getMessage() for r in caplog.records if "Query decomposition:" in r.getMessage()
+        ]
+        assert len(decomposition_logs) == 1
+        message = decomposition_logs[0]
+        assert f"query_len={len(self._SECRET_QUERY)}" in message
+        assert f"sub_queries={len(self._SECRET_SUB_QUERIES)}" in message
+        assert "SECRET" not in message
+        for secret in [self._SECRET_QUERY, *self._SECRET_SUB_QUERIES]:
+            assert secret not in message
+
+    @pytest.mark.asyncio
+    async def test_retry_log_has_no_sub_query_text(self, caplog):
+        """重试日志：保留 attempt/索引/异常类型/长度，不回显子查询与异常正文。"""
+        from app.rag.query_processor import QueryComplexityClassifier
+
+        secret_error = "RuntimeError: SECRET-BACKTRACE-DETAIL"
+
+        def _retrieve_side_effect(sq, *args, **kwargs):
+            if sq == self._SECRET_SUB_QUERIES[0]:
+                raise RuntimeError(secret_error)
+            return ([_healthy_doc()], [], None, [])
+
+        retrieve = AsyncMock(side_effect=_retrieve_side_effect)
+        pipeline = _make_pipeline(retrieve)
+        pipeline.openai_client = object()
+
+        with (
+            caplog.at_level("WARNING", logger="app.rag.pipeline"),
+            patch(
+                "app.rag.pipeline.decompose_query",
+                new=AsyncMock(return_value=self._SECRET_SUB_QUERIES),
+            ),
+            patch.object(QueryComplexityClassifier, "classify", staticmethod(lambda q: "complex")),
+            _patch_rerank(),
+        ):
+            await pipeline.search_knowledge_base(self._SECRET_QUERY, 1, top_k=5)
+
+        retry_logs = [
+            r.getMessage() for r in caplog.records if "Retrieval attempt" in r.getMessage()
+        ]
+        assert retry_logs, "应记录重试警告"
+        message = retry_logs[0]
+        assert "sub-query #0" in message
+        assert "error=RuntimeError" in message
+        assert f"query_len={len(self._SECRET_SUB_QUERIES[0])}" in message
+        assert "SECRET" not in message
+        assert secret_error not in message

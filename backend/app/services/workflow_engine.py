@@ -345,7 +345,9 @@ class KnowledgeSearchNodeExecutor(NodeExecutor):
         # 同组织任意工作流读取（与 chat/agent 检索同口径）
         viewer_id = getattr(self, "user_id", None)
         retrieval_kwargs: dict[str, object] = {}
-        if viewer_id:
+        # None 表示受控的内部系统检索；0 是合法用户 id，文档 ACL 按 None 判定内部检索，
+        # 若此处用真值判断会把 0 误当成“无 viewer”→ 私有文档 fail-open。
+        if viewer_id is not None:
             retrieval_kwargs["viewer_user_id"] = viewer_id
         docs, _ = await rag_service.search_knowledge_base(
             query, organization_id=organization_id, top_k=top_k, **retrieval_kwargs
@@ -951,9 +953,13 @@ class WorkflowEngine:
             raise ValueError(f"Unknown node type: {node.type}")
 
         executor = executor_class(node, self.llm_config)
-        # 安全修复（R0）：把引擎级组织范围注入知识库检索节点
+        # 安全修复（R0 + #511 P0-2）：把引擎级组织范围与发起用户注入知识库检索节点
+        # （见 WorkflowEngine.get_executor），绝不从请求体（state["input"]）读取，
+        # 防止任意用户通过 input.organization_id 跨租户读取知识库，或同组织内
+        # 借工作流读取他人私有文档（检索侧按 viewer_user_id 做文档级 ACL）。
         if isinstance(executor, KnowledgeSearchNodeExecutor):
             executor.organization_id = self.organization_id
+            executor.user_id = self.user_id
         # 安全修复（A1）：记忆节点的租户上下文由引擎注入，节点配置不可控，
         # 命名空间由 memory_service 按 (org, user, agent) 拼装。
         if isinstance(executor, MemoryNodeExecutor):

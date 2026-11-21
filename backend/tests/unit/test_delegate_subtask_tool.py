@@ -57,7 +57,7 @@ async def test_tool_visible_and_recursion_guarded_in_child():
             "delegate_subtask",
             {"tasks": ["查清甲材料", "查清乙材料"], "context": "背景X"},
             organization_id=2,
-            user_id=0,
+            user_id=11,
         )
 
     assert result.success, f"工具执行失败: {result.error}"
@@ -99,7 +99,7 @@ async def test_no_client_returns_explicit_failure():
             "delegate_subtask",
             {"tasks": ["x"]},
             organization_id=1,
-            user_id=0,
+            user_id=11,
         )
     assert not result.success
     assert result.error.code == "invalid_configuration"
@@ -112,7 +112,15 @@ async def test_concurrency_capped_at_three_and_order_kept(monkeypatch):
     inflight = 0
     peak = 0
 
-    async def fake_delegate(client, task, parent_context="", model="m", organization_id=1):
+    async def fake_delegate(
+        client,
+        task,
+        parent_context="",
+        model="m",
+        organization_id=1,
+        user_id=11,
+        internal_system_task=False,
+    ):
         nonlocal inflight, peak
         inflight += 1
         peak = max(peak, inflight)
@@ -122,7 +130,11 @@ async def test_concurrency_capped_at_three_and_order_kept(monkeypatch):
 
     monkeypatch.setattr(sa, "delegate_task", fake_delegate)
     results = await sa.run_parallel_subtasks(
-        client=None, tasks=[f"t{i}" for i in range(6)], organization_id=1, per_task_timeout=None
+        client=None,
+        tasks=[f"t{i}" for i in range(6)],
+        organization_id=1,
+        user_id=11,
+        per_task_timeout=None,
     )
     assert peak <= 3, f"并发上限应为 3，实测峰值 {peak}"
     assert results == [f"t{i}" for i in range(6)]
@@ -132,14 +144,22 @@ async def test_concurrency_capped_at_three_and_order_kept(monkeypatch):
 async def test_per_task_timeout_marks_without_killing_batch(monkeypatch):
     import app.agent.subagent as sa
 
-    async def slow_delegate(client, task, parent_context="", model="m", organization_id=1):
+    async def slow_delegate(
+        client,
+        task,
+        parent_context="",
+        model="m",
+        organization_id=1,
+        user_id=11,
+        internal_system_task=False,
+    ):
         if task == "slow":
             await asyncio.sleep(0.5)
         yield SimpleNamespace(type="chunk", content=task)
 
     monkeypatch.setattr(sa, "delegate_task", slow_delegate)
     results = await sa.run_parallel_subtasks(
-        client=None, tasks=["slow", "fast"], organization_id=1, per_task_timeout=0.05
+        client=None, tasks=["slow", "fast"], organization_id=1, user_id=11, per_task_timeout=0.05
     )
     assert results[0].startswith("[子任务超时"), f"超时子任务应带标注: {results[0]}"
     assert results[1] == "fast", "其余子任务不受拖累"
@@ -149,14 +169,22 @@ async def test_per_task_timeout_marks_without_killing_batch(monkeypatch):
 async def test_single_task_error_contained(monkeypatch):
     import app.agent.subagent as sa
 
-    async def flaky_delegate(client, task, parent_context="", model="m", organization_id=1):
+    async def flaky_delegate(
+        client,
+        task,
+        parent_context="",
+        model="m",
+        organization_id=1,
+        user_id=11,
+        internal_system_task=False,
+    ):
         if task == "boom":
             raise RuntimeError("炸了")
         yield SimpleNamespace(type="chunk", content="ok:" + task)
 
     monkeypatch.setattr(sa, "delegate_task", flaky_delegate)
     results = await sa.run_parallel_subtasks(
-        client=None, tasks=["boom", "fine"], organization_id=1, per_task_timeout=None
+        client=None, tasks=["boom", "fine"], organization_id=1, user_id=11, per_task_timeout=None
     )
     assert results[0].startswith("[Error: RuntimeError"), results[0]
     assert results[1] == "ok:fine"

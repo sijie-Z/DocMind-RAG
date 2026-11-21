@@ -9,6 +9,7 @@ import json
 import logging
 import math
 import re
+import threading
 import time
 import unicodedata
 import zlib
@@ -50,6 +51,89 @@ def _require_org_id(organization_id: int | None, where: str) -> int:
             "必须是正整数组织 ID（0/-1 是历史 fail-open 哨兵，已禁用）"
         )
     return org_id
+
+
+def _viewer_segment(
+    viewer_user_id: int | None = None,
+    acl_revision: str | int | None = None,
+) -> str:
+    """Normalize an ACL viewer into a cache-key segment.
+
+    ``None`` keeps legacy no-viewer keys byte-identical (performance baseline).
+    A viewer id adds a numeric-only segment; ACL revocation additionally bumps
+    ``acl_revision`` so stale entries become unreachable immediately.
+    """
+    if viewer_user_id is None and not acl_revision:
+        return ""
+    segments = []
+    if viewer_user_id is not None:
+        if isinstance(viewer_user_id, bool):
+            raise ValueError(f"viewer_user_id 非法: {viewer_user_id!r}")
+        try:
+            viewer = int(viewer_user_id)
+        except (TypeError, ValueError):
+            raise ValueError(f"viewer_user_id 非法: {viewer_user_id!r}") from None
+        # user_id=0 是本项目的合法 viewer（平台/系统账号），必须与 None
+        # （无 viewer 的共享缓存路径）区分，不能用正整数校验把它拒绝。
+        if viewer < 0:
+            raise ValueError(f"viewer_user_id={viewer_user_id!r} 非法：不能为负数")
+        segments.append(f"viewer:{viewer}")
+    if acl_revision:
+        revision = str(acl_revision).strip()
+        if not re.fullmatch(r"[A-Za-z0-9_.:-]+", revision):
+            digest = hashlib.sha256(revision.encode()).hexdigest()[:16]
+            revision = f"h{digest}"
+        segments.append(f"acl:{revision}")
+    return ":".join(segments)
+
+
+# ACL 变更代次：无 viewer 的组织级缓存条目必须靠显式失效/代次升级退出命中。
+# 代次存 Redis（多 worker 共享）；无 Redis 时 clear_for_org 清理本进程缓存。
+_ACL_GENERATION_KEY_PREFIX = "rag:acl:generation:"
+_ACL_GENERATION_LOCK = threading.Lock()
+_ACL_GENERATION_LOCAL: dict[int, int] = {}
+
+
+async def bump_acl_generation(organization_id: int) -> int:
+    """Advance the org's ACL generation after a grant/revoke/visibility change.
+
+    Redis is used for cross-worker generations; the local counter is a monotonic
+    fallback for no-Redis / incomplete clients and is always advanced.
+    """
+    with _ACL_GENERATION_LOCK:
+        local = _ACL_GENERATION_LOCAL.get(organization_id, 0) + 1
+        _ACL_GENERATION_LOCAL[organization_id] = local
+    try:
+        rc = _get_redis()
+        if rc is not None:
+            remote = int(await rc.incr(f"{_ACL_GENERATION_KEY_PREFIX}{organization_id}"))
+            return max(remote, local)
+    except Exception:
+        pass
+    return local
+
+
+async def acl_generation(organization_id: int) -> int:
+    """Read the current ACL generation (0 when no change has happened)."""
+    remote = 0
+    try:
+        rc = _get_redis()
+        if rc is not None:
+            value = await rc.get(f"{_ACL_GENERATION_KEY_PREFIX}{organization_id}")
+            if value is not None:
+                remote = int(value)
+    except Exception:
+        pass
+    with _ACL_GENERATION_LOCK:
+        return max(remote, _ACL_GENERATION_LOCAL.get(organization_id, 0))
+
+
+async def clear_all_for_org(organization_id: int) -> int:
+    """Invalidate answer + retrieval caches after an ACL/visibility mutation."""
+    generation = await bump_acl_generation(organization_id)
+    await RetrievalCache().clear_for_org(organization_id)
+    await SemanticCache().clear_for_org(organization_id)
+    return generation
 
 
 # ── issue #195：语义缓存的查询等价判定 ────────────────────────────────
@@ -363,14 +447,18 @@ class RetrievalCache:
         search_mode: str | None = None,
         *,
         provenance_mode: str | None = None,
+        viewer_user_id: int | None = None,
+        acl_revision: str | int | None = None,
     ) -> str:
         # issue #225：search_mode 分域；R2 再以 schema + provenance mode 隔离
         # compat 全集与 strict 子集。旧 v1/v2 key 不读，org 清理前缀不变。
         mode_seg = f"|mode={search_mode}" if search_mode else ""
         evidence_mode = normalize_mode(provenance_mode)
+        viewer_seg = _viewer_segment(viewer_user_id, acl_revision)
+        acl_seg = f"|acl={viewer_seg}" if viewer_seg else ""
         return (
             f"org={organization_id}|topk={top_k}{mode_seg}"
-            f"|prov={CACHE_SCHEMA_VERSION}|prov_mode={evidence_mode}|q={query.strip().lower()}"
+            f"|prov={CACHE_SCHEMA_VERSION}|prov_mode={evidence_mode}{acl_seg}|q={query.strip().lower()}"
         )
 
     def describe_key(
@@ -381,6 +469,8 @@ class RetrievalCache:
         search_mode: str | None = None,
         *,
         provenance_mode: str | None = None,
+        viewer_user_id: int | None = None,
+        acl_revision: str | int | None = None,
     ) -> dict[str, Any]:
         """issue #195：debug 用的键摘要（含分域信息，不含明文查询）。"""
         return {
@@ -391,6 +481,8 @@ class RetrievalCache:
                     top_k,
                     search_mode,
                     provenance_mode=provenance_mode,
+                    viewer_user_id=viewer_user_id,
+                    acl_revision=acl_revision,
                 )
             ),
             "organization_id": organization_id,
@@ -406,6 +498,8 @@ class RetrievalCache:
         search_mode: str | None = None,
         *,
         provenance_mode: str | None = None,
+        viewer_user_id: int | None = None,
+        acl_revision: str | int | None = None,
     ) -> list[dict[str, Any]] | None:
         if not settings.RAG_ENABLE_CACHE:
             return None
@@ -415,6 +509,8 @@ class RetrievalCache:
             top_k,
             search_mode,
             provenance_mode=provenance_mode,
+            viewer_user_id=viewer_user_id,
+            acl_revision=acl_revision,
         )
         # Try Redis first
         try:
@@ -444,6 +540,8 @@ class RetrievalCache:
         search_mode: str | None = None,
         *,
         provenance_mode: str | None = None,
+        viewer_user_id: int | None = None,
+        acl_revision: str | int | None = None,
     ) -> None:
         if not settings.RAG_ENABLE_CACHE:
             return
@@ -453,6 +551,8 @@ class RetrievalCache:
             top_k,
             search_mode,
             provenance_mode=provenance_mode,
+            viewer_user_id=viewer_user_id,
+            acl_revision=acl_revision,
         )
         # Try Redis
         try:
@@ -468,7 +568,8 @@ class RetrievalCache:
 
     async def clear_for_org(self, organization_id: int) -> None:
         """Invalidate all exact-match cache entries for an organization."""
-        # 内存 LRU 中清理该组织的匹配项
+        # ACL 变更必须同时让进程内（含多 worker 共享）缓存失效：检索缓存的
+        # key 在无 viewer 时保持历史字节格式，不能只靠 key 维度发现撤权。
         self._memory.clear_matching(f"org={organization_id}|")
         # Redis 中按 SCAN 匹配删除（无 Redis 时静默跳过）
         try:
@@ -582,6 +683,8 @@ class SemanticCache:
         hit_info: dict[str, Any] | None = None,
         *,
         scope: str = "",
+        viewer_user_id: int | None = None,
+        acl_revision: str | int | None = None,
     ) -> dict[str, Any] | None:
         """Find the most similar cached entry **whose query is equivalent**.
 
@@ -633,9 +736,14 @@ class SemanticCache:
                 _reject("redis_unavailable")
                 return None
 
+            # ACL 分域：viewer / ACL 版本改变时命中不同索引与键；
+            # 两者都缺省时 key 与历史实现逐字节一致（无 viewer 性能基线不变）。
             scope_seg = _scope_segment(scope)
-            index_key = f"{self.index_key}:{org_id}" + (f":{scope_seg}" if scope_seg else "")
-            org_prefix = f"org:{org_id}:" + (f"{scope_seg}:" if scope_seg else "")
+            viewer_seg = _viewer_segment(viewer_user_id, acl_revision)
+            suffix = "".join(f":{seg}" for seg in (scope_seg, viewer_seg) if seg)
+            index_key = f"{self.index_key}:{org_id}{suffix}"
+            prefix = "".join(f"{seg}:" for seg in (scope_seg, viewer_seg) if seg)
+            org_prefix = f"org:{org_id}:{prefix}"
             query_score = self._quantize(query_embedding)
             candidates = await rc.zrangebyscore(
                 index_key,
@@ -723,6 +831,8 @@ class SemanticCache:
         *,
         organization_id: int,
         scope: str = "",
+        viewer_user_id: int | None = None,
+        acl_revision: str | int | None = None,
     ) -> None:
         """Store a Q&A pair in the semantic cache.
 
@@ -741,8 +851,11 @@ class SemanticCache:
                 return
 
             scope_seg = _scope_segment(scope)
-            index_key = f"{self.index_key}:{org_id}" + (f":{scope_seg}" if scope_seg else "")
-            org_prefix = f"org:{org_id}:" + (f"{scope_seg}:" if scope_seg else "")
+            viewer_seg = _viewer_segment(viewer_user_id, acl_revision)
+            suffix = "".join(f":{seg}" for seg in (scope_seg, viewer_seg) if seg)
+            index_key = f"{self.index_key}:{org_id}{suffix}"
+            prefix = "".join(f"{seg}:" for seg in (scope_seg, viewer_seg) if seg)
+            org_prefix = f"org:{org_id}:{prefix}"
             cache_key = f"{self.prefix}{org_prefix}{self._hash_key(embedding)}"
             data = {
                 "query": query,

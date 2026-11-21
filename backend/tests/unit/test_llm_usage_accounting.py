@@ -200,7 +200,11 @@ async def test_tool_internal_llm_call_counted_into_ctx():
 
     pipeline = _fake_pipeline_with_llm("你好，世界", _usage(300, 100))
     ctx = ExecutionContext(query="t")
-    run_context = RunContext(user_id=0, organization_id=1, extra={"exec_ctx": ctx})
+    run_context = RunContext(
+        user_id=0,
+        organization_id=1,
+        extra={"exec_ctx": ctx, "internal_system_task": True},
+    )
 
     with patch("app.dependencies.get_rag_pipeline", return_value=pipeline):
         out = await tool_registry.execute(
@@ -245,7 +249,11 @@ async def test_core_tools_llm_call_counted_into_ctx():
 
     pipeline = _fake_pipeline_with_llm("# 报告正文", _usage(500, 200))
     ctx = ExecutionContext(query="t")
-    run_context = RunContext(user_id=0, organization_id=1, extra={"exec_ctx": ctx})
+    run_context = RunContext(
+        user_id=0,
+        organization_id=1,
+        extra={"exec_ctx": ctx, "internal_system_task": True},
+    )
 
     with patch("app.dependencies.get_rag_pipeline", return_value=pipeline):
         out = await tool_registry.execute(
@@ -386,7 +394,11 @@ async def test_composite_skill_inner_calls_counted_into_ctx():
     es_hits = {"hits": {"hits": [{"_source": {"content": "全文内容", "filename": "f.md"}}]}}
 
     ctx = ExecutionContext(query="t")
-    run_context = RunContext(user_id=0, organization_id=1, extra={"exec_ctx": ctx})
+    run_context = RunContext(
+        user_id=0,
+        organization_id=1,
+        extra={"exec_ctx": ctx, "internal_system_task": True},
+    )
 
     with (
         patch("app.dependencies.get_rag_pipeline", return_value=pipeline),

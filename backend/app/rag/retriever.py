@@ -1208,8 +1208,8 @@ class HybridRetriever:
         strategy_label = f"forced_{forced_mode}" if forced_mode else strategy
         RAG_ADAPTIVE_STRATEGY.labels(strategy=strategy_label).inc()
         logger.info(
-            "Adaptive RAG: query='%s...' → strategy=%s%s",
-            query[:50],
+            "Adaptive RAG: query_len=%d → strategy=%s%s",
+            len(query),
             strategy,
             f" (forced by search_mode={forced_mode})" if forced_mode else "",
         )

@@ -310,7 +310,9 @@ async def test_delegate_child_config_disables_skills(monkeypatch):
             yield AgentEvent(type="done", content="")
 
     monkeypatch.setattr(subagent, "PERAgentLoop", _StubLoop)
-    async for _ in subagent.delegate_task(MagicMock(), "做一个播客脚本", organization_id=1):
+    async for _ in subagent.delegate_task(
+        MagicMock(), "做一个播客脚本", organization_id=1, user_id=9
+    ):
         pass
 
     cfg = captured["config"]

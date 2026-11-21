@@ -68,7 +68,12 @@ import pytest
 
 from app.core.config import Settings, settings
 from app.core.config.ai import AISettings
-from app.rag.cache import RetrievalCache, SemanticCache, queries_equivalent
+from app.rag.cache import (
+    RetrievalCache,
+    SemanticCache,
+    _scope_segment,
+    queries_equivalent,
+)
 from app.rag.source_provenance import SourceProvenanceUnavailableError
 
 # ── 测试替身 ─────────────────────────────────────────────────────────
@@ -83,6 +88,11 @@ class _FakeRedis:
 
     def pipeline(self):
         return self
+
+    async def incr(self, key: str) -> int:
+        value = int(self.values.get(key, 0)) + 1
+        self.values[key] = str(value)
+        return value
 
     def setex(self, key: str, _ttl: int, value: str) -> None:
         self.values[key] = value
@@ -126,13 +136,21 @@ def _enable(monkeypatch, *, answer: bool | None = None, retrieval: bool | None =
         monkeypatch.setattr(settings, "SEMANTIC_CACHE_RETRIEVAL_ENABLED", retrieval)
 
 
-async def _seed(cache: SemanticCache, query: str, embedding=None, org: int = 1, answer: str = "A"):
+async def _seed(
+    cache: SemanticCache,
+    query: str,
+    embedding=None,
+    org: int = 1,
+    answer: str = "A",
+    viewer_user_id: int | None = None,
+):
     await cache.set(
         query,
         list(embedding or _VEC_A),
         answer,
         [{"chunk_id": "cached_chunk"}],
         organization_id=org,
+        viewer_user_id=viewer_user_id,
     )
 
 
@@ -663,6 +681,7 @@ async def _run_chat(
     user_content: str,
     debug: bool = True,
     cache_scope: str | None = None,
+    user_id: int = 1,
 ) -> list:
     from app.services.chat_service import run_rag_pipeline
 
@@ -678,7 +697,7 @@ async def _run_chat(
         await run_rag_pipeline(
             session=session,
             user_content=user_content,
-            user_id=1,
+            user_id=user_id,
             search_org_id=1,
             organization_id=1,
             conversation_id=None,
@@ -723,7 +742,9 @@ class TestAnswerCacheConsumer:
         _enable(monkeypatch, answer=True)
         _fake_redis(monkeypatch)
         sem_cache = SemanticCache()
-        await _seed(sem_cache, "《劳动合同法》第七条是什么", answer="第七条的答案")
+        await _seed(
+            sem_cache, "《劳动合同法》第七条是什么", answer="第七条的答案", viewer_user_id=1
+        )
 
         captured: dict = {}
         fake_rag = _fake_rag_stack(_VEC_A, AsyncMock(return_value=([], None)), captured)
@@ -932,3 +953,222 @@ def test_cosine_anchor_matches_triage_repro():
     )
     assert cos == pytest.approx(0.9817, abs=1e-3)
     assert cos >= settings.SEMANTIC_CACHE_THRESHOLD
+
+
+# ── issue #511：ACL/viewer 缓存隔离（判别性测试）─────────────────────
+
+
+class TestCacheAclIsolation:
+    """A 的私有答案/私有 chunk 不得经缓存被 B 命中；无 viewer 基线保持。"""
+
+    @pytest.mark.asyncio
+    async def test_answer_cache_isolated_by_viewer(self, monkeypatch):
+        _enable(monkeypatch, answer=True, retrieval=False)
+        fake = _fake_redis(monkeypatch)
+        cache = SemanticCache()
+        q = "私有合同保密条款是什么"
+        await cache.set(
+            q,
+            _VEC_A,
+            "A 的私有答案",
+            [{"chunk_id": "private-chunk"}],
+            organization_id=1,
+            scope="server:model",
+            viewer_user_id=1,
+        )
+
+        hit_a = await cache.get(_VEC_A, 1, query=q, scope="server:model", viewer_user_id=1)
+        assert hit_a and hit_a["answer"] == "A 的私有答案"
+        # 变异点：去掉 viewer_user_id 分域 → 此处命中，测试变红。
+        assert await cache.get(_VEC_A, 1, query=q, scope="server:model", viewer_user_id=2) is None
+        assert await cache.get(_VEC_A, 1, query=q, scope="server:model") is None
+        expected_key = (
+            f"{cache.prefix}org:1:{_scope_segment('server:model')}:viewer:1:"
+            f"{cache._hash_key(_VEC_A)}"
+        )
+        assert expected_key in fake.values
+
+    @pytest.mark.asyncio
+    async def test_viewer_zero_is_valid_and_distinct_from_no_viewer(self, monkeypatch):
+        """user_id=0 是合法 viewer，必须能分段且与 None（共享缓存）隔离。
+
+        变异点：把 _viewer_segment 的 <=0 恢复为拒绝 → 本条红（ValueError）。
+        """
+        from app.rag.cache import _viewer_segment
+
+        assert _viewer_segment(0) == "viewer:0"
+        assert _viewer_segment(0, 2) == "viewer:0:acl:2"
+        assert _viewer_segment(None) == ""
+
+        _enable(monkeypatch, answer=True, retrieval=False)
+        _fake_redis(monkeypatch)
+        cache = SemanticCache()
+        q = "平台账号问题"
+        await cache.set(q, _VEC_A, "viewer0答案", [], organization_id=1, viewer_user_id=0)
+        assert await cache.get(_VEC_A, 1, query=q, viewer_user_id=0)
+        assert await cache.get(_VEC_A, 1, query=q) is None
+        assert await cache.get(_VEC_A, 1, query=q, viewer_user_id=1) is None
+
+    @pytest.mark.asyncio
+    async def test_pipeline_semantic_read_uses_acl_revision(self, monkeypatch):
+        """撤权后 ACL 代次升级，pipeline 语义缓存读侧不得命中旧私有 chunk。
+
+        变异点：删掉 pipeline 读侧 acl_revision 传参 → 旧 entry 仍命中，本条红。
+        """
+        from app.rag.cache import SemanticCache as RSemanticCache
+
+        _enable(monkeypatch, retrieval=True)
+        _fake_redis(monkeypatch)
+        p = _make_pipeline(monkeypatch, _VEC_A)
+        p.semantic_cache = RSemanticCache.for_retrieval()
+        q = "pipeline撤权探针"
+        for revision in (None, 1):
+            await p.semantic_cache.set(
+                q,
+                list(_VEC_A),
+                "",
+                [{"chunk_id": "private-chunk"}],
+                organization_id=1,
+                acl_revision=revision,
+            )
+
+        from app.rag import cache as cache_mod
+
+        cache_mod._ACL_GENERATION_LOCAL[1] = 1
+        results, debug = await p.search_knowledge_base(q, 1, top_k=5, debug=True)
+        assert [h["chunk_id"] for h in results] == ["private-chunk"]
+        assert debug["cache_type"] == "semantic"
+
+        cache_mod._ACL_GENERATION_LOCAL[1] = 2
+        p.retriever.retrieve.reset_mock()
+        results2, debug2 = await p.search_knowledge_base(q, 1, top_k=5, debug=True)
+        assert results2 == [], "ACL 代次升级后旧检索语义缓存不得再命中"
+        assert debug2.get("cache_type") != "semantic"
+        assert p.retriever.retrieve.await_count == 1
+
+    @pytest.mark.asyncio
+    async def test_no_viewer_answer_cache_still_hits(self, monkeypatch):
+        """无 viewer 的普通缓存路径必须保持原有命中语义（避免误伤性能）。"""
+        _enable(monkeypatch, answer=True, retrieval=False)
+        _fake_redis(monkeypatch)
+        cache = SemanticCache()
+        await cache.set("普通问题", _VEC_A, "普通答案", [], organization_id=1)
+        hit = await cache.get(_VEC_A, 1, query="普通问题")
+        assert hit and hit["answer"] == "普通答案"
+
+    @pytest.mark.asyncio
+    async def test_chat_answer_cache_does_not_cross_users(self, monkeypatch):
+        """A 私有问生成答案后，A 同问命中自己的缓存；B 同问零命中且必走检索。
+
+        固定 org policy（否则每次 MagicMock scope 不同造成假绿）。
+        变异点：只删 get 或只删 set 的 viewer_user_id → A 自命中消失；
+        两侧都删 → B 命中 A 的答案且跳过检索。三种变异均应变红。
+        """
+        _enable(monkeypatch, answer=True, retrieval=False)
+        fake = _fake_redis(monkeypatch)
+        sem_cache = SemanticCache()
+        q = "私有合同保密条款是什么"
+        session = _mock_chat_session()
+        policy = SimpleNamespace(
+            default_model="model", retrieval_top_k=None, allow_privacy_mode=True
+        )
+        policy_patch = patch(
+            "app.services.chat_service.organization_settings_service.get_runtime_policy",
+            new=AsyncMock(return_value=policy),
+        )
+
+        with policy_patch:
+            captured_a: dict = {}
+            fake_rag = _fake_rag_stack(
+                _VEC_A, AsyncMock(return_value=([{"chunk_id": "private-chip"}], None)), captured_a
+            )
+            await _run_chat(session, fake_rag, sem_cache, q, cache_scope="server:model", user_id=1)
+            assert captured_a["chat_stream_calls"] == 1
+            assert fake_rag.search_knowledge_base.await_count == 1
+            expected_key = (
+                f"{sem_cache.prefix}org:1:{_scope_segment('server:model')}:viewer:1:"
+                f"{sem_cache._hash_key(_VEC_A)}"
+            )
+            assert expected_key in fake.values, "A 的答案必须按 viewer:1 精确落库"
+
+            # A 同问：自己的缓存必须命中（两侧 viewer 必须一致）。
+            fake_rag.search_knowledge_base.reset_mock()
+            captured_a2: dict = {}
+            fake_rag.chat_stream = _fake_rag_stack(
+                _VEC_A, AsyncMock(return_value=([], None)), captured_a2
+            ).chat_stream
+            events_a2 = await _run_chat(
+                session, fake_rag, sem_cache, q, cache_scope="server:model", user_id=1
+            )
+            assert fake_rag.search_knowledge_base.await_count == 0, "A 同问应命中自己的缓存"
+            assert any(e.type == "message" and e.is_cached for e in events_a2)
+            assert captured_a2.get("chat_stream_calls", 0) == 0
+
+            # B 同问：不得命中 A 的答案，必须走 ACL 过滤后的真实检索。
+            fake_rag.search_knowledge_base.reset_mock()
+            captured_b: dict = {}
+            fake_rag.chat_stream = _fake_rag_stack(
+                _VEC_A, AsyncMock(return_value=([], None)), captured_b
+            ).chat_stream
+            events_b = await _run_chat(
+                session, fake_rag, sem_cache, q, cache_scope="server:model", user_id=2
+            )
+            assert fake_rag.search_knowledge_base.await_count == 1, (
+                "B 不得命中 A 的缓存，必须真实检索"
+            )
+            assert captured_b.get("chat_stream_calls", 0) == 1
+            assert not any(e.type == "message" and e.is_cached for e in events_b)
+            assert all(e.content != "A 的私有答案" for e in events_b)
+
+    @pytest.mark.asyncio
+    async def test_retrieval_cache_no_longer_hits_after_acl_bump(self, monkeypatch):
+        """撤权/私有化后 ACL 代次升级，旧检索缓存不再命中私有 chunk。
+
+        变异点：RetrievalCache key 去掉 acl_revision → 旧 key 仍命中，测试变红。
+        """
+        from app.rag.cache import RetrievalCache, bump_acl_generation, clear_all_for_org
+
+        cache = RetrievalCache()
+        q = "保密条款"
+        private = [{"chunk_id": "private-chunk", "text": "机密"}]
+        await cache.set(q, 1, 5, private)
+        assert await cache.get(q, 1, 5) == private
+
+        revision = await clear_all_for_org(1)
+        assert revision >= 1
+        assert await cache.get(q, 1, 5) is None
+        # bump 后旧 key 即使物理残留也不再命中。
+        await cache.set(q, 1, 5, private, acl_revision=revision)
+        newer = await bump_acl_generation(1)
+        assert await cache.get(q, 1, 5, acl_revision=newer) is None
+
+    @pytest.mark.asyncio
+    async def test_semantic_retrieval_cache_acl_bump_and_viewer_isolation(self, monkeypatch):
+        """检索语义缓存：跨 viewer 不命中；ACL 代次升级后同 viewer 也不命中。"""
+        from app.rag.cache import SemanticCache as RSemanticCache
+
+        _enable(monkeypatch, retrieval=True, answer=False)
+        fake = _fake_redis(monkeypatch)
+        cache = RSemanticCache.for_retrieval("compat")
+        q = "保密条款"
+        chunks = [{"chunk_id": "private-chunk"}]
+        await cache.set(q, _VEC_A, "", chunks, organization_id=1, acl_revision=1)
+
+        hit = await cache.get(_VEC_A, 1, query=q, acl_revision=1)
+        assert hit and hit["sources"] == chunks
+        # 变异点：去掉 acl_revision 分域 → 旧 entry 仍命中，测试变红。
+        assert await cache.get(_VEC_A, 1, query=q, acl_revision=2) is None
+        assert await cache.get(_VEC_A, 1, query=q) is None
+        expected_index = f"{cache.index_key}:1:acl:1"
+        assert list(fake.members[expected_index]) == [
+            f"{cache.prefix}org:1:acl:1:{cache._hash_key(_VEC_A)}"
+        ]
+
+    @pytest.mark.asyncio
+    async def test_no_viewer_legacy_key_unchanged(self):
+        """无 viewer 的精确缓存 key 必须与历史字节格式一致。"""
+        from app.rag.cache import RetrievalCache
+
+        assert RetrievalCache()._key("MiXed Query", 7, 5) == (
+            "org=7|topk=5|prov=v3|prov_mode=compat|q=mixed query"
+        )

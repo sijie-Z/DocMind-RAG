@@ -25,7 +25,7 @@ from app.models.chat import (
     MessageType,
 )
 from app.models.prompt import PromptTemplate
-from app.rag.cache import SemanticCache
+from app.rag.cache import SemanticCache, acl_generation
 from app.rag.errors import LLMNotConfiguredError, RetrievalUnavailableError
 from app.rag.pipeline import (
     USER_LLM_REQUEST_FAILED_MESSAGE,
@@ -581,6 +581,9 @@ async def run_rag_pipeline(
     answer_cache_scope = _effective_answer_cache_scope(
         cache_scope, getattr(org_policy, "default_model", None)
     )
+    # 授权变更（私有化/撤权）后旧答案必须失效：把组织 ACL 代次纳入缓存键，
+    # 无变更时代次为 0，key 与历史实现逐字节一致。
+    acl_revision = await acl_generation(search_org_id) or None
     # 组织策略禁用隐私模式时，客户端 UI 已置灰；服务端仍强制关闭（纵深防御），
     # 不信任客户端可伪造的 privacyMode=true。
     privacy_mode = privacy_mode and org_policy.allow_privacy_mode
@@ -714,6 +717,8 @@ async def run_rag_pipeline(
                 query=user_content,
                 hit_info=cache_meta,
                 scope=answer_cache_scope,
+                viewer_user_id=user_id,
+                acl_revision=acl_revision,
             )
             if cached_res and not _cached_answer_provenance_blocked(cached_res):
                 full_response = cached_res.get("answer", "")
@@ -1113,6 +1118,8 @@ async def run_rag_pipeline(
             sources=sources_list,
             organization_id=search_org_id,
             scope=answer_cache_scope,
+            viewer_user_id=user_id,
+            acl_revision=acl_revision,
         )
 
     try:

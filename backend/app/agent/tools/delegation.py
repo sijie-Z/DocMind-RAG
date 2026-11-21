@@ -19,6 +19,7 @@ registry，主循环的 Executor 即可在工具列表里看到 `delegate_subtas
 
 import logging
 import time
+from typing import Any
 
 from app.agent.registry import ToolResult, register_tool
 
@@ -72,6 +73,9 @@ async def delegate_subtask(
     tasks: list[str],
     context: str = "",
     organization_id: int | None = None,
+    user_id: int | None = None,
+    run_context=None,
+    **_: Any,
 ) -> str | ToolResult:
     if not tasks:
         return ToolResult.fail(code="validation_error", message="tasks 不能为空")
@@ -88,6 +92,18 @@ async def delegate_subtask(
         return ToolResult.fail(
             code="auth_required",
             message="无法确定组织范围，禁止委派子任务（子代理检索依赖组织上下文）",
+        )
+    # issue #511 P0-1: subagents inherit the viewer's identity. Without a
+    # real user_id, a delegated search would run as loop default 0 and skip
+    # private-document ACLs. Only an explicitly marked internal system task
+    # may delegate without a viewer. The marker is server-side RunContext only.
+    internal_system_task = bool(
+        run_context is not None and run_context.extra.get("internal_system_task", False)
+    )
+    if not user_id and not internal_system_task:
+        return ToolResult.fail(
+            code="auth_required",
+            message="viewer user_id is required for delegation",
         )
 
     try:
@@ -110,6 +126,8 @@ async def delegate_subtask(
         client=client,
         tasks=tasks,
         organization_id=organization_id,
+        user_id=user_id,
+        internal_system_task=internal_system_task,
         parent_context=context,
         per_task_timeout=PER_TASK_TIMEOUT,
     )

@@ -72,6 +72,20 @@ def _reset_llm_breaker():
     _ex_mod._LLM_BREAKER._reset()
 
 
+@pytest.fixture(autouse=True)
+def _reset_acl_generation():
+    """隔离 ACL 代次的进程内回退计数，避免换序执行相互污染。"""
+    from app.rag import cache as _cache_mod
+
+    before = dict(_cache_mod._ACL_GENERATION_LOCAL)
+    _cache_mod._ACL_GENERATION_LOCAL.clear()
+    try:
+        yield
+    finally:
+        _cache_mod._ACL_GENERATION_LOCAL.clear()
+        _cache_mod._ACL_GENERATION_LOCAL.update(before)
+
+
 @pytest.fixture(scope="session")
 def client():
     """创建 FastAPI TestClient（session 级别复用）。"""
