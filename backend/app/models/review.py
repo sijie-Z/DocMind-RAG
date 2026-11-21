@@ -212,6 +212,11 @@ class ReviewItem(Base):
     # 抽取的文本事实（期限值/单位/起算事件/条件/例外），每项带
     # identified|ambiguous|not_found；未识别不填猜测值。
     facts: Mapped[Any | None] = mapped_column(JSON)
+    # 竞品对标：风险等级与可解释引用；纯派生，不影响判定/哈希/过期原因。
+    severity: Mapped[str | None] = mapped_column(String(16), comment="风险等级 high/medium/low")
+    explanation: Mapped[Any | None] = mapped_column(
+        JSON, comment="可解释引用 rule_id/evidence_id/reason_code"
+    )
     decided_by: Mapped[int | None] = mapped_column(Integer, ForeignKey("users.id"))
     decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     decision_note: Mapped[str | None] = mapped_column(Text)

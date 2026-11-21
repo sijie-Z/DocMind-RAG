@@ -56,6 +56,7 @@ from app.services.review_document_service import (
     iter_chunks,
     meta_to_dict,
 )
+from app.services.review_explanation_service import derive_explanation, derive_severity
 
 CHECKLIST_VERSIONS = ("v1",)
 # 允许选择/改选证据的案件状态；blocked 必须先把文档/身份问题修好。
@@ -1116,6 +1117,19 @@ def evidence_to_dict(row: ReviewEvidence, *, stale: bool) -> dict[str, Any]:
 
 
 def _item_to_dict(item: ReviewItem, evidence: dict[str, list[dict[str, Any]]]) -> dict[str, Any]:
+    severity = derive_severity(
+        item.facts,
+        item_key=item.item_key,
+        change_type=item.change_type,
+        severity=item.severity,
+    )
+    explanation = derive_explanation(
+        item.facts,
+        item_key=item.item_key,
+        change_type=item.change_type,
+        evidence=evidence,
+        explanation=item.explanation,
+    )
     return {
         "id": item.id,
         "item_key": item.item_key,
@@ -1123,6 +1137,8 @@ def _item_to_dict(item: ReviewItem, evidence: dict[str, list[dict[str, Any]]]) -
         "change_type": item.change_type,
         "status": item.status,
         "facts": item.facts,
+        "severity": severity,
+        "explanation": explanation,
         "decided_by": item.decided_by,
         "decided_at": _iso(item.decided_at),
         "decision_note": item.decision_note,
