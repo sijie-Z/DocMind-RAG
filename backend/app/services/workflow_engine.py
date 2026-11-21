@@ -345,7 +345,9 @@ class KnowledgeSearchNodeExecutor(NodeExecutor):
         # 同组织任意工作流读取（与 chat/agent 检索同口径）
         viewer_id = getattr(self, "user_id", None)
         retrieval_kwargs: dict[str, object] = {}
-        if viewer_id:
+        # None 表示受控的内部系统检索；0 是合法用户 id，文档 ACL 按 None 判定内部检索，
+        # 若此处用真值判断会把 0 误当成“无 viewer”→ 私有文档 fail-open。
+        if viewer_id is not None:
             retrieval_kwargs["viewer_user_id"] = viewer_id
         docs, _ = await rag_service.search_knowledge_base(
             query, organization_id=organization_id, top_k=top_k, **retrieval_kwargs

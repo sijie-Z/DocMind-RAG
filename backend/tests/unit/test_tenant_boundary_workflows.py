@@ -417,3 +417,26 @@ async def test_knowledge_search_uses_authenticated_viewer_not_input_user(monkeyp
     assert calls[0][1].get("viewer_user_id") == 9, (
         "文档级 ACL 必须按发起用户 B 过滤私有 chunk，不得回落到请求体伪造的 A"
     )
+
+
+@pytest.mark.asyncio
+async def test_knowledge_search_treats_zero_user_id_as_viewer(monkeypatch):
+    """user_id=0 是合法 viewer，不能因真值判断被当成内部检索而 fail-open。"""
+    from app.services.rag_service import RagServiceFacade
+
+    calls: list[dict] = []
+
+    async def fake_search(self, query, organization_id, top_k=5, **kwargs):
+        calls.append(kwargs)
+        return [], None
+
+    monkeypatch.setattr(RagServiceFacade, "search_knowledge_base", fake_search)
+
+    engine = WorkflowEngine(_search_config(), organization_id=7, user_id=0)
+    result = await engine.execute({"text": "报销流程"})
+
+    assert result["success"] is True, result
+    assert len(calls) == 1, calls
+    assert calls[0].get("viewer_user_id") == 0, (
+        "0 是合法用户 id，ACL 服务以 None 判定内部检索；漏传会 fail-open 泄漏私有文档"
+    )
