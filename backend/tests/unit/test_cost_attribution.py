@@ -10,6 +10,7 @@
 """
 
 import inspect
+import math
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
@@ -612,6 +613,105 @@ async def test_legacy_summary_json_has_no_new_keys(usage_db):
             "by_user",
             "by_day",
         }, "legacy 响应不得出现 by_organization/by_feature 新键"
+    finally:
+        app.dependency_overrides.pop(get_db, None)
+        app.dependency_overrides.pop(get_current_user, None)
+
+
+# ── CR 第二轮：最小安全修复判别测试 ──────────────────────────────────
+
+
+@pytest.mark.parametrize("bad_container", [None, "oops", [1, 2], 42])
+def test_estimate_cost_malformed_rates_container_falls_back(monkeypatch, bad_container):
+    """容器攻击：TOKEN_COST_RATES 非 dict 时整体回落 default-safe，不抛异常。"""
+    monkeypatch.setattr(settings, "TOKEN_COST_RATES", bad_container)
+    monkeypatch.setattr(settings, "TOKEN_COST_DEFAULT_RATE", (0.0005, 0.002))
+    cost = _estimate_cost("deepseek-chat", 1000, 500)
+    assert cost == pytest.approx(0.0005 + 0.001)
+    assert math.isfinite(cost)
+
+
+def test_estimate_cost_skips_malformed_keys_and_rates(monkeypatch):
+    """超长/空白 key、非二元组、长度≠2 的 rate 全部安全跳过。"""
+    monkeypatch.setattr(
+        settings,
+        "TOKEN_COST_RATES",
+        {
+            "x" * 300: [9.0, 9.0],
+            "bad key": [9.0, 9.0],
+            "deepseek-chat": [0.01],
+            "gpt-4": "0.5",
+        },
+    )
+    monkeypatch.setattr(settings, "TOKEN_COST_DEFAULT_RATE", (0.0005, 0.002))
+    cost = _estimate_cost("deepseek-chat", 1000, 0)
+    assert cost == pytest.approx(0.0005), "非法条目必须跳过，只用合法兜底费率"
+
+
+def test_estimate_cost_huge_integer_does_not_overflow(monkeypatch):
+    """大整数：10**400 在 rate 或 token 数上都不能 OverflowError/500。"""
+    from app.api.v1.endpoints.token_usage import _safe_rate
+
+    assert _safe_rate([10**400, 0.001]) is None
+    monkeypatch.setattr(settings, "TOKEN_COST_RATES", {"deepseek-chat": [10**400, 0.001]})
+    monkeypatch.setattr(settings, "TOKEN_COST_DEFAULT_RATE", [10**400, 0.002])
+    cost = _estimate_cost("deepseek-chat", 1000, 500)
+    assert math.isfinite(cost) and cost >= 0
+    huge = _estimate_cost("deepseek-chat", 10**400, 10**400)
+    assert math.isfinite(huge) and huge >= 0
+
+
+def test_cost_rate_config_rejects_huge_integer():
+    """配置层：float(10**400) 抛可读 ValidationError，不 500。"""
+    from pydantic import ValidationError
+
+    from app.core.config import Settings
+
+    with pytest.raises(ValidationError, match="TOKEN_COST_RATES"):
+        Settings(TOKEN_COST_RATES={"gpt-4": [10**400, 0.01]})
+    with pytest.raises(ValidationError, match="TOKEN_COST_DEFAULT_RATE"):
+        Settings(TOKEN_COST_DEFAULT_RATE=[10**400, 0.01])
+
+
+@pytest.mark.asyncio
+async def test_summary_feature_empty_string_keeps_legacy_json(usage_db):
+    """feature="" 视为未过滤，summary JSON 不出现新维度键。"""
+    factory, _db_gen = usage_db
+    await _seed(factory)
+    async with factory() as s:
+        s.add(
+            TokenUsageRecord(
+                user_id=100,
+                organization_id=11,
+                model="deepseek-chat",
+                source="rag_chat",
+                input_tokens=1000,
+                output_tokens=100,
+                cost_usd=0.0007,
+                created_at=datetime.now(UTC) - timedelta(days=1),
+            )
+        )
+        await s.commit()
+
+    from app.main import app
+
+    app.dependency_overrides[get_db] = _db_gen
+    app.dependency_overrides[get_current_user] = lambda: _user(999, 11, superuser=True)
+    client = TestClient(app)
+    try:
+        resp = client.get("/api/v1/token-usage/summary?feature=")
+        assert resp.status_code == 200, resp.text
+        # 判别关键：feature="" 必须等同未过滤（否则旧行被 feature == "" 滤掉 → 0）。
+        assert resp.json()["total_input_tokens"] == 1000
+        assert set(resp.json()) == {
+            "total_input_tokens",
+            "total_output_tokens",
+            "total_cost_usd",
+            "total_requests",
+            "by_model",
+            "by_user",
+            "by_day",
+        }, "feature='' 不得让 legacy 响应多出新键"
     finally:
         app.dependency_overrides.pop(get_db, None)
         app.dependency_overrides.pop(get_current_user, None)

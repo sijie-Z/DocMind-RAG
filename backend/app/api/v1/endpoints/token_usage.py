@@ -72,18 +72,27 @@ _FALLBACK_RATE = (0.0005, 0.002)
 
 
 def _safe_rate(value: object) -> tuple[float, float] | None:
-    """把运行期费率归一为合法二元组；形状不对返回 None（跳过/用兜底）。"""
+    """把运行期费率归一为合法二元组；形状/数值不对返回 None（跳过/用兜底）。"""
     if isinstance(value, (str, bytes)) or not isinstance(value, (tuple, list)) or len(value) != 2:
         return None
     rates: list[float] = []
     for item in value:
         if isinstance(item, bool) or not isinstance(item, (int, float)):
             return None
-        number = float(item)
+        try:
+            number = float(item)
+        except (OverflowError, ValueError, TypeError):
+            # 10**400 之类大整数不能让读侧炸掉：该条目视为非法。
+            return None
         if not math.isfinite(number) or number < 0:
             return None
         rates.append(number)
     return (rates[0], rates[1])
+
+
+def _safe_rates(value: object) -> dict:
+    """运行期费率表容器闸门：非 dict 一律视为空表（整体回落 default-safe）。"""
+    return value if isinstance(value, dict) else {}
 
 
 def _estimate_cost(model: str, input_tokens: int, output_tokens: int) -> float:
@@ -98,14 +107,26 @@ def _estimate_cost(model: str, input_tokens: int, output_tokens: int) -> float:
     """
     model = model.lower()
     in_rate, out_rate = _safe_rate(settings.TOKEN_COST_DEFAULT_RATE) or _FALLBACK_RATE
-    for key, rate in settings.TOKEN_COST_RATES.items():
-        if not isinstance(key, str) or key.lower() not in model:
+    for key, rate in _safe_rates(settings.TOKEN_COST_RATES).items():
+        # 超长/非法 key 直接跳过，不做 lower()/in 匹配（避免异常或退化匹配）。
+        if (
+            not isinstance(key, str)
+            or not key
+            or len(key) > 100
+            or any(ch.isspace() for ch in key)
+            or key.lower() not in model
+        ):
             continue
         valid = _safe_rate(rate)
         if valid is not None:
             in_rate, out_rate = valid
             break
-    return (input_tokens / 1000 * in_rate) + (output_tokens / 1000 * out_rate)
+    try:
+        cost = (input_tokens / 1000 * in_rate) + (output_tokens / 1000 * out_rate)
+    except (OverflowError, ValueError, TypeError):
+        # 极端 token 数不会 500；用 0 成本诚实表示"无法估算"而非伪造数字。
+        return 0.0
+    return cost if math.isfinite(cost) else 0.0
 
 
 # ── API endpoints ──────────────────────────────────────────────────
@@ -162,6 +183,10 @@ async def get_token_usage_summary(
         # 非超管始终强制锁定本组织，忽略请求里的组织参数歧义。
         organization_id = effective_org_id
 
+    # feature="" 等同未过滤：不得触发新维度键的序列化（legacy JSON 兼容）。
+    feature = feature.strip() if isinstance(feature, str) else feature
+    if not feature:
+        feature = None
     since = datetime.now(UTC) - timedelta(days=days)
     conditions = [TokenUsageRecord.created_at >= since]
     if organization_id is not None:

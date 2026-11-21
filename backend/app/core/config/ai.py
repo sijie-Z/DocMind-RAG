@@ -24,7 +24,11 @@ def _validate_cost_rate(value: Any, info: ValidationInfo) -> tuple[float, float]
     for item in value:
         if isinstance(item, bool) or not isinstance(item, (int, float)):
             raise ValueError(f"{label} 的费率必须是非负有限数，收到 {item!r}")
-        number = float(item)
+        try:
+            number = float(item)
+        except (OverflowError, ValueError, TypeError) as exc:
+            # 10**400 这类大整数 float() 会 OverflowError——不能让配置校验自身 500。
+            raise ValueError(f"{label} 的费率必须是非负有限数，收到 {item!r}") from exc
         if not math.isfinite(number) or number < 0:
             raise ValueError(f"{label} 的费率必须是非负有限数，收到 {item!r}")
         rates.append(number)
