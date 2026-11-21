@@ -175,6 +175,17 @@ async def test_stream_minimal_flow_completes_and_persists_node_results():
         assert set(stored) == {"in1", "out1"}
         assert stored["in1"]["status"] == "completed"
         assert stored["in1"]["output"]["messages"][0]["content"] == "你好"
+        # 节点可观测性：实时/回放 SSE 与落库 JSON 列自动携带 NodeResult 新增字段
+        for key in ("input", "tokens_in", "tokens_out", "cost_usd", "model"):
+            assert key in in1_live, key
+            assert key in stored["in1"], key
+        replay = next(
+            d
+            for t, d in events
+            if t == "node_complete" and d.get("node_id") == "in1" and "status" in d
+        )
+        for key in ("input", "tokens_in", "tokens_out", "cost_usd", "model"):
+            assert key in replay, key
     finally:
         await db_engine.dispose()
 
