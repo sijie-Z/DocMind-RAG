@@ -225,6 +225,11 @@ class RAGPipeline:
         # 即使结果随后被 ACL 过滤，缓存命中数与 sources 仍会泄漏存在性。
         blocked_ids: list[str] = []
         acl_enabled = viewer_user_id is not None
+        # ACL 代次：无 viewer 的组织级缓存条目在授权变更后必须退出命中。
+        # 有 viewer 时保持原有 bypass（viewer-filtered 结果不写共享缓存）。
+        from app.rag.cache import acl_generation
+
+        acl_revision = await acl_generation(organization_id) or None
         if acl_enabled:
             from app.core.database import AsyncSessionLocal
             from app.services.document_acl import get_blocked_document_ids
@@ -262,6 +267,8 @@ class RAGPipeline:
                     top_k,
                     search_mode=search_mode,
                     provenance_mode=settings.RAG_SOURCE_PROVENANCE_MODE,
+                    viewer_user_id=viewer_user_id,
+                    acl_revision=acl_revision,
                 )
                 if cached is not None:
                     # v2 cache still needs the same strict gate as a fresh result.
@@ -292,6 +299,8 @@ class RAGPipeline:
                                 top_k,
                                 search_mode,
                                 provenance_mode=settings.RAG_SOURCE_PROVENANCE_MODE,
+                                viewer_user_id=viewer_user_id,
+                                acl_revision=acl_revision,
                             ),
                         }
                     return cached, debug_info
@@ -354,6 +363,8 @@ class RAGPipeline:
                                 cached_sources,
                                 search_mode=search_mode,
                                 provenance_mode=settings.RAG_SOURCE_PROVENANCE_MODE,
+                                viewer_user_id=viewer_user_id,
+                                acl_revision=acl_revision,
                             )
                         if debug and debug_info is not None:
                             debug_info["cache_hit"] = True
@@ -654,6 +665,8 @@ class RAGPipeline:
                     result,
                     search_mode=search_mode,
                     provenance_mode=settings.RAG_SOURCE_PROVENANCE_MODE,
+                    viewer_user_id=viewer_user_id,
+                    acl_revision=acl_revision,
                 )
             # 语义缓存写入与读侧同一原则：显式模式一律不写（`not search_mode` 守卫）。
             # 缺它时 vector/hybrid 臂回传的非空 qv 会经上面回填的 query_vector 让本

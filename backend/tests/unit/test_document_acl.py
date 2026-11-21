@@ -162,3 +162,45 @@ class TestDocumentAccessGuard:
         ):
             assert await get_document_for_user(db, user, "d1") is doc
             acl_mock.assert_not_awaited()
+
+
+class TestAclMutationCacheInvalidation:
+    @pytest.mark.asyncio
+    async def test_authorized_users_change_clears_cache_and_bumps_generation(self):
+        """撤权/授权成功后必须清组织缓存，否则私有 chunk 仍从旧 key 命中。
+
+        变异点：删掉 documents.py 中 clear_all_for_org 调用 → 本条红。
+        """
+        from app.api.v1.endpoints import documents as documents_mod
+
+        fake_doc = MagicMock()
+        fake_doc.organization_id = 7
+        fake_doc.uploaded_by = 1
+        fake_doc.id = "doc-acl"
+        fake_doc.user_id = 1
+
+        existing = MagicMock()
+        existing.scalars.return_value.all.return_value = [2]
+        db = AsyncMock()
+        db.execute = AsyncMock(return_value=existing)
+
+        clear = AsyncMock(return_value=2)
+        with (
+            patch.object(documents_mod, "get_document_for_user", AsyncMock(return_value=fake_doc)),
+            patch.object(documents_mod, "is_org_admin", AsyncMock(return_value=False)),
+            patch.object(documents_mod, "_can_manage_document_acl", return_value=True),
+            patch.object(documents_mod, "_is_private", return_value=True),
+            patch.object(documents_mod.audit_service, "log_activity", AsyncMock()),
+            patch.object(
+                documents_mod, "get_document_authorized_users", AsyncMock(return_value={})
+            ),
+            patch("app.rag.cache.clear_all_for_org", new=clear),
+        ):
+            await documents_mod.put_document_authorized_users(
+                document_id="doc-acl",
+                body=documents_mod.AuthorizedUsersUpdate(user_ids=[]),
+                db=db,
+                current_user=MagicMock(),
+            )
+
+        clear.assert_awaited_once_with(7)
