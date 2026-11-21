@@ -1972,6 +1972,19 @@ def _split_sentences(text: str) -> list[str]:
     return [part.strip() for part in _SENTENCE_BREAK.split(text) if part.strip()]
 
 
+# 句式比对时忽略的标点/空白：只改标点（，→。）不是内容变化（issue #756）。
+_SENTENCE_NOISE = re.compile(r"""[\s，。；、,.;:：!?！？…—\-"“”'‘’（）()《》\[\]【】]""")
+
+
+def _sentence_key(text: str) -> str:
+    """句式键：归一化后去掉标点/空白，用于判断"这一句 base 里已经有了"。
+
+    必须去标点：把一句的逗号改成句号会把它拆成两句，两段的文本都与原句不等，
+    但内容一个字没变 —— 不去标点就会把这种纯排版差异报成新增。
+    """
+    return _SENTENCE_NOISE.sub("", normalize_clause_text(text))
+
+
 def _new_sentences(segment: Clause, base_sentences: list[str]) -> list[str]:
     """该行里「base 完全没有」的句子（长度与相似度双阈值，避免同义改写噪音）。"""
     fresh: list[str] = []
@@ -2108,6 +2121,9 @@ def detect_added_clauses(
 
     # 句级池：判为「改写」时用它找出行内**真正新增的句子**（issue #714）。
     base_sentences = [sent for seg in base_segments for sent in _split_sentences(seg.text)]
+    # 句式键池（去标点/空白）：判断"这一句 base 里已经有了"（issue #756）。
+    base_sent_keys = {_sentence_key(sent) for sent in base_sentences}
+    base_seg_keys = {_sentence_key(seg.text) for seg in base_segments}
 
     # 按条号归集的 base 句子池/原文：条号已存在的行要判断「是改写还是追加」（issue #722）。
     base_sents_by_no: dict[int, list[str]] = {}
@@ -2150,6 +2166,12 @@ def detect_added_clauses(
         norm = normalize_clause_text(segment.text)
         if len(norm) < ADDED_MIN_CHARS or norm in base_norms or norm in seen:
             continue
+        # 去标点后与 base 某段/某句完全相同 → 只是排版差异（，→。拆句），不是新增。
+        # 必须放在分支之前：这类片段会被判成"与 base 高度相似"，进而走句级分支，
+        # 拆出来的短句相似度跌破阈值后会被误报成新增（issue #756）。
+        seg_key = _sentence_key(segment.text)
+        if seg_key in base_seg_keys or seg_key in base_sent_keys:
+            continue
 
         # 需要作为「句子级新增」报出的文本；None 表示整行都是新增。
         fresh_text: str | None = None
@@ -2180,6 +2202,17 @@ def detect_added_clauses(
             if not fresh:
                 continue
             fresh_text = "。".join(fresh)
+
+        if fresh_text is None:
+            # 「整条新增」前的最后一道判断（issue #756）：这一段里只要有一句是 base 已有的原句，
+            # 就说明它是「旧内容 + 追加」，只报追加的句子 —— 整段贴上会让审核人以为旧条款也变了。
+            if any(
+                _sentence_key(sent) in base_sent_keys for sent in _split_sentences(segment.text)
+            ):
+                fresh = _new_sentences(segment, base_sentences)
+                if not fresh:
+                    continue
+                fresh_text = "。".join(fresh)
 
         if fresh_text is None:
             seen.add(norm)
