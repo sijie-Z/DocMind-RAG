@@ -29,7 +29,7 @@ from app.models.document import Document, DocumentChunk, DocumentStatus
 from app.models.knowledge_job import KnowledgeJobStatus, KnowledgeProcessingJob
 from app.rag.source_provenance import PARSER_ORIGINAL
 from app.services.clause_refs import extract_clause_fields
-from app.services.document_parser import document_service
+from app.services.document_parser import document_service, normalize_parse_profile
 from app.services.document_status import (
     require_count_response,
     require_delete_by_query_response,
@@ -357,6 +357,7 @@ class DocumentProcessor:
         document_id: str,
         job_id: int | None = None,
         on_progress: Callable[[], None] | None = None,
+        parse_profile: str | None = None,
     ) -> bool | DeferredOutcome:
         """Run the full document pipeline once.
 
@@ -379,7 +380,6 @@ class DocumentProcessor:
           偏移被提交后文档永久卡 PARSING）。
         """
         notify = on_progress or _noop
-        logger.info("[DOC_PROC] start document_id=%s job_id=%s", document_id, job_id)
         self._lock_lost.discard(document_id)
         lock_acquired = await self._acquire_processing_lock(document_id)
         if lock_acquired is False:
@@ -398,6 +398,27 @@ class DocumentProcessor:
         if lock_acquired is True:
             heartbeat_task = asyncio.create_task(self._lock_heartbeat_loop(document_id))
         try:
+            try:
+                profile = normalize_parse_profile(parse_profile)
+            except ValueError as exc:
+                # 消息自身的永久缺陷：按终局失败处理（文档/job 落 FAILED，
+                # 返回 True 让 consumer 提交偏移），绝不抛出去变成毒消息重投。
+                # 外层 finally 仍会释放 processing 锁/心跳，不留悬挂状态。
+                logger.error(
+                    "[DOC_PROC] invalid parse_profile, terminal failure document_id=%s "
+                    "job_id=%s error=%s",
+                    document_id,
+                    job_id,
+                    exc,
+                )
+                await self._mark_failed(document_id, str(exc), job_id)
+                return True
+            logger.info(
+                "[DOC_PROC] start document_id=%s job_id=%s parse_profile=%s",
+                document_id,
+                job_id,
+                profile,
+            )
             doc = await self._load_and_mark_parsing(document_id, job_id)
             if doc is STALE_RUN:
                 # A3-P0：该 job 已 SUCCESS（INDEXED 与 job 成功同事务提交）。
@@ -418,8 +439,24 @@ class DocumentProcessor:
                 await self._mark_job_failed(job_id, "文档不存在，任务无法继续（终局）")
                 return True
 
-            parse_result = await self.parser.parse_document(doc.file_path, str(doc.organization_id))
+            # auto 走原有两参调用，兼容既有 parser 替身/自定义实现；
+            # 非 auto 才传第三参（档位差异仅在 PDF 解析内部生效）。
+            if profile == "auto":
+                parse_result = await self.parser.parse_document(
+                    doc.file_path, str(doc.organization_id)
+                )
+            else:
+                parse_result = await self.parser.parse_document(
+                    doc.file_path, str(doc.organization_id), parse_profile=profile
+                )
             self._checkpoint(document_id, notify)
+            # 下游 chunk meta_data 来自 chunk["metadata"]：强制把实际档位注入，
+            # 兼容 parser 替身/旧实现不写该字段的情况（无 DB migration）。
+            profile_used = parse_result.get("parse_profile_used", profile)
+            for chunk_info in parse_result.get("chunks", []):
+                chunk_meta = chunk_info.get("metadata")
+                if isinstance(chunk_meta, dict):
+                    chunk_meta.setdefault("parse_profile", profile_used)
             chunks_data = parse_result.get("chunks", [])
             # issue #301 批 D（#28）：先剔除全空白 chunk 再判空。修前只看"列表非空"，
             # 而扫描件/OCR 缺失时解析链会产出一个**空文本 chunk**（content="" →

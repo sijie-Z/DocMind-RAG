@@ -144,6 +144,7 @@ class KnowledgeService:
         top_k: int = 5,
         search_mode: str | None = None,
         document_ids: list[str] | None = None,
+        metadata_filters: dict[str, list[str]] | None = None,
         debug: bool = False,
         viewer_user_id: int | None = None,
     ) -> tuple[list[dict[str, Any]], dict[str, Any] | None]:
@@ -177,6 +178,7 @@ class KnowledgeService:
                 organization_id=org_id,
                 top_k=top_k,
                 document_ids=document_ids,
+                metadata_filters=metadata_filters,
                 search_mode=search_mode,
                 debug=debug,
                 viewer_user_id=viewer_user_id,

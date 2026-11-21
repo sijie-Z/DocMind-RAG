@@ -193,6 +193,31 @@ class TestDocumentUpload:
                     app.dependency_overrides.pop(get_db, None)
                     app.dependency_overrides.pop(get_current_user, None)
 
+    def test_upload_rejects_invalid_parse_profile(self, client: TestClient):
+        """非法档位必须在上传入口被明确拒绝（400），不得进后台解析。"""
+        from app.main import app
+
+        mock_user = _make_mock_user(is_superuser=True)
+        override_func, _mock_db = _override_get_db()
+
+        async def _override_user():
+            return mock_user
+
+        app.dependency_overrides[get_db] = override_func
+        app.dependency_overrides[get_current_user] = _override_user
+        try:
+            r = client.post(
+                "/api/v1/documents/upload",
+                files={"file": ("test.pdf", io.BytesIO(b"%PDF-1.4"), "application/pdf")},
+                data={"parse_profile": "force_ocr"},
+                headers={"Authorization": "Bearer test_token"},
+            )
+            assert r.status_code == 400
+            assert "非法解析档位" in r.json()["message"]
+        finally:
+            app.dependency_overrides.pop(get_db, None)
+            app.dependency_overrides.pop(get_current_user, None)
+
     def test_upload_no_permission(self, client: TestClient):
         """无上传权限应返回 403。"""
         from app.main import app

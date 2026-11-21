@@ -310,6 +310,7 @@ async def search_knowledge(
             top_k=effective_top_k,
             search_mode=requested_mode,
             document_ids=request.document_ids or None,
+            metadata_filters=request.metadata_filters,
             debug=request.debug,
             viewer_user_id=current_user.id,
         )

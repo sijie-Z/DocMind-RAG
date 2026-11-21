@@ -1,6 +1,7 @@
 """Unit tests for the unified document processor."""
 
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -21,6 +22,96 @@ async def test_get_embeddings_preserves_length(monkeypatch):
     embeddings = await processor._get_embeddings(["hello", "", "world"])
 
     assert len(embeddings) == 3
+
+
+@pytest.mark.asyncio
+async def test_invalid_parse_profile_is_terminal_failure_not_redelivered(monkeypatch):
+    """非法档位是永久缺陷：文档/job 落 FAILED、processor 返回 True（consumer
+    提交偏移），不再重投；processing 锁必须在 finally 中释放。"""
+    processor = DocumentProcessor()
+    events = []
+
+    async def fake_lock(_document_id):
+        events.append("lock")
+        return True
+
+    async def fake_release(_document_id):
+        events.append("release")
+
+    async def fake_mark_failed(document_id, error, job_id):
+        events.append(("failed", document_id, job_id))
+        assert "非法解析档位" in error
+
+    monkeypatch.setattr(processor, "_acquire_processing_lock", fake_lock)
+    monkeypatch.setattr(processor, "_release_processing_lock", fake_release)
+    monkeypatch.setattr(processor, "_mark_failed", fake_mark_failed)
+    monkeypatch.setattr(
+        processor,
+        "_load_and_mark_parsing",
+        AsyncMock(side_effect=AssertionError("非法档位不得进入解析阶段")),
+    )
+
+    ok = await processor.process("doc-1", 7, parse_profile="magic_ocr")
+
+    assert ok is True
+    assert events == ["lock", ("failed", "doc-1", 7), "release"]
+
+
+@pytest.mark.asyncio
+async def test_process_forwards_parse_profile_to_parser(monkeypatch):
+    """非 auto 档位必须传到 parser；chunk meta_data 带上实际档位（无 migration）。"""
+    processor = DocumentProcessor()
+    captured = {}
+
+    async def fake_lock(_document_id):
+        return True
+
+    async def fake_load(_document_id, _job_id):
+        return SimpleNamespace(file_path="f.pdf", organization_id="1", id="doc-1")
+
+    async def fake_parse(file_path, organization_id, parse_profile=None):
+        captured["profile"] = parse_profile
+        return {
+            "parse_profile_used": parse_profile,
+            "chunks": [
+                {
+                    "chunk_text": "hi",
+                    "chunk_index": 0,
+                    "chunk_length": 2,
+                    "metadata": {"type": "contextual_semantic_split"},
+                }
+            ],
+        }
+
+    async def fake_embeddings(texts):
+        return [[1.0]] * len(texts)
+
+    async def fake_replace(_doc, chunks_data, _embeddings):
+        captured["chunks"] = chunks_data
+
+    async def fake_success(_document_id, _chunks_data, _job_id):
+        pass
+
+    async def fake_release(_document_id):
+        pass
+
+    async def fake_graph(_doc, _chunks):
+        pass
+
+    monkeypatch.setattr(processor, "_acquire_processing_lock", fake_lock)
+    monkeypatch.setattr(processor, "_load_and_mark_parsing", fake_load)
+    monkeypatch.setattr(processor.parser, "parse_document", fake_parse)
+    monkeypatch.setattr(processor, "_get_embeddings", fake_embeddings)
+    monkeypatch.setattr(processor, "_replace_document_state", fake_replace)
+    monkeypatch.setattr(processor, "_mark_success", fake_success)
+    monkeypatch.setattr(processor, "_release_processing_lock", fake_release)
+    monkeypatch.setattr(processor, "_extract_graph_safely", fake_graph)
+
+    ok = await processor.process("doc-1", 7, parse_profile="table_accurate")
+
+    assert ok is True
+    assert captured["profile"] == "table_accurate"
+    assert captured["chunks"][0]["metadata"]["parse_profile"] == "table_accurate"
 
 
 @pytest.mark.parametrize("with_progress", [True, False])
