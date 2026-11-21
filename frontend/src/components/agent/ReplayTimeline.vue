@@ -5,8 +5,8 @@
       <code class="replay-task-id">{{ timeline?.task_id || taskId }}</code>
       <span v-if="timeline" class="replay-chips">
         <span class="replay-chip">{{ timeline.steps_completed }}/{{ timeline.steps.length }} {{ t('agentReplay.steps') }}</span>
-        <span class="replay-chip">{{ fmtMs(timeline.duration_ms) }}</span>
-        <span class="replay-chip">{{ timeline.total_tokens }} {{ t('agentReplay.tokens') }}</span>
+        <span class="replay-chip">{{ stepMetric(timeline.duration_ms, (ms) => fmtMs(ms)) }}</span>
+        <span class="replay-chip">{{ stepMetric(timeline.total_tokens, (n) => `${n} ${t('agentReplay.tokens')}`) }}</span>
       </span>
       <button class="replay-close" :title="t('agentReplay.close')" @click="emit('close')">✕</button>
     </div>
@@ -46,8 +46,14 @@
               </div>
               <div class="step-meta">
                 <span class="step-status-text">{{ statusLabel(step.status) }}</span>
-                <span v-if="step.duration_ms" class="step-metric">{{ fmtMs(step.duration_ms) }}</span>
-                <span v-if="step.tokens_used" class="step-metric">{{ step.tokens_used }} {{ t('agentReplay.tokens') }}</span>
+                <span class="step-metric" :title="metricTitle(step.duration_ms, t('agent.step.latency'))">
+                  <span class="metric-label">{{ t('agent.step.latency') }}</span>
+                  <span class="metric-value">{{ stepMetric(step.duration_ms, (ms) => fmtMs(ms)) }}</span>
+                </span>
+                <span class="step-metric" :title="metricTitle(step.tokens_used, t('agent.step.tokens'))">
+                  <span class="metric-label">{{ t('agent.step.tokens') }}</span>
+                  <span class="metric-value">{{ stepMetric(step.tokens_used, (n) => String(n)) }}</span>
+                </span>
               </div>
               <div v-if="step.result_summary" class="step-result">{{ step.result_summary }}</div>
               <div v-if="step.error" class="step-error">{{ step.error }}</div>
@@ -97,8 +103,23 @@ const emit = defineEmits<{ close: [] }>()
 
 const { t } = useI18n()
 
+/** 未知（undefined/null/NaN/非数/后端占位 0）一律显示 —，绝不伪造 0 或空串。 */
+function isKnownMetric(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value) && value > 0
+}
+
+function stepMetric(value: unknown, format: (n: number) => string): string {
+  return isKnownMetric(value) ? format(value) : `— (${t('agent.step.unavailable')})`
+}
+
+function metricTitle(value: unknown, label: string): string {
+  return isKnownMetric(value) ? label : `${label} · ${t('agent.step.unavailable')}`
+}
+
 function fmtMs(ms: number): string {
-  if (!ms) return ''
+  // 亚毫秒真实值经 Math.round 会变成「0ms」，与「未知才显示 —」的语义冲突；
+  // 显示 <1ms 既保留「有值」信息，也不伪造 0。
+  if (ms < 1) return '<1ms'
   if (ms < 1000) return `${Math.round(ms)}ms`
   return `${(ms / 1000).toFixed(1)}s`
 }
@@ -250,7 +271,17 @@ function statusLabel(status: string): string {
   background: rgba(220, 38, 38, 0.05);
 }
 
-.replay-step.step-idle {
+/* 跳过/待执行行只压暗装饰性与状态文字；耗时/Token 指标是信息文字，不参与
+   压暗。整行 opacity: .65 会把 #6b7280 叠成 #9fa3ac（白底 2.53:1），低于
+   DESIGN_SYSTEM.md 对信息文字的 4.5:1 下限；指标保持 .step-meta 原色
+   （#6b7280 白底 4.83:1、暗色 #9ca3af/#111827 约 6.99:1）。 */
+.replay-step.step-idle .step-index,
+.replay-step.step-idle .step-icon,
+.replay-step.step-idle .step-desc,
+.replay-step.step-idle .step-tool,
+.replay-step.step-idle .step-status-text,
+.replay-step.step-idle .step-result,
+.replay-step.step-idle .step-error {
   opacity: 0.65;
 }
 
@@ -301,6 +332,24 @@ function statusLabel(status: string): string {
 
 .step-status-text {
   font-weight: 600;
+}
+
+.step-metric {
+  display: inline-flex;
+  gap: 4px;
+  white-space: nowrap;
+}
+
+.metric-label {
+  /* 标签是信息文字：颜色继承 .step-meta 的 var(--text-secondary, #6b7280)。
+     该变量全仓没有定义，实际生效的是回退值 #6b7280（Tailwind gray-500），
+     白底 4.83:1；暗色走 .dark .step-meta 的 #9ca3af，对 #111827 约 6.99:1。
+     不要再给标签叠加降低不透明度的样式，否则会跌破 4.5:1。 */
+  color: inherit;
+}
+
+.metric-value {
+  font-variant-numeric: tabular-nums;
 }
 
 .step-failed .step-status-text,

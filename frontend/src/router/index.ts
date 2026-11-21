@@ -385,7 +385,17 @@ export const routes: RouteRecordRaw[] = [
     }
   },
   {
-    // 真实 404：未知路径停留在原地址并渲染 404 页（不再静默弹回营销页）
+    // Read-only conversation snapshot: public, must precede the catch-all.
+    path: '/share/:token',
+    name: 'SharedConversation',
+    component: () => import('@/views/share/readonly.vue'),
+    meta: {
+      title: 'chat.share.title',
+      requiresAuth: false
+    }
+  },
+  {
+    // 404 fallback for unknown paths; must remain last.
     path: '/:pathMatch(.*)*',
     name: 'NotFound',
     component: () => import('@/views/error/404.vue'),

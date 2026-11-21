@@ -40,6 +40,22 @@
       </n-button>
     </div>
 
+    <!-- 会话标题搜索 -->
+    <div class="px-3 pt-3 pb-1">
+      <n-input
+        :value="conversationSearch ?? ''"
+        clearable
+        round
+        size="small"
+        :placeholder="t('chat.conversationSearch.placeholder')"
+        :input-props="{ 'aria-label': t('chat.conversationSearch.placeholder'), 'data-testid': 'chat-conversation-search' }"
+        @update:value="onSearchInput"
+        @clear="onSearchClear"
+      >
+        <template #prefix><n-icon><SearchOutline /></n-icon></template>
+      </n-input>
+    </div>
+
     <!-- Conversation list -->
     <div class="flex-1 overflow-y-auto p-3 space-y-2 scrollbar-thin">
       <!-- Loading skeleton -->
@@ -62,10 +78,17 @@
         </n-result>
       </div>
 
-      <!-- Empty state -->
-      <div v-else-if="conversations.length === 0" class="text-center text-gray-400 dark:text-gray-500 text-sm py-8 flex flex-col items-center">
-        <n-icon size="48" class="mb-2 opacity-20"><ChatboxOutline /></n-icon>
-        {{ t('chat.noHistory') }}
+      <!-- Empty state：搜索命中为 0 时如实提示，而非误报「无历史会话」 -->
+      <div v-else-if="conversations.length === 0" class="text-center text-gray-400 dark:text-gray-500 text-sm py-8 flex flex-col items-center gap-2">
+        <n-icon size="48" class="mb-1 opacity-20"><ChatboxOutline /></n-icon>
+        <span>{{ hasSearch ? t('chat.conversationSearch.empty') : t('chat.noHistory') }}</span>
+        <n-button
+          v-if="hasSearch"
+          size="tiny"
+          quaternary
+          data-testid="chat-conversation-search-clear"
+          @click="onSearchClear"
+        >{{ t('chat.conversationSearch.clear') }}</n-button>
       </div>
 
       <div
@@ -122,12 +145,13 @@
 
 <script setup lang="ts">
 import { useI18n } from 'vue-i18n'
+import { computed } from 'vue'
 import type { Conversation } from '@/api/conversation'
 import { format } from 'date-fns'
 import { parseApiDate } from '@/utils/format'
 import { useAppVersion } from '@/composables/useAppVersion'
 import {
-  AddOutline, RefreshOutline, ChatboxOutline, ChatboxEllipsesOutline, TrashOutline, CloseOutline
+  AddOutline, RefreshOutline, ChatboxOutline, ChatboxEllipsesOutline, TrashOutline, CloseOutline, SearchOutline
 } from '@vicons/ionicons5'
 
 const { t } = useI18n()
@@ -135,23 +159,31 @@ const { t } = useI18n()
 // ISS-2 数字对账：侧栏版本动态读取（后端 APP_VERSION 唯一真源，经 /health）
 const appVersion = useAppVersion()
 
-defineProps<{
+// 既有测试与调用方可能不传该 prop（旧签名兼容），在模板里统一按空串处理。
+const props = defineProps<{
   sidebarOpen: boolean
   conversations: Conversation[]
   isListLoading: boolean
   convLoadError: boolean
   currentConversationId: string | number | undefined
+  conversationSearch?: string
   /** 关闭（或移动端抽屉未打开）时整体移出 tab 序与可访问性树 */
   inert?: boolean
 }>()
+const hasSearch = computed(() => !!props.conversationSearch?.trim())
 
-defineEmits<{
+const emit = defineEmits<{
   newConversation: []
   refresh: []
   selectConversation: [conv: Conversation]
   deleteConversation: [id: string]
   close: []
+  searchChange: [value: string]
+  searchClear: []
 }>()
+
+const onSearchInput = (value: string) => emit('searchChange', value)
+const onSearchClear = () => emit('searchClear')
 
 const formatDate = (dateStr: string) => {
   if (!dateStr) return ''

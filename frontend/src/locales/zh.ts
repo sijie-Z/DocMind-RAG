@@ -529,6 +529,32 @@ export default {
     // Export
     exportTitle: '对话导出',
     exportChat: '导出对话',
+    // Chat share link (read-only snapshot)
+    share: {
+      title: '分享会话',
+      description: '生成只读链接；任何获得链接的人只能查看消息快照，不能修改原会话。',
+      linkLabel: '分享链接',
+      tokenLabel: '访问令牌',
+      onceNotice: '令牌仅在此处显示一次，请立即复制保存。',
+      activeNotice: '此会话已有分享链接。重新生成会使旧链接立即失效。',
+      inactive: '此会话尚未开启分享。',
+      create: '生成分享链接',
+      regenerate: '重新生成链接',
+      copyLink: '复制链接',
+      revoke: '撤销分享',
+      revokeConfirm: '撤销后旧链接立即失效，确认继续？',
+      created: '分享链接已生成',
+      revoked: '分享已撤销',
+      copied: '链接已复制',
+      createFailed: '生成分享链接失败',
+      revokeFailed: '撤销分享失败',
+      copyFailed: '复制失败，请手动复制链接',
+      loadFailed: '读取分享状态失败',
+      readOnlyNotice: '只读快照 · 无法发送消息或修改此会话',
+      loading: '正在加载分享内容…',
+      unavailable: '分享链接不存在或已失效。',
+      sources: '检索来源',
+    },
     roleUser: '用户',
     roleAssistant: '助手',
     sourceDoc: '文档',
@@ -545,6 +571,12 @@ export default {
     liked: '已点赞',
     disliked: '已点踩',
     feedbackFailed: '反馈失败：{message}',
+    // 会话侧栏按标题搜索
+    conversationSearch: {
+      placeholder: '搜索会话标题',
+      clear: '清除搜索',
+      empty: '没有匹配的会话，试试其他关键词',
+    },
   },
   validation: {
     required: '此项必填',
@@ -1369,6 +1401,11 @@ export default {
   agent: {
     sessionSelectorLabel: '选择 Agent 会话',
     stepResult: '步骤结果',
+    step: {
+      tokens: 'Token 数',
+      latency: '耗时',
+      unavailable: '数据不可用',
+    },
     newSessionOption: '+ 新建会话',
     untitledSession: '未命名',
     backToChat: '返回对话',

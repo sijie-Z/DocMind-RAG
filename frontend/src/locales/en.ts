@@ -523,6 +523,32 @@ export default {
     // Export
     exportTitle: 'Chat Export',
     exportChat: 'Export Chat',
+    // Chat share link (read-only snapshot)
+    share: {
+      title: 'Share conversation',
+      description: 'Create a read-only link. Anyone with the link can view a message snapshot but cannot modify the original conversation.',
+      linkLabel: 'Share link',
+      tokenLabel: 'Access token',
+      onceNotice: 'The token is shown only once — copy it now.',
+      activeNotice: 'Sharing is active. Regenerating immediately invalidates the old link.',
+      inactive: 'Sharing is not enabled for this conversation.',
+      create: 'Create share link',
+      regenerate: 'Regenerate link',
+      copyLink: 'Copy link',
+      revoke: 'Revoke share',
+      revokeConfirm: 'Revoking invalidates the old link immediately. Continue?',
+      created: 'Share link created',
+      revoked: 'Share revoked',
+      copied: 'Link copied',
+      createFailed: 'Could not create share link',
+      revokeFailed: 'Could not revoke share',
+      copyFailed: 'Copy failed — please copy the link manually',
+      loadFailed: 'Could not load share status',
+      readOnlyNotice: 'Read-only snapshot · cannot send messages or modify this conversation',
+      loading: 'Loading shared conversation…',
+      unavailable: 'This share link does not exist or has expired.',
+      sources: 'Sources',
+    },
     roleUser: 'User',
     roleAssistant: 'Assistant',
     sourceDoc: 'Document',
@@ -537,6 +563,12 @@ export default {
     liked: 'Liked',
     disliked: 'Disliked',
     feedbackFailed: 'Feedback failed: {message}',
+    // Conversation sidebar title search
+    conversationSearch: {
+      placeholder: 'Search conversation titles',
+      clear: 'Clear search',
+      empty: 'No matching conversations. Try another keyword.',
+    },
   },
   validation: {
     required: 'This field is required',
@@ -1361,6 +1393,11 @@ export default {
   agent: {
     sessionSelectorLabel: 'Select agent session',
     stepResult: 'Step result',
+    step: {
+      tokens: 'Tokens',
+      latency: 'Latency',
+      unavailable: 'Unavailable',
+    },
     newSessionOption: '+ New session',
     untitledSession: 'Untitled',
     backToChat: 'Back to Chat',

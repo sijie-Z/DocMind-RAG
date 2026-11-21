@@ -5,6 +5,7 @@ import json
 import logging
 import logging.handlers
 import os
+import re
 import time
 
 from app.core.config import settings
@@ -31,6 +32,36 @@ def sanitize_log_value(value: object) -> str:
     if value is None:
         return "-"
     return str(value).replace("\r", "\\r").replace("\n", "\\n")
+
+
+class ShareTokenRedactingFilter(logging.Filter):
+    """Strip share tokens from access-log paths before any formatter sees them.
+
+    The public snapshot API carries the capability token in its URL path
+    (``/api/v1/chat/shares/<token>``), which uvicorn would otherwise write
+    verbatim into access logs. Redact the path segment in-place on every
+    record so neither JSON nor plain-text handlers can leak the token.
+    """
+
+    _SHARE_PATH = re.compile(r"(/shares/)[^/\s\"']+")
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        args = record.args
+        if isinstance(args, tuple):
+            record.args = tuple(
+                self._SHARE_PATH.sub(r"\g<1>[REDACTED]", arg) if isinstance(arg, str) else arg
+                for arg in args
+            )
+        elif isinstance(args, dict):
+            record.args = {
+                key: self._SHARE_PATH.sub(r"\g<1>[REDACTED]", value)
+                if isinstance(value, str)
+                else value
+                for key, value in args.items()
+            }
+        if isinstance(record.msg, str):
+            record.msg = self._SHARE_PATH.sub(r"\g<1>[REDACTED]", record.msg)
+        return True
 
 
 class JsonFormatter(logging.Formatter):
@@ -132,6 +163,9 @@ def setup_logging():
 
     console_handler.setFormatter(formatter)
     file_handler.setFormatter(formatter)
+    redactor = ShareTokenRedactingFilter()
+    console_handler.addFilter(redactor)
+    file_handler.addFilter(redactor)
     root_logger.addHandler(console_handler)
     root_logger.addHandler(file_handler)
 
@@ -142,6 +176,10 @@ def setup_logging():
     logging.getLogger("redis").setLevel(logging.WARNING)
 
     logging.getLogger("app.services.permission_service").setLevel(logging.DEBUG)
+
+    # uvicorn access logger keeps its own handlers; attach the same filter so
+    # the token inside the public snapshot URL never lands in access logs.
+    logging.getLogger("uvicorn.access").addFilter(redactor)
 
     logger = logging.getLogger("docmind")
     logger.setLevel(getattr(logging, settings.LOG_LEVEL.upper()))
