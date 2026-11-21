@@ -54,6 +54,13 @@ logger = logging.getLogger(__name__)
 _semantic_cache = SemanticCache()
 
 
+def _resolve_attribution_request_id() -> str | None:
+    """成本归因用的 request_id：只读请求上下文，缺失时返回 None（零回归）。"""
+    from app.core.request_id import get_request_id
+
+    return get_request_id()
+
+
 STRICT_MODE_PROMPT = (
     "你是企业知识库问答助手，当前处于【严格模式】。\n"
     "⚠️ 核心约束：\n"
@@ -1099,6 +1106,10 @@ async def run_rag_pipeline(
                 source="rag_chat",
                 input_tokens=token_usage[0],
                 output_tokens=token_usage[1],
+                # 成本归因：feature 与 source 同口径；request_id 来自中间件
+                # contextvar（无 HTTP 请求上下文时为 None，不影响旧行为）。
+                feature="rag_chat",
+                request_id=_resolve_attribution_request_id(),
             )
     except Exception as e:
         logger.warning(f"Token usage recording failed (non-fatal): {e}")

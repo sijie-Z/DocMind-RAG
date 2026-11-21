@@ -231,6 +231,9 @@ class ExecutionContext:
     # ── Progress ──
     progress: float = 0.0
     total_tokens: int = 0
+    # 成本归因：按模型累计输入/输出拆分，由 usage 单一入口写入。
+    # 不进 to_dict()/checkpoint 契约；resume 只记本次 run 的增量用量。
+    usage_by_model: dict[str, tuple[int, int]] = field(default_factory=dict)
     start_time: float = field(default_factory=lambda: datetime.now().timestamp())
     duration_ms: float = 0.0
 

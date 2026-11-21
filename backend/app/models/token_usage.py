@@ -28,6 +28,19 @@ class TokenUsageRecord(Base):
     input_tokens: Mapped[int] = mapped_column(Integer, comment="输入Token数")
     output_tokens: Mapped[int] = mapped_column(Integer, comment="输出Token数")
     cost_usd: Mapped[float | None] = mapped_column(Float, comment="估算成本(USD)")
+    # 成本归因维度（全部 nullable：旧行保持 NULL，旧调用方无需传参）。
+    task_id: Mapped[str | None] = mapped_column(
+        String(64), nullable=True, index=True, comment="Agent 任务 ID"
+    )
+    request_id: Mapped[str | None] = mapped_column(
+        String(64), nullable=True, index=True, comment="HTTP 请求 ID（X-Request-ID）"
+    )
+    feature: Mapped[str | None] = mapped_column(
+        String(50), nullable=True, index=True, comment="功能来源: rag_chat, agent, tool_call"
+    )
+    prompt_version: Mapped[str | None] = mapped_column(
+        String(100), nullable=True, comment="提示词版本"
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), index=True, comment="创建时间"
     )

@@ -153,6 +153,12 @@ def record_llm_usage(
     total = prompt + completion
     if total and ctx is not None:
         ctx.add_tokens(total)
+        # 成本归因：单一入口同步累计按模型拆分的输入/输出 token，供 run 末尾
+        # 按各自模型费率落一行成本；老 ctx 替身（测试 stub）没有该属性时跳过。
+        bucket = getattr(ctx, "usage_by_model", None)
+        if isinstance(bucket, dict):
+            in_tokens, out_tokens = bucket.get(model, (0, 0))
+            bucket[model] = (in_tokens + prompt, out_tokens + completion)
     _record_jsonl(
         ctx,
         response=response,
