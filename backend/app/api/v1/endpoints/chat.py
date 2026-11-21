@@ -1144,6 +1144,7 @@ async def chat_parse_upload(
     上传文件并立即解析文本内容，用于聊天上下文。
     不经过完整的 RAG 链路（不向量化、不索引 ES），直接返回纯文本。
     """
+    import inspect
     import os
     import tempfile
     from pathlib import Path
@@ -1186,11 +1187,22 @@ async def chat_parse_upload(
         with open(temp_path, "wb") as f:
             f.write(raw)
 
-        result = await document_service.parse_local_file(
-            temp_path,
-            organization_id=str(org_id),
-            parse_profile=effective_parse_profile,
-        )
+        parse_kwargs = {"organization_id": str(org_id)}
+        parse_fn = document_service.parse_local_file
+        # 兼容旧测试替身/外部实现：仅在解析器真的接受 parse_profile（或 **kwargs）
+        # 时传新参数；否则保持旧两参调用，避免把新增档位变成破坏性签名变更。
+        try:
+            signature = inspect.signature(parse_fn)
+            accepts_parse_profile = "parse_profile" in signature.parameters or any(
+                parameter.kind == inspect.Parameter.VAR_KEYWORD
+                for parameter in signature.parameters.values()
+            )
+        except (TypeError, ValueError):
+            accepts_parse_profile = False
+        if accepts_parse_profile:
+            parse_kwargs["parse_profile"] = effective_parse_profile
+
+        result = await parse_fn(temp_path, **parse_kwargs)
 
         chunks = result.get("chunks", [])
         original_chunk_count = 0
