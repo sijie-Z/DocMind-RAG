@@ -23,6 +23,7 @@ from app.models.review import (
     ReviewEvidence,
     ReviewExport,
     ReviewItem,
+    ReviewRuleSet,
 )
 from app.models.scheduled_task import ScheduledTask, ScheduleRunStatus, ScheduleType
 from app.models.token_usage import TokenUsageRecord
@@ -61,6 +62,7 @@ __all__ = [
     "ReviewItem",
     "ReviewEvidence",
     "ReviewExport",
+    "ReviewRuleSet",
     "TokenUsageRecord",
     "SystemManual",
     "Permission",

@@ -887,6 +887,7 @@ def test_022_migration_roundtrip(tmp_path, monkeypatch):
         "base_document_id",
         "revised_document_id",
         "checklist_version",
+        "rule_snapshot_id",
         "status",
         "blocking_reasons",
         "readiness_snapshot",
