@@ -113,22 +113,37 @@ def _redact_prompt_fragments(text: str, prompt: Any) -> str:
     return text
 
 
+def _without_surrogates(value: Any) -> str:
+    """把孤立代理字符（U+D800–U+DFFF）替换为 U+FFFD。
+
+    ``system_prompt_override`` 等字段可经 /agent/config 写入 Redis，是用户可控
+    输入；JSON 反序列化允许出现孤立代理（如 ``"\\ud800"``），而
+    ``str.encode("utf-8")`` 对它们必然抛 UnicodeEncodeError。任何要落盘/求哈希
+    的文本都先过这里——用 U+FFFD 替换而不是抛错，保持摘要确定且不影响主流程。
+    """
+    text = value if isinstance(value, str) else str(value)
+    return "".join("�" if 0xD800 <= ord(ch) <= 0xDFFF else ch for ch in text)
+
+
 def hash_prompt(prompt: Any) -> str | None:
     """对提示词做确定性摘要（sha256），只返回摘要，不返回正文。
 
     - ``prompt=None`` → ``None``（调用点拿不到提示词时如实留空，不伪造）；
     - list/dict（OpenAI messages 等）→ 规范 JSON（键排序、紧凑分隔符）后求哈希；
-    - 其它不可序列化形态 → ``str()`` 后求哈希（仍是摘要，不含正文）。
+    - 其它不可序列化形态 → ``str()`` 后求哈希（仍是摘要，不含正文）；
+    - 孤立代理字符按 U+FFFD 归一后再编码：用户可控输入不得让求哈希抛错。
     """
     if prompt is None:
         return None
     if isinstance(prompt, str):
-        payload = prompt
+        payload = _without_surrogates(prompt)
     else:
         try:
             payload = json.dumps(prompt, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
         except (TypeError, ValueError):
             payload = str(prompt)
+        # ensure_ascii=False 会把原始代理字符原样带进 payload；统一归一后再编码。
+        payload = _without_surrogates(payload)
     return "sha256:" + hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
@@ -188,9 +203,10 @@ def _safe_label(value: Any, *, max_len: int = 64) -> str | None:
     """
     if isinstance(value, bool) or not isinstance(value, (str, int)):
         return None
-    # log_safe 处理 C0/DEL；C1（U+0080–U+009F）也是 Unicode 控制字符，补齐转义。
+    # 孤立代理先归一（否则落盘/控制台编码会抛错），再转义 C1 与 C0/DEL。
     escaped = "".join(
-        ch if not 0x80 <= ord(ch) <= 0x9F else f"\\x{ord(ch):02x}" for ch in str(value)
+        ch if not 0x80 <= ord(ch) <= 0x9F else f"\\x{ord(ch):02x}"
+        for ch in _without_surrogates(value)
     )
     cleaned = log_safe(escaped, max_len=max_len)
     return cleaned or None
@@ -249,6 +265,30 @@ def derive_run_prompt_metadata(
 
     观测层的属性访问失败一律按缺失降级，绝不把异常抛回主流程。
     """
+    try:
+        return _derive_run_prompt_metadata(
+            config,
+            template=template,
+            prompt_text=prompt_text,
+            fallback_prompt=fallback_prompt,
+            prompt_label=prompt_label,
+            experiment_id=experiment_id,
+        )
+    except Exception:  # noqa: BLE001 — 观测派生失败不得影响 run（字段留空）
+        logger.debug("prompt metadata derivation skipped", exc_info=True)
+        return {}
+
+
+def _derive_run_prompt_metadata(
+    config: Any = None,
+    *,
+    template: Any = None,
+    prompt_text: str | None = None,
+    fallback_prompt: str | None = None,
+    prompt_label: Any = None,
+    experiment_id: Any = None,
+) -> dict[str, str]:
+    """:func:`derive_run_prompt_metadata` 的实现体（异常由外层统一兜底）。"""
     meta = resolve_prompt_metadata(template, prompt_label=prompt_label, experiment_id=experiment_id)
     if meta.get("prompt_id"):
         return meta

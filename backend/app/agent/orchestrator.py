@@ -89,13 +89,18 @@ class Orchestrator:
         # 与 PERAgentLoop 同口径：技能/经验按组织隔离
         ctx.organization_id = getattr(self, "_organization_id", None)
         # 提示词版本追踪（P1）：与 PERAgentLoop.run 同一派生口径，保证经
-        # Orchestrator 发起的 run 也不出现"四个字段全空"。无模板时用配置摘要。
-        for key, value in derive_run_prompt_metadata(
-            self._config,
-            template=getattr(self, "prompt_template", None),
-            fallback_prompt=DEFAULT_SYSTEM_PROMPT,
-        ).items():
-            setattr(ctx, key, value)
+        # Orchestrator 发起的 run 也不出现"四个字段全空"。
+        # 如实说明：Orchestrator 没有 PromptTemplate 注入面（本类不定义
+        # prompt_template，生产路径也无调用者），因此这里恒走配置摘要分支；
+        # 不保留 getattr(template) 的假分支，避免看起来"DB 模板优先级生效"。
+        try:
+            for key, value in derive_run_prompt_metadata(
+                self._config,
+                fallback_prompt=DEFAULT_SYSTEM_PROMPT,
+            ).items():
+                setattr(ctx, key, value)
+        except Exception:  # noqa: BLE001 — 观测派生绝不阻断主流程
+            logger.debug("prompt metadata derivation skipped", exc_info=True)
 
         # ── Step 1: Send plan_request → Planner ───────────────────────
         planner_msg = AgentMessage.plan_request(trace_id, query)

@@ -25,6 +25,7 @@ from app.agent.exec_context import ExecutionContext
 from app.agent.llm_call_log import (
     build_llm_call_record,
     derive_run_prompt_metadata,
+    hash_prompt,
     resolve_prompt_metadata,
 )
 from app.agent.llm_call_reader import read_llm_calls
@@ -410,6 +411,177 @@ async def test_real_run_without_template_still_safe_when_config_empty(log_file: 
     record = build_llm_call_record(task_id="t", request_id="r", **derive_run_prompt_metadata(None))
     assert set(record) == LEGACY_FIELDS
     assert loop_mod.DEFAULT_SYSTEM_PROMPT, "内置常量必须存在（派生回退来源）"
+
+
+# ── 回归：用户可控 override 的孤立代理字符不得让 run 崩溃 ─────────────────
+
+SURROGATE_PROMPT = "hi \ud800 there"
+
+
+def test_hash_and_derive_tolerate_lone_surrogates():
+    """变异点：去掉 _without_surrogates → UnicodeEncodeError，本用例红。"""
+    digest = hash_prompt(SURROGATE_PROMPT)
+    assert digest.startswith("sha256:"), "孤立代理不得让求哈希抛错"
+
+    meta = derive_run_prompt_metadata(None, prompt_text=SURROGATE_PROMPT)
+    assert meta["prompt_id"].startswith("config-")
+    assert len(meta["prompt_version"]) == 16
+    # 归一后摘要稳定：同一输入两次结果一致
+    assert derive_run_prompt_metadata(None, prompt_text=SURROGATE_PROMPT) == meta
+
+    label = resolve_prompt_metadata(prompt_label=SURROGATE_PROMPT)["prompt_label"]
+    assert "\ud800" not in label, "代理字符必须被归一，不得原样落盘"
+
+
+@pytest.mark.asyncio
+async def test_real_run_survives_surrogate_in_system_prompt_override(log_file: Path, monkeypatch):
+    """system_prompt_override 可经 /agent/config 写入 Redis（用户可控）。
+
+    变异点：run 起点派生不兜底异常 → 本用例 run 直接抛 UnicodeEncodeError。
+    """
+    from app.agent.loop import PERAgentLoop
+
+    async def _no_save(self, ttl=86400 * 7):
+        return False
+
+    monkeypatch.setattr(ExecutionContext, "save", _no_save)
+
+    class _FakeMemory:
+        def reset_working(self):
+            pass
+
+        def get_all_results(self):
+            return {}
+
+        def store_step_result(self, *a, **k):
+            pass
+
+        def get_step_result(self, *a, **k):
+            return None
+
+        async def record_interaction(self, *a, **k):
+            pass
+
+    resp = MagicMock()
+    msg = MagicMock()
+    msg.content = "answer"
+    msg.tool_calls = None
+    resp.model = "deepseek-p1"
+    resp.choices = [MagicMock()]
+    resp.choices[0].message = msg
+    resp.usage = SimpleNamespace(prompt_tokens=5, completion_tokens=2)
+
+    client = MagicMock()
+    client.chat.completions.create = AsyncMock(return_value=resp)
+
+    loop = PERAgentLoop(
+        client,
+        AgentConfig(
+            system_prompt_override=SURROGATE_PROMPT,
+            enable_planning=False,
+            enable_tools=False,
+            enable_reflection=False,
+            enable_memory=False,
+            enable_thinking=False,
+            enable_experience=False,
+            enable_checkpoint=False,
+        ),
+        organization_id=1,
+        user_id=0,
+    )
+    loop.memory = _FakeMemory()
+    loop._write_experiences = AsyncMock()
+
+    events = await asyncio.wait_for(
+        _collect_run(loop, "问题", task_id="task-sg", request_id="req-sg"), timeout=15.0
+    )
+
+    assert any(e.type == "run_report" for e in events), "run 必须跑完并外发 run_report"
+
+    raw = log_file.read_text(encoding="utf-8")
+    records = [json.loads(ln) for ln in raw.splitlines()]
+    assert len(records) == 1, "一次调用一行，观测写入不得因代理字符失败"
+    # 无论派生成功（归一后摘要）还是被兜底跳过（字段留空），都不得崩溃；
+    # 成功路径下必须仍是稳定摘要，且绝不出现原始代理字符。
+    if "prompt_id" in records[0]:
+        assert records[0]["prompt_id"].startswith("config-")
+        assert len(records[0]["prompt_version"]) == 16
+    assert "\ud800" not in raw
+
+
+@pytest.mark.asyncio
+async def test_real_run_survives_derivation_failure(log_file: Path, monkeypatch):
+    """防御纵深：派生函数自身抛错时，run 仍完成且 JSONL/RunReport 照常产出。
+
+    变异点：loop.py 去掉 try/except → 派生异常直接冒泡，本用例红。
+    （代理字符由 _without_surrogates 归一吸收；本用例锁的是"观测层任意
+    派生失败都不得影响 run"这一契约，不依赖具体异常类型。）
+    """
+    from app.agent import loop as loop_mod
+
+    async def _no_save(self, ttl=86400 * 7):
+        return False
+
+    monkeypatch.setattr(ExecutionContext, "save", _no_save)
+
+    def _boom(*a, **k):
+        raise RuntimeError("derivation exploded")
+
+    monkeypatch.setattr(loop_mod, "derive_run_prompt_metadata", _boom)
+
+    class _FakeMemory:
+        def reset_working(self):
+            pass
+
+        def get_all_results(self):
+            return {}
+
+        def store_step_result(self, *a, **k):
+            pass
+
+        def get_step_result(self, *a, **k):
+            return None
+
+        async def record_interaction(self, *a, **k):
+            pass
+
+    resp = MagicMock()
+    msg = MagicMock()
+    msg.content = "answer"
+    msg.tool_calls = None
+    resp.model = "deepseek-p1"
+    resp.choices = [MagicMock()]
+    resp.choices[0].message = msg
+    resp.usage = SimpleNamespace(prompt_tokens=5, completion_tokens=2)
+
+    client = MagicMock()
+    client.chat.completions.create = AsyncMock(return_value=resp)
+
+    loop = loop_mod.PERAgentLoop(
+        client,
+        AgentConfig(
+            enable_planning=False,
+            enable_tools=False,
+            enable_reflection=False,
+            enable_memory=False,
+            enable_thinking=False,
+            enable_experience=False,
+            enable_checkpoint=False,
+        ),
+        organization_id=1,
+        user_id=0,
+    )
+    loop.memory = _FakeMemory()
+    loop._write_experiences = AsyncMock()
+
+    events = await asyncio.wait_for(
+        _collect_run(loop, "问题", task_id="task-boom", request_id="req-boom"), timeout=15.0
+    )
+
+    assert any(e.type == "run_report" for e in events), "派生失败不得中止 run"
+    records = [json.loads(ln) for ln in log_file.read_text(encoding="utf-8").splitlines()]
+    assert len(records) == 1
+    assert set(records[0]) == LEGACY_FIELDS, "派生失败 → 字段留空，旧键集不变"
 
 
 async def _collect_run(loop, query: str, **kwargs) -> list:
