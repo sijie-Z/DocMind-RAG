@@ -915,6 +915,17 @@ async def put_document_authorized_users(
             )
         await db.commit()
 
+        # ACL 撤权/授权后必须让旧检索与答案缓存退出命中：无 viewer 的组织级
+        # 条目此前只靠 TTL 过期，撤权后仍可能命中含私有 chunk 的结果。
+        try:
+            from app.rag.cache import clear_all_for_org
+
+            await clear_all_for_org(doc.organization_id)
+        except Exception as cache_err:
+            logger.warning(
+                "文档授权变更后清理缓存失败（org=%s）: %s", doc.organization_id, cache_err
+            )
+
         # 授权变更必须留痕（管理员可替换他人私有文档的授权名单，需可审计）
         try:
             await audit_service.log_activity(
