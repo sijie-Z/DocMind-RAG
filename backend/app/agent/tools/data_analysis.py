@@ -152,6 +152,7 @@ async def compare_documents(
     aspect: str = "general",
     organization_id: int | None = None,
     user_id: int | None = None,
+    run_context=None,
     **_: Any,
 ) -> str | ToolResult:
     if not document_ids or len(document_ids) < 2:
@@ -173,7 +174,7 @@ async def compare_documents(
     from app.agent.core_tools import _ensure_document_readable
 
     for did in document_ids:
-        denied = await _ensure_document_readable(did, organization_id, user_id)
+        denied = await _ensure_document_readable(did, organization_id, user_id, run_context)
         if denied:
             return denied
 

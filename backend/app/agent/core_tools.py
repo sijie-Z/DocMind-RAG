@@ -19,7 +19,7 @@ from app.agent.registry import (
     extended_surface_enabled,
     register_tool,
 )
-from app.agent.run_context import RunContext
+from app.agent.run_context import RunContext, is_internal_system_task
 from app.agent.usage import ctx_from_run_context, record_llm_call_error, record_llm_usage
 from app.core.config import ai as ai_config
 from app.core.config import settings
@@ -292,20 +292,15 @@ async def _ensure_document_readable(
 ) -> ToolResult | None:
     """Agent 直读工具的 ACL 守门：返回失败结果表示拒绝，None 表示放行。
 
-    issue #511: 真实用户请求没有 viewer (user_id) 时直接拒绝；
-    只有显式 internal_system_task=True 的后台任务才走组织级可读。
+    issue #511: a viewer-less request fails closed. Only a server-side
+    RunContext created by ``run_context_for_internal_system_task`` may read at
+    organization scope; ``extra`` markers and a missing RunContext are not
+    trusted. The context must also match the requested tenant.
     """
-    # issue #511: only a server-side RunContext can carry identity metadata;
-    # LLM tool arguments never reach this flag. A request that actually ran
-    # through the executor always has a RunContext: if it has no viewer and no
-    # explicit internal-system marker, fail closed instead of reading A's
-    # private document at organization scope. Direct internal/legacy calls
-    # without a RunContext keep the historical org-level behavior.
-    internal_system_task = bool(
-        run_context and run_context.extra.get("internal_system_task", False)
-    )
+    # The marker is a server-side identity registry, not a string in ``extra``:
+    # neither LLM tool arguments nor a request payload can construct one.
     if not user_id:
-        if internal_system_task or run_context is None:
+        if is_internal_system_task(run_context) and run_context.organization_id == organization_id:
             return None
         return ToolResult.fail(
             code="not_found",

@@ -48,14 +48,19 @@ class Orchestrator:
         config: AgentConfig | None = None,
         organization_id: int | None = None,
         user_id: int = 0,
+        *,
+        internal_system_task: bool = False,
     ):
         # A2 P0（fail-closed）：编排器下的执行器必须有组织上下文。
         if organization_id is None:
             raise ValueError("Orchestrator 缺少 organization_id，拒绝在无组织上下文下运行")
+        if internal_system_task and user_id:
+            raise ValueError("internal_system_task=True 不得同时携带真实 user_id")
         self._config = config or AgentConfig()
         self._planner = planner
         self._organization_id = organization_id
         self._user_id = user_id
+        self._internal_system_task = internal_system_task
 
     @property
     def bus(self):
@@ -150,6 +155,7 @@ class Orchestrator:
             config=self._config,
             organization_id=self._organization_id,
             user_id=self._user_id,
+            internal_system_task=self._internal_system_task,
         )
 
         # ExecutorAgent polls the bus for its execute message, runs steps
