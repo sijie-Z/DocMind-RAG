@@ -174,6 +174,32 @@ def test_orphans_duplicate_ids_and_cycles_do_not_hang():
     assert all(len(r["children"]) >= 0 for r in roots)
 
 
+def test_non_mapping_records_are_skipped_without_crashing():
+    """None/str/int 等坏记录直接跳过，正常记录仍能组装成树。"""
+    good = _row(span_id="only", span_type="llm")
+
+    roots = build_trace_tree([good, None, "bad", 42])
+
+    assert len(roots) == 1
+    assert roots[0]["span_id"] == "only"
+    assert roots[0]["children"] == []
+    assert build_trace_tree([None, "bad"]) == []
+
+
+def test_cycle_does_not_capture_strict_descendant():
+    """A↔B 互环时 A/B 各为 root；C(parent=A) 不是环成员，仍挂在 A 下。"""
+    a = _row(span_id="A", parent_span_id="B")
+    b = _row(span_id="B", parent_span_id="A")
+    c = _row(span_id="C", parent_span_id="A")
+
+    roots = build_trace_tree([c, a, b])
+
+    assert {r["span_id"] for r in roots} == {"A", "B"}
+    a_node = next(r for r in roots if r["span_id"] == "A")
+    assert [child["span_id"] for child in a_node["children"]] == ["C"]
+    assert a_node["children"][0]["children"] == []
+
+
 def test_orphan_root_still_owns_its_descendants():
     """孤儿自身挂 root，但其子孙仍按 parent 挂到该孤儿。"""
     orphan = _row(span_id="orphan", parent_span_id="missing")

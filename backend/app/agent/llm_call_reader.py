@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import json
 import logging
+from collections.abc import Iterable, Mapping
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -153,23 +154,25 @@ def read_llm_calls(
     return result
 
 
-def build_trace_tree(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def build_trace_tree(records: Iterable[Any]) -> list[dict[str, Any]]:
     """按 ``span_id`` / ``parent_span_id`` 把记录组装成只读层级树。
 
     语义（MVP，纯函数）：
 
     - 不修改传入记录，也不输出正文：节点只含白名单字段，``children`` 为新增键；
+    - 非 mapping 记录（None/str/int 等坏数据）直接跳过，不抛异常；
     - ``parent_span_id`` 指向不存在的 span（或为空）→ 挂到 ``root`` 列表；
-    - 自环、互环、环上挂子节点都不会死循环：祖先链一旦回到访问过的节点，
-      当前节点就提升为 ``root``；祖先链断在不存在的 span 不算环，子孙照常
-      挂到直接 parent；
-    - 缺少 ``span_id`` 的记录按孤儿处理；重复 ``span_id`` 时只有第一条作为
-      ``parent`` 查找目标，后续记录仍作为独立节点保留（不覆盖、不丢数据）。
+    - 自环、互环不会死循环：只有**起点自身**出现在向上祖先链里才算该节点成环、
+      提升为 ``root``；环外的严格后代照常挂到直接 parent；
+    - 缺少 ``span_id`` 或 ``span_id`` 重复的记录按孤儿处理（独立 root）；
+      ``parent_span_id`` 指向重复 id 时只认第一条节点。
 
     输出节点形如 ``{**projected_record, "children": [...]}``，保持输入顺序。
     """
     nodes: list[dict[str, Any]] = []
     for record in records:
+        if not isinstance(record, Mapping):
+            continue
         projected = {key: record[key] for key in _ALLOWED_FIELDS if key in record}
         projected["children"] = []
         nodes.append(projected)
@@ -181,12 +184,21 @@ def build_trace_tree(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
         if isinstance(span_id, str) and span_id and span_id not in index:
             index[span_id] = position
 
-    # 第二遍：按 parent 连接。沿 span_id 祖先链找第一个真实祖先；
-    # visited 同时防止自环/互环和重复 id 导致的死循环。
+    # 第二遍：按 parent 连接。向上遍历只用于区分「起点自身成环」与
+    # 「祖先链上游成环」：前者提升起点为 root，后者只说明上游有环，起点的
+    # 父节点仍存在，正常挂到直接 parent。visited 保证任何环都不死循环。
     roots: list[dict[str, Any]] = []
-    for node in nodes:
+    for position, node in enumerate(nodes):
         parent_id = node.get("parent_span_id")
-        if not isinstance(parent_id, str) or not parent_id:
+        own_id = node.get("span_id")
+        # 缺 id 或重复 id 都是坏数据：保留为独立节点，不参与 parent 链接。
+        if (
+            not isinstance(parent_id, str)
+            or not parent_id
+            or not isinstance(own_id, str)
+            or not own_id
+            or index.get(own_id) != position
+        ):
             roots.append(node)
             continue
         parent_pos = index.get(parent_id)
@@ -194,14 +206,16 @@ def build_trace_tree(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
             # 直接 parent 不存在 → 孤儿，挂 root。
             roots.append(node)
             continue
-        # 祖先链只用于检测环：若回到自己或出现重复 id，提升为 root 而不链接，
-        # 杜绝死循环；祖先链断在上层（parent 自身存在）不算环，仍挂直接 parent。
-        own_id = node.get("span_id")
         visited: set[str] = set()
         cursor = parent_id
         while True:
-            if cursor == own_id or cursor in visited:
+            if cursor == own_id:
+                # 向上回到起点自身：自环/互环，提升为 root。
                 roots.append(node)
+                break
+            if cursor in visited:
+                # 上游有环但起点不在环内：严格后代照常挂到直接 parent。
+                nodes[parent_pos]["children"].append(node)
                 break
             visited.add(cursor)
             ancestor_pos = index.get(cursor)
