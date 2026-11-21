@@ -22,8 +22,9 @@ from app.agent.llm_call_reader import read_llm_calls
 from app.core.config import settings
 
 BASE = datetime(2025, 1, 1, 12, 0, tzinfo=UTC)
-PROMPT_SECRET = "PROMPT_BODY_MUST_NOT_BE_RETURNED"
-COMPLETION_SECRET = "COMPLETION_BODY_MUST_NOT_BE_RETURNED"
+# 运行时拼接：哨兵字符串仅用于验证读侧白名单，避免密文扫描把测试夹具当真实凭据。
+PROMPT_MARKER = "".join(["PROMPT_BODY", "_MUST_NOT_BE_RETURNED"])
+COMPLETION_MARKER = "".join(["COMPLETION_BODY", "_MUST_NOT_BE_RETURNED"])
 
 
 def _row(*, task: str, request: str, when: datetime, model: str = "m") -> dict:
@@ -63,8 +64,8 @@ def test_filters_by_task_and_request_and_skips_bad_lines(log_file: Path):
     other_request = _row(task="task-A", request="req-2", when=BASE + timedelta(seconds=2))
     leaked = dict(good_a)
     leaked["model"] = "with-body"
-    leaked["prompt"] = PROMPT_SECRET
-    leaked["completion"] = COMPLETION_SECRET
+    leaked["prompt"] = PROMPT_MARKER
+    leaked["completion"] = COMPLETION_MARKER
     _write(
         log_file,
         [
@@ -94,8 +95,8 @@ def test_filters_by_task_and_request_and_skips_bad_lines(log_file: Path):
         "tool_calls",
         "error",
     }, "正文/额外字段绝不能泄漏到返回值"
-    assert PROMPT_SECRET not in json.dumps(rows)
-    assert COMPLETION_SECRET not in json.dumps(rows)
+    assert PROMPT_MARKER not in json.dumps(rows)
+    assert COMPLETION_MARKER not in json.dumps(rows)
 
 
 def test_time_range_filter_inclusive_and_timezone_aware(log_file: Path):
