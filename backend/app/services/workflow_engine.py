@@ -951,9 +951,13 @@ class WorkflowEngine:
             raise ValueError(f"Unknown node type: {node.type}")
 
         executor = executor_class(node, self.llm_config)
-        # 安全修复（R0）：把引擎级组织范围注入知识库检索节点
+        # 安全修复（R0 + #511 P0-2）：把引擎级组织范围与发起用户注入知识库检索节点
+        # （见 WorkflowEngine.get_executor），绝不从请求体（state["input"]）读取，
+        # 防止任意用户通过 input.organization_id 跨租户读取知识库，或同组织内
+        # 借工作流读取他人私有文档（检索侧按 viewer_user_id 做文档级 ACL）。
         if isinstance(executor, KnowledgeSearchNodeExecutor):
             executor.organization_id = self.organization_id
+            executor.user_id = self.user_id
         # 安全修复（A1）：记忆节点的租户上下文由引擎注入，节点配置不可控，
         # 命名空间由 memory_service 按 (org, user, agent) 拼装。
         if isinstance(executor, MemoryNodeExecutor):
