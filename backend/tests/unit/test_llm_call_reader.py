@@ -43,6 +43,7 @@ def _row(*, task: str, request: str, when: datetime, model: str = "m") -> dict:
 
 def _write(path: Path, lines: list[str]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
+    # codeql[py/clear-text-storage-sensitive-data] 测试夹具：硬编码哨兵写入 tmp_path，无真实凭据
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
