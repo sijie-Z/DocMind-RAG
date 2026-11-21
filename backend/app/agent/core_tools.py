@@ -295,12 +295,12 @@ async def _ensure_document_readable(
     issue #511: a viewer-less request fails closed. Only a server-side
     RunContext created by ``run_context_for_internal_system_task`` may read at
     organization scope; ``extra`` markers and a missing RunContext are not
-    trusted.
+    trusted. The context must also match the requested tenant.
     """
-    # The marker is a module-private object on RunContext, not a string in
-    # ``extra``: LLM tool arguments and HTTP payloads cannot construct it.
+    # The marker is a server-side identity registry, not a string in ``extra``:
+    # neither LLM tool arguments nor a request payload can construct one.
     if not user_id:
-        if is_internal_system_task(run_context):
+        if is_internal_system_task(run_context) and run_context.organization_id == organization_id:
             return None
         return ToolResult.fail(
             code="not_found",
