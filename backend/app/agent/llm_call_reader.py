@@ -38,6 +38,12 @@ _ALLOWED_FIELDS = (
     "prompt_hash",
     "tool_calls",
     "error",
+    # 层级 trace 扩展字段：旧行没有这些键时投影结果也不放键。
+    "span_id",
+    "parent_span_id",
+    "span_type",
+    "start_time",
+    "end_time",
 )
 
 DEFAULT_MAX_LINES = 10_000
@@ -145,3 +151,67 @@ def read_llm_calls(
     except FileNotFoundError:
         return []
     return result
+
+
+def build_trace_tree(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """按 ``span_id`` / ``parent_span_id`` 把记录组装成只读层级树。
+
+    语义（MVP，纯函数）：
+
+    - 不修改传入记录，也不输出正文：节点只含白名单字段，``children`` 为新增键；
+    - ``parent_span_id`` 指向不存在的 span（或为空）→ 挂到 ``root`` 列表；
+    - 自环、互环、环上挂子节点都不会死循环：祖先链一旦回到访问过的节点，
+      当前节点就提升为 ``root``；祖先链断在不存在的 span 不算环，子孙照常
+      挂到直接 parent；
+    - 缺少 ``span_id`` 的记录按孤儿处理；重复 ``span_id`` 时只有第一条作为
+      ``parent`` 查找目标，后续记录仍作为独立节点保留（不覆盖、不丢数据）。
+
+    输出节点形如 ``{**projected_record, "children": [...]}``，保持输入顺序。
+    """
+    nodes: list[dict[str, Any]] = []
+    for record in records:
+        projected = {key: record[key] for key in _ALLOWED_FIELDS if key in record}
+        projected["children"] = []
+        nodes.append(projected)
+
+    # 第一遍：记录 index（同一 span_id 只认第一条），避免后续节点指向第二条。
+    index: dict[str, int] = {}
+    for position, node in enumerate(nodes):
+        span_id = node.get("span_id")
+        if isinstance(span_id, str) and span_id and span_id not in index:
+            index[span_id] = position
+
+    # 第二遍：按 parent 连接。沿 span_id 祖先链找第一个真实祖先；
+    # visited 同时防止自环/互环和重复 id 导致的死循环。
+    roots: list[dict[str, Any]] = []
+    for node in nodes:
+        parent_id = node.get("parent_span_id")
+        if not isinstance(parent_id, str) or not parent_id:
+            roots.append(node)
+            continue
+        parent_pos = index.get(parent_id)
+        if parent_pos is None:
+            # 直接 parent 不存在 → 孤儿，挂 root。
+            roots.append(node)
+            continue
+        # 祖先链只用于检测环：若回到自己或出现重复 id，提升为 root 而不链接，
+        # 杜绝死循环；祖先链断在上层（parent 自身存在）不算环，仍挂直接 parent。
+        own_id = node.get("span_id")
+        visited: set[str] = set()
+        cursor = parent_id
+        while True:
+            if cursor == own_id or cursor in visited:
+                roots.append(node)
+                break
+            visited.add(cursor)
+            ancestor_pos = index.get(cursor)
+            if ancestor_pos is None:
+                nodes[parent_pos]["children"].append(node)
+                break
+            ancestor_parent = nodes[ancestor_pos].get("parent_span_id")
+            if not isinstance(ancestor_parent, str) or not ancestor_parent:
+                nodes[parent_pos]["children"].append(node)
+                break
+            cursor = ancestor_parent
+
+    return roots

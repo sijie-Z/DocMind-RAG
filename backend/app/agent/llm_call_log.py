@@ -130,6 +130,27 @@ def hash_prompt(prompt: Any) -> str | None:
     return "sha256:" + hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
+_OPTIONAL_TRACE_FIELDS = (
+    "span_id",
+    "parent_span_id",
+    "span_type",
+    "start_time",
+    "end_time",
+)
+
+
+def _optional_trace_fields(record: dict[str, Any], values: dict[str, Any]) -> None:
+    """只在调用点显式传入时加入层级 trace 字段。
+
+    ``None`` 表示"未提供"，不写出该键——旧调用点的记录键集保持 10 个不变。
+    时间值只做字符串化，不解析、不生成，也不接受正文内容。
+    """
+    for key in _OPTIONAL_TRACE_FIELDS:
+        value = values.get(key)
+        if value is not None:
+            record[key] = _text_or_none(value)
+
+
 def build_llm_call_record(
     *,
     task_id: str | None,
@@ -142,8 +163,13 @@ def build_llm_call_record(
     prompt_hash: str | None = None,
     tool_calls: int = 0,
     error: Any = None,
+    span_id: str | None = None,
+    parent_span_id: str | None = None,
+    span_type: str | None = None,
+    start_time: str | None = None,
+    end_time: str | None = None,
 ) -> dict[str, Any]:
-    """组装一行记录。键集固定为 10 个（issue #510 规格），不夹带正文。"""
+    """组装一行记录。默认键集固定为 10 个；可选层级字段只在传入时加入。"""
     if prompt_hash is None:
         prompt_hash = hash_prompt(prompt)
     # 错误文本防线：先替换本次提示词正文片段（provider 报错可能回显输入），
@@ -151,7 +177,7 @@ def build_llm_call_record(
     error_text = _text_or_none(error)
     if error_text is not None:
         error_text = _redact_prompt_fragments(error_text, prompt)[:500]
-    return {
+    record = {
         "ts": _utc_now_iso(),
         "task_id": _text_or_none(task_id),
         "request_id": _text_or_none(request_id),
@@ -163,6 +189,17 @@ def build_llm_call_record(
         "tool_calls": _as_int(tool_calls),
         "error": error_text,
     }
+    _optional_trace_fields(
+        record,
+        {
+            "span_id": span_id,
+            "parent_span_id": parent_span_id,
+            "span_type": span_type,
+            "start_time": start_time,
+            "end_time": end_time,
+        },
+    )
+    return record
 
 
 def resolve_log_path(task_id: str | None = None) -> Path | None:
