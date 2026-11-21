@@ -418,6 +418,7 @@ async def list_candidates(
     session: AsyncSession,
     *,
     organization_id: int,
+    viewer_user_id: int | None,
     q: str | None = None,
     page: int = 1,
     page_size: int = 50,
@@ -426,8 +427,18 @@ async def list_candidates(
 
     只做只读列举，不在此处算 readiness（那是逐文档的重活）；前端对选中的
     三份文档按需查询。已登记身份的排前面，便于在建案弹窗里优先看到。
+
+    候选条目的标题/文件名/ID 属于文档元数据，必须和文档读取端点同口径：
+    私有文档对上传者与显式授权人以外不可见（issue #511）。viewer_user_id
+    必须由服务端注入，禁止信任客户端参数。
     """
     conditions = [Document.organization_id == organization_id]
+    if viewer_user_id is not None:
+        from app.services.document_acl import get_blocked_document_ids
+
+        blocked = await get_blocked_document_ids(session, organization_id, viewer_user_id)
+        if blocked:
+            conditions.append(Document.id.notin_(blocked))
     if q:
         keyword = q.strip()
         if keyword:
