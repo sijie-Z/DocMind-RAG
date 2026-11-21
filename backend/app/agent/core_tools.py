@@ -1756,6 +1756,7 @@ async def get_prompt_template(
     name: str,
     organization_id: int | None = None,
     user_id: int | None = None,
+    run_context: RunContext | None = None,
     **_: Any,
 ) -> str | ToolResult:
     from sqlalchemy import and_, or_, select
@@ -1808,6 +1809,19 @@ async def get_prompt_template(
 
     if not tpl:
         return f"Prompt template '{name}' not found."
+
+    # 提示词版本追踪（P1）：把本 run 实际取到的模板行挂回 ExecutionContext，
+    # 后续 LLM 调用与 RunReport 即可带上 prompt_id/version（只取标量 id/version，
+    # 不读 name/content 等自由文本）。观测失败绝不影响工具结果。
+    _ctx = ctx_from_run_context(run_context)
+    if _ctx is not None:
+        try:
+            from app.agent.llm_call_log import resolve_prompt_metadata
+
+            for _key, _value in resolve_prompt_metadata(tpl).items():
+                setattr(_ctx, _key, _value)
+        except Exception:  # noqa: BLE001 — 观测不得阻断工具主流程
+            pass
 
     return json.dumps(
         {

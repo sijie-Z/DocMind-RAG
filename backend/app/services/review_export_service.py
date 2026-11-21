@@ -339,7 +339,9 @@ async def export_case(session: AsyncSession, case: ReviewCase, *, user_id: int) 
     return export
 
 
-def export_summary(export: ReviewExport) -> dict[str, Any]:
+def export_summary(
+    export: ReviewExport, *, rule_metadata: dict[str, Any] | None = None
+) -> dict[str, Any]:
     return {
         "id": export.id,
         "case_id": export.case_id,
@@ -350,6 +352,7 @@ def export_summary(export: ReviewExport) -> dict[str, Any]:
         "unidentified_count": export.unidentified_count,
         "created_by": export.created_by,
         "created_at": export.created_at.isoformat() if export.created_at else None,
+        **(rule_metadata or {}),
     }
 
 

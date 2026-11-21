@@ -24,7 +24,7 @@ from app.models.agent_task import AgentTask
 from app.models.chat import ChatSession
 from app.models.document import Document, DocumentType
 from app.models.organization import Organization
-from app.models.review import ReviewCase, ReviewExport
+from app.models.review import ReviewCase, ReviewExport, ReviewRuleSet
 from app.models.user import User
 from app.services.organization_service import organization_service
 
@@ -221,6 +221,32 @@ async def test_delete_org_with_review_exports_blocks():
             with pytest.raises(ConflictError) as excinfo:
                 await organization_service.delete_organization_thoroughly(s, 10)
         assert "核验单导出 1 条" in str(excinfo.value)
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_delete_org_with_review_rule_sets_blocks():
+    """规则快照也有组织外键：未纳入清理会触发 MySQL 1451，必须先转移。"""
+    engine, factory = await _setup()
+    try:
+        async with factory() as s:
+            s.add(
+                ReviewRuleSet(
+                    id="ruleset-1",
+                    organization_id=10,
+                    version="v1",
+                    payload_json={"schema_version": 1, "organization_id": 10, "rules": []},
+                    payload_sha256="b" * 64,
+                )
+            )
+            await s.commit()
+        async with factory() as s:
+            with pytest.raises(ConflictError) as excinfo:
+                await organization_service.delete_organization_thoroughly(s, 10)
+        assert "规则快照 1 条" in str(excinfo.value)
+        async with factory() as s:
+            assert await s.get(Organization, 10) is not None
     finally:
         await engine.dispose()
 

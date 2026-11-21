@@ -47,6 +47,8 @@ class BaseAppSettings(BaseSettings):
     # true → 按 run 分文件（llm_calls-run-<sha256(task_id)[:16]>.jsonl）；false → 单文件追加。
     # 文件名只含摘要，原始 task_id 绝不进入路径（CodeQL path-injection 结构性修法）。
     LLM_CALL_LOG_PER_RUN: bool = False
+    # 供外部运维读取的只读筛选配置，不执行删除：None = 不清理（默认）。
+    LLM_CALL_LOG_RETENTION_DAYS: int | None = None
     # SQL 语句回显开关（issue #493）：与 DEBUG 解耦，默认关闭。SQLAlchemy 在
     # echo=True 时会往具名 logger ``sqlalchemy.engine.Engine`` 挂
     # ``StreamHandler(sys.stdout)``——stdio 协议进程的 stdout 只允许协议帧，

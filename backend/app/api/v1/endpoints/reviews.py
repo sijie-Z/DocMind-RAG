@@ -29,6 +29,7 @@ from app.services import review_analysis_service as analysis_service
 from app.services import review_case_service as case_service
 from app.services import review_document_service as document_service
 from app.services import review_export_service as export_service
+from app.services.review_rule_snapshot import case_rule_metadata
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -292,7 +293,12 @@ async def export_review_case(
     try:
         case = await case_service.get_case_for_user(db, current_user, review_id)
         export = await export_service.export_case(db, case, user_id=current_user.id)
-        return {"success": True, "data": export_service.export_summary(export)}
+        # 规则元数据放在导出响应的元数据里，不进入已固化的 payload / payload_sha256。
+        rule_metadata = await case_rule_metadata(db, case, export.payload["items"])
+        return {
+            "success": True,
+            "data": export_service.export_summary(export, rule_metadata=rule_metadata),
+        }
     except (NotFoundError, AuthorizationError):
         raise
     except AppError:
