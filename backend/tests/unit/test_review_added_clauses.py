@@ -457,3 +457,57 @@ class TestNumberedClauseAppendedSentence:
         texts = " ".join(c.text for c in added)
         assert "逾期未对账" in texts, [c.text for c in added]
         assert "每月十日前完成对账" not in texts, f"不应把旧条款内容当作新增: {texts}"
+
+
+# ── 新句并入段落：只能报新增的那一句，不能把整段旧文当新增 ──
+# 现场（2026-11-20 probe 实测）：新增句被 chunker 并入相邻段落时，整段相似度会
+# 跌破 0.75（句子被稀释），`_is_variant_of_existing` 失守 → 走「整条新增」分支，
+# 于是把**整段旧文 + 新句**一起贴进核验单。审核人看到 `— → 整段旧文`，
+# 等于把旧条款当成新增。这与"多报"同类，但会让人以为旧条款也变了。
+PARAGRAPH = (
+    "本制度适用于公司全体采购人员，采购金额超过五万元的须经部门负责人审批，"
+    "审批通过后方可执行采购流程。"
+)
+OTHER_PARA = "报销须在费用发生后三十日内提交。"
+MERGED_NEW = "保密义务：双方对合同内容及履行中知悉的商业秘密承担保密责任，泄露方赔偿全部损失。"
+
+
+class TestMergedSentenceReportsOnlyNew:
+    """并入段落的新句 → 只报新句（issue #756）。"""
+
+    def test_new_sentence_merged_into_next_paragraph_reports_only_that_sentence(self) -> None:
+        base = [_anon_clause(1, PARAGRAPH), _anon_clause(2, OTHER_PARA)]
+        revised = [_anon_clause(1, PARAGRAPH), _anon_clause(2, OTHER_PARA + MERGED_NEW)]
+
+        added = detect_added_clauses(base, revised)
+
+        texts = " ".join(c.text for c in added)
+        assert "保密义务" in texts, f"并入段落的新增句丢了: {texts!r}"
+        # 关键：不能把整段旧文一起贴上
+        assert "报销须在费用发生后三十日内提交" not in texts, f"旧段落内容被当成了新增: {texts!r}"
+
+    def test_new_sentence_merged_into_previous_paragraph_reports_only_that_sentence(self) -> None:
+        base = [_anon_clause(1, PARAGRAPH), _anon_clause(2, OTHER_PARA)]
+        revised = [_anon_clause(1, PARAGRAPH + MERGED_NEW), _anon_clause(2, OTHER_PARA)]
+
+        added = detect_added_clauses(base, revised)
+
+        texts = " ".join(c.text for c in added)
+        assert "保密义务" in texts, f"并入段落的新增句丢了: {texts!r}"
+        assert "本制度适用于公司全体采购人员" not in texts, f"旧段落内容被当成了新增: {texts!r}"
+
+    def test_punctuation_only_change_in_paragraph_is_not_added(self) -> None:
+        # 同一段只改标点（，→。）：按句内容（去标点）比对，全部句子都已存在 → 不是新增
+        base = [_anon_clause(1, "乙方保守商业秘密，保密期限为五年，期满仍应继续承担保密义务。")]
+        revised = [_anon_clause(1, "乙方保守商业秘密。保密期限为五年。期满仍应继续承担保密义务。")]
+
+        assert detect_added_clauses(base, revised) == [], "仅改标点不应报新增"
+
+    def test_genuinely_new_paragraph_is_still_reported_whole(self) -> None:
+        # 与 base 没有任何共同句子的独立新段落 → 仍按整条新增报出（不要过度切碎）
+        base = [_anon_clause(1, PARAGRAPH)]
+        revised = [_anon_clause(1, PARAGRAPH), _anon_clause(2, MERGED_NEW)]
+
+        added = detect_added_clauses(base, revised)
+
+        assert [c.text for c in added] == [MERGED_NEW]
