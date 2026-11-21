@@ -19,11 +19,15 @@ import app.models  # noqa: F401
 from app.core.database import Base
 from app.models.review import ReviewCase, ReviewRuleSet
 from app.services import review_case_service as case_service
+from app.services import review_rule_snapshot
 from app.services.review_checklist import ChecklistItem, load_checklist
 from app.services.review_rule_snapshot import (
     _digest,
+    attach_snapshot,
+    build_snapshot_payload,
     case_rule_metadata,
     load_snapshot,
+    parse_snapshot,
     resolve_case_rules,
 )
 from tests.unit.test_review_case_service import ORG, USER_ID, _create_case, _seed_ready_case
@@ -188,6 +192,113 @@ async def test_snapshot_reused_for_identical_rules(factory, monkeypatch):
     async with factory() as db:
         rows = (await db.execute(select(ReviewRuleSet))).scalars().all()
         assert len(rows) == 1
+
+
+@pytest.mark.asyncio
+async def test_tampered_row_organization_falls_back(factory, monkeypatch):
+    """只改行级组织列（payload 内组织仍正确）也视为篡改，必须回落。"""
+    monkeypatch.delenv("REVIEW_CHECKLIST_JSON", raising=False)
+    await _seed_ready_case(factory)
+    case = await _create_case(factory)
+    async with factory() as db:
+        row = await db.get(ReviewRuleSet, case.rule_snapshot_id)
+        # 行级列改成外组织，但 payload 未动（sha256 仍然自洽）。
+        row.organization_id = ORG + 1
+        await db.commit()
+        assert _digest(row.payload_json) == row.payload_sha256
+        assert parse_snapshot(row, organization_id=ORG) is None
+
+        assert await load_snapshot(db, case) is None
+        metadata = await case_rule_metadata(db, case, [])
+        assert metadata["from_snapshot"] is False
+
+
+@pytest.mark.asyncio
+async def test_payload_organization_mismatch_falls_back(factory, monkeypatch):
+    """payload 内冻结的组织与调用方不符时回落（交叉校验 payload）。"""
+    monkeypatch.delenv("REVIEW_CHECKLIST_JSON", raising=False)
+    await _seed_ready_case(factory)
+    case = await _create_case(factory)
+    async with factory() as db:
+        row = await db.get(ReviewRuleSet, case.rule_snapshot_id)
+        # 连同哈希一起改：行级组织仍等于 ORG，只有 payload 组织不一致。
+        tampered = dict(row.payload_json)
+        tampered["organization_id"] = ORG + 1
+        row.payload_json = tampered
+        row.payload_sha256 = _digest(tampered)
+        await db.commit()
+
+        assert parse_snapshot(row, organization_id=ORG) is None
+        assert await load_snapshot(db, case) is None
+        rules = await resolve_case_rules(db, case)
+        assert {rule.key for rule in rules} == {
+            "payment_term",
+            "start_condition",
+            "acceptance_invoice",
+            "exception",
+        }
+
+
+@pytest.mark.asyncio
+async def test_concurrent_first_snapshot_insert_reuses_winner(factory, monkeypatch):
+    """并发首建：INSERT 撞唯一约束后回查复用对手行，而不是把竞态变成 409。
+
+    构造方式：直接构造一个案件对象（不落库），让第一次 `_find_by_digest`
+    返回 None（并发窗口内双方都没看到对手行），随后插入会撞
+    (organization_id, payload_sha256) 唯一约束。
+    """
+    monkeypatch.delenv("REVIEW_CHECKLIST_JSON", raising=False)
+    await _seed_ready_case(factory)
+    checklist = load_checklist()
+    payload = build_snapshot_payload(checklist, ORG)
+    digest = _digest(payload)
+    winner_id = str(uuid.uuid4())
+
+    async with factory() as db:
+        # 对手行：同 (组织, 哈希) 已提交（另一个建案事务的产物）。
+        db.add(
+            ReviewRuleSet(
+                id=winner_id,
+                organization_id=ORG,
+                version="v1",
+                payload_json=payload,
+                payload_sha256=digest,
+                published_at=datetime.now(UTC).replace(tzinfo=None),
+            )
+        )
+        await db.commit()
+
+        case = ReviewCase(
+            id=str(uuid.uuid4()),
+            organization_id=ORG,
+            title="并发建案",
+            policy_document_id="doc-p",
+            base_document_id="doc-b",
+            revised_document_id="doc-r",
+            checklist_version="v1",
+            status="ready",
+            created_by=USER_ID,
+            lock_version=1,
+        )
+        db.add(case)
+
+        real_find = review_rule_snapshot._find_by_digest
+        calls = {"n": 0}
+
+        async def first_miss_then_real(session, organization_id, digest):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                return None  # 模拟并发窗口：首次 SELECT 未命中
+            return await real_find(session, organization_id, digest)
+
+        monkeypatch.setattr(review_rule_snapshot, "_find_by_digest", first_miss_then_real)
+        row = await attach_snapshot(db, case, checklist)
+        await db.commit()
+
+        assert row.id == winner_id, "必须复用已存在的对手行，而不是再插一行"
+        assert case.rule_snapshot_id == winner_id
+        rows = (await db.execute(select(ReviewRuleSet))).scalars().all()
+        assert len(rows) == 1, "竞态后不得留下重复快照行"
 
 
 def test_rule_snapshot_helper_rejects_malformed_rules():

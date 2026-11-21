@@ -25,7 +25,17 @@ def _columns(table: str) -> set[str]:
     return {column["name"] for column in sa.inspect(op.get_bind()).get_columns(table)}
 
 
+def _indexes(table: str) -> set[str]:
+    return {index["name"] for index in sa.inspect(op.get_bind()).get_indexes(table)}
+
+
+def _foreign_keys(table: str) -> set[str]:
+    return {fk["name"] for fk in sa.inspect(op.get_bind()).get_foreign_keys(table) if fk["name"]}
+
+
 def upgrade() -> None:
+    # 幂等分步：MySQL DDL 非事务，上一次执行可能建了表却未推进版本戳。
+    # 与 025 先例一致——已存在的对象跳过，缺失的补齐，不因 1050/1061 失败。
     if "review_rule_set" not in sa.inspect(op.get_bind()).get_table_names():
         op.create_table(
             "review_rule_set",
@@ -56,6 +66,7 @@ def upgrade() -> None:
                 "organization_id", "payload_sha256", name="uq_review_rule_set_org_digest"
             ),
         )
+    if "ix_review_rule_set_org_created" not in _indexes("review_rule_set"):
         op.create_index(
             "ix_review_rule_set_org_created", "review_rule_set", ["organization_id", "created_at"]
         )
@@ -70,10 +81,13 @@ def upgrade() -> None:
                 comment="规则快照 ID",
             ),
         )
+    if "ix_review_case_rule_snapshot_id" not in _indexes("review_case"):
         op.create_index("ix_review_case_rule_snapshot_id", "review_case", ["rule_snapshot_id"])
-        if not _is_sqlite():
+    if not _is_sqlite():
+        fk_name = "fk_review_case_rule_snapshot_id_review_rule_set"
+        if fk_name not in _foreign_keys("review_case"):
             op.create_foreign_key(
-                "fk_review_case_rule_snapshot_id_review_rule_set",
+                fk_name,
                 "review_case",
                 "review_rule_set",
                 ["rule_snapshot_id"],
@@ -82,15 +96,16 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    existing = _columns("review_case")
-    if "rule_snapshot_id" in existing:
-        if not _is_sqlite():
-            op.drop_constraint(
-                "fk_review_case_rule_snapshot_id_review_rule_set",
-                "review_case",
-                type_="foreignkey",
-            )
-        op.drop_index("ix_review_case_rule_snapshot_id", table_name="review_case")
+    # 同样分步幂等：先摘外键/索引再删列，最后删表（MySQL 1553：索引仍被
+    # 外键引用时不能直接删）。缺失的对象跳过，不因 1091/1146 失败。
+    if "rule_snapshot_id" in _columns("review_case"):
+        fk_name = "fk_review_case_rule_snapshot_id_review_rule_set"
+        if not _is_sqlite() and fk_name in _foreign_keys("review_case"):
+            op.drop_constraint(fk_name, "review_case", type_="foreignkey")
+        if "ix_review_case_rule_snapshot_id" in _indexes("review_case"):
+            op.drop_index("ix_review_case_rule_snapshot_id", table_name="review_case")
         op.drop_column("review_case", "rule_snapshot_id")
-    op.drop_index("ix_review_rule_set_org_created", table_name="review_rule_set")
-    op.drop_table("review_rule_set")
+    if "review_rule_set" in sa.inspect(op.get_bind()).get_table_names():
+        if "ix_review_rule_set_org_created" in _indexes("review_rule_set"):
+            op.drop_index("ix_review_rule_set_org_created", table_name="review_rule_set")
+        op.drop_table("review_rule_set")
