@@ -159,3 +159,34 @@ def test_disabled_switch_and_per_run_path_reuse(log_file: Path, monkeypatch: pyt
 def test_invalid_max_lines_rejected(log_file: Path):
     with pytest.raises(ValueError):
         read_llm_calls(max_lines=0)
+
+
+def test_bad_timestamp_is_skipped_without_time_filters(log_file: Path):
+    """无时间过滤时也必须跳过坏时间戳，输出时间戳保证可解析。"""
+    good = _row(task="t", request="r", when=BASE)
+    bad_ts = dict(good, ts="not-a-timestamp")
+    missing_ts = dict(good)
+    missing_ts.pop("ts")
+    _write(log_file, [json.dumps(bad_ts), json.dumps(good), json.dumps(missing_ts)])
+
+    rows = read_llm_calls(task_id="t")
+    assert [r["ts"] for r in rows] == [good["ts"]]
+
+
+def test_oversized_line_is_skipped_without_corrupting_next_line(
+    log_file: Path, caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
+):
+    """单行超限时跳过整行并告警，剩余部分不得污染下一行。"""
+    import app.agent.llm_call_reader as reader
+
+    monkeypatch.setattr(reader, "MAX_LINE_BYTES", 512)
+    good = _row(task="t", request="r", when=BASE)
+    oversized = json.dumps({"ts": good["ts"], "task_id": "t", "padding": "x" * 2048})
+    _write(log_file, [oversized, json.dumps(good)])
+
+    with caplog.at_level("WARNING", logger=reader.logger.name):
+        rows = read_llm_calls(task_id="t")
+
+    assert [r["task_id"] for r in rows] == ["t"]
+    assert rows[0]["model"] == good["model"]
+    assert "超过上限" in caplog.text
