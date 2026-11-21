@@ -175,6 +175,52 @@ async def test_stream_minimal_flow_completes_and_persists_node_results():
         assert set(stored) == {"in1", "out1"}
         assert stored["in1"]["status"] == "completed"
         assert stored["in1"]["output"]["messages"][0]["content"] == "你好"
+        # 节点可观测性：实时/回放 SSE 与落库 JSON 列自动携带 NodeResult 新增字段
+        for key in ("input", "tokens_in", "tokens_out", "cost_usd", "model"):
+            assert key in in1_live, key
+            assert key in stored["in1"], key
+        replay = next(
+            d
+            for t, d in events
+            if t == "node_complete" and d.get("node_id") == "in1" and "status" in d
+        )
+        for key in ("input", "tokens_in", "tokens_out", "cost_usd", "model"):
+            assert key in replay, key
+    finally:
+        await db_engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_stream_node_observability_never_persists_raw_key_names():
+    """评审 CRITICAL：哨兵出现在输入键名时，SSE 新增字段与落库 JSON 都不得泄漏原文。"""
+    from app.models.workflow import WorkflowExecution
+
+    sentinel_key = "SENTINEL-E2E-QUERY-e2e4f1a2"
+    app, db_engine, factory, wf_id = await _setup_app(_MIN_FLOW)
+    try:
+        # 哨兵放在输入键名里（正文 benign）：新增观测字段只能出现哈希，不得泄漏键名原文。
+        # 用 _execute_stream 的 json 参数构造 {sentinel_key: ...} 需要自定义请求：
+        from app.main import app as fastapi_app
+
+        try:
+            transport = httpx.ASGITransport(app=fastapi_app, raise_app_exceptions=False)
+            async with httpx.AsyncClient(
+                transport=transport, base_url="http://test", timeout=60
+            ) as ac:
+                r = await ac.post(
+                    f"/api/v1/workflows/{wf_id}/execute",
+                    params={"stream": "true"},
+                    json={sentinel_key: "benign-value"},
+                )
+        finally:
+            fastapi_app.dependency_overrides.clear()
+        assert r.status_code == 200
+        for t, payload in _parse_sse_events(r.text):
+            if t == "node_complete":
+                assert sentinel_key not in json.dumps(payload["input"], ensure_ascii=False)
+        async with factory() as s:
+            ex = (await s.execute(select(WorkflowExecution))).scalars().one()
+        assert sentinel_key not in json.dumps(ex.node_results, ensure_ascii=False)
     finally:
         await db_engine.dispose()
 
