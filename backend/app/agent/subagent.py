@@ -29,6 +29,8 @@ async def delegate_task(
     model: str = "deepseek-v4-flash",
     max_iterations: int = 5,
     organization_id: int | None = None,
+    user_id: int | None = None,
+    internal_system_task: bool = False,
 ) -> AsyncGenerator[AgentEvent, None]:
     """Delegate a subtask to a child PER agent.
 
@@ -48,6 +50,12 @@ async def delegate_task(
     # A2 P0（fail-closed）：子代理继承父代理的组织边界；缺失即拒绝派发。
     if organization_id is None:
         raise ValueError("delegate_task 缺少 organization_id，拒绝在无组织上下文下派发子任务")
+    # issue #511 P0-1: the child inherits the viewer. A missing user_id would
+    # silently become PERAgentLoop's legacy 0 and bypass private-doc ACLs.
+    if not user_id and not internal_system_task:
+        raise ValueError("delegate_task 缺少 user_id，拒绝无 viewer 身份派发子任务")
+    if internal_system_task and user_id:
+        raise ValueError("internal_system_task=True 不得同时携带真实 user_id")
     child_config = AgentConfig(
         model=model,
         max_iterations=max_iterations,
@@ -72,6 +80,8 @@ async def delegate_task(
         openai_client=client,
         config=child_config,
         organization_id=organization_id,
+        user_id=user_id,
+        internal_system_task=internal_system_task,
     )
 
     async for event in child.run(task):
@@ -83,6 +93,8 @@ async def run_parallel_subtasks(
     tasks: list[str],
     model: str = "deepseek-v4-flash",
     organization_id: int | None = None,
+    user_id: int | None = None,
+    internal_system_task: bool = False,
     parent_context: str = "",
     per_task_timeout: float | None = 300.0,
 ) -> list[str]:
@@ -99,6 +111,8 @@ async def run_parallel_subtasks(
         raise ValueError(
             "run_parallel_subtasks 缺少 organization_id，拒绝在无组织上下文下派发子任务"
         )
+    if not user_id and not internal_system_task:
+        raise ValueError("run_parallel_subtasks 缺少 user_id，拒绝无 viewer 身份派发子任务")
 
     async def _collect_events(task: str) -> list[str]:
         parts: list[str] = []
@@ -108,6 +122,8 @@ async def run_parallel_subtasks(
             parent_context=parent_context,
             model=model,
             organization_id=organization_id,
+            user_id=user_id,
+            internal_system_task=internal_system_task,
         ):
             if event.type == "chunk":
                 parts.append(event.content)
