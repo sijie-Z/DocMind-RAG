@@ -57,6 +57,7 @@ from app.services.review_document_service import (
     meta_to_dict,
 )
 from app.services.review_explanation_service import derive_explanation, derive_severity
+from app.services.review_rule_snapshot import attach_snapshot, case_rule_metadata
 
 CHECKLIST_VERSIONS = ("v1",)
 # 允许选择/改选证据的案件状态；blocked 必须先把文档/身份问题修好。
@@ -240,6 +241,8 @@ async def create_case(
         session.add(case)
         # 清单可配置：默认 4 项 + `REVIEW_CHECKLIST_JSON` 追加项（见 review_checklist）
         checklist = load_checklist()
+        # 规则快照与建案在同一事务落库：旧规则配置变更不影响此案件的复现/审计。
+        await attach_snapshot(session, case, checklist)
         items = {}
         for ordinal, entry in enumerate(checklist, start=1):
             item = ReviewItem(
@@ -1013,12 +1016,14 @@ async def case_detail(session: AsyncSession, case: ReviewCase) -> dict[str, Any]
         or any(entry["missing"] for entry in documents.values())
         or any(entry["identity_changed"] for entry in documents.values())
     )
+    item_dicts = [_item_to_dict(item, evidence_by_item.get(item.id, {})) for item in items]
     return {
         "id": case.id,
         "title": case.title,
         "status": case.status,
         "checklist_version": case.checklist_version,
         "organization_id": case.organization_id,
+        **await case_rule_metadata(session, case, item_dicts),
         "blocking_reasons": case.blocking_reasons or [],
         "created_by": case.created_by,
         "assignee_id": case.assignee_id,
@@ -1030,7 +1035,7 @@ async def case_detail(session: AsyncSession, case: ReviewCase) -> dict[str, Any]
         "archived_by": case.archived_by,
         "lock_version": case.lock_version,
         "documents": documents,
-        "items": [_item_to_dict(item, evidence_by_item.get(item.id, {})) for item in items],
+        "items": item_dicts,
         "summary": summarize_items(items),
         "live_source_stale": live_source_stale,
         "stale_evidence_count": len(stale_by_evidence),

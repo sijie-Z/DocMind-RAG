@@ -165,6 +165,10 @@ class ReviewCase(Base):
     base_document_id: Mapped[str] = mapped_column(String(36), nullable=False)
     revised_document_id: Mapped[str] = mapped_column(String(36), nullable=False)
     checklist_version: Mapped[str] = mapped_column(String(16), nullable=False, default="v1")
+    # 建案时固化的规则/playbook 快照；旧案件为 NULL，读取时回落当前 checklist。
+    rule_snapshot_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("review_rule_set.id"), index=True, comment="规则快照 ID"
+    )
     status: Mapped[str] = mapped_column(String(16), nullable=False, default="blocked")
     # 建案时为什么 blocked（side:reason 列表）；ready 时为空数组。
     blocking_reasons: Mapped[Any | None] = mapped_column(JSON, comment="阻断原因码列表")
@@ -305,4 +309,32 @@ class ReviewExport(Base):
         DateTime(timezone=True).with_variant(mysql.DATETIME(fsp=6), "mysql"),
         server_default=func.now(),
         comment="导出时间（微秒精度，保证同秒导出排序稳定）",
+    )
+
+
+class ReviewRuleSet(Base):
+    """合同审查规则/playbook 版本快照：建案时固化，供旧案件审计复现。
+
+    与 doc/证据快照同口径：快照行不可变，规则配置变更只新增行；案件通过
+    ``rule_snapshot_id`` 引用。组织列用于租户隔离，旧案件可为 NULL。
+    """
+
+    __tablename__ = "review_rule_set"
+    __table_args__ = (
+        Index("ix_review_rule_set_org_created", "organization_id", "created_at"),
+        UniqueConstraint("organization_id", "payload_sha256", name="uq_review_rule_set_org_digest"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    organization_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("organizations.id"), comment="所属组织（旧数据可空）"
+    )
+    version: Mapped[str] = mapped_column(String(32), nullable=False, comment="规则版本标签")
+    payload_json: Mapped[Any] = mapped_column(JSON, nullable=False, comment="规则快照 JSON")
+    payload_sha256: Mapped[str] = mapped_column(String(64), nullable=False, comment="快照内容哈希")
+    published_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), comment="发布时间"
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), comment="创建时间"
     )
