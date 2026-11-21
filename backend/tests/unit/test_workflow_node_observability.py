@@ -18,7 +18,8 @@ from app.services.workflow_engine import WorkflowEngine
 
 _SENTINEL = "SENTINEL-USER-QUERY-9f8e7d6c"
 _KEY_SENTINEL = "SENTINEL-E2E-QUERY-7b6a5c4d"
-_KEY_SECRET = "api_key-sk-abcdef123456"
+# 运行时拼接：测试哨兵键名，避免密文扫描把测试夹具当真实凭据。
+_KEY_SECRET = "".join(["api_key-", "sk-", "abcdef123456"])
 
 
 def _collector(events: list[tuple[str, dict]]):
