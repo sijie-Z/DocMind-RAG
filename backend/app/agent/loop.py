@@ -31,6 +31,7 @@ from app.agent.executor import (
     _legacy_step_result_event,
 )
 from app.agent.final_synthesis import FinalInputPacket, FinalSynthesisResult, FinalSynthesizer
+from app.agent.llm_call_log import derive_run_prompt_metadata
 from app.agent.memory_bridge import AgentMemoryBridge
 from app.agent.planner import Plan, Planner, PlanStep
 from app.agent.reflector import Reflector
@@ -219,6 +220,11 @@ class PERAgentLoop:
         # 该标记经 executor → RunContext → 工具 ACL 守门向下传递。
         self.internal_system_task = internal_system_task
         self._execution_mode = execution_mode
+        # 提示词版本追踪（P1）：真实 PromptTemplate 行可由 set_prompt_template
+        # 注入，run() 起点据此派生 prompt_id/version。**当前生产路径无调用者**
+        # （Agent 提示词来自模块常量 / system_prompt_override），因此真实 run
+        # 恒回退到配置/内置常量摘要——如实留白，不臆造模板 id。
+        self.prompt_template: Any | None = None
         # 技能学习闭环（issue #200）：此前 SkillManager 全仓零调用者
         # 技能学习按组织隔离（A 组织学到的技能不得注入 B 组织的规划）
         self.skill_manager = get_skill_manager(organization_id)
@@ -309,6 +315,16 @@ class PERAgentLoop:
         if self._final_synthesizer is None:
             self._final_synthesizer = FinalSynthesizer(self.client, self.config)
         return self._final_synthesizer
+
+    def set_prompt_template(self, template: Any | None) -> None:
+        """注入本 run 实际使用的 PromptTemplate 行（可选的版本追踪上下文）。
+
+        **当前生产路径没有调用者**：Agent 侧提示词来自模块常量 /
+        ``system_prompt_override``，服务层尚未解析 DB 模板。真实 run 因此
+        恒走"配置摘要"分支；本方法只作为后续接线入口，且只保存引用——不读
+        正文、不查库。传入 ``None`` 等于"无 DB 模板"。
+        """
+        self.prompt_template = template
 
     def _should_continue_execution(self, final_output: str, plan, remaining_steps: list) -> bool:
         """Conditional edge: decide if execution should continue or proceed to reflection.
@@ -658,6 +674,20 @@ class PERAgentLoop:
         # issue #510 第二步：request_id 属于"当前请求"而非 run；resume 由新请求
         # 续跑时如实使用新请求的编号（不落快照，不伪造跨请求的"统一 trace"）。
         ctx.request_id = request_id
+        # 提示词版本/实验标签（P1）：真实 run 起点派生稳定的 id/version/label，
+        # 使调用级 JSONL 与 RunReport 不再全空。有 DB 模板用模板 id/version；
+        # 否则用 system_prompt_override / 内置常量的摘要（只存摘要，不含正文）。
+        # 旧键集不变；派生失败（含用户可控 override 里的孤立代理字符）只是
+        # 字段留空——观测不得让 run 崩溃。derive 内部已有兜底，这里再挡一层。
+        try:
+            for key, value in derive_run_prompt_metadata(
+                self.config,
+                template=getattr(self, "prompt_template", None),
+                fallback_prompt=DEFAULT_SYSTEM_PROMPT,
+            ).items():
+                setattr(ctx, key, value)
+        except Exception:  # noqa: BLE001 — 观测派生绝不阻断主流程
+            logger.debug("prompt metadata derivation skipped", exc_info=True)
         # 成本归因：把本轮 ExecutionContext 暴露给服务层（不进 to_dict() 冻结
         # 契约），放在 run 起点以覆盖后续所有提前返回分支。
         self.last_execution_context = ctx

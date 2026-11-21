@@ -45,6 +45,11 @@ _ALLOWED_FIELDS = (
     "span_type",
     "start_time",
     "end_time",
+    # 提示词版本/实验标签：同样只在旧行实际带键时才输出。
+    "prompt_id",
+    "prompt_version",
+    "prompt_label",
+    "experiment_id",
 )
 
 DEFAULT_MAX_LINES = 10_000

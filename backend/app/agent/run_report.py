@@ -18,6 +18,7 @@ from __future__ import annotations
 from typing import Any
 
 from app.agent.exec_context import ExecutionContext
+from app.agent.llm_call_log import PROMPT_METADATA_FIELDS
 from app.agent.observability_masking import (
     mask_reasoning_preview,
     mask_report_field,
@@ -137,6 +138,12 @@ def build_run_report(ctx: ExecutionContext, final_output: str = "") -> dict[str,
         # issue #202 评审 minor-8：人读报告此前答不出"花了多少 token"
         "total_tokens": ctx.total_tokens,
     }
+    # 提示词版本/实验标签：只在调用方显式设置时进入报告；旧 run 的键集不变。
+    # 只投影标量标识，绝不读模板 name/description/content（可能含提示词正文）。
+    for key in PROMPT_METADATA_FIELDS:
+        value = getattr(ctx, key, None)
+        if value is not None and value != "":
+            report[key] = str(value)
     final_artifact = ctx.artifacts.get("final_synthesis")
     if isinstance(final_artifact, dict):
         # Final tokens are already included in total_tokens by record_llm_usage.
@@ -179,6 +186,10 @@ def render_run_report_text(report: dict[str, Any]) -> str:
     lines.append(f"Goal:  {report['goal'] or '(unset)'}")
     lines.append(f"Duration: {report['duration_ms']} ms")
     lines.append(f"Tokens:   {report.get('total_tokens', 0)}")
+    # 版本/实验标签只在存在时渲染；不输出提示词正文。
+    labels = [(key, report[key]) for key in PROMPT_METADATA_FIELDS if report.get(key)]
+    if labels:
+        lines.append("Prompt:   " + "; ".join(f"{key}={value}" for key, value in labels))
     lines.append("")
     lines.append("## Plan reasoning")
     lines.extend(f"  - {r}" for r in report["plan_reasoning"])
