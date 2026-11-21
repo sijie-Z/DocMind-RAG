@@ -19,7 +19,7 @@ from __future__ import annotations
 import json
 import logging
 from collections.abc import Iterable, Mapping
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -50,6 +50,9 @@ _ALLOWED_FIELDS = (
 DEFAULT_MAX_LINES = 10_000
 # 单行上限：阻止单行超大 JSON 吃掉无界内存（评审 IMPORTANT #1）。
 MAX_LINE_BYTES = 1_048_576
+# 只读留存筛选返回的标识字段：现有 JSONL schema 没有物理行号/唯一记录 id，
+# 因此用时间戳 + 关联 id 标识应清理的记录，供未来运维流程自行定位。
+_RETENTION_ID_FIELDS = ("ts", "task_id", "request_id", "span_id")
 
 
 def _discard_rest_of_line(stream: Any) -> None:
@@ -152,6 +155,41 @@ def read_llm_calls(
     except FileNotFoundError:
         return []
     return result
+
+
+def select_llm_calls_for_retention(
+    records: Iterable[Any],
+    retention_days: int | None,
+    now: datetime | None = None,
+) -> list[dict[str, Any]]:
+    """只读筛选超过留存期的调用记录，**不删除任何文件/记录**。
+
+    - ``retention_days is None`` → 不清理，返回空列表；
+    - ``retention_days <= 0`` → ValueError（避免误把所有记录判为过期）；
+    - 过期条件：``ts < now - retention_days``；边界（恰好等于 cutoff）
+      视为未过期，保留；
+    - 坏记录（非 mapping / 时间戳不可解析）跳过；``now`` 为 naive 时按 UTC；
+    - 返回新字典，仅含 :data:`_RETENTION_ID_FIELDS` 中实际存在的字段，
+      不含正文，也不共享输入对象。
+
+    本函数只产出"应清理标识列表"，供未来经审批的运维流程使用；本身没有
+    文件写入、``unlink`` / ``remove`` 等副作用。
+    """
+    if retention_days is None:
+        return []
+    if retention_days <= 0:
+        raise ValueError("retention_days must be > 0 when configured")
+    reference = _as_utc(now) if now is not None else datetime.now(UTC)
+    cutoff = reference - timedelta(days=retention_days)
+    expired: list[dict[str, Any]] = []
+    for record in records:
+        if not isinstance(record, Mapping):
+            continue
+        ts = _utc_timestamp(record.get("ts"))
+        if ts is None or ts >= cutoff:
+            continue
+        expired.append({key: record[key] for key in _RETENTION_ID_FIELDS if key in record})
+    return expired
 
 
 def build_trace_tree(records: Iterable[Any]) -> list[dict[str, Any]]:
