@@ -770,13 +770,24 @@ async def get_conversation(
                             # AttributeError，被下方逐消息 except 吞掉，附件回填恒失败）。
                             # 同时按有效组织过滤：meta.file_ids 是客户端自填值，缺此
                             # 条件可回读他人组织文档的文件名（跨租户泄露面）。
-                            docs_result = await db.execute(
-                                select(Document).where(
-                                    Document.id.in_(file_ids_list),
-                                    Document.organization_id == effective_org_id,
-                                )
+                            # issue #511：同组织内的私有文档文件名同样属于元数据，
+                            # 客户端自填 file_ids 不得借此回读他人私有文档。
+                            from app.services.document_acl import get_blocked_document_ids
+
+                            blocked = await get_blocked_document_ids(
+                                db, effective_org_id, current_user.id
                             )
-                            doc_map = {str(doc.id): doc for doc in docs_result.scalars().all()}
+                            visible_ids = [fid for fid in file_ids_list if fid not in blocked]
+                            if visible_ids:
+                                docs_result = await db.execute(
+                                    select(Document).where(
+                                        Document.id.in_(visible_ids),
+                                        Document.organization_id == effective_org_id,
+                                    )
+                                )
+                                doc_map = {str(doc.id): doc for doc in docs_result.scalars().all()}
+                            else:
+                                doc_map = {}
                             for fid in meta["file_ids"]:
                                 doc = doc_map.get(str(fid))
                                 if doc:

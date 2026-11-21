@@ -858,6 +858,8 @@ class FileUploadService:
         status: str | None = None,
         skip: int = 0,
         limit: int = 20,
+        *,
+        viewer_user_id: int,
     ) -> dict[str, Any]:
         """
         获取文档列表
@@ -868,12 +870,19 @@ class FileUploadService:
             status: 文档状态（可选）
             skip: 跳过数量
             limit: 返回数量限制
+            viewer_user_id: 认证用户 ID（服务端必填；不得由请求参数提供）
 
         Returns:
             文档列表和统计信息
         """
         try:
             async with AsyncSessionLocal() as session:
+                # issue #511：user_id 只作为上传者筛选条件，且必须由服务端用
+                # 认证用户覆盖。旧实现允许调用方传 A 的 id 让 B 读到 A 的私有
+                # 文件名；这里强制以 viewer 为准，外部传入值不得越权
+                # （viewer_user_id 为必填关键字参数，漏传即 TypeError）。
+                user_id = str(viewer_user_id)
+
                 # 构建查询条件
                 query = select(Document).where(Document.organization_id == organization_id)
 
@@ -882,6 +891,17 @@ class FileUploadService:
 
                 if status:
                     query = query.where(Document.status == status)
+
+                # 私有文档即使上传者相同，也要按 ACL 授权关系过滤（被撤销
+                # 授权后不得继续读到标题/文件名）。get_blocked_document_ids
+                # 自身 fail-closed：查询失败时屏蔽私有文档，不吞异常放行。
+                from app.services.document_acl import get_blocked_document_ids
+
+                blocked = await get_blocked_document_ids(
+                    session, int(organization_id), viewer_user_id
+                )
+                if blocked:
+                    query = query.where(Document.id.notin_(blocked))
 
                 # 获取总数
                 total_query = select(func.count()).select_from(query.subquery())
