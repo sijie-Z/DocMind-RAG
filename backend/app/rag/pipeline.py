@@ -340,6 +340,8 @@ class RAGPipeline:
                         organization_id,
                         query=query,
                         hit_info=sem_meta,
+                        viewer_user_id=viewer_user_id,
+                        acl_revision=acl_revision,
                     )
                     if sem_cached:
                         cached_sources = _gate_source_provenance(
@@ -692,7 +694,13 @@ class RAGPipeline:
             ):
                 # 检索缓存条目 answer 为空（仅 sources），写入检索专用命名空间（R4）
                 await self.semantic_cache.set(
-                    query, query_vector, "", result, organization_id=organization_id
+                    query,
+                    query_vector,
+                    "",
+                    result,
+                    organization_id=organization_id,
+                    viewer_user_id=viewer_user_id,
+                    acl_revision=acl_revision,
                 )
 
             if result:
