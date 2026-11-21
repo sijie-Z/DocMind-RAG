@@ -49,6 +49,13 @@ class TestFieldMasking:
             ("110101199003071234", "110101199003071234"),
             ("4111111111111111", "4111111111111111"),
             ("来自 192.168.1.100 的请求", "192.168.1.100"),
+            ("password=SuperSecret123", "SuperSecret123"),
+            ("token=ghp_ABCDEFGHIJKLMNOPQRST", "ghp_ABCDEFGHIJKLMNOPQRST"),
+            ("Authorization: Bearer ghp_ABCDEFGHIJKLMNOPQRST", "ghp_ABCDEFGHIJKLMNOPQRST"),
+            ("github_pat_ABCDEFGHIJKLMNOPQRSTUVWXYZ", "github_pat_ABCDEFGHIJKLMNOPQRSTUVWXYZ"),
+            ("xoxb-123456789012-abcdefghijkl", "xoxb-123456789012-abcdefghijkl"),
+            ("来自 2001:db8::1 的请求", "2001:db8::1"),
+            ("SSN 123-45-6789", "123-45-6789"),
         ],
     )
     def test_sensitive_patterns_are_irreversibly_masked(self, raw: str, needle: str):
@@ -68,6 +75,23 @@ class TestFieldMasking:
         assert "\\u2028" in masked and "\\u0085" in masked and "\\u200b" in masked
         assert "\\t" in masked and "\\n" in masked
 
+    def test_normal_chinese_text_is_not_false_positive(self):
+        normal = "请核验合同第三条第（一）款，重点检查付款期限与违约责任。"
+        assert mask_run_report_preview(normal) == normal
+
+    def test_key_value_masking_does_not_double_wrap(self):
+        """token 前缀规则先命中时，键值规则不得再套一层括号（修前 [..]]）。"""
+        assert mask_run_report_preview("token=ghp_ABCDEFGHIJKLMNOPQRST") == (
+            "token=[SECRET_REDACTED]"
+        )
+        assert mask_run_report_preview("authorization: Bearer abcdefghijklmnop") == (
+            "authorization: [SECRET_REDACTED]"
+        )
+
+    @pytest.mark.parametrize("address", ["::1", "::", "fe80::1ff:fe23:4567:890a"])
+    def test_compressed_ipv6_forms_are_masked(self, address: str):
+        assert mask_run_report_preview(address) == "[PII_REDACTED]"
+
     def test_masker_is_pure_and_writes_no_log_body(self, caplog):
         raw = "邮件 user@example.com"
         with caplog.at_level(logging.DEBUG):
@@ -77,18 +101,25 @@ class TestFieldMasking:
         assert raw == "邮件 user@example.com"  # 入参未被修改
 
     def test_run_report_dict_and_rendered_text_are_masked(self):
-        ctx = ExecutionContext(
-            query="找一下 user@example.com", goal="读取 sk-abcdefghijklmnopqrstuv"
+        sentinels = (
+            "SuperSecret123",
+            "ghp_ABCDEFGHIJKLMNOPQRST",
+            "2001:db8::1",
+            "123-45-6789",
         )
-        ctx.record_decision("plan", "plan", "联系 13812345678 再检索")
-        report = build_run_report(ctx, final_output="结果见 http://192.168.1.100/x")
+        ctx = ExecutionContext(
+            query=f"找一下 password={sentinels[0]} 的记录",
+            goal=f"读取 token={sentinels[1]} 的配置",
+        )
+        ctx.record_decision("plan", "plan", f"联系 13812345678，SSN {sentinels[3]}")
+        report = build_run_report(ctx, final_output=f"结果来自 {sentinels[2]}")
 
         for field in ("query", "goal", "final_output_preview"):
-            assert "@example.com" not in report[field]
-            assert "sk-abcdefghijklmnop" not in report[field]
+            for needle in sentinels:
+                assert needle not in report[field]
         assert "13812345678" not in report["plan_reasoning"][0]
         text = render_run_report_text(report)
-        for needle in ("user@example.com", "sk-abcdefghijklmnop", "13812345678", "192.168.1.100"):
+        for needle in (*sentinels, "user@example.com", "13812345678", "192.168.1.100"):
             assert needle not in text
 
 
