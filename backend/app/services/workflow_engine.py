@@ -217,12 +217,10 @@ _OBS_NODE_TYPES = frozenset(
     }
 )
 
-# 受工作流工具白名单约束的节点类型。LLM 节点本身也算工具调用（LLM 是收费
-# 外部工具），因此一并纳入；input/output/condition/transform/router 是纯编排
-# 节点，不受 allowlist 限制，避免旧 flow 一旦设置白名单就整体不可运行。
-_WORKFLOW_TOOL_NODE_TYPES = frozenset(
-    {"tool_search", "tool_tts", "code", "api_call", "llm_openai", "llm_deepseek", "llm_qwen"}
-)
+# 纯编排节点：无外部副作用、不消耗预算，故不纳入 allowlist 约束。
+# 其余所有注册执行器（LLM、工具、memory、code、api_call，以及未来新增者）
+# 默认都受 allowlist 保护——白名单按"默认拒绝"派生，不再维护第二份枚举。
+_PURE_ORCHESTRATION_NODE_TYPES = frozenset({"input", "output", "condition", "transform", "router"})
 
 
 def _project_key(key: Any) -> str:
@@ -1078,6 +1076,29 @@ class RouterNodeExecutor(NodeExecutor):
         }
 
 
+# 节点类型 → 执行器：allowlist 保护范围与执行器注册表的唯一来源。
+# 新增有副作用的 executor 时只需在此登记，默认即受 allowlist 约束。
+_EXECUTOR_REGISTRY = {
+    "input": InputNodeExecutor,
+    "output": OutputNodeExecutor,
+    "llm_openai": LLMNodeExecutor,
+    "llm_deepseek": LLMNodeExecutor,
+    "llm_qwen": LLMNodeExecutor,
+    "tool_search": KnowledgeSearchNodeExecutor,
+    "tool_tts": TTSNodeExecutor,
+    "condition": ConditionNodeExecutor,
+    "memory": MemoryNodeExecutor,
+    "code": CodeExecuteNodeExecutor,
+    "api_call": APICallNodeExecutor,
+    "transform": TransformNodeExecutor,
+    "router": RouterNodeExecutor,
+}
+
+# 受 allowlist / 预算约束的节点 = 所有已注册执行器 - 纯编排节点。
+# 单一来源：注册表新增条目默认落在这里，不必再同步第二份硬编码集合。
+_WORKFLOW_TOOL_NODE_TYPES = frozenset(_EXECUTOR_REGISTRY) - _PURE_ORCHESTRATION_NODE_TYPES
+
+
 class WorkflowEngine:
     """工作流引擎 - 基于 LangGraph"""
 
@@ -1107,7 +1128,11 @@ class WorkflowEngine:
         self.max_tokens = getattr(workflow_config, "max_tokens", None)
         self._tokens_used = 0
         self._cost_used = 0.0
-        self._budget_data_missing: str | None = None
+        # token 与 cost 的可能来源不同（provider 给了 token 但模型无价格表
+        # → cost 仍不可核验），必须分别记录缺失，不能用一个共享字符串覆盖。
+        # 缺省不设预算时两标志虽会置位，但 _check_budget 立即返回，行为不变。
+        self._tokens_data_missing = False
+        self._cost_data_missing = False
 
     def _check_tool_allowed(self, node: WorkflowNode) -> None:
         """节点调用外部工具前校验 allowlist（None=不限制，[]=拒绝全部）。
@@ -1137,12 +1162,12 @@ class WorkflowEngine:
         """
         if self.max_tokens is None and self.max_cost_usd is None:
             return
-        if self.max_tokens is not None and self._budget_data_missing == "tokens":
+        if self.max_tokens is not None and self._tokens_data_missing:
             raise WorkflowBudgetExceededError(
                 "工作流 token 预算无法核验：上游未提供 usage 数据，已拒绝继续调用工具"
                 f"（上限 {self.max_tokens}）"
             )
-        if self.max_cost_usd is not None and self._budget_data_missing == "cost":
+        if self.max_cost_usd is not None and self._cost_data_missing:
             raise WorkflowBudgetExceededError(
                 "工作流成本预算无法核验：上游未提供成本数据，已拒绝继续调用工具"
                 f"（上限 ${self.max_cost_usd:.6f}）"
@@ -1168,12 +1193,14 @@ class WorkflowEngine:
         tokens_out = node_result.tokens_out
         if tokens_in is not None and tokens_out is not None:
             self._tokens_used += tokens_in + tokens_out
-        elif self._budget_data_missing is None:
-            self._budget_data_missing = "tokens"
+        else:
+            self._tokens_data_missing = True
         if node_result.cost_usd is not None:
             self._cost_used += node_result.cost_usd
-        elif self._budget_data_missing is None:
-            self._budget_data_missing = "cost"
+        else:
+            # 覆盖两种真实情形：provider 无 usage，或有 usage 但模型不在价格表。
+            # 设置了成本预算时两者都不能当作 0 元放行。
+            self._cost_data_missing = True
 
     def set_event_callback(self, callback: Callable) -> None:
         """设置事件回调函数（用于 SSE 推送）"""
@@ -1193,22 +1220,7 @@ class WorkflowEngine:
 
     def get_executor(self, node: WorkflowNode) -> NodeExecutor:
         """获取节点执行器"""
-        executors = {
-            "input": InputNodeExecutor,
-            "output": OutputNodeExecutor,
-            "llm_openai": LLMNodeExecutor,
-            "llm_deepseek": LLMNodeExecutor,
-            "llm_qwen": LLMNodeExecutor,
-            "tool_search": KnowledgeSearchNodeExecutor,
-            "tool_tts": TTSNodeExecutor,
-            "condition": ConditionNodeExecutor,
-            "memory": MemoryNodeExecutor,
-            "code": CodeExecuteNodeExecutor,
-            "api_call": APICallNodeExecutor,
-            "transform": TransformNodeExecutor,
-            "router": RouterNodeExecutor,
-        }
-
+        executors = _EXECUTOR_REGISTRY
         executor_class = executors.get(node.type)
         if not executor_class:
             raise ValueError(f"Unknown node type: {node.type}")

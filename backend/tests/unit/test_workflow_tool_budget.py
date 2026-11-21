@@ -5,6 +5,9 @@ from langchain_core.messages import AIMessage
 
 from app.schemas.workflow import WorkflowConfig, WorkflowEdge, WorkflowNode
 from app.services.workflow_engine import (
+    _EXECUTOR_REGISTRY,
+    _PURE_ORCHESTRATION_NODE_TYPES,
+    _WORKFLOW_TOOL_NODE_TYPES,
     WorkflowBudgetExceededError,
     WorkflowEngine,
     WorkflowToolNotAllowedError,
@@ -115,6 +118,44 @@ class TestWorkflowToolAllowlist:
         assert result["success"] is True
         assert _FakeSearchExecutor.calls == 1
 
+    async def test_memory_node_is_protected_by_allowlist(self, monkeypatch):
+        """memory 有副作用（写记忆），必须受 allowlist 约束。"""
+        executed = []
+
+        async def fake_execute(state):
+            executed.append(state)
+            return {"context": {"memory_written": True}}
+
+        class _FakeMemoryExecutor:
+            async def execute_with_retry(self, state):
+                return await fake_execute(state)
+
+        real_get_executor = WorkflowEngine.get_executor
+
+        def get_executor(self, node):
+            if node.type == "memory":
+                return _FakeMemoryExecutor()
+            return real_get_executor(self, node)
+
+        monkeypatch.setattr(WorkflowEngine, "get_executor", get_executor)
+        engine = WorkflowEngine(_flow("input", "memory", "output", allowed_tools=["tool_search"]))
+
+        result = await engine.execute({"text": "hi"})
+
+        assert result["success"] is False
+        assert "memory" in result["error"]
+        assert executed == []  # 判别性：记忆节点根本没执行
+
+    def test_protected_set_derived_from_executor_registry(self):
+        """注册表 ⊆ 受保护集合 ∪ 纯编排集合；新增 executor 默认受保护。"""
+        assert set(_EXECUTOR_REGISTRY) <= (
+            _WORKFLOW_TOOL_NODE_TYPES | _PURE_ORCHESTRATION_NODE_TYPES
+        )
+        assert not (_WORKFLOW_TOOL_NODE_TYPES & _PURE_ORCHESTRATION_NODE_TYPES)
+        assert "memory" in _WORKFLOW_TOOL_NODE_TYPES
+        assert "llm_openai" in _WORKFLOW_TOOL_NODE_TYPES
+        assert "input" in _PURE_ORCHESTRATION_NODE_TYPES
+
     def test_allowlist_config_normalizes_duplicates_and_blank_items(self):
         config = WorkflowConfig(
             nodes=[], edges=[], allowed_tools=["tool_search", " tool_search ", ""]
@@ -194,6 +235,58 @@ class TestWorkflowRunBudget:
         assert result["success"] is False
         assert "成本预算" in result["error"]
         assert "0.000100" in result["error"]
+
+    @pytest.mark.asyncio
+    async def test_cost_exactly_at_limit_succeeds(self, monkeypatch):
+        """成本恰好等于上限不算超支（off-by-one 判别，> 改 >= 必须变红）。"""
+        response = _llm_response(1000, 1000)
+        cost = 1000 / 1000 * 0.00015 + 1000 / 1000 * 0.0006
+        llm = _RecordingLLM(response)
+        monkeypatch.setattr(
+            "app.services.workflow_engine.NodeExecutor.get_llm", lambda self, _t="openai": llm
+        )
+        engine = WorkflowEngine(_flow("input", "llm_openai", "output", max_cost_usd=cost))
+
+        result = await engine.execute({"text": "hi"})
+
+        assert result["success"] is True
+        assert llm.calls == 1
+
+    @pytest.mark.asyncio
+    async def test_no_usage_cost_only_fails_closed(self, monkeypatch):
+        """仅设 max_cost_usd 且 provider 无 usage：成本不可核验，禁止第二个付费调用。"""
+        llm = _RecordingLLM(AIMessage(content="ok"))
+        monkeypatch.setattr(
+            "app.services.workflow_engine.NodeExecutor.get_llm", lambda self, _t="openai": llm
+        )
+        engine = WorkflowEngine(
+            _flow("input", "llm_openai", "llm_openai", "output", max_cost_usd=1.0)
+        )
+
+        result = await engine.execute({"text": "hi"})
+
+        assert result["success"] is False
+        assert "成本预算无法核验" in result["error"]
+        assert llm.calls == 1  # 判别性：付费节点不得再被调用
+
+    @pytest.mark.asyncio
+    async def test_known_tokens_unpriced_model_rejects_cost_budget(self, monkeypatch):
+        """有 token 但模型无价格表：仍须拒绝（保留既有正确路径）。"""
+        response = AIMessage(
+            content="ok",
+            response_metadata={"model_name": "unknown-model-xyz"},
+            usage_metadata={"input_tokens": 10, "output_tokens": 5, "total_tokens": 15},
+        )
+        llm = _RecordingLLM(response)
+        monkeypatch.setattr(
+            "app.services.workflow_engine.NodeExecutor.get_llm", lambda self, _t="openai": llm
+        )
+        engine = WorkflowEngine(_flow("input", "llm_openai", "output", max_cost_usd=1.0))
+
+        result = await engine.execute({"text": "hi"})
+
+        assert result["success"] is False
+        assert "成本预算无法核验" in result["error"]
 
     @pytest.mark.asyncio
     async def test_budget_stops_following_llm_node(self, monkeypatch):
