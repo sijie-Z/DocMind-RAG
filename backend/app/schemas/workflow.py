@@ -5,7 +5,7 @@ Agent 工作流 Pydantic Schemas
 from datetime import datetime
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 # --- 工作流节点定义 ---
@@ -37,10 +37,28 @@ class WorkflowEdge(BaseModel):
 
 
 class WorkflowConfig(BaseModel):
-    """完整工作流配置"""
+    """完整工作流配置
+
+    工具白名单与运行预算均为可选：缺省时引擎沿用旧行为，存量 flow_data 无需迁移。
+    """
 
     nodes: list[WorkflowNode] = Field(default_factory=list, description="节点列表")
     edges: list[WorkflowEdge] = Field(default_factory=list, description="边列表")
+    # None = 不限制；空列表 = 不允许任何工具节点（两种语义必须区分）
+    allowed_tools: list[str] | None = Field(
+        None, description="允许执行的工具节点类型；None 表示不限制"
+    )
+    max_cost_usd: float | None = Field(None, ge=0, description="单次运行最大美元成本；None 不限")
+    max_tokens: int | None = Field(None, ge=0, description="单次运行最大 token 数；None 不限")
+
+    @field_validator("allowed_tools")
+    @classmethod
+    def _validate_allowed_tools(cls, value: list[str] | None) -> list[str] | None:
+        if value is None:
+            return None
+        # 去重且不接受空白项：避免 "" 造成语义歧义或凭据被塞进 allowlist
+        cleaned = [tool.strip() for tool in value if isinstance(tool, str) and tool.strip()]
+        return list(dict.fromkeys(cleaned))
 
 
 # --- API 请求/响应 ---

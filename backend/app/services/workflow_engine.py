@@ -36,6 +36,14 @@ class TransientNodeError(Exception):
     """
 
 
+class WorkflowToolNotAllowedError(ValueError):
+    """工作流节点使用了 allowlist 未授权的工具（fail-closed，不调用工具）。"""
+
+
+class WorkflowBudgetExceededError(ValueError):
+    """工作流单次运行的 token/成本预算已耗尽（fail-closed，中断后续节点）。"""
+
+
 class ExecutionStatus(str, Enum):
     PENDING = "pending"
     RUNNING = "running"
@@ -207,6 +215,13 @@ _OBS_NODE_TYPES = frozenset(
         "transform",
         "router",
     }
+)
+
+# 受工作流工具白名单约束的节点类型。LLM 节点本身也算工具调用（LLM 是收费
+# 外部工具），因此一并纳入；input/output/condition/transform/router 是纯编排
+# 节点，不受 allowlist 限制，避免旧 flow 一旦设置白名单就整体不可运行。
+_WORKFLOW_TOOL_NODE_TYPES = frozenset(
+    {"tool_search", "tool_tts", "code", "api_call", "llm_openai", "llm_deepseek", "llm_qwen"}
 )
 
 
@@ -1085,6 +1100,80 @@ class WorkflowEngine:
         self.edges = workflow_config.edges
         self.node_results: dict[str, NodeResult] = {}
         self.event_callback: Callable | None = None
+        # 竞品对标 P1：可选 allowlist / 预算。None 一律表示旧行为（不限制），
+        # 不把缺省值猜成 0，保证存量 flow_data 语义不变。
+        self.allowed_tools = getattr(workflow_config, "allowed_tools", None)
+        self.max_cost_usd = getattr(workflow_config, "max_cost_usd", None)
+        self.max_tokens = getattr(workflow_config, "max_tokens", None)
+        self._tokens_used = 0
+        self._cost_used = 0.0
+        self._budget_data_missing: str | None = None
+
+    def _check_tool_allowed(self, node: WorkflowNode) -> None:
+        """节点调用外部工具前校验 allowlist（None=不限制，[]=拒绝全部）。
+
+        在进入 NodeExecutor / execute_with_retry 之前调用：拒绝时工具根本不会被
+        实例化或调用；ValueError 族异常不会被重试。
+        """
+        if node.type not in _WORKFLOW_TOOL_NODE_TYPES:
+            return
+        if self.allowed_tools is None:
+            return
+        if node.type not in self.allowed_tools:
+            raise WorkflowToolNotAllowedError(
+                f"工作流不允许调用工具节点 {node.type}（节点 {node.id}）："
+                f"allowed_tools={sorted(self.allowed_tools)}"
+            )
+
+    def _check_budget(self, *, before_call: bool = True) -> None:
+        """检查累计预算；节点调用前与节点完成后各一次。
+
+        实际用量来自 LLM 节点已落地的 NodeResult.tokens_in/out/cost_usd
+        （provider 没给 usage 的字段为 None）；若设置了预算但拿不到可靠数据，
+        fail-closed 拒绝继续，避免"看不到花费就当作没花钱"。
+
+        before_call=True：已用 >= 上限即可拒绝（没有剩余额度）；
+        before_call=False：只有 > 上限才拒绝（恰好等于上限不算超支）。
+        """
+        if self.max_tokens is None and self.max_cost_usd is None:
+            return
+        if self.max_tokens is not None and self._budget_data_missing == "tokens":
+            raise WorkflowBudgetExceededError(
+                "工作流 token 预算无法核验：上游未提供 usage 数据，已拒绝继续调用工具"
+                f"（上限 {self.max_tokens}）"
+            )
+        if self.max_cost_usd is not None and self._budget_data_missing == "cost":
+            raise WorkflowBudgetExceededError(
+                "工作流成本预算无法核验：上游未提供成本数据，已拒绝继续调用工具"
+                f"（上限 ${self.max_cost_usd:.6f}）"
+            )
+        if self.max_tokens is not None:
+            used, limit = self._tokens_used, self.max_tokens
+            exceeded = used >= limit if before_call else used > limit
+            if exceeded:
+                raise WorkflowBudgetExceededError(
+                    f"工作流 token 预算已耗尽：已用 {used} / 上限 {limit}"
+                )
+        if self.max_cost_usd is not None:
+            used, limit = self._cost_used, self.max_cost_usd
+            exceeded = used >= limit if before_call else used > limit
+            if exceeded:
+                raise WorkflowBudgetExceededError(
+                    f"工作流成本预算已耗尽：已用 ${used:.6f} / 上限 ${limit:.6f}"
+                )
+
+    def _consume_budget(self, node_result: NodeResult) -> None:
+        """在节点完成后以真实 usage 更新运行累计值（不做字符数估算）。"""
+        tokens_in = node_result.tokens_in
+        tokens_out = node_result.tokens_out
+        if tokens_in is not None and tokens_out is not None:
+            self._tokens_used += tokens_in + tokens_out
+        elif self._budget_data_missing is None:
+            self._budget_data_missing = "tokens"
+        if node_result.cost_usd is not None:
+            self._cost_used += node_result.cost_usd
+        elif self._budget_data_missing is None:
+            self._budget_data_missing = "cost"
 
     def set_event_callback(self, callback: Callable) -> None:
         """设置事件回调函数（用于 SSE 推送）"""
@@ -1168,6 +1257,12 @@ class WorkflowEngine:
                 )
 
                 try:
+                    # 权限/预算守卫必须发生在工具调用之前；二者都是确定性
+                    # ValueError，execute_with_retry 不重试。
+                    self._check_tool_allowed(_node)
+                    if _node.type.startswith("llm_") or _node.type in _WORKFLOW_TOOL_NODE_TYPES:
+                        self._check_budget()
+
                     result = await executor.execute_with_retry(state)
                     completed_at = datetime.now()
                     duration = int((completed_at - started_at).total_seconds() * 1000)
@@ -1206,6 +1301,12 @@ class WorkflowEngine:
                             node_result.model,
                             node_result.cost_usd,
                         ) = _llm_call_metadata(result)
+                        # 只有 LLM 节点在本引擎里产出 usage；input/tool 节点
+                        # 的 None 是"本来就没有"，不能据此判定预算不可核验。
+                        self._consume_budget(node_result)
+                        # 最后一个 LLM 节点就可能把预算耗尽；不等下一个节点
+                        # 再发现，直接让本次运行失败。
+                        self._check_budget(before_call=False)
 
                     await self.emit_event(
                         "node_complete",
@@ -1245,6 +1346,12 @@ class WorkflowEngine:
                             "timestamp": completed_at.isoformat(),
                         },
                     )
+
+                    # 权限/预算违规必须 fail-closed：抛出而不是返回 errors
+                    # 让图继续跑下游工具节点（#301 的"节点失败但整体成功"
+                    # 语义只适用于普通节点失败）。
+                    if isinstance(e, (WorkflowToolNotAllowedError, WorkflowBudgetExceededError)):
+                        raise
 
                     return {"errors": [str(e)]}
 
