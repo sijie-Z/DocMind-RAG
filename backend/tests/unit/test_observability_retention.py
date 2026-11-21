@@ -92,6 +92,35 @@ class TestFieldMasking:
     def test_compressed_ipv6_forms_are_masked(self, address: str):
         assert mask_run_report_preview(address) == "[PII_REDACTED]"
 
+    @pytest.mark.parametrize(
+        ("raw", "expected"),
+        [
+            ('password: "quoted secret value"', "password: [SECRET_REDACTED]"),
+            ("api_key: 'x y'", "api_key: [SECRET_REDACTED]"),
+            ('password: "a b"', "password: [SECRET_REDACTED]"),
+            ('token="abc def"', "token=[SECRET_REDACTED]"),
+            ('password: "unterminated secret', "password: [SECRET_REDACTED]"),
+        ],
+    )
+    def test_quoted_key_value_consumes_whole_value(self, raw: str, expected: str):
+        """引号内有空格时，闭引号与后续片段都必须被整体消费（修前残留 ` secret value"`）。"""
+        assert mask_run_report_preview(raw) == expected
+
+    def test_quoted_secret_absent_from_report_dict_and_text(self):
+        dq, sq = "a b", "x y"
+        ctx = ExecutionContext(
+            query=f'password: "{dq}"',
+            goal=f"api_key: '{sq}'",
+        )
+        report = build_run_report(ctx)
+        for field in ("query", "goal"):
+            assert dq not in report[field] and sq not in report[field]
+        text = render_run_report_text(report)
+        for residue in (dq, sq, f'{dq}"', f"{sq}'", f" {dq}", f" {sq}"):
+            assert residue not in text
+        assert "password: [SECRET_REDACTED]" in text
+        assert "api_key: [SECRET_REDACTED]" in text
+
     def test_masker_is_pure_and_writes_no_log_body(self, caplog):
         raw = "邮件 user@example.com"
         with caplog.at_level(logging.DEBUG):

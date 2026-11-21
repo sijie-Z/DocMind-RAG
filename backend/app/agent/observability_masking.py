@@ -67,14 +67,21 @@ _PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
     (re.compile(r"(?i)\b(?:bearer|basic)\s+[A-Za-z0-9._~+/=-]{8,}"), _SECRET_PLACEHOLDER),
     # password/passwd/pwd/token/secret/api_key/api-key/authorization 后接值。
     # 用 (?<![A-Za-z0-9_]) 代替 \b：中文与 ASCII 都是 \w，\b 会在「密password=」处误判。
-    # 值里已经出现的占位符（前面的 token 前缀规则先命中）整体吞掉，避免叠加成
-    # 「[SECRET_REDACTED]]」这类畸形输出。
+    # 值分支优先级：成对引号（吃掉闭引号，允许引号内空白）> 未闭合引号（吃到行尾，
+    # 坏输入也不漏原文）> 已出现的占位符（前面的 token 前缀规则先命中，整体吞掉避免
+    # 叠加成「[SECRET_REDACTED]]」）> 裸值。
     (
         re.compile(
             r"(?i)(?<![A-Za-z0-9_])"
             r"(?P<key>password|passwd|pwd|token|secret|api[_-]?key|authorization)"
             r"(?P<sep>\s*[:=]\s*)"
-            r"(?:\[(?:PII|SECRET)_REDACTED\]|[\"']?[^\s,;，。；、)\]}\"']{1,256})"
+            r"(?:"
+            r"\"[^\"]{1,256}\""
+            r"|'[^']{1,256}'"
+            r"|[\"'][^\n]{0,256}"
+            r"|\[(?:PII|SECRET)_REDACTED\]"
+            r"|[^\s,;，。；、)\]}\"']{1,256}"
+            r")"
         ),
         _KV_SECRET_REPL,
     ),
