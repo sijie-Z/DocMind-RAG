@@ -224,6 +224,17 @@ class RAGPipeline:
         debug_info: dict | None = {"stages": {}} if debug else None
 
         try:
+            # issue #196：索引配置错误（维度/embedding 模型漂移等）时**拒绝检索**。
+            # 必须先于任何「标签零命中」早退：索引坏时返回 200 空结果会把故障
+            # 伪装成「没匹配到」，违背既有 fail-closed 语义。
+            from app.core.elasticsearch import get_index_error
+
+            index_error = get_index_error()
+            if index_error:
+                # fail-closed：暖缓存也可能来自旧模型索引，一律拒绝；不读写缓存。
+                RAG_RETRIEVAL_UNAVAILABLE.labels(state="failed").inc()
+                raise RetrievalUnavailableError(f"知识库索引不可用，检索已拒绝：{index_error}")
+
             # 文档级 ACL：viewer 可见集从 DB 解析（授权即时生效）。有 viewer 时
             # **绕过共享缓存**——缓存按 org 分域，A 与 B 同组织会互相命中结果；
             # 即使结果随后被 ACL 过滤，缓存命中数与 sources 仍会泄漏存在性。
@@ -255,18 +266,6 @@ class RAGPipeline:
                                 debug_info["metadata_filter"] = {"matched_document_ids": []}
                             return [], debug_info
                         document_ids = narrowed
-
-            # issue #196：索引配置错误（维度/embedding 模型漂移等）时**拒绝检索**。
-            # 写入侧已被 IndexConfigError 拦下，但查询侧若继续用当前模型向量去撞
-            # 旧模型索引，会返回非空但静默错配的结果——正是「漂移不得静默混用」
-            # 要消除的形态。按 #292 的故障语义上抛，由上层显式降级。
-            from app.core.elasticsearch import get_index_error
-
-            index_error = get_index_error()
-            if index_error:
-                # fail-closed：暖缓存也可能来自旧模型索引，一律拒绝；不读写缓存。
-                RAG_RETRIEVAL_UNAVAILABLE.labels(state="failed").inc()
-                raise RetrievalUnavailableError(f"知识库索引不可用，检索已拒绝：{index_error}")
 
             # SemanticCache 是轻量命名空间配置；真实实例按本次 mode 选择，
             # 测试替身/自定义实现保持原对象。避免 strict 子集写入 compat 域。

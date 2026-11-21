@@ -19,6 +19,7 @@ from pydantic import ValidationError
 
 from app.rag.metadata_filter import (
     _NO_MATCH,
+    MAX_METADATA_FILTER_SCAN,
     intersect_document_ids,
     normalize_metadata_filters,
     resolve_metadata_filter_document_ids,
@@ -160,6 +161,83 @@ class TestTagPrefilter:
         filters = build_retrieval_filters(7, captured["document_ids"])
         filters = with_acl_filter(filters, captured["blocked_document_ids"])
         assert {"bool": {"must_not": [{"terms": {"document_id": ["doc-private"]}}]}} in filters
+
+    @pytest.mark.asyncio
+    async def test_zero_intersection_never_falls_back_to_org_wide(self):
+        """显式 doc-old + 标签只命中 doc-annual → 早退空结果，ES 不执行、缓存不写。
+
+        变异点（CRITICAL）：intersect_document_ids 把零交集返回 [] → 本条红。
+        """
+        from app.rag.pipeline import RAGPipeline
+
+        rows = [("doc-annual", ["2024"])]
+        db = AsyncMock()
+        db.execute = AsyncMock(return_value=MagicMock(all=MagicMock(return_value=rows)))
+
+        pipeline = RAGPipeline()
+        session = MagicMock()
+        session.__aenter__ = AsyncMock(return_value=session)
+        session.__aexit__ = AsyncMock(return_value=False)
+        session.execute = db.execute
+
+        pipeline.retriever.retrieve = AsyncMock(side_effect=AssertionError("must not retrieve"))
+        pipeline.cache.get = AsyncMock(side_effect=AssertionError("must not read cache"))
+        pipeline.cache.set = AsyncMock(side_effect=AssertionError("must not write cache"))
+        pipeline.semantic_cache.set = AsyncMock(side_effect=AssertionError("must not write cache"))
+
+        with patch("app.core.database.AsyncSessionLocal", return_value=session):
+            results, _ = await pipeline.search_knowledge_base(
+                "x",
+                7,
+                top_k=5,
+                document_ids=["doc-old"],
+                metadata_filters={"tags": ["2024"]},
+            )
+
+        assert results == []
+        pipeline.retriever.retrieve.assert_not_awaited()
+        pipeline.cache.set.assert_not_awaited()
+        # 直接断言零交集不是可被 retriever 忽略的空列表。
+        assert intersect_document_ids(["doc-old"], ["doc-annual"]) is _NO_MATCH
+        # ES filter 在零交集路径上根本没有生成，绝不退化成仅 org/is_enabled。
+        assert build_retrieval_filters(7, None) != build_retrieval_filters(7, ["doc-old"])
+
+    @pytest.mark.asyncio
+    async def test_zero_match_with_index_error_rejects(self):
+        """标签零命中 + 索引配置错误 → 必须拒绝，不能用 200 空结果掩盖故障。
+
+        变异点（IMPORTANT）：index_error 检查放回零命中早退之后 → 本条红。
+        """
+        from app.rag.errors import RetrievalUnavailableError
+        from app.rag.pipeline import RAGPipeline
+
+        pipeline = RAGPipeline()
+        session = MagicMock()
+        session.__aenter__ = AsyncMock(return_value=session)
+        session.__aexit__ = AsyncMock(return_value=False)
+        session.execute = AsyncMock(return_value=MagicMock(all=MagicMock(return_value=[])))
+
+        with (
+            patch("app.core.elasticsearch.get_index_error", return_value="dimension mismatch"),
+            patch("app.core.database.AsyncSessionLocal", return_value=session),
+            pytest.raises(RetrievalUnavailableError, match="索引不可用"),
+        ):
+            await pipeline.search_knowledge_base(
+                "x", 7, top_k=5, metadata_filters={"tags": ["nope"]}
+            )
+
+    @pytest.mark.asyncio
+    async def test_scan_limit_exceeded_rejects_instead_of_partial_result(self):
+        """候选超过上限 → 显式拒绝；不能静默返回部分匹配放大检索范围。"""
+        from app.rag.errors import RetrievalUnavailableError
+
+        rows = [(f"doc-{i}", ["2024"]) for i in range(MAX_METADATA_FILTER_SCAN + 1)]
+        db = AsyncMock()
+        db.execute = AsyncMock(return_value=MagicMock(all=MagicMock(return_value=rows)))
+        with pytest.raises(RetrievalUnavailableError, match="超过"):
+            await resolve_metadata_filter_document_ids(db, 7, {"tags": ["2024"]})
+        stmt = db.execute.await_args.args[0]
+        assert stmt._limit == MAX_METADATA_FILTER_SCAN + 1
 
     @pytest.mark.asyncio
     async def test_empty_match_fails_closed(self):

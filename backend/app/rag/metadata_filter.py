@@ -24,6 +24,8 @@ METADATA_FILTER_FIELDS: frozenset[str] = frozenset({"tags", "file_type"})
 # 只允许常见的标签/类型文本值，控制注入面与查询代价。
 _SAFE_VALUE_RE = re.compile(r"^[\w.\-/一-鿿]+$", re.UNICODE)
 MAX_METADATA_FILTER_VALUES = 20
+# 组织内被扫的文档上限：超限时拒绝检索，不能悄悄返回「部分匹配」把范围放大。
+MAX_METADATA_FILTER_SCAN = 10_000
 
 
 def normalize_metadata_filters(
@@ -100,11 +102,20 @@ async def resolve_metadata_filter_document_ids(
         conditions.append(Document.file_type.in_(allowed) if allowed else false())
 
     try:
-        rows = (await db.execute(select(*columns).where(*conditions))).all()
+        # 有界扫描：超限时显式拒绝，不能静默返回不完整候选（那会放大检索范围）。
+        stmt = select(*columns).where(*conditions).limit(MAX_METADATA_FILTER_SCAN + 1)
+        rows = (await db.execute(stmt)).all()
     except Exception as exc:  # noqa: BLE001 — fail closed，不让过滤失效变成越权检索
         from app.rag.errors import RetrievalUnavailableError
 
         raise RetrievalUnavailableError("标签过滤查询失败，检索已拒绝") from exc
+
+    if len(rows) > MAX_METADATA_FILTER_SCAN:
+        from app.rag.errors import RetrievalUnavailableError
+
+        raise RetrievalUnavailableError(
+            f"标签过滤候选超过 {MAX_METADATA_FILTER_SCAN} 篇，检索已拒绝；请缩小标签范围"
+        )
 
     matched: list[str] = []
     for row in rows:
@@ -137,4 +148,6 @@ def intersect_document_ids(
     if not explicit_ids:
         return filtered_ids
     allow = set(filtered_ids)
-    return [doc_id for doc_id in explicit_ids if doc_id in allow]
+    narrowed = [doc_id for doc_id in explicit_ids if doc_id in allow]
+    # 零交集与「标签零命中」同形：返回 [] 会被检索器当成「不限定」→ 全组织检索。
+    return narrowed or _NO_MATCH
