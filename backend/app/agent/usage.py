@@ -77,6 +77,7 @@ def _record_jsonl(
     prompt_hash: str | None,
     tool_calls: int | None,
     error: str | None,
+    prompt_metadata: dict[str, str] | None = None,
 ) -> None:
     """写一行调用级 JSONL（ctx 缺失/鸭子类型不匹配时静默跳过）。
 
@@ -100,6 +101,7 @@ def _record_jsonl(
             prompt_hash=prompt_hash,
             tool_calls=_tool_call_count(response) if tool_calls is None else tool_calls,
             error=error,
+            **(prompt_metadata or {}),
         )
     except Exception as exc:  # noqa: BLE001 — 观测绝不阻断主流程
         logger.debug("LLM call JSONL record skipped: %s", exc)
@@ -114,6 +116,7 @@ def record_llm_usage(
     prompt_hash: str | None = None,
     tool_calls: int | None = None,
     error: str | None = None,
+    prompt_metadata: dict[str, str] | None = None,
 ) -> int:
     """提取 response.usage → Prometheus 指标 + ctx.total_tokens + 调用级 JSONL。
 
@@ -128,6 +131,8 @@ def record_llm_usage(
         prompt_hash: 已算好的摘要（给定则优先于 messages）。
         tool_calls: 本次响应请求的工具调用数（None → 从 response 提取）。
         error: 失败调用的错误文本（成功调用为 None）。
+        prompt_metadata: 可选的版本/实验标识字典（键见 PROMPT_METADATA_FIELDS）；
+                 不传则由 ctx 的 run 级字段提供，绝不接收提示词正文。
 
     返回本次计入的 token 总数（prompt + completion；无 usage 时 0）——
     供 step 级记账（`complete_step(tokens=...)`）使用。
@@ -170,6 +175,7 @@ def record_llm_usage(
         prompt_hash=prompt_hash,
         tool_calls=tool_calls,
         error=error,
+        prompt_metadata=prompt_metadata,
     )
     return total
 
@@ -181,6 +187,7 @@ def record_llm_call_error(
     error: Any,
     latency_ms: float | None = None,
     messages: Any = None,
+    prompt_metadata: dict[str, str] | None = None,
 ) -> None:
     """记录一次**失败**的 LLM 调用（无 response / 无 usage）。
 
@@ -205,4 +212,5 @@ def record_llm_call_error(
         prompt_hash=None,
         tool_calls=0,
         error=error_text,
+        prompt_metadata=prompt_metadata,
     )

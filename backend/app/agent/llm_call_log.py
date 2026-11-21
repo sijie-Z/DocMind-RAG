@@ -138,17 +138,71 @@ _OPTIONAL_TRACE_FIELDS = (
     "end_time",
 )
 
+# 提示词版本/实验标签：与层级 trace 相同的"可选键"契约（旧调用点键集不变）。
+# 只存标量标识，绝不存模板 name/description/content 等自由文本（可能含提示词正文）。
+PROMPT_METADATA_FIELDS = (
+    "prompt_id",
+    "prompt_version",
+    "prompt_label",
+    "experiment_id",
+)
+
+
+def _optional_fields(
+    record: dict[str, Any], names: tuple[str, ...], values: dict[str, Any]
+) -> None:
+    """只在调用点给出非 None、非空字符串的值时写出可选字段。
+
+    ``None`` / ``""`` 表示"未提供"，不写出该键——旧调用点的记录键集保持不变。
+    所有值统一字符串化（与 TokenUsageRecord.prompt_version 的 String 列同口径），
+    不解析、不生成，也不接受正文内容。注意 ``is not None`` 判定保留 version=0。
+    """
+    for key in names:
+        value = values.get(key)
+        if value is not None and value != "":
+            record[key] = _text_or_none(value)
+
 
 def _optional_trace_fields(record: dict[str, Any], values: dict[str, Any]) -> None:
-    """只在调用点显式传入时加入层级 trace 字段。
+    """只在调用点显式传入时加入层级 trace 字段（兼容旧调用点）。"""
+    _optional_fields(record, _OPTIONAL_TRACE_FIELDS, values)
 
-    ``None`` 表示"未提供"，不写出该键——旧调用点的记录键集保持 10 个不变。
-    时间值只做字符串化，不解析、不生成，也不接受正文内容。
+
+def _safe_attr(obj: Any, name: str) -> Any:
+    """读取已知标量属性；属性访问抛错（如 ORM 已 detach）时按缺失处理。"""
+    try:
+        return getattr(obj, name, None)
+    except Exception:  # noqa: BLE001 — 观测层不得把异常抛回业务主流程
+        return None
+
+
+def resolve_prompt_metadata(
+    template: Any = None,
+    *,
+    prompt_label: Any = None,
+    experiment_id: Any = None,
+) -> dict[str, str]:
+    """从 PromptTemplate（或等价对象）解析**纯元数据**，不查库、不读正文。
+
+    - ``prompt_id`` / ``prompt_version`` 只取模板的 ``id`` / ``version``
+      整数字段（``bool`` 与空串视为缺失）；**不读** ``name`` / ``description``
+      / ``content``：这些是用户自由文本或提示词正文，不得进入日志与报告；
+    - ``prompt_label`` / ``experiment_id`` 只来自调用方给出的非空标量标识，
+      模板没有 label/experiment 概念时不臆造；
+    - 输出全部为 ``str``，与 :func:`build_llm_call_record` 的落盘口径一致。
+
+    这是一个纯函数：不改 template，不做 I/O，任何属性访问异常都按"未提供"降级。
     """
-    for key in _OPTIONAL_TRACE_FIELDS:
-        value = values.get(key)
-        if value is not None:
-            record[key] = _text_or_none(value)
+    result: dict[str, str] = {}
+    if template is not None:
+        for key, attr in (("prompt_id", "id"), ("prompt_version", "version")):
+            value = _safe_attr(template, attr)
+            if type(value) is int:  # 排除 bool / 字符串 / MagicMock 等非真实整数
+                result[key] = str(value)
+    for key, value in (("prompt_label", prompt_label), ("experiment_id", experiment_id)):
+        if value is not None and value != "" and not isinstance(value, (dict, list, tuple, set)):
+            result[key] = str(value)
+    return result
 
 
 def build_llm_call_record(
@@ -168,8 +222,12 @@ def build_llm_call_record(
     span_type: str | None = None,
     start_time: str | None = None,
     end_time: str | None = None,
+    prompt_id: str | int | None = None,
+    prompt_version: str | int | None = None,
+    prompt_label: str | None = None,
+    experiment_id: str | None = None,
 ) -> dict[str, Any]:
-    """组装一行记录。默认键集固定为 10 个；可选层级字段只在传入时加入。"""
+    """组装一行记录。默认键集固定为 10 个；可选字段只在传入时加入。"""
     if prompt_hash is None:
         prompt_hash = hash_prompt(prompt)
     # 错误文本防线：先替换本次提示词正文片段（provider 报错可能回显输入），
@@ -197,6 +255,16 @@ def build_llm_call_record(
             "span_type": span_type,
             "start_time": start_time,
             "end_time": end_time,
+        },
+    )
+    _optional_fields(
+        record,
+        PROMPT_METADATA_FIELDS,
+        {
+            "prompt_id": prompt_id,
+            "prompt_version": prompt_version,
+            "prompt_label": prompt_label,
+            "experiment_id": experiment_id,
         },
     )
     return record
