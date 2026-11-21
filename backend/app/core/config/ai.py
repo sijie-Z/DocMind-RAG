@@ -1,9 +1,37 @@
 """AI and RAG settings — LLM, embedding, reranker, vector search, caching."""
 
-from typing import Literal
+import math
+from typing import Annotated, Any, Literal
 
-from pydantic import Field
+from pydantic import BeforeValidator, Field, ValidationInfo
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+def _validate_cost_rate(value: Any, info: ValidationInfo) -> tuple[float, float]:
+    """成本费率二元组的入参闸门：必须恰好 2 个非负有限数。
+
+    配置层 fail-fast：``TOKEN_COST_RATES={"gpt-4": [0.03]}`` 这类坏配置在
+    Settings 构造（含 YAML/ENV 加载）时就抛可读 ValidationError，而不是等
+    ``_estimate_cost`` 索引 [1] 时 500 或静默吞掉用量记录。
+    bool 是 int 子类但语义上不是费率，明确拒绝；NaN/inf 同样拒绝。
+    """
+    label = info.field_name or "TOKEN_COST_RATE"
+    if isinstance(value, (str, bytes)) or not isinstance(value, (tuple, list)):
+        raise ValueError(f"{label} 必须是 [输入费率, 输出费率] 二元组")
+    if len(value) != 2:
+        raise ValueError(f"{label} 必须恰好 2 个费率，收到 {len(value)} 个")
+    rates: list[float] = []
+    for item in value:
+        if isinstance(item, bool) or not isinstance(item, (int, float)):
+            raise ValueError(f"{label} 的费率必须是非负有限数，收到 {item!r}")
+        number = float(item)
+        if not math.isfinite(number) or number < 0:
+            raise ValueError(f"{label} 的费率必须是非负有限数，收到 {item!r}")
+        rates.append(number)
+    return (rates[0], rates[1])
+
+
+CostRate = Annotated[tuple[float, float], BeforeValidator(_validate_cost_rate)]
 
 
 def unified_final_enabled() -> bool:
@@ -84,7 +112,8 @@ class AISettings(BaseSettings):
     # 成本归因：模型费率表（每 1K token，USD；输入/输出二元组）。
     # 仅做粗估，默认值与迁入前 token_usage._estimate_cost 的硬编码表逐字一致。
     # 配置来源与既有 Settings 一致（YAML profile/bundle/patch、.env JSON、环境变量）。
-    TOKEN_COST_RATES: dict[str, tuple[float, float] | list[float]] = {
+    # CostRate 的 BeforeValidator 在加载期拒绝长度/类型/NaN 非法值（fail-fast）。
+    TOKEN_COST_RATES: dict[str, CostRate] = {
         "deepseek": (0.0005, 0.002),
         "deepseek-chat": (0.0005, 0.002),
         "gpt-4": (0.03, 0.06),
@@ -94,7 +123,7 @@ class AISettings(BaseSettings):
         "gemini": (0.0005, 0.0015),
     }
     # 未命中上表时的兜底费率（旧实现固定为 DeepSeek-like）。
-    TOKEN_COST_DEFAULT_RATE: tuple[float, float] | list[float] = (0.0005, 0.002)
+    TOKEN_COST_DEFAULT_RATE: CostRate = (0.0005, 0.002)
 
     # issue #467：LLM 连接级快速失败（RAG 查询改写 / 查询分解 / HyDE / 重排 LLM
     # 兜底 / 流式生成共用 `app.core.llm_failfast`）。连接阶段独立短超时：死主机

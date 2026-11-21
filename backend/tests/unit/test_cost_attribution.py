@@ -382,3 +382,236 @@ def test_migration_030_extends_029_head():
     assert {"task_id", "request_id", "feature", "prompt_version"} <= columns
     for name in ("task_id", "request_id", "feature", "prompt_version"):
         assert TokenUsageRecord.__table__.c[name].nullable is True, "旧行必须保持 NULL"
+
+
+# ── CR 修复判别测试 ──────────────────────────────────────────────────
+
+
+@pytest.mark.parametrize(
+    "bad_rates",
+    [
+        {"gpt-4": [0.03]},
+        {"gpt-4": [0.01, 0.02, 0.03]},
+        {"gpt-4": [-0.1, 0.02]},
+        {"gpt-4": [float("nan"), 0.02]},
+        {"gpt-4": ["0.1", 0.02]},
+    ],
+)
+def test_cost_rate_config_rejects_malformed_rates(bad_rates):
+    """IMPORTANT-1：配置加载期拒绝非法费率（长度/负数/NaN/类型）。"""
+    from pydantic import ValidationError
+
+    from app.core.config import Settings
+
+    with pytest.raises(ValidationError, match="TOKEN_COST_RATES"):
+        Settings(TOKEN_COST_RATES=bad_rates)
+
+
+@pytest.mark.parametrize("bad_rate", [[0.0005], [0.1, -1], [float("inf"), 0.2], "0.5"])
+def test_cost_rate_config_rejects_malformed_default_rate(bad_rate):
+    """IMPORTANT-1：默认费率同样校验，不能让 _estimate_cost 索引崩掉。"""
+    from pydantic import ValidationError
+
+    from app.core.config import Settings
+
+    with pytest.raises(ValidationError, match="TOKEN_COST_DEFAULT_RATE"):
+        Settings(TOKEN_COST_DEFAULT_RATE=bad_rate)
+
+
+def test_estimate_cost_runtime_malformed_rate_falls_back(monkeypatch):
+    """IMPORTANT-1 读侧兜底：运行期绕过校验改成坏值也不得 IndexError。"""
+    monkeypatch.setattr(settings, "TOKEN_COST_RATES", {"deepseek-chat": [0.03]})
+    monkeypatch.setattr(settings, "TOKEN_COST_DEFAULT_RATE", [0.0005])
+    # 坏条目被跳过 → 用合法兜底费率，不抛异常。
+    assert _estimate_cost("deepseek-chat", 1000, 500) == pytest.approx(0.0005 + 0.001)
+    assert _estimate_cost("deepseek-chat", 1000, 500) > 0
+
+
+@pytest.mark.asyncio
+async def test_chat_failed_run_still_records_cost_once(monkeypatch, usage_db):
+    """IMPORTANT-2：异常终止的 run 仍落成本，且只落一次。"""
+    from unittest.mock import AsyncMock
+
+    from app.agent.config import AgentConfig
+    from app.agent.events import AgentEvent
+    from app.agent.exec_context import ExecutionContext
+    from app.agent.service import AgentService
+
+    calls: list[dict] = []
+
+    async def _spy(**kwargs):
+        calls.append(kwargs)
+
+    monkeypatch.setattr(
+        "app.api.v1.endpoints.token_usage.record_token_usage", AsyncMock(side_effect=_spy)
+    )
+    ctx = ExecutionContext(query="q")
+    ctx.usage_by_model = {"deepseek-chat": (1000, 200)}
+    fake_agent = SimpleNamespace(
+        last_execution_context=ctx,
+        paused_for_approval=False,
+        paused_for_plan_approval=False,
+        paused_for_final_commit=False,
+        run_cancelled=False,
+        run_failed=False,
+        _final_commit_persisted=False,
+    )
+
+    async def _failing_run(*args, **kwargs):
+        yield AgentEvent(type="chunk", content="partial")
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr("app.agent.service.PERAgentLoop", lambda **kwargs: fake_agent)
+    monkeypatch.setattr(fake_agent, "run", _failing_run, raising=False)
+    monkeypatch.setattr(fake_agent, "_get_tools", lambda: [], raising=False)
+    monkeypatch.setattr(AgentService, "_checkpoint_error", AsyncMock())
+    monkeypatch.setattr(AgentService, "_checkpoint_disconnect", AsyncMock())
+    monkeypatch.setattr("app.agent.checkpoint.create_task", AsyncMock(return_value=None))
+    monkeypatch.setattr(AgentService, "_finalize_task_terminal", AsyncMock(return_value=None))
+    monkeypatch.setattr(AgentConfig, "save_to_redis", AsyncMock())
+
+    service = AgentService()
+    with pytest.raises(RuntimeError, match="boom"):
+        [_ async for _ in service.chat(query="q", organization_id=11, user_id=100)]
+
+    assert len(calls) == 1, f"失败路径必须落且仅落一次成本：{calls}"
+    assert calls[0]["input_tokens"] == 1000 and calls[0]["output_tokens"] == 200
+
+
+@pytest.mark.asyncio
+async def test_chat_cancelled_run_still_records_cost_once(monkeypatch, usage_db):
+    """IMPORTANT-2：取消的 run 仍落成本，且只落一次。"""
+    import asyncio
+    from unittest.mock import AsyncMock
+
+    from app.agent.config import AgentConfig
+    from app.agent.events import AgentEvent
+    from app.agent.exec_context import ExecutionContext
+    from app.agent.service import AgentService
+
+    calls: list[dict] = []
+
+    async def _spy(**kwargs):
+        calls.append(kwargs)
+
+    monkeypatch.setattr(
+        "app.api.v1.endpoints.token_usage.record_token_usage", AsyncMock(side_effect=_spy)
+    )
+    ctx = ExecutionContext(query="q")
+    ctx.usage_by_model = {"deepseek-chat": (1000, 200)}
+    fake_agent = SimpleNamespace(
+        last_execution_context=ctx,
+        paused_for_approval=False,
+        paused_for_plan_approval=False,
+        paused_for_final_commit=False,
+        run_cancelled=False,
+        run_failed=False,
+        _final_commit_persisted=False,
+    )
+
+    async def _cancelled_run(*args, **kwargs):
+        yield AgentEvent(type="chunk", content="partial")
+        raise asyncio.CancelledError()
+
+    monkeypatch.setattr("app.agent.service.PERAgentLoop", lambda **kwargs: fake_agent)
+    monkeypatch.setattr(fake_agent, "run", _cancelled_run, raising=False)
+    monkeypatch.setattr(fake_agent, "_get_tools", lambda: [], raising=False)
+    monkeypatch.setattr(AgentService, "_checkpoint_disconnect", AsyncMock())
+    monkeypatch.setattr("app.agent.checkpoint.create_task", AsyncMock(return_value=None))
+    monkeypatch.setattr(AgentConfig, "save_to_redis", AsyncMock())
+
+    service = AgentService()
+    with pytest.raises(asyncio.CancelledError):
+        [_ async for _ in service.chat(query="q", organization_id=11, user_id=100)]
+
+    assert len(calls) == 1, f"取消路径必须落且仅落一次成本：{calls}"
+    assert calls[0]["input_tokens"] == 1000 and calls[0]["output_tokens"] == 200
+
+
+@pytest.mark.asyncio
+async def test_chat_success_run_records_cost_once(monkeypatch, usage_db):
+    """IMPORTANT-2：正常 run 不重复落成本（与旧路径一致恰好 1 条）。"""
+    from unittest.mock import AsyncMock
+
+    from app.agent.config import AgentConfig
+    from app.agent.events import AgentEvent
+    from app.agent.exec_context import ExecutionContext
+    from app.agent.service import AgentService
+
+    calls: list[dict] = []
+
+    async def _spy(**kwargs):
+        calls.append(kwargs)
+
+    monkeypatch.setattr(
+        "app.api.v1.endpoints.token_usage.record_token_usage", AsyncMock(side_effect=_spy)
+    )
+    ctx = ExecutionContext(query="q")
+    ctx.usage_by_model = {"deepseek-chat": (1000, 200)}
+    fake_agent = SimpleNamespace(
+        last_execution_context=ctx,
+        paused_for_approval=False,
+        paused_for_plan_approval=False,
+        paused_for_final_commit=False,
+        run_cancelled=False,
+        run_failed=False,
+        _final_commit_persisted=False,
+    )
+
+    async def _ok_run(*args, **kwargs):
+        yield AgentEvent(type="chunk", content="ok")
+
+    monkeypatch.setattr("app.agent.service.PERAgentLoop", lambda **kwargs: fake_agent)
+    monkeypatch.setattr(fake_agent, "run", _ok_run, raising=False)
+    monkeypatch.setattr(fake_agent, "_get_tools", lambda: [], raising=False)
+    monkeypatch.setattr("app.agent.checkpoint.create_task", AsyncMock(return_value=None))
+    monkeypatch.setattr(AgentService, "_finalize_task_terminal", AsyncMock(return_value=None))
+    monkeypatch.setattr(AgentConfig, "save_to_redis", AsyncMock())
+
+    service = AgentService()
+    events = [_ async for _ in service.chat(query="q", organization_id=11, user_id=100)]
+    assert events
+    assert len(calls) == 1, f"正常路径也只能落一次成本：{calls}"
+
+
+@pytest.mark.asyncio
+async def test_legacy_summary_json_has_no_new_keys(usage_db):
+    """IMPORTANT-3：旧行（无新维度）summary JSON 与父版本键集逐字一致。"""
+    factory, _db_gen = usage_db
+    await _seed(factory)
+    # 只用旧列写入：organization_id 是旧字段，feature/task_id 等保持 NULL。
+    async with factory() as s:
+        s.add(
+            TokenUsageRecord(
+                user_id=100,
+                organization_id=11,
+                model="deepseek-chat",
+                source="rag_chat",
+                input_tokens=1000,
+                output_tokens=100,
+                cost_usd=0.0007,
+                created_at=datetime.now(UTC) - timedelta(days=1),
+            )
+        )
+        await s.commit()
+
+    from app.main import app
+
+    app.dependency_overrides[get_db] = _db_gen
+    app.dependency_overrides[get_current_user] = lambda: _user(999, 11, superuser=True)
+    client = TestClient(app)
+    try:
+        resp = client.get("/api/v1/token-usage/summary")
+        assert resp.status_code == 200, resp.text
+        assert set(resp.json()) == {
+            "total_input_tokens",
+            "total_output_tokens",
+            "total_cost_usd",
+            "total_requests",
+            "by_model",
+            "by_user",
+            "by_day",
+        }, "legacy 响应不得出现 by_organization/by_feature 新键"
+    finally:
+        app.dependency_overrides.pop(get_db, None)
+        app.dependency_overrides.pop(get_current_user, None)

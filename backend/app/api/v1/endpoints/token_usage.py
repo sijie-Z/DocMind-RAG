@@ -1,9 +1,10 @@
 """API endpoints for token usage tracking and cost analytics."""
 
+import math
 from datetime import UTC, datetime, timedelta
 
 from fastapi import APIRouter, Depends, Query
-from sqlalchemy import desc, func, select
+from sqlalchemy import desc, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
@@ -65,20 +66,44 @@ async def record_token_usage(
         await ts.commit()
 
 
+# 兜底费率：配置加载期已 fail-fast 校验（AISettings.CostRate），这里再兜一层，
+# 防止运行期 monkeypatch / 直接改 settings 对象绕过校验时 IndexError → 500。
+_FALLBACK_RATE = (0.0005, 0.002)
+
+
+def _safe_rate(value: object) -> tuple[float, float] | None:
+    """把运行期费率归一为合法二元组；形状不对返回 None（跳过/用兜底）。"""
+    if isinstance(value, (str, bytes)) or not isinstance(value, (tuple, list)) or len(value) != 2:
+        return None
+    rates: list[float] = []
+    for item in value:
+        if isinstance(item, bool) or not isinstance(item, (int, float)):
+            return None
+        number = float(item)
+        if not math.isfinite(number) or number < 0:
+            return None
+        rates.append(number)
+    return (rates[0], rates[1])
+
+
 def _estimate_cost(model: str, input_tokens: int, output_tokens: int) -> float:
     """Rough cost estimation per 1K tokens (USD).
 
     费率来自配置 ``TOKEN_COST_RATES`` / ``TOKEN_COST_DEFAULT_RATE``，
     默认值与配置化前完全一致；匹配规则同样保持「小写模型名包含 rate key，
     按配置顺序首尾命中即止」（deepseek 必须先于 deepseek-chat 之外的泛化键）。
+
+    配置加载期（AISettings.CostRate）拒绝非法费率；本函数再做一次读侧形状
+    校验：即使运行时被绕过校验改成坏值，也安全回落到默认/旧费率，绝不 IndexError。
     """
     model = model.lower()
-    rates = settings.TOKEN_COST_RATES
-    default_rate = settings.TOKEN_COST_DEFAULT_RATE
-    in_rate, out_rate = float(default_rate[0]), float(default_rate[1])
-    for key, rate in rates.items():
-        if key.lower() in model:
-            in_rate, out_rate = float(rate[0]), float(rate[1])
+    in_rate, out_rate = _safe_rate(settings.TOKEN_COST_DEFAULT_RATE) or _FALLBACK_RATE
+    for key, rate in settings.TOKEN_COST_RATES.items():
+        if not isinstance(key, str) or key.lower() not in model:
+            continue
+        valid = _safe_rate(rate)
+        if valid is not None:
+            in_rate, out_rate = valid
             break
     return (input_tokens / 1000 * in_rate) + (output_tokens / 1000 * out_rate)
 
@@ -107,7 +132,7 @@ async def create_token_record(
     return {"success": True}
 
 
-@router.get("/summary", response_model=TokenUsageSummary)
+@router.get("/summary", response_model=TokenUsageSummary, response_model_exclude_unset=True)
 async def get_token_usage_summary(
     days: int = Query(7, ge=1, le=365, description="统计天数"),
     organization_id: int | None = Query(
@@ -260,7 +285,7 @@ async def get_token_usage_summary(
         .order_by(desc(func.sum(TokenUsageRecord.cost_usd)))
     )
 
-    return TokenUsageSummary(
+    payload = TokenUsageSummary(
         total_input_tokens=int(total_input or 0),
         total_output_tokens=int(total_output or 0),
         total_cost_usd=round(float(total_cost or 0), 4),
@@ -268,6 +293,31 @@ async def get_token_usage_summary(
         by_model=by_model_list,
         by_user=by_user_list,
         by_day=by_day_list,
-        by_organization=_breakdown_rows(by_organization.all(), "organization_id"),
-        by_feature=_breakdown_rows(by_feature.all(), "feature"),
     )
+    # 兼容契约：没有任何**新增维度**数据时，响应 JSON 与父版本逐键一致。
+    # organization_id 是旧字段，不能当作"新维度存在"的判据（否则 legacy 行
+    # 永远触发新键）；只认 task_id/request_id/feature/prompt_version。
+    # response_model_exclude_unset=True + 只有非空才赋值 → 新键只在有值时出现。
+    has_dimensions = (
+        await db.execute(
+            select(func.count(TokenUsageRecord.id))
+            .where(*conditions)
+            .where(
+                or_(
+                    TokenUsageRecord.feature.is_not(None),
+                    TokenUsageRecord.task_id.is_not(None),
+                    TokenUsageRecord.request_id.is_not(None),
+                    TokenUsageRecord.prompt_version.is_not(None),
+                )
+            )
+        )
+    ).scalar_one()
+    by_org_rows = (
+        _breakdown_rows(by_organization.all(), "organization_id") if has_dimensions else []
+    )
+    by_feature_rows = _breakdown_rows(by_feature.all(), "feature") if has_dimensions else []
+    if by_org_rows:
+        payload.by_organization = by_org_rows
+    if by_feature_rows:
+        payload.by_feature = by_feature_rows
+    return payload
