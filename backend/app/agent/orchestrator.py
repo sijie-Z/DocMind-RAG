@@ -26,6 +26,8 @@ from typing import Any
 from app.agent.config import AgentConfig
 from app.agent.events import AgentEvent
 from app.agent.exec_context import ExecutionContext
+from app.agent.llm_call_log import derive_run_prompt_metadata
+from app.agent.loop import DEFAULT_SYSTEM_PROMPT
 from app.agent.message import AgentMessage, message_bus
 from app.agent.planner import Plan, Planner, PlanStep
 from app.agent.tracing import ExecutionTrace, get_trace_store
@@ -86,6 +88,14 @@ class Orchestrator:
         ctx = ExecutionContext(query=query)
         # 与 PERAgentLoop 同口径：技能/经验按组织隔离
         ctx.organization_id = getattr(self, "_organization_id", None)
+        # 提示词版本追踪（P1）：与 PERAgentLoop.run 同一派生口径，保证经
+        # Orchestrator 发起的 run 也不出现"四个字段全空"。无模板时用配置摘要。
+        for key, value in derive_run_prompt_metadata(
+            self._config,
+            template=getattr(self, "prompt_template", None),
+            fallback_prompt=DEFAULT_SYSTEM_PROMPT,
+        ).items():
+            setattr(ctx, key, value)
 
         # ── Step 1: Send plan_request → Planner ───────────────────────
         planner_msg = AgentMessage.plan_request(trace_id, query)

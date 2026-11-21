@@ -36,6 +36,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from app.core.log_safety import log_safe
+
 logger = logging.getLogger(__name__)
 
 DEFAULT_LOG_FILE = "logs/llm_calls.jsonl"
@@ -176,6 +178,24 @@ def _safe_attr(obj: Any, name: str) -> Any:
         return None
 
 
+def _safe_label(value: Any, *, max_len: int = 64) -> str | None:
+    """把 label/experiment 收敛为安全标量标识。
+
+    只接受 ``str`` / 非 ``bool`` 的 ``int``（大整数也允许）：容器、对象、bool
+    一律拒绝——绝不把 ``str(SimpleNamespace(...))`` 这类对象内容写进 JSONL。
+    控制字符（含 Unicode C1）用仓库既有 :func:`log_safe` 转义，再限长；空串
+    视为"未提供"。注意不把用户自由文本当作版本来源，label 只是窄化后的标识。
+    """
+    if isinstance(value, bool) or not isinstance(value, (str, int)):
+        return None
+    # log_safe 处理 C0/DEL；C1（U+0080–U+009F）也是 Unicode 控制字符，补齐转义。
+    escaped = "".join(
+        ch if not 0x80 <= ord(ch) <= 0x9F else f"\\x{ord(ch):02x}" for ch in str(value)
+    )
+    cleaned = log_safe(escaped, max_len=max_len)
+    return cleaned or None
+
+
 def resolve_prompt_metadata(
     template: Any = None,
     *,
@@ -187,8 +207,8 @@ def resolve_prompt_metadata(
     - ``prompt_id`` / ``prompt_version`` 只取模板的 ``id`` / ``version``
       整数字段（``bool`` 与空串视为缺失）；**不读** ``name`` / ``description``
       / ``content``：这些是用户自由文本或提示词正文，不得进入日志与报告；
-    - ``prompt_label`` / ``experiment_id`` 只来自调用方给出的非空标量标识，
-      模板没有 label/experiment 概念时不臆造；
+    - ``prompt_label`` / ``experiment_id`` 只来自调用方的 str/非 bool int 标识，
+      经控制字符转义与限长；模板没有 label/experiment 概念时不臆造；
     - 输出全部为 ``str``，与 :func:`build_llm_call_record` 的落盘口径一致。
 
     这是一个纯函数：不改 template，不做 I/O，任何属性访问异常都按"未提供"降级。
@@ -200,9 +220,67 @@ def resolve_prompt_metadata(
             if type(value) is int:  # 排除 bool / 字符串 / MagicMock 等非真实整数
                 result[key] = str(value)
     for key, value in (("prompt_label", prompt_label), ("experiment_id", experiment_id)):
-        if value is not None and value != "" and not isinstance(value, (dict, list, tuple, set)):
-            result[key] = str(value)
+        cleaned = _safe_label(value)
+        if cleaned is not None:
+            result[key] = cleaned
     return result
+
+
+def derive_run_prompt_metadata(
+    config: Any = None,
+    *,
+    template: Any = None,
+    prompt_text: str | None = None,
+    fallback_prompt: str | None = None,
+    prompt_label: Any = None,
+    experiment_id: Any = None,
+) -> dict[str, str]:
+    """为一个真实 run 派生可选的版本标识（纯函数，无 DB / 无 I/O）。
+
+    优先级：显式 ``template``（真实 PromptTemplate 行）> ``prompt_text`` >
+    ``config.system_prompt_override`` > ``fallback_prompt``（模块常量）。
+
+    - 有 DB 模板时只取 ``id`` / ``version``（:func:`resolve_prompt_metadata`），
+      不做任何正文哈希；
+    - 无模板但有可用提示词来源时，生成**稳定**的 ``prompt_id``（配置身份 +
+      提示词的摘要）与 ``prompt_version``（提示词摘要）——两者都是摘要，
+      绝不含提示词正文；``prompt_label`` 缺省为 ``agent-config``；
+    - 全部来源缺失时返回空字典：旧 run 的 JSONL / 报告键集保持不变。
+
+    观测层的属性访问失败一律按缺失降级，绝不把异常抛回主流程。
+    """
+    meta = resolve_prompt_metadata(template, prompt_label=prompt_label, experiment_id=experiment_id)
+    if meta.get("prompt_id"):
+        return meta
+
+    source = prompt_text
+    if source is None and config is not None:
+        raw = _safe_attr(config, "system_prompt_override")
+        source = raw if isinstance(raw, str) and raw else None
+    if not source:
+        source = fallback_prompt
+    if not isinstance(source, str) or not source:
+        return meta
+
+    digest = hash_prompt(source) or ""
+    version = digest.removeprefix("sha256:")[:16]
+    agent_id = _safe_attr(config, "agent_id")
+    model = _safe_attr(config, "model")
+    identity = {
+        "agent_id": agent_id if isinstance(agent_id, str) else "",
+        "model": model if isinstance(model, str) else "",
+        "prompt": source,
+    }
+    identity_digest = hash_prompt(identity) or ""
+    meta["prompt_id"] = "config-" + identity_digest.removeprefix("sha256:")[:16]
+    meta["prompt_version"] = version
+    cleaned_label = _safe_label(prompt_label)
+    meta["prompt_label"] = cleaned_label or "agent-config"
+    if experiment_id is not None:
+        cleaned_experiment = _safe_label(experiment_id)
+        if cleaned_experiment is not None:
+            meta["experiment_id"] = cleaned_experiment
+    return meta
 
 
 def build_llm_call_record(
