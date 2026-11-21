@@ -17,6 +17,8 @@ from app.schemas.workflow import WorkflowConfig, WorkflowEdge, WorkflowNode
 from app.services.workflow_engine import WorkflowEngine
 
 _SENTINEL = "SENTINEL-USER-QUERY-9f8e7d6c"
+_KEY_SENTINEL = "SENTINEL-E2E-QUERY-7b6a5c4d"
+_KEY_SECRET = "api_key-sk-abcdef123456"
 
 
 def _collector(events: list[tuple[str, dict]]):
@@ -81,8 +83,8 @@ class TestNodeInputSnapshot:
             dumped = _dump_no_text(r.input)
             assert _SENTINEL not in dumped
             assert "should-never-appear" not in dumped
-            # 只有结构形状：输入正文以 {"length": N} 出现，而非原文
-            assert r.input["state"]["input"]["keys"] == ["text"]
+            # 未知键（含 "text"）只保留哈希摘要，不保留原始键名
+            assert r.input["state"]["input"]["keys"] == ["key_sha256:982d9e3e"]
 
         # 边运行边落：running 阶段也已写入 input（由 node_start 事件时序间接确认）
         assert [t for t, _ in events if t == "node_complete"] != []
@@ -113,7 +115,36 @@ class TestNodeInputSnapshot:
             assert input_shape["truncated"] is True  # >32 键，只留摘要
             assert len(input_shape["keys"]) <= 32
             if result.node_type == "input":
-                assert "api_key***" in dumped  # 前 32 键内的敏感键名打码；值从不复制
+                assert "key_sha256:" in dumped  # 未知/敏感键名只留哈希；值从不复制
+
+    @pytest.mark.asyncio
+    async def test_unknown_and_secret_keys_never_appear_in_snapshot_or_sse(self):
+        """评审 CRITICAL：键名也可能是用户 query / 密钥；整个 JSON 字符串都不许出现原文。"""
+        events: list[tuple[str, dict]] = []
+        engine = WorkflowEngine(_flow(), organization_id=1)
+        engine.set_event_callback(_collector(events))
+
+        poisoned_input = {
+            _KEY_SENTINEL: "value",
+            _KEY_SECRET: "value",
+            "text": _SENTINEL,
+        }
+        node = WorkflowNode(
+            id="in1",
+            type="input",
+            data={_KEY_SECRET: "secret-value", "prompt": "{{input}}"},
+            position={"x": 0, "y": 0},
+        )
+        engine.nodes["in1"] = node
+        await engine.execute(poisoned_input)
+
+        result_snapshots = [r.input for r in engine.get_node_results()]
+        event_snapshots = [d["input"] for t, d in events if t == "node_complete"]
+        for payload in result_snapshots + event_snapshots:
+            dumped = _dump_no_text(payload)
+            for marker in (_KEY_SENTINEL, _KEY_SECRET, _SENTINEL, "secret-value"):
+                assert marker not in dumped, (marker, dumped[:500])
+            assert "key_sha256:" in dumped  # 未知键只保留短哈希摘要
 
     @pytest.mark.asyncio
     async def test_input_snapshot_does_not_mutate_state(self):
@@ -195,6 +226,45 @@ class TestLLMNodeTokenObservability:
         assert live["tokens_out"] == 45
         assert live["model"] == "gpt-4o-mini"
         assert live["cost_usd"] == pytest.approx(llm_result.cost_usd)
+
+    @pytest.mark.asyncio
+    async def test_invalid_token_values_are_rejected(self, monkeypatch):
+        """IMPORTANT：bool 不是 token 数，负数不得产生负成本；逐个字段独立置 None。"""
+        cases = [
+            (
+                {"input_tokens": True, "output_tokens": 10},
+                (None, 10),
+            ),
+            (
+                {"input_tokens": 10, "output_tokens": -5},
+                (10, None),
+            ),
+            (
+                {"input_tokens": 12.5, "output_tokens": "8"},
+                (None, None),
+            ),
+        ]
+        for usage, expected in cases:
+            response = AIMessage(content="ok", response_metadata={"model_name": "gpt-4o-mini"})
+            response.usage_metadata = usage  # 赋值绕过构造期校验，专门测引擎侧运行时校验
+            engine = WorkflowEngine(
+                WorkflowConfig(
+                    nodes=[WorkflowNode(id="llm1", type="llm_openai", data={}, position={})],
+                    edges=[],
+                ),
+                organization_id=1,
+            )
+            monkeypatch.setattr(
+                "app.services.workflow_engine.NodeExecutor.get_llm",
+                lambda self, _t="openai", _r=response: _StubLLM(_r),
+            )
+            await engine.execute({"text": "hello"})
+            (result,) = engine.get_node_results()
+            assert (result.tokens_in, result.tokens_out) == expected, usage
+            if result.cost_usd is not None:
+                assert result.cost_usd >= 0
+            if None in expected:
+                assert result.cost_usd is None  # 缺任一合法计数就不估算成本
 
     @pytest.mark.asyncio
     async def test_no_usage_means_null_token_fields(self, monkeypatch):
