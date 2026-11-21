@@ -573,3 +573,19 @@ async def test_upsert_self_heal_conflicts_when_target_slot_taken(factory, monkey
     async with factory() as db:
         meta = await db.get(ReviewDocumentMeta, DOC)
     assert meta.organization_id == 999, "冲突时不得半写自愈"
+
+
+@pytest.mark.asyncio
+async def test_list_candidates_fail_closed_when_acl_lookup_raises(factory, monkeypatch):
+    """ACL 查询失败必须拒绝列举，不能吞异常后回退成组织级全量元数据。"""
+    import app.services.document_acl as acl
+
+    await _seed_doc(factory)
+
+    async def _boom(*_args, **_kwargs):
+        raise RuntimeError("acl backend unavailable")
+
+    monkeypatch.setattr(acl, "get_blocked_document_ids", _boom)
+    async with factory() as db:
+        with pytest.raises(RuntimeError, match="acl backend unavailable"):
+            await svc.list_candidates(db, organization_id=ORG, viewer_user_id=2)

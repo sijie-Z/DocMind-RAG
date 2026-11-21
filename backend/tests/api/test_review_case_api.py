@@ -11,7 +11,14 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 import app.models  # noqa: F401
 from app.core.database import Base, get_db
 from app.core.security import get_current_user
-from app.models.document import Document, DocumentChunk, DocumentStatus, DocumentType
+from app.models.document import (
+    Document,
+    DocumentAcl,
+    DocumentChunk,
+    DocumentStatus,
+    DocumentType,
+    DocumentVisibility,
+)
 from app.models.organization import Organization
 from app.models.rbac import PermissionType
 from app.models.review import ReviewDocumentMeta
@@ -26,6 +33,8 @@ LEGACY = "doc-api-legacy"
 NOMETA = "doc-api-nometa"
 FOREIGN = "doc-api-foreign"
 MISMETA = "doc-api-mismeta"
+PRIVATE = "doc-api-private"
+GRANTED_PRIVATE = "doc-api-granted-private"
 
 
 @pytest.fixture
@@ -46,6 +55,8 @@ async def factory(tmp_path):
             (NOMETA, ORG),
             (MISMETA, ORG),
             (FOREIGN, OTHER_ORG),
+            (PRIVATE, ORG),
+            (GRANTED_PRIVATE, ORG),
         ):
             docs.append(
                 Document(
@@ -57,9 +68,22 @@ async def factory(tmp_path):
                     status=DocumentStatus.INDEXED,
                     organization_id=org_id,
                     uploaded_by=1,
+                    visibility=(
+                        DocumentVisibility.PRIVATE
+                        if doc_id in {PRIVATE, GRANTED_PRIVATE}
+                        else DocumentVisibility.ORGANIZATION
+                    ),
                 )
             )
         db.add_all(docs)
+        db.add(
+            DocumentAcl(
+                id="acl-granted-review",
+                document_id=GRANTED_PRIVATE,
+                subject_type="user",
+                subject_id=2,
+            )
+        )
         db.add_all(
             [
                 ReviewDocumentMeta(
@@ -344,6 +368,44 @@ async def test_cross_org_access_is_forbidden(factory, monkeypatch):
         listed = await ac.get("/api/v1/reviews")
         assert listed.status_code == 200
         assert listed.json()["data"]["total"] == 0
+
+
+@pytest.mark.asyncio
+async def test_review_detail_hides_case_referencing_another_users_private_document(
+    factory, monkeypatch
+):
+    """案件详情：引用他人私有文档的案件不得把其元数据经详情回显（issue #511）。
+
+    get_case_for_user 已按文档级 ACL 拦截；此处锁定回归口径，防止后续改写
+    绕过守卫重新泄漏文件名/document_id。
+    """
+
+    async def _grant_read(_db, _user_obj, organization_id=None):
+        return {PermissionType.DOCUMENT_READ.value}
+
+    monkeypatch.setattr("app.core.security.permission_service.get_user_permissions", _grant_read)
+
+    async with _Ctx(_user(superuser=True), factory) as ac:
+        case = await _create_case(ac)
+    async with factory() as db:
+        doc = await db.get(Document, BASE)
+        doc.visibility = DocumentVisibility.PRIVATE
+        doc.title = "私有基准合同"
+        doc.uploaded_by = 1
+        await db.commit()
+
+    for user_id in (2, 3):
+        user = _user()
+        user.id = user_id
+        async with _Ctx(user, factory) as ac:
+            detail = await ac.get(f"/api/v1/reviews/{case['id']}")
+            assert detail.status_code == 404, detail.text
+            assert "私有基准合同" not in detail.text
+            assert BASE not in detail.text
+
+    async with _Ctx(_user(), factory) as ac:
+        own = await ac.get(f"/api/v1/reviews/{case['id']}")
+    assert own.status_code == 200, own.text
 
 
 @pytest.mark.asyncio
@@ -673,7 +735,16 @@ async def test_candidates_lists_org_documents_with_optional_identity(factory):
         assert r.status_code == 200, r.text
         data = r.json()["data"]
         ids = [item["document_id"] for item in data["items"]]
-        assert set(ids) == {POLICY, BASE, REVISED, LEGACY, NOMETA, MISMETA}
+        assert set(ids) == {
+            POLICY,
+            BASE,
+            REVISED,
+            LEGACY,
+            NOMETA,
+            MISMETA,
+            PRIVATE,
+            GRANTED_PRIVATE,
+        }
         assert FOREIGN not in ids, "候选文档必须限定在本组织"
         by_id = {item["document_id"]: item for item in data["items"]}
         assert by_id[POLICY]["meta"]["doc_role"] == "policy"
@@ -685,7 +756,88 @@ async def test_candidates_lists_org_documents_with_optional_identity(factory):
         assert by_id[MISMETA]["meta"] is None, "meta 组织与文档组织不一致时不得带出身份"
         registered = {POLICY, BASE, REVISED, LEGACY}
         assert set(ids[: len(registered)]) == registered, "已登记身份的文档应排在前面"
-        assert set(ids[len(registered) :]) == {NOMETA, MISMETA}
+        assert set(ids[len(registered) :]) == {NOMETA, MISMETA, PRIVATE, GRANTED_PRIVATE}
+
+
+@pytest.mark.asyncio
+async def test_candidates_private_metadata_is_viewer_scoped(factory, monkeypatch):
+    """私有文档元数据按 viewer 过滤：他人不可见、作者与授权人可见（issue #511）。
+
+    变异点：删掉 list_candidates 的 blocked 过滤 → 用户 B 看到 A 的私有文档，
+    total/items 与授权断言全部失败。
+    """
+
+    async def _grant_read(_db, _user_obj, organization_id=None):
+        return {PermissionType.DOCUMENT_READ.value}
+
+    monkeypatch.setattr("app.core.security.permission_service.get_user_permissions", _grant_read)
+
+    async with factory() as db:
+        for doc_id in (PRIVATE, GRANTED_PRIVATE):
+            doc = await db.get(Document, doc_id)
+            doc.title = f"绝密私有-{doc_id}"
+            doc.filename = f"doc-api-private-{doc_id}.pdf"
+        await db.commit()
+
+    async def _ids(user_id):
+        user = _user()
+        user.id = user_id
+        async with _Ctx(user, factory) as ac:
+            r = await ac.get("/api/v1/reviews/candidates")
+            assert r.status_code == 200, r.text
+            return r.json()["data"]
+
+    other = await _ids(3)
+    other_ids = [item["document_id"] for item in other["items"]]
+    assert PRIVATE not in other_ids
+    assert GRANTED_PRIVATE not in other_ids
+    assert other["total"] == len(other_ids) == 6
+    # 响应正文任何字段都不得泄漏标题/文件名/ID（含分页计数）。
+    other_user = _user()
+    other_user.id = 3
+    async with _Ctx(other_user, factory) as ac:
+        r_other = await ac.get("/api/v1/reviews/candidates")
+    assert r_other.status_code == 200
+    assert PRIVATE not in r_other.text
+    assert GRANTED_PRIVATE not in r_other.text
+    assert "绝密私有" not in r_other.text
+
+    owner = await _ids(1)
+    owner_ids = [item["document_id"] for item in owner["items"]]
+    assert PRIVATE in owner_ids
+    assert GRANTED_PRIVATE in owner_ids  # 上传者本人
+    assert owner["total"] == len(owner_ids) == 8
+
+    granted = await _ids(2)
+    granted_ids = [item["document_id"] for item in granted["items"]]
+    assert PRIVATE not in granted_ids
+    assert GRANTED_PRIVATE in granted_ids
+    assert granted["total"] == len(granted_ids) == 7
+
+
+@pytest.mark.asyncio
+async def test_candidates_q_cannot_probe_private_metadata(factory, monkeypatch):
+    """搜索私有标题/文件名不得成为探测通道；count 与 items 同步为 0。"""
+
+    async def _grant_read(_db, _user_obj, organization_id=None):
+        return {PermissionType.DOCUMENT_READ.value}
+
+    monkeypatch.setattr("app.core.security.permission_service.get_user_permissions", _grant_read)
+    async with factory() as db:
+        doc = await db.get(Document, PRIVATE)
+        doc.title = "绝密私有标题"
+        doc.filename = "secret-only.pdf"
+        await db.commit()
+
+    user = _user()
+    user.id = 3
+    async with _Ctx(user, factory) as ac:
+        for keyword in (PRIVATE, "secret-only", "绝密私有"):
+            r = await ac.get("/api/v1/reviews/candidates", params={"q": keyword})
+            assert r.status_code == 200, r.text
+            data = r.json()["data"]
+            assert data["total"] == 0
+            assert data["items"] == []
 
 
 @pytest.mark.asyncio
