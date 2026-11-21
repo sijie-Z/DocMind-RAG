@@ -40,7 +40,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.exceptions import ConflictError
 from app.models.document import Document, DocumentChunk, DocumentStatus
-from app.models.review import ReviewCase, ReviewItem
+from app.models.review import ReviewCase, ReviewEvidence, ReviewItem
 from app.rag.source_provenance import SourceProvenanceUnavailableError
 from app.services.clause_refs import extract_clause_fields
 from app.services.review_case_service import case_detail, ensure_candidate_evidence
@@ -51,6 +51,7 @@ from app.services.review_document_service import (
     get_review_meta,
     iter_chunks,
 )
+from app.services.review_explanation_service import derive_explanation, derive_severity
 
 EXTRACTOR_VERSION = 1
 ITEM_KEYS = ("payment_term", "start_condition", "acceptance_invoice", "exception")
@@ -2519,6 +2520,42 @@ async def analyze_case(session: AsyncSession, case: ReviewCase) -> dict[str, Any
                         char_end=clause.char_end,
                     )
 
+        # 派生展示元数据：只读 facts/change_type/item_key/证据 id，
+        # 不改 facts 与判定，也不触碰任何哈希/过期语义。
+        derived_rows = (
+            (await session.execute(select(ReviewItem).where(ReviewItem.case_id == case.id)))
+            .scalars()
+            .all()
+        )
+        evidence_by_item: dict[str, dict[str, list[dict[str, Any]]]] = {}
+        for row in (
+            (
+                await session.execute(
+                    select(ReviewEvidence)
+                    .where(ReviewEvidence.case_id == case.id)
+                    .order_by(ReviewEvidence.id)
+                )
+            )
+            .scalars()
+            .all()
+        ):
+            item_evidence = evidence_by_item.setdefault(row.item_id, {})
+            item_evidence.setdefault(row.side, []).append(
+                {"id": row.id, "selected": row.selected, "role": row.role}
+            )
+        for derived in derived_rows:
+            # 每次重算，绝不把旧 severity/explanation 当覆盖值透传。
+            derived.severity = derive_severity(
+                derived.facts,
+                item_key=derived.item_key,
+                change_type=derived.change_type,
+            )
+            derived.explanation = derive_explanation(
+                derived.facts,
+                item_key=derived.item_key,
+                change_type=derived.change_type,
+                evidence=evidence_by_item.get(derived.id, {}),
+            )
         await session.commit()
     except IntegrityError as exc:
         # 并发两次 analyze 同时补同一 (item, side, chunk)：唯一约束最后兜底。

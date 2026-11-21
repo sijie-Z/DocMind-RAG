@@ -577,7 +577,7 @@ def _synthetic_payload(items, *, coverage=None):
 
 
 def test_markdown_ambiguous_facts_and_unknown_codes_are_explicit():
-    """歧义列候选与原因、未识别如实标注、未知码透传且不破坏结构。"""
+    """歧义列候选与原因、未识别如实标注、未知码不外泄且不破坏结构。"""
     payload = _synthetic_payload(
         [
             {
@@ -671,7 +671,7 @@ def test_markdown_ambiguous_facts_and_unknown_codes_are_explicit():
     assert "- 合同修订版：未识别" in markdown, "not_found 必须在事实行如实标注"
     assert "引用的条款无法定位" in markdown, "生产路径原因码必须本地化"
     assert "reference_unresolved" not in markdown
-    assert "some_new_code" in markdown, "未知原因码必须透传"
+    assert "some_new_code" not in markdown, "未知原因码不得进入交付报告"
     assert "custom_item" in markdown, "未知核验项不得丢弃"
     assert "mystery" in markdown, "未知状态不得丢弃"
     assert "mystery 1" in markdown, "未知状态也要计入汇总"
