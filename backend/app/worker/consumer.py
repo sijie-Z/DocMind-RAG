@@ -155,10 +155,16 @@ async def run_consume_loop(consumer, process=None, touch=None, record_attempt=No
 
                 doc_id = data.get("document_id")
                 job_id = data.get("job_id")
+                parse_profile = data.get("parse_profile")
 
                 if doc_id:
                     try:
-                        processed = await process_call(doc_id, job_id)
+                        # 旧调用方（含测试替身）仍是两参回调；仅在消息带档位时
+                        # 传第三参，保持消费链向后兼容。
+                        if parse_profile:
+                            processed = await process_call(doc_id, job_id, parse_profile)
+                        else:
+                            processed = await process_call(doc_id, job_id)
                     except Exception as e:
                         # 未分类异常（防御网；真实 processor 内部已兜底）：按失败处理，
                         # 绝不允许把异常当成"处理过了"提交偏移，也不允许静默吞掉。
@@ -232,8 +238,8 @@ async def consume():
             consumer,
             # 把心跳刷新作为处理阶段回调传入：单篇大文档的解析/向量化可能
             # 远超心跳阈值，阶段级刷新避免把"长耗时处理"误判为"卡死"。
-            process=lambda doc_id, job_id: processor.process(
-                doc_id, job_id, on_progress=touch_heartbeat
+            process=lambda doc_id, job_id, parse_profile=None: processor.process(
+                doc_id, job_id, on_progress=touch_heartbeat, parse_profile=parse_profile
             ),
         )
 

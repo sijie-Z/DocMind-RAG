@@ -51,6 +51,7 @@ from app.rag.source_provenance import SourceProvenanceUnavailableError
 from app.schemas.knowledge import DocumentDownloadUrl, DocumentDownloadUrlResponse
 from app.schemas.review import ReviewMetaUpsert
 from app.services.audit_service import audit_service
+from app.services.document_parser import normalize_parse_profile
 from app.services.document_preview import load_document_chunk, load_document_preview_text
 from app.services.file_service import file_service
 from app.services.review_document_service import (
@@ -170,6 +171,7 @@ async def upload_document(
     description: str | None = Form(None),
     tags: str | None = Form(None),
     visibility: str | None = Form(None),
+    parse_profile: str | None = Form(None),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -199,6 +201,12 @@ async def upload_document(
             except (json.JSONDecodeError, TypeError):
                 # 也可能传普通逗号分隔字符串 "tag1,tag2"
                 keywords_list = [t.strip() for t in tags.split(",") if t.strip()]
+
+        # 解析档位：非法值在上传入口就拒绝，避免非法策略进入 Kafka/后台任务。
+        try:
+            effective_parse_profile = normalize_parse_profile(parse_profile)
+        except ValueError as exc:
+            raise ValidationError(str(exc)) from exc
 
         # 扩展名前置校验：旧版二进制 Office 解析链不支持，收下只会在异步
         # 解析阶段失败——入口直接 400 并提示可操作路径（与 /files/upload 同口径）。
@@ -315,6 +323,7 @@ async def upload_document(
                 if hasattr(new_doc.file_type, "value")
                 else str(new_doc.file_type),
                 "action": "process",
+                "parse_profile": effective_parse_profile,
             }
             sent = await kafka_producer.send_message(settings.KAFKA_FILE_PROCESSING_TOPIC, message)
         except Exception as kafka_err:
@@ -336,7 +345,7 @@ async def upload_document(
 
                 # 先建协程再装成 task：create_task 失败时显式 close()，避免
                 # "coroutine was never awaited" 泄漏（失败分支的干净收尾）。
-                coro = processor.process(doc_id, job.id)
+                coro = processor.process(doc_id, job.id, parse_profile=effective_parse_profile)
                 try:
                     task = asyncio.create_task(coro)
                 except Exception:

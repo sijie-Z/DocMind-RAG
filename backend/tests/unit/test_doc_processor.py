@@ -23,6 +23,63 @@ async def test_get_embeddings_preserves_length(monkeypatch):
     assert len(embeddings) == 3
 
 
+@pytest.mark.asyncio
+async def test_process_forwards_parse_profile_to_parser(monkeypatch):
+    """非 auto 档位必须传到 parser；chunk meta_data 带上实际档位（无 migration）。"""
+    processor = DocumentProcessor()
+    captured = {}
+
+    async def fake_lock(_document_id):
+        return True
+
+    async def fake_load(_document_id, _job_id):
+        return SimpleNamespace(file_path="f.pdf", organization_id="1", id="doc-1")
+
+    async def fake_parse(file_path, organization_id, parse_profile=None):
+        captured["profile"] = parse_profile
+        return {
+            "parse_profile_used": parse_profile,
+            "chunks": [
+                {
+                    "chunk_text": "hi",
+                    "chunk_index": 0,
+                    "chunk_length": 2,
+                    "metadata": {"type": "contextual_semantic_split"},
+                }
+            ],
+        }
+
+    async def fake_embeddings(texts):
+        return [[1.0]] * len(texts)
+
+    async def fake_replace(_doc, chunks_data, _embeddings):
+        captured["chunks"] = chunks_data
+
+    async def fake_success(_document_id, _chunks_data, _job_id):
+        pass
+
+    async def fake_release(_document_id):
+        pass
+
+    async def fake_graph(_doc, _chunks):
+        pass
+
+    monkeypatch.setattr(processor, "_acquire_processing_lock", fake_lock)
+    monkeypatch.setattr(processor, "_load_and_mark_parsing", fake_load)
+    monkeypatch.setattr(processor.parser, "parse_document", fake_parse)
+    monkeypatch.setattr(processor, "_get_embeddings", fake_embeddings)
+    monkeypatch.setattr(processor, "_replace_document_state", fake_replace)
+    monkeypatch.setattr(processor, "_mark_success", fake_success)
+    monkeypatch.setattr(processor, "_release_processing_lock", fake_release)
+    monkeypatch.setattr(processor, "_extract_graph_safely", fake_graph)
+
+    ok = await processor.process("doc-1", 7, parse_profile="table_accurate")
+
+    assert ok is True
+    assert captured["profile"] == "table_accurate"
+    assert captured["chunks"][0]["metadata"]["parse_profile"] == "table_accurate"
+
+
 @pytest.mark.parametrize("with_progress", [True, False])
 @pytest.mark.asyncio
 async def test_process_reports_progress_at_stage_boundaries(monkeypatch, with_progress):

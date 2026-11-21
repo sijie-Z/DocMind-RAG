@@ -119,6 +119,37 @@ async def test_message_processed_then_committed_explicitly_with_job_id():
 
 
 @pytest.mark.asyncio
+async def test_parse_profile_from_message_forwarded_to_process():
+    """消息带 parse_profile 时转发给 processor；旧两参回调不受影响。"""
+    events = []
+
+    async def fake_process(document_id, job_id, parse_profile=None):
+        events.append((document_id, job_id, parse_profile))
+
+    consumer = PositionFakeConsumer(
+        [
+            {
+                "topic-0": [
+                    _msg(
+                        {
+                            "document_id": "doc-1",
+                            "job_id": 7,
+                            "parse_profile": "ocr",
+                        },
+                        offset=5,
+                    )
+                ]
+            }
+        ]
+    )
+
+    with pytest.raises(_Stop):
+        await run_consume_loop(consumer, process=fake_process, touch=lambda: None)
+
+    assert events == [("doc-1", 7, "ocr")]
+
+
+@pytest.mark.asyncio
 async def test_non_dict_message_skipped_and_committed():
     processed = []
 
