@@ -139,6 +139,7 @@ class RAGPipeline:
         organization_id: int,
         top_k: int = 5,
         document_ids: list[str] | None = None,
+        metadata_filters: dict[str, list[str]] | None = None,
         debug: bool = False,
         search_mode: str | None = None,
         viewer_user_id: int | None = None,
@@ -157,6 +158,7 @@ class RAGPipeline:
                 organization_id,
                 top_k,
                 document_ids,
+                metadata_filters,
                 debug=debug,
                 search_mode=search_mode,
                 viewer_user_id=viewer_user_id,
@@ -182,6 +184,7 @@ class RAGPipeline:
         organization_id: int,
         top_k: int = 5,
         document_ids: list[str] | None = None,
+        metadata_filters: dict[str, list[str]] | None = None,
         debug: bool = False,
         search_mode: str | None = None,
         viewer_user_id: int | None = None,
@@ -220,30 +223,10 @@ class RAGPipeline:
 
         debug_info: dict | None = {"stages": {}} if debug else None
 
-        # 文档级 ACL：viewer 可见集从 DB 解析（授权即时生效）。有 viewer 时
-        # **绕过共享缓存**——缓存按 org 分域，A 与 B 同组织会互相命中结果；
-        # 即使结果随后被 ACL 过滤，缓存命中数与 sources 仍会泄漏存在性。
-        blocked_ids: list[str] = []
-        acl_enabled = viewer_user_id is not None
-        # ACL 代次：无 viewer 的组织级缓存条目在授权变更后必须退出命中。
-        # 有 viewer 时保持原有 bypass（viewer-filtered 结果不写共享缓存）。
-        from app.rag.cache import acl_generation
-
-        acl_revision = await acl_generation(organization_id) or None
-        if acl_enabled:
-            from app.core.database import AsyncSessionLocal
-            from app.services.document_acl import get_blocked_document_ids
-
-            async with AsyncSessionLocal() as session:
-                blocked_ids = await get_blocked_document_ids(
-                    session, organization_id, viewer_user_id
-                )
-
         try:
             # issue #196：索引配置错误（维度/embedding 模型漂移等）时**拒绝检索**。
-            # 写入侧已被 IndexConfigError 拦下，但查询侧若继续用当前模型向量去撞
-            # 旧模型索引，会返回非空但静默错配的结果——正是「漂移不得静默混用」
-            # 要消除的形态。按 #292 的故障语义上抛，由上层显式降级。
+            # 必须先于任何「标签零命中」早退：索引坏时返回 200 空结果会把故障
+            # 伪装成「没匹配到」，违背既有 fail-closed 语义。
             from app.core.elasticsearch import get_index_error
 
             index_error = get_index_error()
@@ -251,6 +234,44 @@ class RAGPipeline:
                 # fail-closed：暖缓存也可能来自旧模型索引，一律拒绝；不读写缓存。
                 RAG_RETRIEVAL_UNAVAILABLE.labels(state="failed").inc()
                 raise RetrievalUnavailableError(f"知识库索引不可用，检索已拒绝：{index_error}")
+
+            # ACL 代次：无 viewer 的组织级缓存条目在授权变更后必须退出命中。
+            # 有 viewer 时保持原有 bypass（viewer-filtered 结果不写共享缓存）。
+            from app.rag.cache import acl_generation
+
+            acl_revision = await acl_generation(organization_id) or None
+
+            # 文档级 ACL：viewer 可见集从 DB 解析（授权即时生效）。有 viewer 时
+            # **绕过共享缓存**——缓存按 org 分域，A 与 B 同组织会互相命中结果；
+            # 即使结果随后被 ACL 过滤，缓存命中数与 sources 仍会泄漏存在性。
+            blocked_ids: list[str] = []
+            acl_enabled = viewer_user_id is not None
+            if acl_enabled or metadata_filters:
+                from app.core.database import AsyncSessionLocal
+                from app.rag.metadata_filter import (
+                    _NO_MATCH,
+                    intersect_document_ids,
+                    resolve_metadata_filter_document_ids,
+                )
+                from app.services.document_acl import get_blocked_document_ids
+
+                async with AsyncSessionLocal() as session:
+                    if acl_enabled:
+                        blocked_ids = await get_blocked_document_ids(
+                            session, organization_id, viewer_user_id
+                        )
+                    if metadata_filters:
+                        # 只收窄 document_ids；ACL 永远单独以 must_not 合并，不能覆盖/绕过。
+                        filtered_ids = await resolve_metadata_filter_document_ids(
+                            session, organization_id, metadata_filters
+                        )
+                        narrowed = intersect_document_ids(document_ids, filtered_ids)
+                        if narrowed is _NO_MATCH:
+                            # 标签命中为空：返回空结果，绝不退回「不限定」全库检索。
+                            if debug and debug_info is not None:
+                                debug_info["metadata_filter"] = {"matched_document_ids": []}
+                            return [], debug_info
+                        document_ids = narrowed
 
             # SemanticCache 是轻量命名空间配置；真实实例按本次 mode 选择，
             # 测试替身/自定义实现保持原对象。避免 strict 子集写入 compat 域。

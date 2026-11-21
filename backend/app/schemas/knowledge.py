@@ -42,8 +42,27 @@ class KnowledgeSearchRequest(BaseModel):
     document_ids: list[str] | None = Field(
         None, max_length=50, description="限定检索的文档 id 列表；缺省 = 全组织"
     )
+    # 竞品对标 P0：按标签/元数据收窄检索范围。字段名白名单 + 值校验在
+    # app.rag.metadata_filter 单点收口，未知字段直接 422，不进 ES 查询。
+    metadata_filters: dict[str, str | list[str]] | None = Field(
+        None,
+        description=(
+            "可选元数据过滤：仅支持 tags / file_type；值为字符串或字符串数组（OR），"
+            "多字段为 AND；无过滤时查询结构与旧实现一致"
+        ),
+    )
     # 检索自测：返回每臂候选/RRF/rerank/MMR 诊断（仅本次请求，不落库）。
     debug: bool = Field(False, description="是否返回检索诊断信息")
+
+    @field_validator("metadata_filters")
+    @classmethod
+    def validate_metadata_filters(
+        cls, value: dict[str, str | list[str]] | None
+    ) -> dict[str, list[str]] | None:
+        """非法字段/值在入口拒绝，不能落到 ES 或直接静默放宽成全库检索。"""
+        from app.rag.metadata_filter import normalize_metadata_filters
+
+        return normalize_metadata_filters(value)
 
     @field_validator("document_ids")
     @classmethod
