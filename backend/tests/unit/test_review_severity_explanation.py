@@ -374,7 +374,7 @@ def test_031_migration_chain_and_backfill(monkeypatch) -> None:
     heads = set(script.get_heads())
     assert heads == {"031_review_severity"}
     chain = [rev.revision for rev in script.iterate_revisions(next(iter(heads)), "base")]
-    assert chain[chain.index("031_review_severity") + 1] == "029_chat_session_share_token"
+    assert chain[chain.index("031_review_severity") + 1] == "030_cost_attribution"
 
     command.upgrade(cfg, "029_chat_session_share_token")
     case_id, item_id, ev_id = str(uuid4()), str(uuid4()), str(uuid4())

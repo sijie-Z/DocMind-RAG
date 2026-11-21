@@ -23,7 +23,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision = "031_review_severity"
-down_revision = "029_chat_session_share_token"
+down_revision = "030_cost_attribution"
 branch_labels = None
 depends_on = None
 
