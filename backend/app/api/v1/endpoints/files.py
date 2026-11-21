@@ -180,7 +180,12 @@ async def get_document_list(
         # S3 安全加固：无组织用户直接 403，不再兜底到 "1"
         organization_id = str(await require_organization(current_user, db))
         result = await file_service.get_document_list(
-            organization_id=organization_id, user_id=user_id, status=status, skip=skip, limit=limit
+            organization_id=organization_id,
+            user_id=str(current_user.id),
+            status=status,
+            skip=skip,
+            limit=limit,
+            viewer_user_id=current_user.id,
         )
         return FileListResponse(**result)
     except AppError:

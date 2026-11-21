@@ -612,8 +612,18 @@ async def get_organization_documents(
     _ensure_org_membership(current_user, org_id)
     try:
         from app.models.document import Document
+        from app.services.document_acl import get_blocked_document_ids
 
         query = select(Document).where(Document.organization_id == org_id)
+
+        # issue #511：私有文档的标题/ID 属于元数据，同样不能经组织文档列表
+        # 泄漏给上传者与授权人以外的成员。与知识库列表同口径：按当前 viewer
+        # 取 blocked_ids 后同时过滤列表和 count；超管保留既有审计可见性。
+        if not getattr(current_user, "is_superuser", False):
+            blocked = await get_blocked_document_ids(db, org_id, current_user.id)
+            if blocked:
+                query = query.where(Document.id.notin_(blocked))
+
         result = await db.execute(query)
         documents = result.scalars().all()
 
