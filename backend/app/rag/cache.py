@@ -73,8 +73,10 @@ def _viewer_segment(
             viewer = int(viewer_user_id)
         except (TypeError, ValueError):
             raise ValueError(f"viewer_user_id 非法: {viewer_user_id!r}") from None
-        if viewer <= 0:
-            raise ValueError(f"viewer_user_id={viewer_user_id!r} 非法：必须是正整数")
+        # user_id=0 是本项目的合法 viewer（平台/系统账号），必须与 None
+        # （无 viewer 的共享缓存路径）区分，不能用正整数校验把它拒绝。
+        if viewer < 0:
+            raise ValueError(f"viewer_user_id={viewer_user_id!r} 非法：不能为负数")
         segments.append(f"viewer:{viewer}")
     if acl_revision:
         revision = str(acl_revision).strip()
