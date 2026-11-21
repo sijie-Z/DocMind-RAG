@@ -38,6 +38,7 @@ from app.agent.exec_context import ExecutionContext
 from app.agent.message import AgentMessage, message_bus
 from app.agent.planner import PlanStep
 from app.agent.registry import ToolResult
+from app.agent.run_context import RunContext, run_context_for_internal_system_task
 from app.agent.tracing import ToolCallRecord, get_trace_store
 
 logger = logging.getLogger(__name__)
@@ -59,14 +60,19 @@ class ExecutorAgent:
         organization_id: int | None = None,
         user_id: int = 0,
         execution_mode: str = "dag",
+        *,
+        internal_system_task: bool = False,
     ):
         # A2 P0（fail-closed）：执行器直接调用工具，必须有组织上下文。
         if organization_id is None:
             raise ValueError("ExecutorAgent 缺少 organization_id，拒绝在无组织上下文下运行")
+        if internal_system_task and user_id:
+            raise ValueError("internal_system_task=True 不得同时携带真实 user_id")
         self._config = config or AgentConfig()
         self._organization_id = organization_id
         self._user_id = user_id
         self._execution_mode = execution_mode  # "dag" or "serial"
+        self._internal_system_task = internal_system_task
         self._seen_fingerprints: set[int] = set()
         self._consecutive_low_gain: int = 0
 
@@ -465,11 +471,23 @@ class ExecutorAgent:
             )
 
         start = time.perf_counter()
+        if self._internal_system_task:
+            run_context = run_context_for_internal_system_task(
+                organization_id=self._organization_id,
+                agent_id=getattr(self._config, "agent_id", "default"),
+            )
+        else:
+            run_context = RunContext(
+                user_id=self._user_id,
+                organization_id=self._organization_id,
+                agent_id=getattr(self._config, "agent_id", "default"),
+            )
         result = await registry.execute_detailed(
             step.tool_hint,
             arguments,
             organization_id=self._organization_id,
             user_id=self._user_id,
+            run_context=run_context,
         )
         elapsed = (time.perf_counter() - start) * 1000
 

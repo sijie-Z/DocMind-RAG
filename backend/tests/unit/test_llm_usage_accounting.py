@@ -196,14 +196,13 @@ async def test_tool_internal_llm_call_counted_into_ctx():
     from unittest.mock import patch
 
     from app.agent.registry import tool_registry
-    from app.agent.run_context import RunContext
+    from app.agent.run_context import run_context_for_internal_system_task
 
     pipeline = _fake_pipeline_with_llm("你好，世界", _usage(300, 100))
     ctx = ExecutionContext(query="t")
-    run_context = RunContext(
-        user_id=0,
+    run_context = run_context_for_internal_system_task(
         organization_id=1,
-        extra={"exec_ctx": ctx, "internal_system_task": True},
+        extra={"exec_ctx": ctx},
     )
 
     with patch("app.dependencies.get_rag_pipeline", return_value=pipeline):
@@ -245,14 +244,13 @@ async def test_core_tools_llm_call_counted_into_ctx():
     from unittest.mock import patch
 
     from app.agent.registry import tool_registry
-    from app.agent.run_context import RunContext
+    from app.agent.run_context import run_context_for_internal_system_task
 
     pipeline = _fake_pipeline_with_llm("# 报告正文", _usage(500, 200))
     ctx = ExecutionContext(query="t")
-    run_context = RunContext(
-        user_id=0,
+    run_context = run_context_for_internal_system_task(
         organization_id=1,
-        extra={"exec_ctx": ctx, "internal_system_task": True},
+        extra={"exec_ctx": ctx},
     )
 
     with patch("app.dependencies.get_rag_pipeline", return_value=pipeline):
@@ -356,7 +354,7 @@ async def test_composite_skill_inner_calls_counted_into_ctx():
     from unittest.mock import AsyncMock, patch
 
     from app.agent.registry import tool_registry
-    from app.agent.run_context import RunContext
+    from app.agent.run_context import run_context_for_internal_system_task
 
     responses = [
         SimpleNamespace(  # extract_insights 的 LLM 响应
@@ -394,10 +392,9 @@ async def test_composite_skill_inner_calls_counted_into_ctx():
     es_hits = {"hits": {"hits": [{"_source": {"content": "全文内容", "filename": "f.md"}}]}}
 
     ctx = ExecutionContext(query="t")
-    run_context = RunContext(
-        user_id=0,
+    run_context = run_context_for_internal_system_task(
         organization_id=1,
-        extra={"exec_ctx": ctx, "internal_system_task": True},
+        extra={"exec_ctx": ctx},
     )
 
     with (

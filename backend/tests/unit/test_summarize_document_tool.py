@@ -16,6 +16,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from app.agent import core_tools
+from app.agent.run_context import run_context_for_internal_system_task
 from app.core.elasticsearch import ElasticsearchTools
 
 HITS = {
@@ -67,7 +68,11 @@ async def test_empty_llm_content_falls_back_to_raw_preview(monkeypatch):
         lambda: _pipeline_with("", finish_reason="length"),
     )
 
-    out = await core_tools.summarize_document(document_id="d-x", organization_id=1)
+    out = await core_tools.summarize_document(
+        document_id="d-x",
+        organization_id=1,
+        run_context=run_context_for_internal_system_task(organization_id=1),
+    )
 
     assert "Summary generation failed." not in out, "空正文不得当摘要直返"
     assert "贡献指南正文第一段" in out, "空正文必须回退到原文预览（保住可总结性）"
@@ -84,7 +89,11 @@ async def test_normal_summary_returned(monkeypatch):
         lambda: _pipeline_with("主题：贡献指南；要点：行为准则。"),
     )
 
-    out = await core_tools.summarize_document(document_id="d-x", organization_id=1)
+    out = await core_tools.summarize_document(
+        document_id="d-x",
+        organization_id=1,
+        run_context=run_context_for_internal_system_task(organization_id=1),
+    )
 
     assert "主题：贡献指南；要点：行为准则。" in out
     assert "CONTRIBUTING.md" in out
