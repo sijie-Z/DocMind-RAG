@@ -2371,6 +2371,9 @@ class Executor:
                     extra={
                         "disabled_tools": sorted(self._disabled_tool_names()),
                         **({"exec_ctx": ctx} if ctx is not None else {}),
+                        # ACL P0（issue #511）：唯一允许无 viewer 走组织级可读的
+                        # 通道是调用方显式声明的内部系统任务；缺省 0 不再等价。
+                        "internal_system_task": getattr(self, "internal_system_task", False),
                     },
                 )
                 raw_result = await asyncio.wait_for(

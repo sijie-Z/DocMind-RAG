@@ -444,7 +444,11 @@ async def test_tool_llm_failure_writes_one_redacted_error_row(log_path, monkeypa
     from app.agent.tools.translation import translate_text
 
     ctx = ExecutionContext(query="q", task_id="t", request_id="r")
-    run_context = RunContext(user_id=0, organization_id=1, extra={"exec_ctx": ctx})
+    run_context = RunContext(
+        user_id=0,
+        organization_id=1,
+        extra={"exec_ctx": ctx, "internal_system_task": True},
+    )
     client = MagicMock()
     client.chat.completions.create = AsyncMock(
         side_effect=RuntimeError(f"provider error: {PROMPT_SECRET}")
@@ -508,7 +512,11 @@ async def test_core_tool_llm_failure_writes_one_row(log_path, monkeypatch, tool_
     )
 
     ctx = ExecutionContext(query="q", task_id="t", request_id="r")
-    run_context = RunContext(user_id=0, organization_id=1, extra={"exec_ctx": ctx})
+    run_context = RunContext(
+        user_id=0,
+        organization_id=1,
+        extra={"exec_ctx": ctx, "internal_system_task": True},
+    )
     tool = getattr(core_tools_mod, tool_name)
     await tool(organization_id=1, run_context=run_context, **call_kwargs)
 
@@ -553,7 +561,11 @@ async def test_tool_pre_call_failure_does_not_write_llm_row(log_path, monkeypatc
 
     monkeypatch.setattr("app.dependencies.get_rag_pipeline", _boom)
     ctx = ExecutionContext(query="q", task_id="t", request_id="r")
-    run_context = RunContext(user_id=0, organization_id=1, extra={"exec_ctx": ctx})
+    run_context = RunContext(
+        user_id=0,
+        organization_id=1,
+        extra={"exec_ctx": ctx, "internal_system_task": True},
+    )
 
     result = await translate_text("hello world", "zh", run_context=run_context)
     assert result.success is False
