@@ -6,8 +6,9 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy import desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
 from app.core.database import get_db
-from app.core.security import get_current_user
+from app.core.security import get_bound_api_key_org_id, get_current_user, is_org_admin
 from app.exceptions import AuthorizationError
 from app.models.token_usage import TokenUsageRecord
 from app.models.user import User
@@ -25,8 +26,16 @@ async def record_token_usage(
     source: str,
     input_tokens: int,
     output_tokens: int,
+    *,
+    task_id: str | None = None,
+    request_id: str | None = None,
+    feature: str | None = None,
+    prompt_version: str | None = None,
 ) -> None:
-    """Record a token usage entry. Called internally by pipeline/agent."""
+    """Record a token usage entry. Called internally by pipeline/agent.
+
+    维度参数均为可选关键字：旧调用点不传时落库行为完全不变（新列保持 NULL）。
+    """
     if input_tokens <= 0 and output_tokens <= 0:
         return
 
@@ -46,6 +55,10 @@ async def record_token_usage(
         input_tokens=input_tokens,
         output_tokens=output_tokens,
         cost_usd=cost_usd,
+        task_id=task_id,
+        request_id=request_id,
+        feature=feature,
+        prompt_version=prompt_version,
     )
     async with AsyncSessionLocal() as ts:
         ts.add(record)
@@ -53,21 +66,19 @@ async def record_token_usage(
 
 
 def _estimate_cost(model: str, input_tokens: int, output_tokens: int) -> float:
-    """Rough cost estimation per 1K tokens (USD)."""
+    """Rough cost estimation per 1K tokens (USD).
+
+    费率来自配置 ``TOKEN_COST_RATES`` / ``TOKEN_COST_DEFAULT_RATE``，
+    默认值与配置化前完全一致；匹配规则同样保持「小写模型名包含 rate key，
+    按配置顺序首尾命中即止」（deepseek 必须先于 deepseek-chat 之外的泛化键）。
+    """
     model = model.lower()
-    rates = {
-        "deepseek": (0.0005, 0.002),
-        "deepseek-chat": (0.0005, 0.002),
-        "gpt-4": (0.03, 0.06),
-        "gpt-4o": (0.01, 0.03),
-        "gpt-4o-mini": (0.00015, 0.0006),
-        "claude": (0.008, 0.024),
-        "gemini": (0.0005, 0.0015),
-    }
-    in_rate, out_rate = (0.0005, 0.002)  # default: DeepSeek-like
-    for key, (i_r, o_r) in rates.items():
-        if key in model:
-            in_rate, out_rate = i_r, o_r
+    rates = settings.TOKEN_COST_RATES
+    default_rate = settings.TOKEN_COST_DEFAULT_RATE
+    in_rate, out_rate = float(default_rate[0]), float(default_rate[1])
+    for key, rate in rates.items():
+        if key.lower() in model:
+            in_rate, out_rate = float(rate[0]), float(rate[1])
             break
     return (input_tokens / 1000 * in_rate) + (output_tokens / 1000 * out_rate)
 
@@ -99,14 +110,39 @@ async def create_token_record(
 @router.get("/summary", response_model=TokenUsageSummary)
 async def get_token_usage_summary(
     days: int = Query(7, ge=1, le=365, description="统计天数"),
+    organization_id: int | None = Query(
+        None, description="按组织过滤（超管可指定；组织管理员仅限本组织）"
+    ),
+    feature: str | None = Query(
+        None, max_length=50, description="按功能过滤（如 rag_chat / agent）"
+    ),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Get summary of token usage for dashboards."""
+    """Get summary of token usage for dashboards.
+
+    平台超管保持全局视角（可选 organization_id/feature 过滤）；组织管理员
+    只能看本组织，显式传别的组织号一律 403。组织过滤作用于全部聚合（total /
+    by_model / by_user / by_day / by_organization / by_feature），杜绝通过任一
+    切片泄露他组织成本。
+    """
     if not current_user.is_superuser:
-        raise AuthorizationError(detail="需要管理员权限")
+        # 与 organization_settings 同口径：组织绑定 API key 的组织是不可漂移的
+        # 唯一上下文；普通 JWT 用户用当前组织。
+        effective_org_id = get_bound_api_key_org_id(current_user) or current_user.organization_id
+        if not await is_org_admin(db, current_user, effective_org_id):
+            raise AuthorizationError(detail="需要组织管理员权限")
+        if organization_id is not None and organization_id != effective_org_id:
+            raise AuthorizationError(detail="无权查看其他组织的成本数据")
+        # 非超管始终强制锁定本组织，忽略请求里的组织参数歧义。
+        organization_id = effective_org_id
 
     since = datetime.now(UTC) - timedelta(days=days)
+    conditions = [TokenUsageRecord.created_at >= since]
+    if organization_id is not None:
+        conditions.append(TokenUsageRecord.organization_id == organization_id)
+    if feature is not None:
+        conditions.append(TokenUsageRecord.feature == feature)
 
     # Total stats
     total = await db.execute(
@@ -115,7 +151,7 @@ async def get_token_usage_summary(
             func.coalesce(func.sum(TokenUsageRecord.output_tokens), 0),
             func.coalesce(func.sum(TokenUsageRecord.cost_usd), 0),
             func.count(TokenUsageRecord.id),
-        ).where(TokenUsageRecord.created_at >= since)
+        ).where(*conditions)
     )
     total_input, total_output, total_cost, total_count = total.one()
 
@@ -128,7 +164,7 @@ async def get_token_usage_summary(
             func.sum(TokenUsageRecord.cost_usd),
             func.count(TokenUsageRecord.id),
         )
-        .where(TokenUsageRecord.created_at >= since)
+        .where(*conditions)
         .group_by(TokenUsageRecord.model)
         .order_by(desc(func.sum(TokenUsageRecord.cost_usd)))
     )
@@ -152,7 +188,7 @@ async def get_token_usage_summary(
             func.sum(TokenUsageRecord.cost_usd),
             func.count(TokenUsageRecord.id),
         )
-        .where(TokenUsageRecord.created_at >= since)
+        .where(*conditions)
         .group_by(TokenUsageRecord.user_id)
         .order_by(desc(func.sum(TokenUsageRecord.cost_usd)))
         .limit(20)
@@ -177,7 +213,7 @@ async def get_token_usage_summary(
             func.sum(TokenUsageRecord.cost_usd),
             func.count(TokenUsageRecord.id),
         )
-        .where(TokenUsageRecord.created_at >= since)
+        .where(*conditions)
         .group_by(func.date(TokenUsageRecord.created_at))
         .order_by(func.date(TokenUsageRecord.created_at))
     )
@@ -192,6 +228,38 @@ async def get_token_usage_summary(
         for row in by_day.all()
     ]
 
+    # By organization / by feature（成本归因：回答"哪个租户/功能在烧钱"）
+    def _breakdown_rows(rows, key: str) -> list[dict]:
+        return [
+            {
+                key: row[0],
+                "input_tokens": int(row[1] or 0),
+                "output_tokens": int(row[2] or 0),
+                "cost_usd": round(float(row[3] or 0), 4),
+                "requests": int(row[4] or 0),
+            }
+            for row in rows
+        ]
+
+    breakdown_columns = (
+        func.sum(TokenUsageRecord.input_tokens),
+        func.sum(TokenUsageRecord.output_tokens),
+        func.sum(TokenUsageRecord.cost_usd),
+        func.count(TokenUsageRecord.id),
+    )
+    by_organization = await db.execute(
+        select(TokenUsageRecord.organization_id, *breakdown_columns)
+        .where(*conditions)
+        .group_by(TokenUsageRecord.organization_id)
+        .order_by(desc(func.sum(TokenUsageRecord.cost_usd)))
+    )
+    by_feature = await db.execute(
+        select(TokenUsageRecord.feature, *breakdown_columns)
+        .where(*conditions)
+        .group_by(TokenUsageRecord.feature)
+        .order_by(desc(func.sum(TokenUsageRecord.cost_usd)))
+    )
+
     return TokenUsageSummary(
         total_input_tokens=int(total_input or 0),
         total_output_tokens=int(total_output or 0),
@@ -200,4 +268,6 @@ async def get_token_usage_summary(
         by_model=by_model_list,
         by_user=by_user_list,
         by_day=by_day_list,
+        by_organization=_breakdown_rows(by_organization.all(), "organization_id"),
+        by_feature=_breakdown_rows(by_feature.all(), "feature"),
     )

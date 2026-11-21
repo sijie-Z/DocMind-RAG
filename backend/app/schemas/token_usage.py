@@ -38,3 +38,9 @@ class TokenUsageSummary(BaseModel):
     by_model: list[dict] = Field(default_factory=list, description="Usage breakdown by model")
     by_user: list[dict] = Field(default_factory=list, description="Usage breakdown by user")
     by_day: list[dict] = Field(default_factory=list, description="Daily usage trend")
+    by_organization: list[dict] = Field(
+        default_factory=list, description="Usage breakdown by organization (cost attribution)"
+    )
+    by_feature: list[dict] = Field(
+        default_factory=list, description="Usage breakdown by feature (cost attribution)"
+    )

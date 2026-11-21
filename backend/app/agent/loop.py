@@ -644,6 +644,9 @@ class PERAgentLoop:
         # issue #510 第二步：request_id 属于"当前请求"而非 run；resume 由新请求
         # 续跑时如实使用新请求的编号（不落快照，不伪造跨请求的"统一 trace"）。
         ctx.request_id = request_id
+        # 成本归因：把本轮 ExecutionContext 暴露给服务层（不进 to_dict() 冻结
+        # 契约），放在 run 起点以覆盖后续所有提前返回分支。
+        self.last_execution_context = ctx
 
         # ── Hooks（issue #474）：agent/turn_start —— run 起点（观察，不阻断）──
         _, turn_start_errors = await self._emit_hook_event(
@@ -1753,7 +1756,6 @@ class PERAgentLoop:
                     yield event
                 return
 
-        # Yield execution context as a data event for observability
         yield AgentEvent(
             type="execution_context",
             content=ctx.to_dict(),

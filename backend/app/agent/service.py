@@ -349,6 +349,47 @@ class AgentService:
             self._client = pipeline.openai_client
         return self._client
 
+    async def _record_agent_cost(
+        self,
+        *,
+        ctx,
+        task_id: str | None,
+        request_id: str | None,
+        organization_id: int,
+        user_id: int,
+    ) -> None:
+        """把本轮 PER run 的 token 用量落成成本归因记录（失败不影响主流程）。
+
+        数据来源是 usage 单一入口累计的 `usage_by_model`，按各模型费率计价；
+        仅当有实际 token 时写库。旧路径（无 ctx / 未接入累计）零写入。
+        """
+        if ctx is None:
+            return
+        usage = getattr(ctx, "usage_by_model", None)
+        if not isinstance(usage, dict) or not usage:
+            return
+        try:
+            from app.api.v1.endpoints.token_usage import record_token_usage
+
+            async with AsyncSessionLocal() as db:
+                for model, (input_tokens, output_tokens) in usage.items():
+                    if input_tokens <= 0 and output_tokens <= 0:
+                        continue
+                    await record_token_usage(
+                        db=db,
+                        user_id=user_id,
+                        organization_id=organization_id,
+                        model=model,
+                        source="agent",
+                        input_tokens=input_tokens,
+                        output_tokens=output_tokens,
+                        task_id=task_id,
+                        request_id=request_id,
+                        feature="agent",
+                    )
+        except Exception as exc:  # noqa: BLE001 — 观测绝不阻断 Agent run
+            logger.debug("Agent token cost attribution skipped: %s", log_safe(exc))
+
     @staticmethod
     def _wire_cancel(agent: PERAgentLoop, task_id: str | None) -> None:
         """HITL：给 loop 接上 task 级取消旗查询（无 task_id = 无取消通道，如实不接）。"""
@@ -548,6 +589,15 @@ class AgentService:
             await self._checkpoint_error(task_id, agent, exc)
             raise
         else:
+            # 成本归因：usage 单一入口已累计本轮按模型 token；失败只记 debug，
+            # 绝不改变 run 的事件/终态语义（观测不阻断业务）。
+            await self._record_agent_cost(
+                ctx=getattr(agent, "last_execution_context", None),
+                task_id=task_id,
+                request_id=request_id,
+                organization_id=organization_id,
+                user_id=user_id,
+            )
             if task_id:
                 # issue #301 批 A #10/#11：终态写入必须被确认——返回值不再被
                 # 丢弃（写失败必有可观测信号），run 级失败（无工具模式 LLM

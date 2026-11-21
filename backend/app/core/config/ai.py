@@ -81,6 +81,21 @@ class AISettings(BaseSettings):
     AI_MAX_TOKENS: int = 10000
     AI_STREAM_TIMEOUT: int = 120
 
+    # 成本归因：模型费率表（每 1K token，USD；输入/输出二元组）。
+    # 仅做粗估，默认值与迁入前 token_usage._estimate_cost 的硬编码表逐字一致。
+    # 配置来源与既有 Settings 一致（YAML profile/bundle/patch、.env JSON、环境变量）。
+    TOKEN_COST_RATES: dict[str, tuple[float, float] | list[float]] = {
+        "deepseek": (0.0005, 0.002),
+        "deepseek-chat": (0.0005, 0.002),
+        "gpt-4": (0.03, 0.06),
+        "gpt-4o": (0.01, 0.03),
+        "gpt-4o-mini": (0.00015, 0.0006),
+        "claude": (0.008, 0.024),
+        "gemini": (0.0005, 0.0015),
+    }
+    # 未命中上表时的兜底费率（旧实现固定为 DeepSeek-like）。
+    TOKEN_COST_DEFAULT_RATE: tuple[float, float] | list[float] = (0.0005, 0.002)
+
     # issue #467：LLM 连接级快速失败（RAG 查询改写 / 查询分解 / HyDE / 重排 LLM
     # 兜底 / 流式生成共用 `app.core.llm_failfast`）。连接阶段独立短超时：死主机
     # （SYN 被丢弃）不再拖满读超时；连接被拒 / DNS 失败由 APIConnectionError 直接
