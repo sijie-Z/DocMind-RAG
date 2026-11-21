@@ -349,6 +349,47 @@ class AgentService:
             self._client = pipeline.openai_client
         return self._client
 
+    async def _record_agent_cost(
+        self,
+        *,
+        ctx,
+        task_id: str | None,
+        request_id: str | None,
+        organization_id: int,
+        user_id: int,
+    ) -> None:
+        """把本轮 PER run 的 token 用量落成成本归因记录（失败不影响主流程）。
+
+        数据来源是 usage 单一入口累计的 `usage_by_model`，按各模型费率计价；
+        仅当有实际 token 时写库。旧路径（无 ctx / 未接入累计）零写入。
+        """
+        if ctx is None:
+            return
+        usage = getattr(ctx, "usage_by_model", None)
+        if not isinstance(usage, dict) or not usage:
+            return
+        try:
+            from app.api.v1.endpoints.token_usage import record_token_usage
+
+            async with AsyncSessionLocal() as db:
+                for model, (input_tokens, output_tokens) in usage.items():
+                    if input_tokens <= 0 and output_tokens <= 0:
+                        continue
+                    await record_token_usage(
+                        db=db,
+                        user_id=user_id,
+                        organization_id=organization_id,
+                        model=model,
+                        source="agent",
+                        input_tokens=input_tokens,
+                        output_tokens=output_tokens,
+                        task_id=task_id,
+                        request_id=request_id,
+                        feature="agent",
+                    )
+        except Exception as exc:  # noqa: BLE001 — 观测绝不阻断 Agent run
+            logger.debug("Agent token cost attribution skipped: %s", log_safe(exc))
+
     @staticmethod
     def _wire_cancel(agent: PERAgentLoop, task_id: str | None) -> None:
         """HITL：给 loop 接上 task 级取消旗查询（无 task_id = 无取消通道，如实不接）。"""
@@ -447,6 +488,23 @@ class AgentService:
         # agent.run 循环。修复前 try 从 run 才开启：断连/取消落在这些
         # await / yield 上会直接逃逸（无任何 handler），任务行永停 RUNNING。
         agent: PERAgentLoop | None = None
+        # 成本归因：所有终止路径（正常 / 失败 / 取消 / 断流 / 提前 return）
+        # 共用这一个 best-effort 收尾；flag 保证同一 run 只落一次，绝不重复计费。
+        cost_recorded = False
+
+        async def _flush_agent_cost() -> None:
+            nonlocal cost_recorded
+            if cost_recorded:
+                return
+            cost_recorded = True
+            await self._record_agent_cost(
+                ctx=getattr(agent, "last_execution_context", None),
+                task_id=task_id,
+                request_id=request_id,
+                organization_id=organization_id,
+                user_id=user_id,
+            )
+
         try:
             # 引用文档（体验第四波 @引用）：解析为 planner 上下文段 + 诚实警告。
             # 解析失败不阻塞聊天——引用是增强不是前提（fail-open 与 checkpoint 同）。
@@ -582,6 +640,10 @@ class AgentService:
                         if request_id:
                             finalize_event.request_id = request_id
                         yield finalize_event
+        finally:
+            # 成本归因：所有终止路径（正常 / 失败 / 取消 / 断流 / 提前 return）
+            # 共用这一次 best-effort 收尾；flag 保证同一 run 只落一次。
+            await _flush_agent_cost()
 
         # Persist config for session recovery
         if session_id:
@@ -719,6 +781,21 @@ class AgentService:
         )
         # HITL：取消旗接线（resume 流同样受协作式取消约束）。
         self._wire_cancel(agent, task_id)
+        cost_recorded = False
+
+        async def _flush_resume_cost() -> None:
+            nonlocal cost_recorded
+            if cost_recorded:
+                return
+            cost_recorded = True
+            await self._record_agent_cost(
+                ctx=getattr(agent, "last_execution_context", None),
+                task_id=task_id,
+                request_id=request_id,
+                organization_id=task.organization_id,
+                user_id=task.user_id,
+            )
+
         try:
             async for event in agent.run(
                 query,
@@ -781,6 +858,9 @@ class AgentService:
                     if request_id:
                         finalize_event.request_id = request_id
                     yield finalize_event
+        finally:
+            # resume 同样覆盖所有终止路径（含失败/取消/断流）；只落一次成本。
+            await _flush_resume_cost()
 
     # ── Checkpoint 兜底（断流 / 异常；二者都不得改变既有语义）──────────────
 

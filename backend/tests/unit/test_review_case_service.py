@@ -908,6 +908,9 @@ def test_022_migration_roundtrip(tmp_path, monkeypatch):
         "change_type",
         "status",
         "facts",
+        # 031_review_severity：纯派生展示字段，不改判定/哈希/过期语义。
+        "severity",
+        "explanation",
         "decided_by",
         "decided_at",
         "decision_note",

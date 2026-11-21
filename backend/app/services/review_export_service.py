@@ -31,6 +31,10 @@ from app.exceptions import ConflictError, NotFoundError, ValidationError
 from app.models.review import REVIEW_SIDES, ReviewCase, ReviewExport, ReviewItem
 from app.models.user_audit import UserActivityLog
 from app.services.review_case_service import case_detail
+from app.services.review_explanation_service import (
+    derive_review_explanation,
+    safe_reason_codes,
+)
 
 DECISION_STATUSES = ("verified", "needs_human", "not_applicable")
 INCOMPLETE_STATUSES = ("pending", "insufficient", "parse_failed")
@@ -87,6 +91,8 @@ FACT_REASON_LABELS = {
     "reference_unresolved": "引用的条款无法定位",
 }
 UNIT_LABELS = {"day": "自然日", "workday": "工作日", "month": "个月"}
+# 竞品对标 High/Medium/Low：只做展示标签，不进入 payload，故不影响 payload_sha256。
+SEVERITY_LABELS = {"high": "高风险", "medium": "中风险", "low": "低风险"}
 
 
 def _now() -> datetime:
@@ -436,8 +442,12 @@ def _locator_text(clause_no: Any, section_no: Any, page_number: Any) -> str:
 
 
 def _fact_reason(reason: Any) -> str:
-    """组合码（如 ``unit_unclear+multiple_durations``）逐段翻译，未知段透传。"""
-    parts = [part.strip() for part in str(reason or "").split("+") if part.strip()]
+    """组合码（如 ``unit_unclear+multiple_durations``）逐段翻译。
+
+    只允许已知机器码进入报告；未知码/自由文本/超长串一律不透传，
+    避免 facts.reason 被写入敌意内容时污染导出的 Markdown。
+    """
+    parts = safe_reason_codes(reason)
     return " · ".join(_flatten(FACT_REASON_LABELS.get(part, part)) for part in parts)
 
 
@@ -587,16 +597,27 @@ def render_markdown(payload: dict[str, Any], *, export_meta: dict[str, Any] | No
         )
     lines.append("")
     lines.append("## 核验项")
-    lines.append("| 核验项 | 差异类型 | 决策 | 决策人 | 决策时间 | 说明 |")
-    lines.append("| --- | --- | --- | --- | --- | --- |")
+    lines.append("| 核验项 | 差异类型 | 决策 | 决策人 | 决策时间 | 说明 | 风险等级 | 依据 |")
+    lines.append("| --- | --- | --- | --- | --- | --- | --- | --- |")
     for item in items:
+        severity, explanation = derive_review_explanation(item)
         decided_by = item.get("decided_by")
+        reference_parts: list[str] = []
+        if explanation:
+            rule = _label(ITEM_LABELS, explanation.get("rule_id"))
+            if rule:
+                reference_parts.append("规则：" + _flatten(rule))
+            if explanation.get("evidence_id"):
+                reference_parts.append("证据：" + _flatten(explanation["evidence_id"]))
+            if explanation.get("reason_code"):
+                reference_parts.append(_fact_reason(explanation["reason_code"]))
         lines.append(
             f"| {_cell(_label(ITEM_LABELS, item.get('item_key')))} | "
             f"{_cell(_label(CHANGE_TYPE_LABELS, item.get('change_type')))} | "
             f"{_cell(_label(ITEM_STATUS_LABELS, item.get('status')))} | "
             f"{_cell(f'#{decided_by}' if decided_by is not None else '')} | "
-            f"{_cell(_format_time(item.get('decided_at')))} | {_cell(item.get('decision_note') or '')} |"
+            f"{_cell(_format_time(item.get('decided_at')))} | {_cell(item.get('decision_note') or '')} | "
+            f"{_cell(_label(SEVERITY_LABELS, severity))} | {_cell(' · '.join(reference_parts))} |"
         )
     lines.append("")
     lines.append("## 逐项核验")
@@ -604,6 +625,34 @@ def render_markdown(payload: dict[str, Any], *, export_meta: dict[str, Any] | No
         change = _label(CHANGE_TYPE_LABELS, item.get("change_type"))
         heading = _flatten(_label(ITEM_LABELS, item.get("item_key")))
         lines.append(f"### {heading}{f'（{_flatten(change)}）' if change else ''}")
+        detail_severity, detail_explanation = derive_review_explanation(item)
+        lines.append(f"- 风险等级：{_flatten(_label(SEVERITY_LABELS, detail_severity))}")
+        if detail_explanation:
+            lines.append(
+                "- 依据："
+                + _flatten(
+                    " · ".join(
+                        part
+                        for part in (
+                            (
+                                "规则："
+                                + _flatten(_label(ITEM_LABELS, detail_explanation.get("rule_id")))
+                            )
+                            if detail_explanation.get("rule_id")
+                            else "",
+                            ("证据：" + _flatten(str(detail_explanation["evidence_id"])))
+                            if detail_explanation.get("evidence_id")
+                            else "",
+                            (
+                                _fact_reason(detail_explanation["reason_code"])
+                                if detail_explanation.get("reason_code")
+                                else ""
+                            ),
+                        )
+                        if part
+                    )
+                )
+            )
         lines.append(f"- 决策：{_flatten(_label(ITEM_STATUS_LABELS, item.get('status')))}")
         decided_by = item.get("decided_by")
         if decided_by is not None:
