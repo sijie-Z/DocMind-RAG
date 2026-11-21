@@ -1117,18 +1117,17 @@ def evidence_to_dict(row: ReviewEvidence, *, stale: bool) -> dict[str, Any]:
 
 
 def _item_to_dict(item: ReviewItem, evidence: dict[str, list[dict[str, Any]]]) -> dict[str, Any]:
+    # 派生值不读旧值：facts 可能被重新分析改写，必须从当前状态重算。
     severity = derive_severity(
         item.facts,
         item_key=item.item_key,
         change_type=item.change_type,
-        severity=item.severity,
     )
     explanation = derive_explanation(
         item.facts,
         item_key=item.item_key,
         change_type=item.change_type,
         evidence=evidence,
-        explanation=item.explanation,
     )
     return {
         "id": item.id,

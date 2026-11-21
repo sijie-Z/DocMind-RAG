@@ -31,7 +31,10 @@ from app.exceptions import ConflictError, NotFoundError, ValidationError
 from app.models.review import REVIEW_SIDES, ReviewCase, ReviewExport, ReviewItem
 from app.models.user_audit import UserActivityLog
 from app.services.review_case_service import case_detail
-from app.services.review_explanation_service import derive_review_explanation
+from app.services.review_explanation_service import (
+    derive_review_explanation,
+    safe_reason_codes,
+)
 
 DECISION_STATUSES = ("verified", "needs_human", "not_applicable")
 INCOMPLETE_STATUSES = ("pending", "insufficient", "parse_failed")
@@ -439,8 +442,12 @@ def _locator_text(clause_no: Any, section_no: Any, page_number: Any) -> str:
 
 
 def _fact_reason(reason: Any) -> str:
-    """组合码（如 ``unit_unclear+multiple_durations``）逐段翻译，未知段透传。"""
-    parts = [part.strip() for part in str(reason or "").split("+") if part.strip()]
+    """组合码（如 ``unit_unclear+multiple_durations``）逐段翻译。
+
+    只允许已知机器码进入报告；未知码/自由文本/超长串一律不透传，
+    避免 facts.reason 被写入敌意内容时污染导出的 Markdown。
+    """
+    parts = safe_reason_codes(reason)
     return " · ".join(_flatten(FACT_REASON_LABELS.get(part, part)) for part in parts)
 
 

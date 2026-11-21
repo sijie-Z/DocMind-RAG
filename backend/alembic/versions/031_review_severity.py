@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 import json
+import re
 from typing import Any
 
 import sqlalchemy as sa
@@ -29,7 +30,18 @@ depends_on = None
 TABLE = "review_item"
 
 _HIGH_REASON_CODES = frozenset({"multiple_durations", "reference_unresolved"})
-_MEDIUM_REASON_CODES = frozenset({"unit_unclear", "no_duration", "no_terms"})
+_MEDIUM_REASON_CODES = frozenset(
+    {
+        "unit_unclear",
+        "no_duration",
+        "no_payment_clause",
+        "no_start_event",
+        "no_terms",
+    }
+)
+KNOWN_REASON_CODES = _HIGH_REASON_CODES | _MEDIUM_REASON_CODES
+_MAX_REASON_FIELD_CHARS = 256
+_REASON_CODE_RE = re.compile(r"^[a-z][a-z0-9_]{0,31}$")
 
 
 def _columns() -> set[str]:
@@ -50,12 +62,12 @@ def _reason_codes(facts: Any) -> tuple[str, ...]:
         if not isinstance(fact, dict):
             continue
         reason = fact.get("reason")
-        if not isinstance(reason, str):
+        if not isinstance(reason, str) or len(reason) > _MAX_REASON_FIELD_CHARS:
             continue
         for part in reason.split("+"):
-            code = part.strip()
-            if code and code not in codes:
-                codes.append(code)
+            if part in KNOWN_REASON_CODES and _REASON_CODE_RE.fullmatch(part):
+                if part not in codes:
+                    codes.append(part)
     return tuple(codes)
 
 
@@ -93,9 +105,7 @@ def _backfill() -> None:
         )
     ):
         evidence_ids.setdefault(row[0], row[1])
-    for row in bind.execute(
-        sa.text("SELECT item_id, id FROM review_evidence ORDER BY id")
-    ):
+    for row in bind.execute(sa.text("SELECT item_id, id FROM review_evidence ORDER BY id")):
         evidence_ids.setdefault(row[0], row[1])
 
     updates: list[dict[str, Any]] = []

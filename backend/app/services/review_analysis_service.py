@@ -2544,18 +2544,17 @@ async def analyze_case(session: AsyncSession, case: ReviewCase) -> dict[str, Any
                 {"id": row.id, "selected": row.selected, "role": row.role}
             )
         for derived in derived_rows:
+            # 每次重算，绝不把旧 severity/explanation 当覆盖值透传。
             derived.severity = derive_severity(
                 derived.facts,
                 item_key=derived.item_key,
                 change_type=derived.change_type,
-                severity=derived.severity,
             )
             derived.explanation = derive_explanation(
                 derived.facts,
                 item_key=derived.item_key,
                 change_type=derived.change_type,
                 evidence=evidence_by_item.get(derived.id, {}),
-                explanation=derived.explanation,
             )
         await session.commit()
     except IntegrityError as exc:
