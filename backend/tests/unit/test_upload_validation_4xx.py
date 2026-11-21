@@ -294,6 +294,48 @@ class TestDocumentUploadEndpointLegacyFormats:
         assert "不支持的文件格式" in exc.value.message
 
 
+class TestParseProfileValidation:
+    """解析档位：非法值必须在入口 400，合法值透传解析链。"""
+
+    @pytest.mark.asyncio
+    async def test_documents_upload_rejects_unknown_profile(self, monkeypatch):
+        from app.api.v1.endpoints import documents as doc_ep
+
+        monkeypatch.setattr(doc_ep, "require_organization", AsyncMock(return_value=1))
+        upload = _make_upload_file("test.pdf", b"%PDF-1.4")
+        with pytest.raises(ValidationError) as exc:
+            await doc_ep.upload_document(
+                file=upload,
+                title=None,
+                description=None,
+                tags=None,
+                db=_fake_db(),
+                current_user=MagicMock(),
+                parse_profile="magic_ocr",
+            )
+        assert exc.value.status_code == 400
+        assert "非法解析档位" in exc.value.message
+
+    @pytest.mark.asyncio
+    async def test_chat_parse_upload_rejects_unknown_profile(self, monkeypatch):
+        from app.api.v1.endpoints import chat as chat_ep
+
+        async def _org(_user, _db):
+            return 1
+
+        monkeypatch.setattr(chat_ep, "require_organization", _org)
+        upload = _make_upload_file("test.pdf", b"%PDF-1.4")
+        with pytest.raises(ValidationError) as exc:
+            await chat_ep.chat_parse_upload(
+                file=upload,
+                db=_fake_db(),
+                current_user=MagicMock(),
+                parse_profile="magic_ocr",
+            )
+        assert exc.value.status_code == 400
+        assert "非法解析档位" in exc.value.message
+
+
 class TestChatParseUploadLegacyFormats:
     """/chat/parse-upload 也必须在入口拒绝旧版格式（此前 500 后再回退）。"""
 

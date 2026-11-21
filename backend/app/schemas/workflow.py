@@ -98,6 +98,13 @@ class NodeResult(BaseModel):
     # 节点耗时（毫秒）。引擎在完成/失败时写入（workflow_engine.py node_func），
     # 未完成或历史记录为 None；前端按 `${duration}ms` 渲染。
     duration: int | None = None
+    # 节点观测（竞品对标 P0）：只记录调用方实际给出的元数据；拿不到一律 None，
+    # 不用字符数估算 token、不猜价格。字段随 NodeResult.model_dump(mode="json")
+    # 自动进入实时 SSE / 结束回放 / 执行历史 JSON 列。
+    tokens_in: int | None = None
+    tokens_out: int | None = None
+    cost_usd: float | None = None
+    model: str | None = None
 
 
 class ExecutionResponse(BaseModel):

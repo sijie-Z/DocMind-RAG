@@ -55,3 +55,7 @@ b0324c14ec457608ad70012a3dc149ccb8ab4daa:派聪明AI知识库系统开发文档.
 b0324c14ec457608ad70012a3dc149ccb8ab4daa:派聪明AI知识库系统开发文档.md:generic-api-key:596
 # 示例值·分享链接测试夹具（非真实凭据；后续提交已改为运行时拼接）
 0d04121c4c71ffa524697fdf5875bda22ddc69f7:backend/tests/api/test_chat_share_link.py:generic-api-key:275
+# 示例值·工作流可观测性测试键名（非真实凭据；后续提交已改为运行时拼接）
+5908e3bfdd41c96a90fefc268cb61103e6660b1f:backend/tests/unit/test_workflow_node_observability.py:generic-api-key:21
+# 示例值·用户级 LLM 设置缓存轮换测试的断言值（非真实凭据；后续提交已换成 rotated-value-*）
+f61e164beb114705ae2aeb96726c83fc6bac5980:backend/tests/unit/test_user_llm_settings.py:generic-api-key:216

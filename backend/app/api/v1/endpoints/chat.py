@@ -11,6 +11,7 @@ from fastapi import (
     APIRouter,
     Depends,
     File,
+    Form,
     Query,
     Request,
     UploadFile,
@@ -1135,6 +1136,7 @@ async def websocket_endpoint(
 @router.post("/parse-upload")
 async def chat_parse_upload(
     file: UploadFile = File(...),
+    parse_profile: str | None = Form(None),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -1142,11 +1144,18 @@ async def chat_parse_upload(
     上传文件并立即解析文本内容，用于聊天上下文。
     不经过完整的 RAG 链路（不向量化、不索引 ES），直接返回纯文本。
     """
+    import inspect
     import os
     import tempfile
     from pathlib import Path
 
-    from app.services.document_parser import document_service
+    from app.services.document_parser import document_service, normalize_parse_profile
+
+    # 非法档位直接 400，不静默按 auto 跑（调用方可据错误修正）
+    try:
+        effective_parse_profile = normalize_parse_profile(parse_profile)
+    except ValueError as exc:
+        raise ValidationError(str(exc)) from exc
 
     # W0-6：解析结果必须携带真实组织上下文。无组织用户显式 403（与检索链路
     # 的 require_organization 口径一致），不再把空串 / "0" 传给解析器。
@@ -1178,10 +1187,22 @@ async def chat_parse_upload(
         with open(temp_path, "wb") as f:
             f.write(raw)
 
-        result = await document_service.parse_local_file(
-            temp_path,
-            organization_id=str(org_id),
-        )
+        parse_kwargs = {"organization_id": str(org_id)}
+        parse_fn = document_service.parse_local_file
+        # 兼容旧测试替身/外部实现：仅在解析器真的接受 parse_profile（或 **kwargs）
+        # 时传新参数；否则保持旧两参调用，避免把新增档位变成破坏性签名变更。
+        try:
+            signature = inspect.signature(parse_fn)
+            accepts_parse_profile = "parse_profile" in signature.parameters or any(
+                parameter.kind == inspect.Parameter.VAR_KEYWORD
+                for parameter in signature.parameters.values()
+            )
+        except (TypeError, ValueError):
+            accepts_parse_profile = False
+        if accepts_parse_profile:
+            parse_kwargs["parse_profile"] = effective_parse_profile
+
+        result = await parse_fn(temp_path, **parse_kwargs)
 
         chunks = result.get("chunks", [])
         original_chunk_count = 0
@@ -1220,6 +1241,7 @@ async def chat_parse_upload(
                 "text_provenance": text_provenance,
                 "original_chunk_count": original_chunk_count,
                 "legacy_chunk_count": legacy_chunk_count,
+                "parse_profile_used": result.get("parse_profile_used", effective_parse_profile),
             },
         }
     except AppError:

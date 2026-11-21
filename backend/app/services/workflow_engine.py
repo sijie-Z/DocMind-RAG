@@ -5,6 +5,7 @@ Agent 工作流引擎
 """
 
 import asyncio
+import hashlib
 import ipaddress
 import logging
 import re
@@ -147,6 +148,177 @@ def _to_jsonable(value: Any) -> Any:
         except Exception:
             return str(value)
     return str(value)
+
+
+# 节点输入观测：只保留结构形状与长度。键名同样可能携带用户 query 或密钥
+# （例如 {"SENTINEL-E2E-QUERY-...": "..."}），因此只允许一小组已知结构键以
+# 原文出现；其余键一律哈希为 key_sha256:<8>，绝不以原文进入 SSE / 落库 JSON。
+_INPUT_MAX_KEYS = 32
+_INPUT_MAX_ITEMS = 8
+_INPUT_MAX_ENTRIES = 128
+_INPUT_MAX_LEN = 4096
+# 引擎 state 的固定键 + 节点 data 的常见配置键；常量表，不接受用户值。
+_OBS_STRUCTURAL_KEYS = frozenset(
+    {
+        "input",
+        "messages",
+        "current_node",
+        "node_outputs",
+        "context",
+        "errors",
+        "memory",
+        "iteration_count",
+        "tool_results",
+        "prompt",
+        "systemPrompt",
+        "model",
+        "temperature",
+        "maxTokens",
+        "max_tokens",
+        "topK",
+        "top_k",
+        "scoreThreshold",
+        "score_threshold",
+        "condition",
+        "memoryType",
+        "action",
+        "agentId",
+        "code",
+        "language",
+    }
+)
+
+
+# 已知节点类型（与 WorkflowEngine.get_executor 的注册表同口径）；非白名单
+# 类型一律哈希，避免配置值把任意文本写进观测字段。
+_OBS_NODE_TYPES = frozenset(
+    {
+        "input",
+        "output",
+        "llm_openai",
+        "llm_deepseek",
+        "llm_qwen",
+        "tool_search",
+        "tool_tts",
+        "condition",
+        "memory",
+        "code",
+        "api_call",
+        "transform",
+        "router",
+    }
+)
+
+
+def _project_key(key: Any) -> str:
+    """键名安全投影：白名单保留，未知键（含敏感键）只留短哈希。"""
+    name = str(key)
+    if name in _OBS_STRUCTURAL_KEYS:
+        return name
+    digest = hashlib.sha256(name.encode("utf-8", "replace")).hexdigest()[:8]
+    return f"key_sha256:{digest}"
+
+
+def _project_node_type(node_type: str) -> str:
+    return node_type if node_type in _OBS_NODE_TYPES else _project_key(node_type)
+
+
+def _input_shape(
+    value: Any, *, depth: int = 0, budget: dict[str, int] | None = None
+) -> dict[str, Any]:
+    """递归给出值的类型形状（投影后的键名 + 容器长度），不复制任何正文。"""
+    if budget is None:
+        budget = {"left": _INPUT_MAX_ENTRIES}
+    if depth >= 2:
+        return {"type": type(value).__name__}
+    if isinstance(value, dict):
+        if budget["left"] <= 0:
+            return {"type": "dict", "truncated": True}
+        keys = list(value)[:_INPUT_MAX_KEYS]
+        budget["left"] -= len(keys)
+        return {
+            "type": "dict",
+            "keys": [_project_key(k) for k in keys],
+            "truncated": len(value) > len(keys),
+        }
+    if isinstance(value, (list, tuple, set)):
+        if budget["left"] <= 0:
+            return {"type": type(value).__name__, "truncated": True}
+        items = list(value)[:_INPUT_MAX_ITEMS]
+        budget["left"] -= len(items)
+        return {
+            "type": type(value).__name__,
+            "length": len(items) if len(items) == len(value) else len(value),
+            "items": [_input_shape(item, depth=depth + 1, budget=budget) for item in items],
+            "truncated": len(items) < len(value),
+        }
+    if isinstance(value, str):
+        # 仅长度与行数：足以排查“输入是否传进来/是否超长”，不含任何原文。
+        return {"type": "str", "length": len(value), "lines": value.count("\n") + 1}
+    return {"type": type(value).__name__}
+
+
+def _node_input_summary(node: WorkflowNode, state: WorkflowState) -> dict[str, Any]:
+    """节点执行前的脱敏输入快照（投影后的结构摘要 + 长度，不含正文与原始键名）。"""
+    budget = {"left": _INPUT_MAX_ENTRIES}
+    summary: dict[str, Any] = {
+        "node_type": _project_node_type(node.type),
+        "state": {
+            _project_key(key): _input_shape(value, budget=budget)
+            for key, value in sorted(state.items(), key=lambda kv: _project_key(kv[0]))
+        },
+        "config": _input_shape(node.data or {}, budget=budget),
+    }
+    return _to_jsonable(summary)
+
+
+def _valid_token_count(value: Any) -> int | None:
+    """只接受真正的非负 int：bool 是 int 子类但 1 个 True 不是 1 个 token。"""
+    return value if type(value) is int and value >= 0 else None
+
+
+# 价格表仅用于“由调用方返回的真实 token 数”推算成本，口径与
+# api/v1/endpoints/token_usage.py::_estimate_cost 一致；刻意不导入该模块，
+# 避免工作流引擎依赖数据库/认证层。新模型无法匹配时不填成本，绝不猜。
+_MODEL_PRICES: tuple[tuple[str, float, float], ...] = (
+    ("deepseek", 0.0005, 0.002),
+    ("gpt-4o-mini", 0.00015, 0.0006),
+    ("gpt-4o", 0.01, 0.03),
+    ("gpt-4", 0.03, 0.06),
+    ("claude", 0.008, 0.024),
+    ("gemini", 0.0005, 0.0015),
+)
+
+
+def _estimate_node_cost(
+    model: str | None, tokens_in: int | None, tokens_out: int | None
+) -> float | None:
+    if not model or tokens_in is None or tokens_out is None:
+        return None
+    name = model.lower()
+    for prefix, in_rate, out_rate in _MODEL_PRICES:
+        if prefix in name:
+            return (tokens_in / 1000 * in_rate) + (tokens_out / 1000 * out_rate)
+    return None
+
+
+def _llm_call_metadata(
+    result: dict[str, Any],
+) -> tuple[int | None, int | None, str | None, float | None]:
+    """从 LLM 节点真实返回的 AIMessage 提取 usage/model；无 usage 则全 None。"""
+    messages = result.get("messages") or []
+    response = next((msg for msg in reversed(list(messages)) if isinstance(msg, AIMessage)), None)
+    if response is None:
+        return None, None, None, None
+
+    usage = response.usage_metadata or {}
+    tokens_in = _valid_token_count(usage.get("input_tokens"))
+    tokens_out = _valid_token_count(usage.get("output_tokens"))
+
+    model = response.response_metadata.get("model_name") or response.response_metadata.get("model")
+    if not isinstance(model, str) or not model.strip():
+        model = None
+    return tokens_in, tokens_out, model, _estimate_node_cost(model, tokens_in, tokens_out)
 
 
 class NodeExecutor:
@@ -980,7 +1152,11 @@ class WorkflowEngine:
                 # 记录开始
                 started_at = datetime.now()
                 self.node_results[_node.id] = NodeResult(
-                    node_id=_node.id, node_type=_node.type, status="running", started_at=started_at
+                    node_id=_node.id,
+                    node_type=_node.type,
+                    status="running",
+                    started_at=started_at,
+                    input=_node_input_summary(_node, state),
                 )
                 await self.emit_event(
                     "node_start",
@@ -1018,16 +1194,31 @@ class WorkflowEngine:
                     # 三处同形态，不再依赖 pydantic 对 Any 字段里 LangChain 消息的
                     # 隐式序列化。
                     jsonable_output = _to_jsonable(result)
-                    self.node_results[_node.id].status = "completed"
-                    self.node_results[_node.id].output = jsonable_output
-                    self.node_results[_node.id].completed_at = completed_at
-                    self.node_results[_node.id].duration = duration
+                    node_result = self.node_results[_node.id]
+                    node_result.status = "completed"
+                    node_result.output = jsonable_output
+                    node_result.completed_at = completed_at
+                    node_result.duration = duration
+                    if _node.type.startswith("llm_"):
+                        (
+                            node_result.tokens_in,
+                            node_result.tokens_out,
+                            node_result.model,
+                            node_result.cost_usd,
+                        ) = _llm_call_metadata(result)
 
                     await self.emit_event(
                         "node_complete",
                         {
-                            "node_id": _node.id,
-                            "node_type": _node.type,
+                            # 新字段（input/tokens/cost/model）随 NodeResult.model_dump
+                            # 自动进入 SSE，避免两处 schema 漂移；status/error 只在终态
+                            # 回放出现（既有实时事件消费者依赖无 status 的旧形态），
+                            # output/duration/timestamp 保留既有键与形态。
+                            **{
+                                k: v
+                                for k, v in node_result.model_dump(mode="json").items()
+                                if k not in {"output", "status", "error"}
+                            },
                             "output": jsonable_output,
                             "duration": duration,
                             "timestamp": completed_at.isoformat(),

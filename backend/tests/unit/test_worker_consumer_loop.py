@@ -119,6 +119,84 @@ async def test_message_processed_then_committed_explicitly_with_job_id():
 
 
 @pytest.mark.asyncio
+async def test_default_callback_receives_profile_as_keyword_not_on_progress(monkeypatch):
+    """不注入 process：默认回调必须把档位作为关键字传给 processor.process，
+    且 on_progress 保持可调用对象（位置传参曾让心跳回调变成字符串并 TypeError）。"""
+    import app.worker.consumer as consumer_mod
+
+    captured = {}
+
+    class FakeProcessor:
+        async def process(self, document_id, job_id, on_progress=None, parse_profile=None):
+            captured.update(
+                document_id=document_id,
+                job_id=job_id,
+                on_progress=on_progress,
+                parse_profile=parse_profile,
+            )
+            return True
+
+    monkeypatch.setattr(consumer_mod, "processor", FakeProcessor())
+
+    consumer = PositionFakeConsumer(
+        [
+            {
+                "topic-0": [
+                    _msg(
+                        {
+                            "document_id": "doc-1",
+                            "job_id": 7,
+                            "parse_profile": "ocr",
+                        },
+                        offset=5,
+                    )
+                ]
+            }
+        ]
+    )
+
+    with pytest.raises(_Stop):
+        await run_consume_loop(consumer, touch=lambda: None)
+
+    assert captured["document_id"] == "doc-1"
+    assert captured["job_id"] == 7
+    assert captured["parse_profile"] == "ocr"
+    assert callable(captured["on_progress"])
+    assert consumer.committed == {("topic-0", 0): 6}
+
+
+@pytest.mark.asyncio
+async def test_parse_profile_from_message_forwarded_to_process():
+    """消息带 parse_profile 时转发给 processor；旧两参回调不受影响。"""
+    events = []
+
+    async def fake_process(document_id, job_id, parse_profile=None):
+        events.append((document_id, job_id, parse_profile))
+
+    consumer = PositionFakeConsumer(
+        [
+            {
+                "topic-0": [
+                    _msg(
+                        {
+                            "document_id": "doc-1",
+                            "job_id": 7,
+                            "parse_profile": "ocr",
+                        },
+                        offset=5,
+                    )
+                ]
+            }
+        ]
+    )
+
+    with pytest.raises(_Stop):
+        await run_consume_loop(consumer, process=fake_process, touch=lambda: None)
+
+    assert events == [("doc-1", 7, "ocr")]
+
+
+@pytest.mark.asyncio
 async def test_non_dict_message_skipped_and_committed():
     processed = []
 
