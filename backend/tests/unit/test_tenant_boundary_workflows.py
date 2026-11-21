@@ -20,6 +20,8 @@ from app.models.organization import Organization
 from app.models.rbac import Role, user_organization_role_association
 from app.models.user import User
 from app.models.workflow import Workflow, WorkflowExecution
+from app.schemas.workflow import WorkflowConfig, WorkflowEdge, WorkflowNode
+from app.services.workflow_engine import KnowledgeSearchNodeExecutor, WorkflowEngine
 
 _MIN_FLOW = {
     "nodes": [
@@ -347,3 +349,71 @@ async def test_execution_list_filters_by_workflow_id():
         assert all(item["workflow_id"] == ids["wf_a_admin"] for item in data["items"])
     finally:
         await engine.dispose()
+
+
+# --- #511 P0-2：工作流知识检索的文档级 ACL viewer 必须来自认证用户 ---
+#
+# 变异守卫：删掉 WorkflowEngine.get_executor 中
+# `executor.user_id = self.user_id` 后，下面两个用例都必须红：
+# - 注入断言直接读执行器属性；
+# - 检索断言检查 rag_service.search_knowledge_base 的真实调用参数。
+
+
+def _search_node() -> WorkflowNode:
+    return WorkflowNode(id="search1", type="tool_search", data={}, position={"x": 0, "y": 0})
+
+
+def _search_config() -> WorkflowConfig:
+    return WorkflowConfig(
+        nodes=[
+            WorkflowNode(
+                id="in1", type="input", data={"prompt": "{{input}}"}, position={"x": 0, "y": 0}
+            ),
+            _search_node(),
+            WorkflowNode(id="out1", type="output", data={}, position={"x": 2, "y": 0}),
+        ],
+        edges=[
+            WorkflowEdge(id="e1", source="in1", target="search1"),
+            WorkflowEdge(id="e2", source="search1", target="out1"),
+        ],
+    )
+
+
+def test_engine_injects_authenticated_viewer_into_knowledge_executor():
+    """知识检索节点与记忆节点同口径注入 (organization_id, user_id)。"""
+    config = _search_config()
+    engine = WorkflowEngine(config, organization_id=7, user_id=9)
+
+    executor = engine.get_executor(config.nodes[1])
+
+    assert isinstance(executor, KnowledgeSearchNodeExecutor)
+    assert executor.organization_id == 7
+    assert executor.user_id == 9, "viewer 用户必须由引擎从认证用户注入，节点配置不可控"
+
+
+@pytest.mark.asyncio
+async def test_knowledge_search_uses_authenticated_viewer_not_input_user(monkeypatch):
+    """B 用户跑工作流时实际检索收到 B 的 user_id；请求体伪造的 A 不得生效。"""
+    from app.services.rag_service import RagServiceFacade
+
+    calls: list[tuple[int, dict]] = []
+
+    async def fake_search(self, query, organization_id, top_k=5, **kwargs):
+        calls.append((organization_id, kwargs))
+        return [], None
+
+    # 类级 patch（与 test_rag_fix_org_scope 同口径，避免实例级 patch 撤销时残留）
+    monkeypatch.setattr(RagServiceFacade, "search_knowledge_base", fake_search)
+
+    engine = WorkflowEngine(_search_config(), organization_id=7, user_id=9)
+    # 请求体里的 A 用户 ID / 其他组织均为客户端可控，不得影响检索
+    result = await engine.execute(
+        {"text": "报销流程", "user_id": 1, "viewer_user_id": 1, "organization_id": 99}
+    )
+
+    assert result["success"] is True, result
+    assert len(calls) == 1, calls
+    assert calls[0][0] == 7, "组织范围必须来自认证用户"
+    assert calls[0][1].get("viewer_user_id") == 9, (
+        "文档级 ACL 必须按发起用户 B 过滤私有 chunk，不得回落到请求体伪造的 A"
+    )
