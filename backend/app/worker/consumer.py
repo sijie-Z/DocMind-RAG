@@ -1,4 +1,5 @@
 import asyncio
+import inspect
 import json
 import logging
 import os
@@ -121,9 +122,23 @@ async def run_consume_loop(consumer, process=None, touch=None, record_attempt=No
     ``DEFERRED``（A3-P0）= 锁被另一处理者持有：**不提交、不记账、不停驻**，回卷
     到该条偏移延迟重投；本分区本批后续消息一并留给重投（见 ``_defer_message``）。
     """
-    process_call = process or processor.process
     beat = touch or touch_heartbeat
     record = record_attempt or _record_failed_attempt
+    callback = process or (
+        lambda doc_id, job_id, **kwargs: processor.process(
+            doc_id, job_id, on_progress=beat, **kwargs
+        )
+    )
+    # 兼容只接受 (doc_id, job_id) 的测试替身/旧回调：这类替身无法消费档位。
+    # 用签名探测而不是捕获 TypeError，避免把 processor 内部真实 TypeError
+    # 误判成"不支持 parse_profile"后重复执行整个处理流程。
+    try:
+        callback_params = inspect.signature(callback).parameters
+        accepts_parse_profile = "parse_profile" in callback_params or any(
+            p.kind is inspect.Parameter.VAR_KEYWORD for p in callback_params.values()
+        )
+    except (TypeError, ValueError):
+        accepts_parse_profile = False
 
     last_committed_offset: int | None = None
 
@@ -159,12 +174,13 @@ async def run_consume_loop(consumer, process=None, touch=None, record_attempt=No
 
                 if doc_id:
                     try:
-                        # 旧调用方（含测试替身）仍是两参回调；仅在消息带档位时
-                        # 传第三参，保持消费链向后兼容。
-                        if parse_profile:
-                            processed = await process_call(doc_id, job_id, parse_profile)
+                        # 档位必须按关键字传入：默认 DocumentProcessor.process
+                        # 的第三位置参是 on_progress，位置传参会让它变成字符串，
+                        # 后续 notify() TypeError（评审 REQUEST CHANGES）。
+                        if parse_profile and accepts_parse_profile:
+                            processed = await callback(doc_id, job_id, parse_profile=parse_profile)
                         else:
-                            processed = await process_call(doc_id, job_id)
+                            processed = await callback(doc_id, job_id)
                     except Exception as e:
                         # 未分类异常（防御网；真实 processor 内部已兜底）：按失败处理，
                         # 绝不允许把异常当成"处理过了"提交偏移，也不允许静默吞掉。

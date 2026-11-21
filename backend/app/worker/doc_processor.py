@@ -380,13 +380,6 @@ class DocumentProcessor:
           偏移被提交后文档永久卡 PARSING）。
         """
         notify = on_progress or _noop
-        profile = normalize_parse_profile(parse_profile)
-        logger.info(
-            "[DOC_PROC] start document_id=%s job_id=%s parse_profile=%s",
-            document_id,
-            job_id,
-            profile,
-        )
         self._lock_lost.discard(document_id)
         lock_acquired = await self._acquire_processing_lock(document_id)
         if lock_acquired is False:
@@ -405,6 +398,27 @@ class DocumentProcessor:
         if lock_acquired is True:
             heartbeat_task = asyncio.create_task(self._lock_heartbeat_loop(document_id))
         try:
+            try:
+                profile = normalize_parse_profile(parse_profile)
+            except ValueError as exc:
+                # 消息自身的永久缺陷：按终局失败处理（文档/job 落 FAILED，
+                # 返回 True 让 consumer 提交偏移），绝不抛出去变成毒消息重投。
+                # 外层 finally 仍会释放 processing 锁/心跳，不留悬挂状态。
+                logger.error(
+                    "[DOC_PROC] invalid parse_profile, terminal failure document_id=%s "
+                    "job_id=%s error=%s",
+                    document_id,
+                    job_id,
+                    exc,
+                )
+                await self._mark_failed(document_id, str(exc), job_id)
+                return True
+            logger.info(
+                "[DOC_PROC] start document_id=%s job_id=%s parse_profile=%s",
+                document_id,
+                job_id,
+                profile,
+            )
             doc = await self._load_and_mark_parsing(document_id, job_id)
             if doc is STALE_RUN:
                 # A3-P0：该 job 已 SUCCESS（INDEXED 与 job 成功同事务提交）。
