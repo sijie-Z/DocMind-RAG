@@ -31,6 +31,10 @@ viewer 可见的文档；运行前再校验一次，失效金标记为 ``status=
 
 from __future__ import annotations
 
+import csv
+import hashlib
+import io
+import json
 import uuid
 from dataclasses import dataclass
 from typing import Any
@@ -40,7 +44,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.exceptions import NotFoundError, ValidationError
 from app.models.document import Document, DocumentStatus
-from app.models.retrieval_eval import RetrievalEvalCase
+from app.models.retrieval_eval import RetrievalEvalCase, RetrievalEvalRun
 from app.services.document_acl import get_blocked_document_ids
 from evals.golden import GoldenItem, Locator
 from evals.harness import RetrieveFn
@@ -485,3 +489,222 @@ async def run_eval(
         "results": results,
         "persisted": False,
     }
+
+
+# ── 运行历史（显式 opt-in 持久化）────────────────────────────────────────
+
+
+def case_set_fingerprint(cases: list[RetrievalEvalCase], *, top_k: int) -> str:
+    """对本次评测输入生成稳定哈希（用例 id + query + 文档级金标，排序后拼接）。
+
+    ``top_k`` 属于评测口径而非测试集，故单独经报告接口写入导出文件；哈希只锁
+    用例集内容，避免同一测试集在不同截断深度下被误判为「不同数据集」。
+    """
+    payload = sorted(
+        (
+            case.id,
+            case.query,
+            tuple(sorted(str(doc_id) for doc_id in (case.expected_document_ids or []))),
+        )
+        for case in cases
+    )
+    encoded = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+
+async def persist_run(
+    session: AsyncSession,
+    *,
+    report: dict[str, Any],
+    cases: list[RetrievalEvalCase],
+    organization_id: int,
+    created_by: int,
+    case_scope: str,
+) -> RetrievalEvalRun:
+    """把既有评测报告固化为一条运行记录（不重跑、不改判定口径）。
+
+    ``case_scope`` 为 ``all``（全量）/ ``subset``（显式 case_ids 子集）：
+    保存时同时保留实际命中的 case_ids 与原请求范围，避免同哈希子集被误读为全量。
+    """
+    run = RetrievalEvalRun(
+        id=str(uuid.uuid4()),
+        organization_id=organization_id,
+        created_by=created_by,
+        top_k=int(report["top_k"]),
+        case_ids=[case.id for case in cases],
+        case_scope=case_scope,
+        case_set_hash=case_set_fingerprint(cases, top_k=int(report["top_k"])),
+        counts=dict(report["counts"]),
+        metrics=dict(report["metrics"]),
+        error_case_ids=list(report["error_case_ids"]),
+        results=list(report["results"]),
+    )
+    session.add(run)
+    await session.commit()
+    await session.refresh(run)
+    return run
+
+
+def run_to_dict(run: RetrievalEvalRun) -> dict[str, Any]:
+    """运行摘要（列表/详情共用；完整逐条结果只在 detail/export 返回）。"""
+    return {
+        "id": run.id,
+        "organization_id": run.organization_id,
+        "created_by": run.created_by,
+        "top_k": run.top_k,
+        "case_ids": list(run.case_ids or []),
+        "case_scope": run.case_scope,
+        "case_set_hash": run.case_set_hash,
+        "counts": dict(run.counts or {}),
+        "metrics": dict(run.metrics or {}),
+        "error_case_ids": list(run.error_case_ids or []),
+        "created_at": run.created_at.isoformat() if run.created_at else None,
+    }
+
+
+def run_detail_dict(run: RetrievalEvalRun) -> dict[str, Any]:
+    """详情 = 摘要 + 逐条结果（含 query；只有组织内授权端点可获取）。"""
+    return {**run_to_dict(run), "results": list(run.results or [])}
+
+
+async def list_runs(
+    session: AsyncSession,
+    *,
+    organization_id: int,
+    page: int = 1,
+    page_size: int = 50,
+    case_set_hash: str | None = None,
+) -> dict[str, Any]:
+    """按组织列出运行（创建时间倒序；id 兜底同秒稳定排序）。"""
+    conditions = [RetrievalEvalRun.organization_id == organization_id]
+    if case_set_hash:
+        conditions.append(RetrievalEvalRun.case_set_hash == case_set_hash)
+    total = (
+        await session.execute(select(func.count(RetrievalEvalRun.id)).where(*conditions))
+    ).scalar() or 0
+    rows = (
+        (
+            await session.execute(
+                select(RetrievalEvalRun)
+                .where(*conditions)
+                .order_by(RetrievalEvalRun.created_at.desc(), RetrievalEvalRun.id.desc())
+                .offset((page - 1) * page_size)
+                .limit(page_size)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    return {"data": [run_to_dict(row) for row in rows], "total": int(total)}
+
+
+async def get_run(session: AsyncSession, *, organization_id: int, run_id: str) -> RetrievalEvalRun:
+    """读取本组织运行；不存在或属于其他组织一律 404（不回显存在性）。"""
+    run = await session.get(RetrievalEvalRun, run_id)
+    if run is None or run.organization_id != organization_id:
+        raise NotFoundError("评测运行不存在")
+    return run
+
+
+def _metric(value: Any) -> float | None:
+    if value is None:
+        return None
+    return float(value)
+
+
+async def trend_summary(
+    session: AsyncSession,
+    *,
+    organization_id: int,
+    case_set_hash: str | None = None,
+    limit: int = 30,
+) -> dict[str, Any]:
+    """最近 N 次运行的指标趋势（组织隔离；按时间正序返回供绘图）。
+
+    只聚合已成功完成的运行（``counts.evaluated > 0``），否则 failed 运行的
+    null 指标会污染均值；failed 数量单独计数，不混入指标分母。
+    """
+    conditions = [RetrievalEvalRun.organization_id == organization_id]
+    if case_set_hash:
+        conditions.append(RetrievalEvalRun.case_set_hash == case_set_hash)
+    rows = (
+        (
+            await session.execute(
+                select(RetrievalEvalRun)
+                .where(*conditions)
+                .order_by(RetrievalEvalRun.created_at.desc(), RetrievalEvalRun.id.desc())
+                .limit(limit)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    points = [run_to_dict(row) for row in reversed(rows)]
+    succeeded = [point for point in points if int(point["counts"].get("evaluated", 0) or 0) > 0]
+    keys = ("recall_at_k", "mrr", "document_hit_at_k", "hit_at_k")
+    averages: dict[str, float | None] = {}
+    for key in keys:
+        values = [
+            value
+            for value in (_metric(point["metrics"].get(key)) for point in succeeded)
+            if value is not None
+        ]
+        averages[key] = round(sum(values) / len(values), 4) if values else None
+    return {
+        "points": points,
+        "summary": {
+            "runs": len(points),
+            "succeeded_runs": len(succeeded),
+            "failed_runs": len(points) - len(succeeded),
+            "averages": averages,
+        },
+    }
+
+
+# JSON/CSV 共用同一批字段；CSV 每行可直接比较 case_set_hash 与 top_k。
+CSV_FIELDS = (
+    "id",
+    "created_at",
+    "created_by",
+    "top_k",
+    "case_scope",
+    "case_set_hash",
+    "case_ids",
+    "counts",
+    "metrics",
+    "error_case_ids",
+    "results",
+)
+
+
+def run_export_dict(run: RetrievalEvalRun) -> dict[str, Any]:
+    """JSON 导出载荷：稳定字段顺序 + 用于跨运行比较的口径元数据。"""
+    detail = run_detail_dict(run)
+    return {
+        "schema_version": 1,
+        "export_type": "retrieval_eval_run",
+        # JSON/CSV 都显式带上 case_set_hash + top_k，比较前可先做可比性校验。
+        "case_set_hash": detail["case_set_hash"],
+        "top_k": detail["top_k"],
+        "data": {field: detail[field] for field in CSV_FIELDS},
+    }
+
+
+def run_export_csv(run: RetrievalEvalRun) -> str:
+    """CSV 导出：一行一运行，嵌套结构以紧凑 JSON 单列承载（与 JSON 导出同源）。"""
+    detail = run_detail_dict(run)
+    payload = {field: detail[field] for field in CSV_FIELDS}
+    payload["case_set_hash"] = detail["case_set_hash"]
+    payload["top_k"] = detail["top_k"]
+    buffer = io.StringIO(newline="")
+    writer = csv.DictWriter(buffer, fieldnames=CSV_FIELDS, extrasaction="ignore")
+    writer.writeheader()
+    writer.writerow(
+        {
+            key: json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+            if isinstance(value, (list, dict))
+            else value
+            for key, value in payload.items()
+        }
+    )
+    return buffer.getvalue()

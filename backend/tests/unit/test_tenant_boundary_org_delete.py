@@ -24,7 +24,7 @@ from app.models.agent_task import AgentTask
 from app.models.chat import ChatSession
 from app.models.document import Document, DocumentType
 from app.models.organization import Organization
-from app.models.retrieval_eval import RetrievalEvalCase
+from app.models.retrieval_eval import RetrievalEvalCase, RetrievalEvalRun
 from app.models.review import ReviewCase, ReviewExport, ReviewRuleSet
 from app.models.user import User
 from app.services.organization_service import organization_service
@@ -277,6 +277,42 @@ async def test_delete_org_with_retrieval_eval_cases_blocks():
             with pytest.raises(ConflictError) as excinfo:
                 await organization_service.delete_organization_thoroughly(s, 10)
         assert "检索评测用例 1 条" in str(excinfo.value)
+        async with factory() as s:
+            assert await s.get(Organization, 10) is not None
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_delete_org_with_retrieval_eval_runs_blocks():
+    """评测运行历史有组织外键：未纳入清理会触发 MySQL 1451，必须先转移。
+
+    变异点：从 organization_service._ATTACHED_DATA_MODELS 删除
+    ("检索评测运行", RetrievalEvalRun) 后，本用例不再抛 ConflictError 而变红。
+    """
+    engine, factory = await _setup()
+    try:
+        async with factory() as s:
+            s.add(
+                RetrievalEvalRun(
+                    id="eval-run-1",
+                    organization_id=10,
+                    created_by=20,
+                    top_k=5,
+                    case_ids=["eval-case-1"],
+                    case_scope="subset",
+                    case_set_hash="a" * 64,
+                    counts={"cases": 1, "evaluated": 1, "errors": 0},
+                    metrics={"recall_at_k": 1.0},
+                    error_case_ids=[],
+                    results=[],
+                )
+            )
+            await s.commit()
+        async with factory() as s:
+            with pytest.raises(ConflictError) as excinfo:
+                await organization_service.delete_organization_thoroughly(s, 10)
+        assert "检索评测运行 1 条" in str(excinfo.value)
         async with factory() as s:
             assert await s.get(Organization, 10) is not None
     finally:

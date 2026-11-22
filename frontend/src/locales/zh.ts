@@ -1915,6 +1915,64 @@ export default {
       }
     }
   },
+  evalRuns: {
+    title: '检索评测运行历史',
+    subtitle: '保存的评测运行可追溯、可导出、可比较；只有显式保存的运行才会出现在此页',
+    refresh: '刷新',
+    filterSet: '用例集',
+    allSets: '全部用例集',
+    filteredCount: '显示 {count}/{total} 次运行',
+    loadFailed: '评测运行历史加载失败',
+    retry: '重试',
+    emptyTitle: '还没有保存过评测运行',
+    emptyDesc: '运行评测时选择「保存本次运行」，指标与逐条结果会出现在此页供后续对比。',
+    trend: {
+      title: '指标趋势',
+      subtitle: '按运行时间从左到右；失败的空指标不计入平均值',
+      metric: '趋势指标',
+      runs: '运行次数',
+      succeededRuns: '成功运行',
+      failedRuns: '失败运行',
+      average: '平均 {metric}',
+      metrics: {
+        recall_at_k: "文档召回率{'@'}k",
+        mrr: 'MRR',
+        document_hit_at_k: "文档命中率{'@'}k"
+      },
+      noData: '暂无可绘制的指标数据',
+      chartLabel: '{metric} 随运行时间变化的折线图',
+      tableView: '查看数据表（无需悬停）'
+    },
+    columns: {
+      time: '时间',
+      hash: '用例集哈希',
+      scope: '范围',
+      topK: 'top_k',
+      cases: '用例数',
+      evaluated: '已评测',
+      errors: '失败数',
+      recall: "召回率{'@'}k",
+      actions: '操作',
+      status: '状态',
+      name: '用例',
+      query: 'query'
+    },
+    scopeAll: '全量',
+    scopeSubset: '指定子集',
+    statusOk: '成功',
+    statusFailed: '失败',
+    viewDetail: '查看详情',
+    detail: {
+      title: '运行详情与导出',
+      loadFailed: '运行详情加载失败'
+    },
+    exportJson: '导出 JSON',
+    exportCsv: '导出 CSV',
+    exportFailed: '导出失败，请稍后重试',
+    replay: '按原用例集重跑并保存',
+    replaySuccess: '重跑已保存，历史已刷新',
+    replayFailed: '重跑失败，请稍后重试'
+  },
   router: {
     notFound: '页面不存在',
     serviceUnavailable: '服务暂时不可用',
@@ -1922,6 +1980,7 @@ export default {
     login: '登录',
     register: '注册',
     knowledgeGraph: '知识图谱',
+    knowledgeEvalRuns: '评测运行历史',
     knowledgeDocument: '文档详情',
     workflowEditor: '工作流编辑器',
     agentMemory: 'Agent记忆'

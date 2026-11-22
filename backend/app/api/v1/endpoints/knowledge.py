@@ -11,6 +11,7 @@ from datetime import datetime
 from typing import Any
 
 from fastapi import APIRouter, Depends, Query, Request
+from fastapi.responses import Response
 from sqlalchemy import desc, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -1475,6 +1476,61 @@ async def delete_retrieval_eval_case(
         raise AppError("删除检索评测用例失败") from e
 
 
+async def _execute_retrieval_eval(
+    body: RetrievalEvalRunRequest,
+    request: Request,
+    current_user: User,
+    db: AsyncSession,
+    *,
+    force_persist: bool = False,
+):
+    """运行评测的共用实现；默认不写库，仅显式 persist/专用端点才固化运行。"""
+    org_id = await _retrieval_eval_org_id(current_user, db)
+    cases = await retrieval_eval_service.load_cases(
+        db, organization_id=org_id, case_ids=body.case_ids
+    )
+    # 运行开始时取一次可检索性快照（含 viewer ACL），与检索路径同一口径。
+    searchable = await retrieval_eval_service.load_searchable_docs(
+        db, organization_id=org_id, viewer_user_id=current_user.id
+    )
+    report = await retrieval_eval_service.run_eval(
+        cases,
+        _make_retrieve_fn(org_id, current_user.id),
+        body.top_k,
+        searchable=searchable,
+    )
+    persist = force_persist or body.persist
+    if persist:
+        run = await retrieval_eval_service.persist_run(
+            db,
+            report=report,
+            cases=cases,
+            organization_id=org_id,
+            created_by=current_user.id,
+            case_scope="subset" if body.case_ids is not None else "all",
+        )
+        report["run_id"] = run.id
+    report["persisted"] = persist
+    await audit_service.log_activity(
+        user_id=current_user.id,
+        action="run_retrieval_eval",
+        target_type="retrieval_eval_run",
+        target_id=report.get("run_id"),
+        # 只记条数/top_k/错误数与是否持久化，不记 query、用例名或金标 id。
+        detail=_eval_audit_detail(
+            org_id,
+            current_user.id,
+            cases=len(cases),
+            top_k=body.top_k,
+            errors=report["counts"]["errors"],
+            persisted=persist,
+        ),
+        request=request,
+        db=db,
+    )
+    return {"success": True, "data": report}
+
+
 @router.post(
     "/eval/run",
     response_model=dict,
@@ -1495,41 +1551,179 @@ async def run_retrieval_eval(
     ``status=error`` 并单独计数，不进任何比例的分母。金标在运行时失效（文档
     被删/停用/未索引、或 viewer 私有权限被撤销）同样记 error + 机器码，
     绝不报成 recall=0。
+
+    ``persist=true`` 为显式 opt-in：结果写入评测运行历史并返回 ``run_id``；
+    缺省严格保持原只读契约（``persisted=false``，不产生任何评测运行记录）。
     """
     try:
-        org_id = await _retrieval_eval_org_id(current_user, db)
-        cases = await retrieval_eval_service.load_cases(
-            db, organization_id=org_id, case_ids=body.case_ids
-        )
-        # 运行开始时取一次可检索性快照（含 viewer ACL），与检索路径同一口径。
-        searchable = await retrieval_eval_service.load_searchable_docs(
-            db, organization_id=org_id, viewer_user_id=current_user.id
-        )
-        report = await retrieval_eval_service.run_eval(
-            cases,
-            _make_retrieve_fn(org_id, current_user.id),
-            body.top_k,
-            searchable=searchable,
-        )
-        await audit_service.log_activity(
-            user_id=current_user.id,
-            action="run_retrieval_eval",
-            target_type="retrieval_eval_run",
-            target_id=None,
-            # 只记条数/top_k/错误数，不记 query、用例名或金标 id。
-            detail=_eval_audit_detail(
-                org_id,
-                current_user.id,
-                cases=len(cases),
-                top_k=body.top_k,
-                errors=report["counts"]["errors"],
-            ),
-            request=request,
-            db=db,
-        )
-        return {"success": True, "data": report}
+        return await _execute_retrieval_eval(body, request, current_user, db)
     except (AppError, NotFoundError, ValidationError, AuthorizationError):
         raise
     except Exception as e:
         logger.error("Run retrieval eval failed: %s", type(e).__name__)
         raise AppError("运行检索评测失败") from e
+
+
+@router.post(
+    "/eval/runs",
+    response_model=dict,
+    dependencies=[
+        Depends(require_scope("knowledge:read")),
+        Depends(permission_required([PermissionType.SEARCH_KNOWLEDGE_BASE])),
+    ],
+)
+async def run_and_persist_retrieval_eval(
+    body: RetrievalEvalRunRequest,
+    request: Request,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """专用持久化入口：语义等价于 ``/eval/run`` + ``persist=true``。"""
+    try:
+        return await _execute_retrieval_eval(body, request, current_user, db, force_persist=True)
+    except (AppError, NotFoundError, ValidationError, AuthorizationError):
+        raise
+    except Exception as e:
+        logger.error("Run and persist retrieval eval failed: %s", type(e).__name__)
+        raise AppError("保存检索评测运行失败") from e
+
+
+@router.get(
+    "/eval/runs",
+    response_model=dict,
+    dependencies=[
+        Depends(require_scope("knowledge:read")),
+        Depends(permission_required([PermissionType.SEARCH_KNOWLEDGE_BASE])),
+    ],
+)
+async def list_retrieval_eval_runs(
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, ge=1, le=200),
+    case_set_hash: str | None = Query(None, max_length=64),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """列出本组织评测运行（可按用例集哈希过滤），跨组织记录绝不返回。"""
+    try:
+        org_id = await _retrieval_eval_org_id(current_user, db)
+        data = await retrieval_eval_service.list_runs(
+            db,
+            organization_id=org_id,
+            page=page,
+            page_size=page_size,
+            case_set_hash=case_set_hash,
+        )
+        return {"success": True, "data": data}
+    except (AppError, NotFoundError, ValidationError, AuthorizationError):
+        raise
+    except Exception as e:
+        logger.error("List retrieval eval runs failed: %s", type(e).__name__)
+        raise AppError("获取检索评测运行历史失败") from e
+
+
+@router.get(
+    "/eval/runs/trend",
+    response_model=dict,
+    dependencies=[
+        Depends(require_scope("knowledge:read")),
+        Depends(permission_required([PermissionType.SEARCH_KNOWLEDGE_BASE])),
+    ],
+)
+async def get_retrieval_eval_trend(
+    case_set_hash: str | None = Query(None, max_length=64),
+    limit: int = Query(30, ge=1, le=200),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """最近 N 次运行的时间趋势与均值（组织隔离；失败运行不计入指标均值）。"""
+    try:
+        org_id = await _retrieval_eval_org_id(current_user, db)
+        data = await retrieval_eval_service.trend_summary(
+            db, organization_id=org_id, case_set_hash=case_set_hash, limit=limit
+        )
+        return {"success": True, "data": data}
+    except (AppError, NotFoundError, ValidationError, AuthorizationError):
+        raise
+    except Exception as e:
+        logger.error("Get retrieval eval trend failed: %s", type(e).__name__)
+        raise AppError("获取检索评测趋势失败") from e
+
+
+@router.get(
+    "/eval/runs/{run_id}",
+    response_model=dict,
+    dependencies=[
+        Depends(require_scope("knowledge:read")),
+        Depends(permission_required([PermissionType.SEARCH_KNOWLEDGE_BASE])),
+    ],
+)
+async def get_retrieval_eval_run(
+    run_id: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """读取本组织单次运行（含逐条结果）；跨组织一律 404。"""
+    try:
+        org_id = await _retrieval_eval_org_id(current_user, db)
+        run = await retrieval_eval_service.get_run(db, organization_id=org_id, run_id=run_id)
+        return {"success": True, "data": retrieval_eval_service.run_detail_dict(run)}
+    except (AppError, NotFoundError, ValidationError, AuthorizationError):
+        raise
+    except Exception as e:
+        logger.error("Get retrieval eval run failed: %s", type(e).__name__)
+        raise AppError("获取检索评测运行详情失败") from e
+
+
+@router.get(
+    "/eval/runs/{run_id}/export",
+    response_class=Response,
+    dependencies=[
+        Depends(require_scope("knowledge:read")),
+        Depends(permission_required([PermissionType.SEARCH_KNOWLEDGE_BASE])),
+    ],
+)
+async def export_retrieval_eval_run(
+    run_id: str,
+    request: Request,
+    format: str = Query("json", pattern="^(json|csv)$"),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """导出单次运行（JSON/CSV 同源同哈希）；跨组织一律 404。
+
+    审计只记导出的 run_id 与格式，不记 query、用例名或逐条结果正文。
+    """
+    try:
+        org_id = await _retrieval_eval_org_id(current_user, db)
+        run = await retrieval_eval_service.get_run(db, organization_id=org_id, run_id=run_id)
+        if format == "csv":
+            content = retrieval_eval_service.run_export_csv(run)
+            media_type = "text/csv; charset=utf-8"
+            suffix = "csv"
+        else:
+            content = json.dumps(
+                retrieval_eval_service.run_export_dict(run),
+                ensure_ascii=False,
+                sort_keys=True,
+            )
+            media_type = "application/json"
+            suffix = "json"
+        await audit_service.log_activity(
+            user_id=current_user.id,
+            action="export_retrieval_eval_run",
+            target_type="retrieval_eval_run",
+            target_id=run_id,
+            detail=_eval_audit_detail(org_id, current_user.id, format=format),
+            request=request,
+            db=db,
+        )
+        return Response(
+            content=content,
+            media_type=media_type,
+            headers={"Content-Disposition": f'attachment; filename="eval-run-{run_id}.{suffix}"'},
+        )
+    except (AppError, NotFoundError, ValidationError, AuthorizationError):
+        raise
+    except Exception as e:
+        logger.error("Export retrieval eval run failed: %s", type(e).__name__)
+        raise AppError("导出检索评测运行失败") from e

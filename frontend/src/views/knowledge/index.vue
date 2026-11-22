@@ -56,6 +56,9 @@
               <template #icon><n-icon><GitNetworkOutline /></n-icon></template>
               {{ t('router.knowledgeGraph') }}
             </n-button>
+            <n-button secondary size="medium" @click="$router.push('/knowledge/eval-runs')">
+              {{ t('evalRuns.title') }}
+            </n-button>
             <n-button
               v-if="stats.failed > 0 && showRebuild"
               secondary

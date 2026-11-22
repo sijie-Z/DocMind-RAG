@@ -1907,6 +1907,64 @@ export default {
       }
     }
   },
+  evalRuns: {
+    title: 'Retrieval eval run history',
+    subtitle: 'Saved runs are traceable, exportable and comparable; only explicitly saved runs appear here',
+    refresh: 'Refresh',
+    filterSet: 'Case set',
+    allSets: 'All case sets',
+    filteredCount: 'Showing {count}/{total} runs',
+    loadFailed: 'Failed to load evaluation run history',
+    retry: 'Retry',
+    emptyTitle: 'No saved evaluation runs yet',
+    emptyDesc: 'Choose “save this run” when running an evaluation; metrics and per-case results will appear here for comparison.',
+    trend: {
+      title: 'Metric trend',
+      subtitle: 'Runs in time order (left to right); null metrics from failed runs are excluded from averages',
+      metric: 'Trend metric',
+      runs: 'Runs',
+      succeededRuns: 'Succeeded',
+      failedRuns: 'Failed',
+      average: 'Average {metric}',
+      metrics: {
+        recall_at_k: "Document recall{'@'}k",
+        mrr: 'MRR',
+        document_hit_at_k: "Document hit{'@'}k"
+      },
+      noData: 'No metric data to plot yet',
+      chartLabel: 'Line chart of {metric} over run time',
+      tableView: 'View data table (no hover needed)'
+    },
+    columns: {
+      time: 'Time',
+      hash: 'Case set hash',
+      scope: 'Scope',
+      topK: 'top_k',
+      cases: 'Cases',
+      evaluated: 'Evaluated',
+      errors: 'Errors',
+      recall: "Recall{'@'}k",
+      actions: 'Actions',
+      status: 'Status',
+      name: 'Case',
+      query: 'query'
+    },
+    scopeAll: 'All cases',
+    scopeSubset: 'Explicit subset',
+    statusOk: 'OK',
+    statusFailed: 'Failed',
+    viewDetail: 'View details',
+    detail: {
+      title: 'Run details and export',
+      loadFailed: 'Failed to load run details'
+    },
+    exportJson: 'Export JSON',
+    exportCsv: 'Export CSV',
+    exportFailed: 'Export failed; please retry',
+    replay: 'Replay saved case set',
+    replaySuccess: 'Replay saved and history refreshed',
+    replayFailed: 'Replay failed; please retry'
+  },
   router: {
     notFound: 'Page Not Found',
     serviceUnavailable: 'Service Temporarily Unavailable',
@@ -1914,6 +1972,7 @@ export default {
     login: 'Login',
     register: 'Register',
     knowledgeGraph: 'Knowledge Graph',
+    knowledgeEvalRuns: 'Eval run history',
     knowledgeDocument: 'Document Details',
     workflowEditor: 'Workflow Editor',
     agentMemory: 'Agent Memory'
