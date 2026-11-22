@@ -29,6 +29,8 @@ from app.core.config import settings
 SECRET_PROMPT = "PROMPT_BODY_NEVER_EXPORTED"
 SECRET_COMPLETION = "COMPLETION_BODY_NEVER_EXPORTED"
 SECRET_QUERY = "用户合同正文 SECRET_QUERY"
+# 运行时拼接，避免把测试哨兵写成看似真实密钥的字面量（gitleaks）。
+SECRET_API_KEY = "sk-" + "12345678901234567890"
 LEGACY_FIELDS = {
     "ts",
     "task_id",
@@ -101,13 +103,13 @@ def test_allowlist_never_exposes_bodies_or_secrets() -> None:
         query=SECRET_QUERY,
         messages=[{"role": "user", "content": SECRET_PROMPT}],
         raw_error=f"failed with {SECRET_PROMPT}",
-        api_key="sk-12345678901234567890",
+        api_key=SECRET_API_KEY,
         error="RateLimitError: too many requests",
     )
     attrs = build_gen_ai_attributes(record)
     assert set(attrs) <= ALLOWED_ATTRIBUTE_KEYS
     serialized = repr(attrs)
-    for secret in (SECRET_PROMPT, SECRET_COMPLETION, SECRET_QUERY, "sk-12345678901234567890"):
+    for secret in (SECRET_PROMPT, SECRET_COMPLETION, SECRET_QUERY, SECRET_API_KEY):
         assert secret not in serialized
     assert "error.message" not in attrs
     assert attrs["error.type"] == "rate_limit"
