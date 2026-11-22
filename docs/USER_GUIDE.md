@@ -4,7 +4,7 @@
 >
 > 本文只做**引述**，不做第二套真源：
 > - 端口、凭据、服务编排以 `backend/docker-compose.yml` 与 `backend/.env.docker.example` 为准；
-> - 关键数字（31 个内置工具 / 默认注入 10 个工具 / 29 个端点模块 / 38 条前端路由 / 24 种 SSE 事件）以 `docs/facts.json` 为单一事实源；README、架构页等既有锚点由 `backend/scripts/check_doc_facts.py` 在 CI 逐 PR 校验，本文数字与之一致（工具/端点/路由/SSE 锚点已纳入 CI 校验）；
+> - 关键数字（31 个内置工具 / 默认注入 10 个工具 / 29 个端点模块 / 39 条前端路由 / 24 种 SSE 事件）以 `docs/facts.json` 为单一事实源；README、架构页等既有锚点由 `backend/scripts/check_doc_facts.py` 在 CI 逐 PR 校验，本文数字与之一致（工具/端点/路由/SSE 锚点已纳入 CI 校验）；
 > - 架构与设计动机见 `README.md`、`AGENT_ARCHITECTURE.md`、`docs/decisions/`。
 >
 > 英文版：[USER_GUIDE_EN.md](USER_GUIDE_EN.md)
@@ -330,6 +330,7 @@ ADMIN_PASSWORD='<至少 8 位>' python reset_admin.py     # Windows PowerShell: 
 | `LOG_LEVEL` / `LOG_JSON` | `INFO` / `true`（代码；模板写 `false`） | 日志级别与 JSON 格式 |
 | `LOG_FILE` | `logs/docmind.log` | 日志文件 |
 | `LLM_CALL_LOG_ENABLED` / `LLM_CALL_LOG_FILE` / `LLM_CALL_LOG_PER_RUN` | `true` / `logs/llm_calls.jsonl` / `false` | LLM 调用级 JSONL（issue #510）：每次调用一行元数据（`task_id`/`request_id`/model/tokens/latency/prompt_hash），**不含 prompt/completion 正文**；`PER_RUN=true` 按 run 分文件 |
+| `OTEL_GEN_AI_EXPORT_ENABLED` | `false` | 可选 OTel GenAI 语义属性导出；默认关闭。仅投影元数据的 `gen_ai.*` 属性到既有 OTel provider，不落正文；`ENABLE_TRACING=true` + `OTLP_ENDPOINT` 才决定 exporter/传输 |
 | `ENABLE_TRACING` / `OTLP_ENDPOINT` | `false` / 空 | OpenTelemetry（`os.getenv` 直读） |
 | `LANGFUSE_ENABLED` / `LANGFUSE_PUBLIC_KEY` / `LANGFUSE_SECRET_KEY` / `LANGFUSE_HOST` | `true` / 空 / 空 / `https://cloud.langfuse.com` | LLM 全链路追踪（可选；未配 key 不启用。已标记为待删除候选，审批前保留） |
 | `ENABLE_SCHEDULER` | `true` | 进程内定时任务调度；**单实例语义**，多 worker 部署需外部调度 |
@@ -509,7 +510,16 @@ python scripts/reconcile_knowledge_index.py --reindex --limit 10
 
 **图谱**：索引成功后会非阻塞地抽取知识图谱，按组织存 Redis（30 天 TTL）。它不参与检索排序，失败也不会把文档标成 FAILED。历史文档可用 `backend/scripts/backfill_graph.py` 回填；图谱页按 `max_nodes`（后端 5–200，默认 50）截断展示。
 
-### 4.2 对话与深度分析
+### 4.2 检索评测运行历史与趋势
+
+知识库页的「检索评测运行历史」（`/knowledge/eval-runs`）把一次性评测变成可追溯质量资产：
+
+- `POST /api/v1/knowledge/eval/run` 默认**不写库**（保持原只读契约）；显式 `persist: true` 或 `POST /api/v1/knowledge/eval/runs` 才保存一次运行。
+- 运行记录含组织、发起人、`top_k`、用例 id/范围、用例集哈希、计数、指标、失败用例 id 与逐条结果；跨组织读取/导出一律 404。
+- `GET /eval/runs`（列表，可按 `case_set_hash` 过滤）、`GET /eval/runs/{id}`（详情）、`GET /eval/runs/trend`（最近 30 次趋势，失败运行不计入指标均值）、`GET /eval/runs/{id}/export?format=json|csv`（同源导出，用于回归比较）。
+- 审计只写组织、用户、条数、格式与字段名，`query`/用例名/逐条正文不进审计日志；逐条结果只在本组织授权详情页可见。
+
+### 4.3 对话与深度分析
 
 对话页（`/chat`）有两个模式，入口是输入区的「快速问答 / 深度分析」二选一开关（`frontend/src/views/chat/components/ChatInput.vue`）：
 

@@ -7,6 +7,7 @@
     "artifacts.kind.",
     "chat.rerankStatus.",
     "common.weekdays.",
+    "evalRuns.trend.metrics.",
     "scheduler.cron.months.",
     "scheduler.cron.weekdays.",
     "scheduler.lastStatus.",

@@ -44,6 +44,10 @@ class BaseAppSettings(BaseSettings):
     # 路径相对进程工作目录（部署即 backend/），默认 backend/logs/llm_calls.jsonl。
     LLM_CALL_LOG_ENABLED: bool = True
     LLM_CALL_LOG_FILE: str = "logs/llm_calls.jsonl"
+    # 可选 OTel GenAI 语义属性导出（默认关闭）：只在既有 LLM 调用元数据 JSONL
+    # 写入点额外投影 gen_ai.* 属性到当前 OTel TracerProvider；不落正文。
+    # 复用 ENABLE_TRACING / OTLP_ENDPOINT 的既有 provider 与 transport。
+    OTEL_GEN_AI_EXPORT_ENABLED: bool = False
     # true → 按 run 分文件（llm_calls-run-<sha256(task_id)[:16]>.jsonl）；false → 单文件追加。
     # 文件名只含摘要，原始 task_id 绝不进入路径（CodeQL path-injection 结构性修法）。
     LLM_CALL_LOG_PER_RUN: bool = False

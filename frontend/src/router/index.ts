@@ -147,8 +147,16 @@ export const routes: RouteRecordRaw[] = [
         }
       },
       {
-        // 文档深链：聊天引用 / 检索命中 / 知识库列表都可落到同一页并高亮分块。
-        // 静态段 knowledge/graph 优先级高于本动态段，两者互不遮蔽。
+        path: 'knowledge/eval-runs',
+        name: 'KnowledgeEvalRuns',
+        component: () => import('@/views/knowledge/evalRunHistory.vue'),
+        meta: {
+          title: 'router.knowledgeEvalRuns',
+          activeMenu: 'Knowledge',
+          icon: 'bar-chart'
+        }
+      },
+      {
         path: 'knowledge/:documentId',
         name: 'KnowledgeDocument',
         component: () => import('@/views/knowledge/detail.vue'),
