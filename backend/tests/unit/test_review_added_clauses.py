@@ -315,6 +315,84 @@ class TestCoveredTerms:
         assert _covered_terms(items) == {}
 
 
+class TestMultiClauseChunkCoverage:
+    """整篇被解析成 1 个 chunk 时，条号并集不能当成「每个条号都已识别」。
+
+    真实栈实测（2026-11-22，真实 MySQL + MinIO + Kafka + worker + ES）：
+    5 行的 .txt 合同被解析成 **1 个 chunk**，`_load_clauses` 的 `clause_no` 因此是该块
+    **全部条号的并集**（V1=[1,2,3,4]、V2=[1,2,3,4,5]）。`_covered_refs` 于是生成
+    `{(r1,1)..(r1,5)}`，把新增的第5条也标成「已识别」→ added=0，违约金被静默吞掉。
+
+    条号并集不是「逐条命中」的证据，此时只能退回块级 + 命中词（句子级排除）。
+    """
+
+    BASE_TEXT = "第1条 标的。\n第2条 期限。\n第3条 付款期限：验收合格后30日内支付。\n第4条 归档。"
+    ADDED_LINE = "第5条 违约金：乙方逾期交付的，应按合同总金额的百分之五支付违约金。"
+
+    def _clause(self, chunk_id: str, text: str, numbers: list[int]) -> Clause:
+        return Clause(
+            chunk_id=chunk_id,
+            chunk_index=0,
+            text=text,
+            raw_text=text,
+            clause_no=numbers,
+            section_no=[],
+        )
+
+    @staticmethod
+    def _item(facts):
+        return SimpleNamespace(facts=facts)
+
+    def test_covered_refs_collapses_multi_clause_union_to_chunk_level(self) -> None:
+        from app.services.review_analysis_service import _covered_refs
+
+        items = [
+            self._item(
+                {
+                    "revised": {
+                        "status": "identified",
+                        "chunk_id": "r1",
+                        "clause_no": [1, 2, 3, 4, 5],
+                        "terms": ["验收合格"],
+                    }
+                }
+            )
+        ]
+
+        assert _covered_refs(items) == {("r1", None)}, "条号并集不得展开成逐条排除"
+
+    def test_covered_terms_collects_terms_for_multi_clause_chunk(self) -> None:
+        items = [
+            self._item(
+                {
+                    "revised": {
+                        "status": "identified",
+                        "chunk_id": "r1",
+                        "clause_no": [1, 2, 3, 4, 5],
+                        "terms": ["验收合格"],
+                    }
+                }
+            )
+        ]
+
+        assert _covered_terms(items) == {"r1": ("验收合格",)}
+
+    def test_new_clause_in_multi_clause_chunk_is_reported(self) -> None:
+        base = [self._clause("b1", self.BASE_TEXT, [1, 2, 3, 4])]
+        revised = [self._clause("r1", self.BASE_TEXT + "\n" + self.ADDED_LINE, [1, 2, 3, 4, 5])]
+
+        added = detect_added_clauses(
+            base,
+            revised,
+            exclude_refs={("r1", None)},
+            exclude_terms_by_chunk={"r1": ("验收合格",)},
+        )
+
+        texts = " ".join(c.text for c in added)
+        assert "违约金" in texts, f"新增条款被整块排除吞掉: {[c.text for c in added]}"
+        assert "第1条" not in texts, f"旧条款不应作为新增报出: {texts}"
+
+
 LONG_BASE = (
     "甲方应当在收到乙方开具的增值税专用发票并完成内部审批流程后，"
     "于验收合格之日起三十日内向乙方支付合同价款，付款方式为银行转账，"

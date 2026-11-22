@@ -2011,6 +2011,11 @@ def _covered_refs(items: list[ReviewItem]) -> set[tuple[str, int | None]]:
 
     用条款行级引用而不是整块，是因为单 chunk 文档里同一块可能既有已识别条款、
     又有真正新增的条款 —— 整块排除会把新增一起吞掉（issue #711）。
+
+    但**条号并集不是逐条命中**：整篇被解析成 1 个 chunk 时（小 .txt 合同常见），
+    `clause_no` 是该块全部条号的并集（实测 V1=[1,2,3,4]、V2=[1,2,3,4,5]）。
+    若按并集展开成逐条排除，新增的第5条会被当成「已识别」而永远不报（issue #761）。
+    所以并集一律退回块级 `(chunk_id, None)`，交给 `_covered_terms` + 句子级排除。
     """
     refs: set[tuple[str, int | None]] = set()
     for item in items:
@@ -2021,17 +2026,18 @@ def _covered_refs(items: list[ReviewItem]) -> set[tuple[str, int | None]]:
             if not chunk_id:
                 continue
             numbers = [n for n in (side_facts.get("clause_no") or []) if isinstance(n, int)]
-            if numbers:
-                refs.update((chunk_id, number) for number in numbers)
+            if len(numbers) == 1:
+                refs.add((chunk_id, numbers[0]))
             else:
                 refs.add((chunk_id, None))
     return refs
 
 
 def _covered_terms(items: list[ReviewItem]) -> dict[str, tuple[str, ...]]:
-    """已识别项在「没有条款号」的 chunk 里命中的词 —— 供句子级排除用（issue #748）。
+    """已识别项在「块级排除」位置命中的词 —— 供句子级排除用（issue #748 / #761）。
 
-    只收集**无条款号**的位置：有条号时 `_covered_refs` 已能精确到行，不需要词表。
+    收集两类位置：无条款号（无编号文档），以及条号是**并集**（整篇一个 chunk，
+    条号不能代表逐条命中）。单条号时 `_covered_refs` 已精确到行，不需要词表。
     专用抽取器（payment_term 等）不一定给 `terms`；缺词的结果是退回整块排除，
     与修复前一致（保守方向，不会因此多报）。
     """
@@ -2043,7 +2049,9 @@ def _covered_terms(items: list[ReviewItem]) -> dict[str, tuple[str, ...]]:
             chunk_id = side_facts.get("chunk_id")
             if not chunk_id:
                 continue
-            if [n for n in (side_facts.get("clause_no") or []) if isinstance(n, int)]:
+            numbers = [n for n in (side_facts.get("clause_no") or []) if isinstance(n, int)]
+            if len(numbers) == 1:
+                # 单条号：行级排除足够精确，词表不插手
                 continue
             hits = [t for t in (side_facts.get("terms") or []) if isinstance(t, str) and t]
             if hits:
