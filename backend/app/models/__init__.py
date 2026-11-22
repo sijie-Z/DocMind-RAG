@@ -4,6 +4,7 @@ from app.models.agent_tool_call import AgentToolCall, AgentToolResult, ToolCallS
 from app.models.api_key import ApiKey
 from app.models.chat import ChatMessage, ChatSession, DeletedChatSession
 from app.models.document import Document
+from app.models.knowledge_base import KnowledgeBase
 from app.models.knowledge_job import KnowledgeJobStatus, KnowledgeProcessingJob
 from app.models.manual import SystemManual
 from app.models.notification import Notification
@@ -17,6 +18,7 @@ from app.models.rbac import (
     role_permission_association,
     user_organization_role_association,
 )
+from app.models.retrieval_eval import RetrievalEvalCase
 from app.models.review import (
     ReviewCase,
     ReviewDocumentMeta,
@@ -63,6 +65,7 @@ __all__ = [
     "ReviewEvidence",
     "ReviewExport",
     "ReviewRuleSet",
+    "RetrievalEvalCase",
     "TokenUsageRecord",
     "SystemManual",
     "Permission",
@@ -73,6 +76,7 @@ __all__ = [
     "UserActivityLog",
     "KnowledgeProcessingJob",
     "KnowledgeJobStatus",
+    "KnowledgeBase",
     "UserSettings",
     "Workflow",
     "WorkflowExecution",

@@ -145,8 +145,11 @@ class KnowledgeService:
         search_mode: str | None = None,
         document_ids: list[str] | None = None,
         metadata_filters: dict[str, list[str]] | None = None,
+        knowledge_base_id: str | None = None,
         debug: bool = False,
         viewer_user_id: int | None = None,
+        *,
+        strict: bool = False,
     ) -> tuple[list[dict[str, Any]], dict[str, Any] | None]:
         """
         搜索知识库 - 统一使用 RagService 以获得更强能力
@@ -161,6 +164,11 @@ class KnowledgeService:
         ``search_knowledge`` 不带诊断，避免调用方（建议词等）承担额外载荷。
 
         W0-6：organization_id 必填，且必须是正整数组织 ID（0/None 不再兜底）。
+
+        ``strict``（默认 False）：普通检索端点维持既有 best-effort 降级（一般异常
+        吞成空结果）；仅检索评测等需要区分「查不到」与「查询失败」的调用方
+        显式开启后，一般异常原样上抛。``RetrievalUnavailableError`` 与
+        ``SourceProvenanceUnavailableError`` 与 strict 无关，始终按既有语义上抛。
         """
         from app.services.rag_service import rag_service
 
@@ -179,6 +187,7 @@ class KnowledgeService:
                 top_k=top_k,
                 document_ids=document_ids,
                 metadata_filters=metadata_filters,
+                knowledge_base_id=knowledge_base_id,
                 search_mode=search_mode,
                 debug=debug,
                 viewer_user_id=viewer_user_id,
@@ -244,7 +253,7 @@ class KnowledgeService:
             # issue #292：检索后端服务故障/超时不得回落成「没有相关内容」（假空数组）。
             # 原样上抛 —— /search 端点映射为 502（ExternalServiceError），
             # suggestions 等 best-effort 调用方自行降级为空并留痕；绝不在这里吞成 []。
-            logger.error("Knowledge search unavailable: retrieval backend failure", exc_info=True)
+            logger.error("Knowledge search unavailable: retrieval backend failure")
             raise
         except SourceProvenanceUnavailableError:
             # strict 模式下全部命中都缺 parser 原文：这是「需重建」的确定性拒绝，
@@ -252,7 +261,11 @@ class KnowledgeService:
             logger.warning("Knowledge search refused: source original unavailable")
             raise
         except Exception as e:
-            logger.error(f"Knowledge search failed: {e}")
+            # strict=true 专供评测：下游异常必须如实冒泡，不能伪装成「零召回」。
+            if strict:
+                raise
+            # 固定文案，禁止回显 {e}：异常消息可能携带 query / 文档正文。
+            logger.error("Knowledge search failed: %s", type(e).__name__)
             return [], None
 
     async def get_search_suggestions(

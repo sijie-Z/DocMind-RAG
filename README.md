@@ -217,10 +217,10 @@ DocMind/
 │   │   │   └── tools/               #   扩展工具（20 个；合计 31 个内置工具）
 │   │   ├── rag/                     # 检索管线：retriever / reranker / pipeline / cache
 │   │   ├── api/v1/
-│   │   │   ├── router.py            # 主路由（注册 29 个模块）
-│   │   │   └── endpoints/           # 端点实现（29 个文件）
-│   │   ├── services/                # 业务服务层（36 个服务）
-│   │   ├── models/                  # ORM 模型（21 个模型文件）
+│   │   │   ├── router.py            # 主路由（注册 30 个模块）
+│   │   │   └── endpoints/           # 端点实现（30 个文件）
+│   │   ├── services/                # 业务服务层（38 个服务）
+│   │   ├── models/                  # ORM 模型（23 个模型文件）
 │   │   ├── core/                    # 配置 / DB / Redis / ES / MinIO / Kafka / JWT
 │   │   └── worker/                  # Kafka 消费者（解析 → 分块 → 嵌入 → 索引）
 │   ├── tests/                       # 后端测试（单测 + API + 集成）
@@ -236,7 +236,7 @@ DocMind/
 
 ### 🌐 API 层 (`backend/app/api/v1/`)
 
-29 个端点模块，统一 `/api/v1` 前缀：
+30 个端点模块，统一 `/api/v1` 前缀：
 
 | 模块 | 路由前缀 | 说明 |
 |------|----------|------|
@@ -246,7 +246,8 @@ DocMind/
 | 文件管理 | `/files` | 上传/下载/删除，MinIO 存储，分块上传 |
 | 文档管理 | `/documents` | 文档解析、向量化、知识库索引、状态追踪 |
 | 聊天 | `/chat` | 会话 CRUD、SSE 流式问答、严格模式、调试端点 |
-| 知识库 | `/knowledge` | 知识库 CRUD、检索、统计、设置 |
+| 知识库 | `/knowledge` | 知识库文档检索、统计、设置 |
+| 知识库管理 | `/knowledge-bases` | 多知识库实体 CRUD（组织隔离） |
 | 合同核验 | `/reviews` | 核验案件/核验项/证据快照 + 确定性抽取与 V1/V2 对齐 + 逐项决策与核验单导出（原文证据 + 版本哈希） |
 | 组织管理 | `/organizations` | 组织 CRUD、成员管理、角色分配 |
 | 组织设置 | `/organizations` | 组织级设置读写与审计（与组织管理共用前缀） |
