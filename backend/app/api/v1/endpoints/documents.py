@@ -172,6 +172,7 @@ async def upload_document(
     tags: str | None = Form(None),
     visibility: str | None = Form(None),
     parse_profile: str | None = Form(None),
+    knowledge_base_id: str | None = Form(None),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -233,6 +234,15 @@ async def upload_document(
         ):
             raise ValidationError("visibility 必须为 organization 或 private")
 
+        # P2 多库归属：可选，且必须是**本组织**的知识库；跨组织/不存在的 id
+        # 在上传入口拒绝，不能借上传挂到别人的库上。
+        effective_kb_id: str | None = None
+        if isinstance(knowledge_base_id, str) and knowledge_base_id.strip():
+            from app.services.knowledge_base_service import knowledge_base_service
+
+            await knowledge_base_service.get(db, org_id, knowledge_base_id.strip())
+            effective_kb_id = knowledge_base_id.strip()
+
         # 限制上传大小后再读文件，避免超大文件先占满内存
         file.file.seek(0, 2)
         declared_size = file.file.tell()
@@ -288,6 +298,7 @@ async def upload_document(
             description=description,
             keywords=keywords_list,  # ✅ 已修正字段名！
             visibility=DocumentVisibility(effective_visibility),
+            knowledge_base_id=effective_kb_id,
         )
 
         db.add(new_doc)

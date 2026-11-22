@@ -114,6 +114,15 @@ class Document(Base):
     organization_id: Mapped[int] = mapped_column(
         Integer, ForeignKey("organizations.id"), index=True, comment="所属组织"
     )
+    # 可选的知识库归属：NULL = 旧语义（组织内全部文档），绝不隐式归入某个库。
+    # FK 目标由迁移 033 建立；具体组织归属以 documents.organization_id 为准，
+    # 检索侧按「org + kb_id」双条件解析，跨组织 kb_id 不能扩大范围。
+    knowledge_base_id: Mapped[str | None] = mapped_column(
+        String(36),
+        ForeignKey("knowledge_bases.id"),
+        index=True,
+        comment="所属知识库（NULL=组织级默认库）",
+    )
     uploaded_by: Mapped[int] = mapped_column(
         Integer, ForeignKey("users.id"), index=True, comment="上传用户"
     )

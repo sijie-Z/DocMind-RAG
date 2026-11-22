@@ -140,6 +140,7 @@ class RAGPipeline:
         top_k: int = 5,
         document_ids: list[str] | None = None,
         metadata_filters: dict[str, list[str]] | None = None,
+        knowledge_base_id: str | None = None,
         debug: bool = False,
         search_mode: str | None = None,
         viewer_user_id: int | None = None,
@@ -159,6 +160,7 @@ class RAGPipeline:
                 top_k,
                 document_ids,
                 metadata_filters,
+                knowledge_base_id,
                 debug=debug,
                 search_mode=search_mode,
                 viewer_user_id=viewer_user_id,
@@ -185,6 +187,7 @@ class RAGPipeline:
         top_k: int = 5,
         document_ids: list[str] | None = None,
         metadata_filters: dict[str, list[str]] | None = None,
+        knowledge_base_id: str | None = None,
         debug: bool = False,
         search_mode: str | None = None,
         viewer_user_id: int | None = None,
@@ -246,8 +249,11 @@ class RAGPipeline:
             # 即使结果随后被 ACL 过滤，缓存命中数与 sources 仍会泄漏存在性。
             blocked_ids: list[str] = []
             acl_enabled = viewer_user_id is not None
-            if acl_enabled or metadata_filters:
+            if acl_enabled or metadata_filters or knowledge_base_id:
                 from app.core.database import AsyncSessionLocal
+                from app.rag.knowledge_base_filter import (
+                    resolve_knowledge_base_document_ids,
+                )
                 from app.rag.metadata_filter import (
                     _NO_MATCH,
                     intersect_document_ids,
@@ -272,6 +278,25 @@ class RAGPipeline:
                                 debug_info["metadata_filter"] = {"matched_document_ids": []}
                             return [], debug_info
                         document_ids = narrowed
+                    if knowledge_base_id:
+                        # 知识库只是另一种收窄：跨组织/空库返回 []，走同一个早退分支。
+                        kb_ids = await resolve_knowledge_base_document_ids(
+                            session, organization_id, knowledge_base_id
+                        )
+                        narrowed = intersect_document_ids(document_ids, kb_ids)
+                        if narrowed is _NO_MATCH:
+                            if debug and debug_info is not None:
+                                debug_info["knowledge_base_filter"] = {
+                                    "knowledge_base_id": knowledge_base_id,
+                                    "matched_document_ids": [],
+                                }
+                            return [], debug_info
+                        document_ids = narrowed
+                        if debug and debug_info is not None:
+                            debug_info["knowledge_base_filter"] = {
+                                "knowledge_base_id": knowledge_base_id,
+                                "matched_document_ids": list(document_ids or []),
+                            }
 
             # SemanticCache 是轻量命名空间配置；真实实例按本次 mode 选择，
             # 测试替身/自定义实现保持原对象。避免 strict 子集写入 compat 域。

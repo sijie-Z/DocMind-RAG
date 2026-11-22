@@ -28,6 +28,7 @@ from app.api.v1.endpoints import (
     documents,
     files,
     knowledge,
+    knowledge_bases,
     llm_config,
     manuals,
     mcp,
@@ -60,6 +61,13 @@ ROUTER_SPECS: dict[str, tuple[APIRouter, str, list[str], str]] = {
     "documents": (documents.router, "/documents", ["文档管理(RAG)"], "rag"),
     "chat": (chat.router, "/chat", ["聊天"], "rag"),
     "knowledge": (knowledge.router, "/knowledge", ["知识库"], "rag"),
+    # P2 多知识库实体 CRUD（与现有文档型 /knowledge 端点分开前缀）。
+    "knowledge_bases": (
+        knowledge_bases.router,
+        "/knowledge-bases",
+        ["知识库管理"],
+        "rag",
+    ),
     # 合同核验案件（Batch 2）：建案/列表/详情/证据选择；证据只读 parser 原文。
     "reviews": (reviews.router, "/reviews", ["合同核验"], "rag"),
     "organizations": (organizations.router, "/organizations", ["组织管理"], "core"),
