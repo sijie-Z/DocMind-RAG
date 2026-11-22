@@ -4,7 +4,7 @@
 >
 > This guide only *references* the sources of truth:
 > - ports, credentials, and service orchestration: `backend/docker-compose.yml` and `backend/.env.docker.example`;
-> - headline numbers (31 built-in tools / 10 tools injected by default / 29 endpoint modules / 38 frontend routes / 24 SSE event types): `docs/facts.json`; existing anchors in README/architecture pages are checked on every PR by `backend/scripts/check_doc_facts.py`, and this guide mirrors them (its tool/endpoint/route/SSE anchors are now also checked);
+> - headline numbers (31 built-in tools / 10 tools injected by default / 29 endpoint modules / 39 frontend routes / 24 SSE event types): `docs/facts.json`; existing anchors in README/architecture pages are checked on every PR by `backend/scripts/check_doc_facts.py`, and this guide mirrors them (its tool/endpoint/route/SSE anchors are now also checked);
 > - architecture and design rationale: `README.md`, `AGENT_ARCHITECTURE.md`, `docs/decisions/`.
 >
 > 中文版：[USER_GUIDE.md](USER_GUIDE.md)
@@ -502,7 +502,16 @@ Reconciliation compares `documents.status=INDEXED` + `chunk_count` against ES ch
 
 **Graph**: after successful indexing, a knowledge graph is extracted non-blocking and stored per organization in Redis (30-day TTL). It does not participate in retrieval ranking, and failures do not mark the document FAILED. Backfill historical documents with `backend/scripts/backfill_graph.py`; the graph page truncates to `max_nodes` (backend 5-200, default 50).
 
-### 4.2 Chat and deep analysis
+### 4.2 Retrieval eval run history and trends
+
+The knowledge page’s “Retrieval eval run history” (`/knowledge/eval-runs`) turns one-off evaluation into a traceable quality asset:
+
+- `POST /api/v1/knowledge/eval/run` stays **non-persistent by default** (original read-only contract); only explicit `persist: true` or `POST /api/v1/knowledge/eval/runs` saves a run.
+- A run stores organization, creator, `top_k`, case ids/scope, case-set hash, counts, metrics, failed case ids and per-case results; cross-org detail/export returns 404.
+- `GET /eval/runs` (list, optional `case_set_hash` filter), `GET /eval/runs/{id}` (detail), `GET /eval/runs/trend` (last 30 runs; failed runs excluded from metric averages), and `GET /eval/runs/{id}/export?format=json|csv` (same-source export for regression comparison).
+- Audit records contain only organization, user, counts, format and field names — `query`, case names and result bodies never enter the audit log; per-case results appear only in the org-scoped detail page.
+
+### 4.3 Chat and deep analysis
 
 The chat page (`/chat`) has two modes, selected by the "Quick Q&A / Deep analysis" radio in the input area (`frontend/src/views/chat/components/ChatInput.vue`):
 

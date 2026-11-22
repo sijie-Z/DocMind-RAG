@@ -111,6 +111,10 @@ class RetrievalEvalRunRequest(BaseModel):
         le=50,
         description="本次评测的检索/截断深度（1..50，默认 5=rank-5 产品口径；与组织 retrieval_top_k 无关）",
     )
+    persist: bool = Field(
+        False,
+        description="是否把本次运行写入评测历史（默认 false：保持原只读契约，不改调用方行为）",
+    )
 
     @field_validator("case_ids")
     @classmethod

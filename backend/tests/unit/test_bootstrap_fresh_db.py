@@ -219,7 +219,7 @@ async def test_guarded_database_at_head_is_not_rebuilt_or_remigrated(sqlite_db, 
 async def test_guarded_legacy_database_still_requires_explicit_adoption(
     sqlite_db, monkeypatch, auto_migrate
 ):
-    """43 表 create_all/legacy 库在两种策略下都不得被自动收养或改写。
+    """44 表 create_all/legacy 库在两种策略下都不得被自动收养或改写。
 
     P2 新增 knowledge_bases 与 retrieval_eval_case，两张表均来自 ORM 模型；
     该用例断言的是“create_all 产出的表数”必须随模型数同步，不是固定历史值。
@@ -228,7 +228,7 @@ async def test_guarded_legacy_database_still_requires_explicit_adoption(
     async with engine.begin() as conn:
         await conn.run_sync(database_module.Base.metadata.create_all)
     tables_before = _table_names(db_path)
-    assert len(tables_before) == 43
+    assert len(tables_before) == 44
     assert _revision_rows(db_path) is None
 
     create_all = _spy_create_all(monkeypatch)

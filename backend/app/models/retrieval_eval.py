@@ -1,14 +1,19 @@
-"""检索评测测试集（竞品对标 P2）：保存的「query → 期望文档集合」。
+"""检索评测测试集与运行历史（竞品对标 P2 / 下一批）。
 
-一行 = 一个组织内的一条检索评测用例；``expected_document_ids`` 是**文档级**
-金标（只认 document_id，不绑条号/文件名），与 ``backend/evals`` 的条款级
-golden set 互补：
+一行用例 = 一个组织内的一条「query → 期望文档集合」；一行运行 = 显式持久化
+的一次评测快照：
 
 - 条款级（golden set + CI 门禁）：文件名 + 条号定义位，衡量「找对条款」；
 - 文档级（本表，产品化「保存测试集 → 跑评测 → 看指标」）：衡量「找对文档」。
 
-运行评测默认只读本表、结果不落库（不引入第二套判定真源）；删除按组织
-隔离，跨组织删除一律 404（不回显存在性）。
+运行评测默认只读本表、结果不落库；只有显式 persist 才写 retrieval_eval_run
+（不引入第二套判定真源）；删除按组织隔离，跨组织删除一律 404（不回显存在性）。
+
+运行历史按组织隔离；逐条结果（含 query 原文，仅本组织授权用户可见）与指标、
+case_ids + 用例集哈希一起固化，用于回归与趋势对比。case_set_hash 对用例
+id + 金标集合 + query 取稳定哈希（排序、定分隔符），与 top_k 一起写入导出
+文件：哈希相同即评测输入集合相同，跨运行指标可比。审计 detail 只记
+org/user/条数与字段名，绝不写 query 或用例名。
 """
 
 from datetime import datetime
@@ -51,4 +56,45 @@ class RetrievalEvalCase(Base):
     )
     updated_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), onupdate=func.now(), comment="更新时间"
+    )
+
+
+class RetrievalEvalRun(Base):
+    """一次持久化评测运行（组织内可见；跨组织读取一律 404）。"""
+
+    __tablename__ = "retrieval_eval_run"
+    __table_args__ = (Index("ix_retrieval_eval_run_org_created", "organization_id", "created_at"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    organization_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("organizations.id"),
+        nullable=False,
+        comment="所属组织（租户隔离键）",
+    )
+    created_by: Mapped[int] = mapped_column(
+        Integer, ForeignKey("users.id"), nullable=False, comment="运行发起人"
+    )
+    top_k: Mapped[int] = mapped_column(Integer, nullable=False, comment="本次运行检索深度")
+    case_ids: Mapped[Any] = mapped_column(
+        JSON, nullable=False, comment="本次运行的用例 id（用例顺序）"
+    )
+    case_scope: Mapped[str] = mapped_column(
+        String(16), nullable=False, comment="用例范围：all=全量 / subset=显式子集"
+    )
+    case_set_hash: Mapped[str] = mapped_column(
+        String(64), nullable=False, comment="用例集合输入哈希（id+query+金标，排序稳定）"
+    )
+    counts: Mapped[Any] = mapped_column(
+        JSON, nullable=False, comment="计数：cases/evaluated/errors"
+    )
+    metrics: Mapped[Any] = mapped_column(
+        JSON, nullable=False, comment="指标：recall_at_k/mrr/document_hit_at_k/hit_at_k"
+    )
+    error_case_ids: Mapped[Any] = mapped_column(JSON, nullable=False, comment="失败用例 id 列表")
+    results: Mapped[Any] = mapped_column(
+        JSON, nullable=False, comment="逐条结果（仅组织内授权用户可见）"
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), comment="创建时间"
     )

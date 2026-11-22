@@ -125,6 +125,7 @@ const T5_EXTRA_KEYS = ['profile.overview']
  */
 const HIDDEN_PAGES: Record<string, string> = {
   KnowledgeGraph: 'Knowledge',
+  KnowledgeEvalRuns: 'Knowledge',
   WorkflowEditor: 'Workflow',
   AgentMemory: 'Workflow',
   Notifications: 'Notifications',
@@ -148,6 +149,7 @@ const BREADCRUMB_PAGES: Record<string, string> = {
 /** 深页页头注册表（T9）：h1 必须引用路由 meta.title 键（顶栏/面包屑/h1 同源） */
 const DEEP_PAGE_HEADINGS: Record<string, string> = {
   KnowledgeGraph: '../../views/knowledge/graph.vue',
+  KnowledgeEvalRuns: '../../views/knowledge/evalRunHistory.vue',
   AgentMemory: '../../views/workflow/memory.vue',
 }
 

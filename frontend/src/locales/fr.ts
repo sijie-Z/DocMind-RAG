@@ -1894,6 +1894,64 @@ export default {
       }
     }
   },
+  evalRuns: {
+    title: 'Historique des exécutions d’évaluation',
+    subtitle: 'Les exécutions enregistrées sont traçables, exportables et comparables ; seules les exécutions explicitement enregistrées apparaissent ici',
+    refresh: 'Actualiser',
+    filterSet: 'Jeu de cas',
+    allSets: 'Tous les jeux de cas',
+    filteredCount: '{count}/{total} exécutions affichées',
+    loadFailed: 'Échec du chargement de l’historique',
+    retry: 'Réessayer',
+    emptyTitle: 'Aucune exécution enregistrée',
+    emptyDesc: 'Choisissez « enregistrer cette exécution » lors d’une évaluation ; les métriques et résultats par cas apparaîtront ici.',
+    trend: {
+      title: 'Tendance des métriques',
+      subtitle: 'Exécutions du plus ancien au plus récent ; les métriques vides des exécutions échouées sont exclues des moyennes',
+      metric: 'Métrique',
+      runs: 'Exécutions',
+      succeededRuns: 'Réussies',
+      failedRuns: 'Échouées',
+      average: 'Moyenne {metric}',
+      metrics: {
+        recall_at_k: "Rappel documentaire{'@'}k",
+        mrr: 'MRR',
+        document_hit_at_k: "Taux de hit documentaire{'@'}k"
+      },
+      noData: 'Aucune donnée de métrique à afficher',
+      chartLabel: 'Courbe de {metric} au fil des exécutions',
+      tableView: 'Voir le tableau (sans survol)'
+    },
+    columns: {
+      time: 'Heure',
+      hash: 'Hachage du jeu',
+      scope: 'Portée',
+      topK: 'top_k',
+      cases: 'Cas',
+      evaluated: 'Évalués',
+      errors: 'Erreurs',
+      recall: "Rappel{'@'}k",
+      actions: 'Actions',
+      status: 'Statut',
+      name: 'Cas',
+      query: 'requête'
+    },
+    scopeAll: 'Tous les cas',
+    scopeSubset: 'Sous-ensemble explicite',
+    statusOk: 'OK',
+    statusFailed: 'Échec',
+    viewDetail: 'Voir les détails',
+    detail: {
+      title: 'Détails et export',
+      loadFailed: 'Échec du chargement des détails'
+    },
+    exportJson: 'Exporter JSON',
+    exportCsv: 'Exporter CSV',
+    exportFailed: 'Échec de l’export ; veuillez réessayer',
+    replay: 'Rejouer le jeu enregistré',
+    replaySuccess: 'Rejeu enregistré et historique actualisé',
+    replayFailed: 'Échec du rejeu ; veuillez réessayer'
+  },
   router: {
     notFound: 'Page introuvable',
     serviceUnavailable: 'Service temporairement indisponible',
@@ -1901,6 +1959,7 @@ export default {
     login: 'Connexion',
     register: 'S\'inscrire',
     knowledgeGraph: 'Graphe de connaissances',
+    knowledgeEvalRuns: 'Historique des évaluations',
     knowledgeDocument: 'Détails du document',
     workflowEditor: 'Éditeur de workflow',
     agentMemory: 'Mémoire de l\'Agent'

@@ -1893,6 +1893,64 @@ export default {
       }
     }
   },
+  evalRuns: {
+    title: '検索評価の実行履歴',
+    subtitle: '保存済みの実行は追跡・エクスポート・比較できます。明示的に保存した実行のみ表示されます',
+    refresh: '更新',
+    filterSet: 'ケースセット',
+    allSets: 'すべてのケースセット',
+    filteredCount: '{total} 件中 {count} 件を表示',
+    loadFailed: '評価実行履歴の読み込みに失敗しました',
+    retry: '再試行',
+    emptyTitle: '保存済みの評価実行はまだありません',
+    emptyDesc: '評価実行時に「この実行を保存」を選ぶと、指標とケースごとの結果が比較用に表示されます。',
+    trend: {
+      title: '指標の推移',
+      subtitle: '実行時刻の古い順に表示。失敗した実行の空指標は平均から除外します',
+      metric: '推移指標',
+      runs: '実行回数',
+      succeededRuns: '成功',
+      failedRuns: '失敗',
+      average: '平均 {metric}',
+      metrics: {
+        recall_at_k: "ドキュメント再現率{'@'}k",
+        mrr: 'MRR',
+        document_hit_at_k: "ドキュメントヒット率{'@'}k"
+      },
+      noData: 'プロットできる指標データがありません',
+      chartLabel: '{metric} の実行時刻別推移グラフ',
+      tableView: 'データ表を見る（ホバー不要）'
+    },
+    columns: {
+      time: '時刻',
+      hash: 'ケースセットハッシュ',
+      scope: '範囲',
+      topK: 'top_k',
+      cases: 'ケース数',
+      evaluated: '評価済み',
+      errors: 'エラー数',
+      recall: "再現率{'@'}k",
+      actions: '操作',
+      status: '状態',
+      name: 'ケース',
+      query: 'query'
+    },
+    scopeAll: '全件',
+    scopeSubset: '指定サブセット',
+    statusOk: '成功',
+    statusFailed: '失敗',
+    viewDetail: '詳細を見る',
+    detail: {
+      title: '実行詳細とエクスポート',
+      loadFailed: '実行詳細の読み込みに失敗しました'
+    },
+    exportJson: 'JSON をエクスポート',
+    exportCsv: 'CSV をエクスポート',
+    exportFailed: 'エクスポートに失敗しました。しばらくしてから再試行してください',
+    replay: '保存済みケースで再実行',
+    replaySuccess: '再実行を保存し、履歴を更新しました',
+    replayFailed: '再実行に失敗しました。しばらくしてから再試行してください'
+  },
   router: {
     notFound: 'ページが見つかりません',
     serviceUnavailable: 'サービス一時利用不可',
@@ -1900,6 +1958,7 @@ export default {
     login: 'ログイン',
     register: '登録',
     knowledgeGraph: 'ナレッジグラフ',
+    knowledgeEvalRuns: '評価実行履歴',
     knowledgeDocument: 'ドキュメント詳細',
     workflowEditor: 'ワークフローエディタ',
     agentMemory: 'Agent メモリ'
