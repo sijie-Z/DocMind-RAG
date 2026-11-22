@@ -17,6 +17,7 @@ from app.models.rbac import (
     role_permission_association,
     user_organization_role_association,
 )
+from app.models.retrieval_eval import RetrievalEvalCase
 from app.models.review import (
     ReviewCase,
     ReviewDocumentMeta,
@@ -63,6 +64,7 @@ __all__ = [
     "ReviewEvidence",
     "ReviewExport",
     "ReviewRuleSet",
+    "RetrievalEvalCase",
     "TokenUsageRecord",
     "SystemManual",
     "Permission",
