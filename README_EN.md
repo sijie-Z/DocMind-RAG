@@ -220,8 +220,8 @@ DocMind/
 │   │   ├── api/v1/
 │   │   │   ├── router.py            # main router (30 modules registered)
 │   │   │   └── endpoints/           # Endpoint implementations (30 files)
-│   │   ├── services/                # business services (37 services)
-│   │   ├── models/                  # ORM models (22 model files)
+│   │   ├── services/                # business services (38 services)
+│   │   ├── models/                  # ORM models (23 model files)
 │   │   ├── core/                    # config / DB / Redis / ES / MinIO / Kafka / JWT
 │   │   └── worker/                  # Kafka consumer (parse → chunk → embed → index)
 │   ├── tests/                       # backend tests (unit + API + integration)
