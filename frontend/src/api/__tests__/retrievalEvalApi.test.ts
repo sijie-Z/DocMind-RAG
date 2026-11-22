@@ -24,12 +24,14 @@ beforeEach(() => {
 })
 
 describe('retrievalEval API', () => {
-  it('list/detail/trend 走组织隔离的无 org 参数端点', async () => {
+  it('list 把 case_set_hash 交给服务端（不做客户端过滤的隐式截断）', async () => {
     await listEvalRuns({ page: 2, page_size: 10, case_set_hash: 'a'.repeat(64) })
     expect(get).toHaveBeenCalledWith('/knowledge/eval/runs', {
       params: { page: 2, page_size: 10, case_set_hash: 'a'.repeat(64) }
     })
+  })
 
+  it('detail/trend 走组织隔离端点', async () => {
     await getEvalRun('run/1')
     expect(get).toHaveBeenCalledWith('/knowledge/eval/runs/run%2F1')
 

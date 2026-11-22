@@ -40,7 +40,7 @@
           @update:value="onMetricChange"
         />
         <span class="text-xs tabular-nums text-slate-500 dark:text-slate-400">
-          {{ t('evalRuns.filteredCount', { count: visibleRuns.length, total: runs.length }) }}
+          {{ t('evalRuns.filteredCount', { count: runs.length, total: listTotal }) }}
         </span>
       </div>
 
@@ -125,7 +125,7 @@
                 :key="`hit-${point.id}`"
                 :x="hitX(index)"
                 :y="padTop"
-                :width="hitWidth"
+                :width="hitWidth(index)"
                 :height="chartHeight - padTop - padBottom"
                 fill="transparent"
                 tabindex="0"
@@ -135,6 +135,8 @@
                 @focus="hovered = index"
                 @blur="hovered = null"
               />
+              <text v-if="chartPoints.length" :x="padLeft" :y="chartHeight - 8" class="eval-axis">{{ shortTime(chartPoints[0].created_at) }}</text>
+              <text v-if="chartPoints.length" :x="chartWidth - padRight" :y="chartHeight - 8" text-anchor="end" class="eval-axis">{{ shortTime(chartPoints.at(-1)!.created_at) }}</text>
               <text v-if="chartPoints.length" :x="xFor(chartPoints.length - 1)" :y="yFor(chartPoints.at(-1)!.value) - 12" text-anchor="end" class="eval-end-label">
                 {{ formatValue(chartPoints.at(-1)!.value) }}
               </text>
@@ -199,7 +201,7 @@
             <div class="flex flex-wrap gap-2">
               <n-button size="small" secondary @click="exportRun('json')">{{ t('evalRuns.exportJson') }}</n-button>
               <n-button size="small" secondary @click="exportRun('csv')">{{ t('evalRuns.exportCsv') }}</n-button>
-              <n-button size="small" type="primary" :loading="replaying" @click="replay">{{ t('evalRuns.replay') }}</n-button>
+              <n-button data-test="eval-replay" size="small" type="primary" :loading="replaying" @click="replay">{{ t('evalRuns.replay') }}</n-button>
             </div>
           </div>
           <dl class="mt-3 grid grid-cols-2 gap-3 text-xs md:grid-cols-4">
@@ -226,7 +228,7 @@
                   <td class="py-1 pr-3">{{ result.status === 'ok' ? t('evalRuns.statusOk') : t('evalRuns.statusFailed') }}<span v-if="result.error_code" class="ml-1 text-red-600 dark:text-red-400">! {{ result.error_code }}</span></td>
                   <td class="py-1 pr-3">{{ result.name }}</td>
                   <td class="py-1 pr-3 break-all">{{ result.query }}</td>
-                  <td class="py-1 tabular-nums">{{ formatValue(Number(result.recall_at_k)) }}</td>
+                  <td class="py-1 tabular-nums">{{ formatValue(result.recall_at_k) }}</td>
                 </tr>
               </tbody>
             </table>
@@ -263,6 +265,7 @@ const router = useRouter()
 const message = useDedupedMessage()
 
 const runs = ref<EvalRunSummary[]>([])
+const listTotal = ref(0)
 const trend = ref<EvalTrend | null>(null)
 const detail = ref<EvalRunDetail | null>(null)
 const error = ref('')
@@ -278,9 +281,8 @@ const metric = computed<MetricKey>(() => {
   return (METRICS as readonly string[]).includes(value) ? (value as MetricKey) : 'recall_at_k'
 })
 const metricLabel = computed(() => t(`evalRuns.trend.metrics.${metric.value}`))
-const visibleRuns = computed(() =>
-  selectedHash.value ? runs.value.filter((run) => run.case_set_hash === selectedHash.value) : runs.value
-)
+// 服务端按 case_set_hash 过滤；前端不再二次截断，否则超过 page_size 的运行会被静默隐藏。
+const visibleRuns = computed(() => runs.value)
 
 const hashOptions = computed(() => {
   const hashes = [...new Set(runs.value.map((run) => run.case_set_hash))]
@@ -302,11 +304,16 @@ async function loadAll(): Promise<void> {
   error.value = ''
   try {
     const [listRes, trendRes] = await Promise.all([
-      listEvalRuns({ page: 1, page_size: 200 }),
+      listEvalRuns({
+        page: 1,
+        page_size: 200,
+        case_set_hash: selectedHash.value || undefined
+      }),
       getEvalTrend({ case_set_hash: selectedHash.value || undefined, limit: 30 })
     ])
     const list = apiUnwrap<{ data: EvalRunSummary[]; total: number }>(listRes)
     runs.value = list?.data || []
+    listTotal.value = list?.total ?? runs.value.length
     trend.value = apiUnwrap<EvalTrend>(trendRes) || null
   } catch (e) {
     error.value = e instanceof Error ? e.message : String(e)
@@ -395,24 +402,48 @@ const padTop = 12
 const padBottom = 28
 const chartPoints = computed(() =>
   (trend.value?.points || [])
-    .map((point) => ({ id: point.id, created_at: point.created_at || '', value: point.metrics[metric.value] }))
-    .filter((point): point is { id: string; created_at: string; value: number } => point.value !== null)
+    .map((point) => ({
+      id: point.id,
+      created_at: point.created_at || '',
+      time: Date.parse(point.created_at || ''),
+      value: point.metrics[metric.value]
+    }))
+    .filter(
+      (point): point is { id: string; created_at: string; time: number; value: number } =>
+        point.value !== null && Number.isFinite(point.time)
+    )
 )
+// X 轴用真实时间定位；失败运行的 null 指标不进入折线，但参与时间跨度，
+// 避免「缺一次运行就把后续点挤到相邻位置」的时间语义失真。
+const timeBounds = computed(() => {
+  const times = (trend.value?.points || [])
+    .map((point) => Date.parse(point.created_at || ''))
+    .filter(Number.isFinite)
+  return { min: Math.min(...times), max: Math.max(...times) }
+})
 function xFor(index: number): number {
-  const count = chartPoints.value.length
-  if (count <= 1) return (padLeft + chartWidth - padRight) / 2
-  return padLeft + (index * (chartWidth - padLeft - padRight)) / (count - 1)
+  const { min, max } = timeBounds.value
+  const time = chartPoints.value[index]?.time
+  if (time === undefined || max <= min) return (padLeft + chartWidth - padRight) / 2
+  return padLeft + ((time - min) / (max - min)) * (chartWidth - padLeft - padRight)
 }
 function hitX(index: number): number {
-  if (chartPoints.value.length <= 1) return xFor(index) - 12
-  const step = (chartWidth - padLeft - padRight) / (chartPoints.value.length - 1)
-  return Math.max(padLeft, xFor(index) - Math.max(step / 2, 12))
+  const points = chartPoints.value
+  if (points.length <= 1) return Math.max(padLeft, xFor(index) - 12)
+  const left = index === 0 ? padLeft : (xFor(index - 1) + xFor(index)) / 2
+  return Math.max(padLeft, left)
 }
-const hitWidth = computed(() => {
-  const count = chartPoints.value.length
-  if (count <= 1) return 24
-  return Math.min(chartWidth - padRight, xFor(count - 1) + Math.max((chartWidth - padLeft - padRight) / (count - 1) / 2, 12)) - hitX(count - 1)
-})
+function hitWidth(index: number): number {
+  const points = chartPoints.value
+  if (points.length <= 1) return 24
+  const right = index === points.length - 1 ? chartWidth - padRight : (xFor(index) + xFor(index + 1)) / 2
+  return Math.max(12, right - hitX(index))
+}
+function shortTime(value: string): string {
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return '—'
+  return `${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')} ${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`
+}
 function yFor(value: number): number {
   const clamped = Math.max(0, Math.min(1, value))
   return padTop + (1 - clamped) * (chartHeight - padTop - padBottom)

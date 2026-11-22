@@ -9,6 +9,7 @@ import csv
 import io
 import json
 from datetime import datetime, timedelta
+from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
@@ -57,7 +58,7 @@ async def _seed_runs(env, count=3):
     base_time = datetime(2026, 11, 20, 12, 0, 0)
     async with env.factory() as s:
         db_case = await s.get(RetrievalEvalCase, case["id"])
-        fingerprint = svc.case_set_fingerprint([db_case], top_k=5)
+        fingerprint = svc.case_set_fingerprint([db_case])
         for index in range(count):
             metrics = {
                 "recall_at_k": 0.5 + index * 0.1,
@@ -100,6 +101,72 @@ async def _seed_runs(env, count=3):
             runs.append(run)
         await s.commit()
     return runs, fingerprint
+
+
+# ── 用例集哈希（内容寻址 / 变异判别）───────────────────────────────────
+
+
+def test_case_set_fingerprint_normalizes_order_and_tracks_content():
+    """哈希按用例集内容计算：输入顺序无关；query/金标/集合成员变化必变。
+
+    变异点：hash 返回常量 → 全部相等断言红；hash 用原始 list 顺序拼接 →
+    reversed 输入断言红；hash 忽略 query / expected_document_ids / 集合成员
+    → 对应不等断言红。直接调用纯函数，不读源码字符串。
+    """
+    from app.services.retrieval_eval_service import case_set_fingerprint
+
+    case_a = SimpleNamespace(
+        id="case-a", query="退款多久到账", expected_document_ids=["doc-1", "doc-2"]
+    )
+    case_b = SimpleNamespace(id="case-b", query="合同何时生效", expected_document_ids=["doc-3"])
+    baseline = case_set_fingerprint([case_a, case_b])
+
+    # 顺序归一化：集合相同则 hash 相同（比较前不必关心用例创建/查询顺序）。
+    assert case_set_fingerprint([case_b, case_a]) == baseline
+    assert len(baseline) == 64
+
+    changed_query = SimpleNamespace(
+        id="case-a", query="退款多久能到", expected_document_ids=["doc-1", "doc-2"]
+    )
+    assert case_set_fingerprint([changed_query, case_b]) != baseline
+
+    changed_golden = SimpleNamespace(
+        id="case-a", query="退款多久到账", expected_document_ids=["doc-1", "doc-9"]
+    )
+    assert case_set_fingerprint([changed_golden, case_b]) != baseline
+
+    # 成员变化（全量 vs 子集语义）也必须反映在集合哈希里。
+    assert case_set_fingerprint([case_a]) != baseline
+
+
+async def test_case_set_hash_ignores_top_k_but_persists_it(env):
+    """top_k 是评测口径，故意不进用例集 hash；但必须原样落库供比较时校验。
+
+    变异点：把 top_k 混入 hash（或让 hash 随 top_k 变化）→ 两次持久化后
+    case_set_hash 相等断言变红；persist_run 漏存 top_k → top_k 集合断言红。
+    """
+    from unittest.mock import patch
+
+    _as(env)
+    case = await _case(env, query="topk-stable")
+    fake = await _fake_run(env, {"topk-stable": [DOC_A1]})
+    run_ids: list[str] = []
+    for top_k in (3, 5):
+        with patch(
+            "app.api.v1.endpoints.knowledge.knowledge_service.search_knowledge_with_meta", fake
+        ):
+            response = await env.client.post(
+                RUN,
+                json={"case_ids": [case["id"]], "top_k": top_k, "persist": True},
+            )
+        assert response.status_code == 200, response.text
+        run_ids.append(response.json()["data"]["run_id"])
+
+    async with env.factory() as session:
+        rows = [await session.get(RetrievalEvalRun, run_id) for run_id in run_ids]
+    assert rows[0].case_set_hash == rows[1].case_set_hash
+    assert {row.top_k for row in rows} == {3, 5}
+    assert rows[0].case_ids == rows[1].case_ids == [case["id"]]
 
 
 # ── persist opt-in（默认不写库）─────────────────────────────────────────
@@ -148,7 +215,14 @@ async def test_default_run_is_non_persistent_opt_in_writes(env):
             assert row.created_by == USER_A
             assert row.organization_id == ORG_A
             assert row.counts == {"cases": 1, "evaluated": 1, "errors": 0}
-            assert row.metrics["recall_at_k"] is not None or row.metrics["recall_at_k"] is None
+            # 本用例的金标 DOC_A1 由 fake 检索排在 top-1，成功运行的文档级
+            # recall/hit/MRR 必为 1.0；写死期望，避免恒真断言掩盖指标回归。
+            assert row.metrics == {
+                "recall_at_k": 1.0,
+                "mrr": 1.0,
+                "document_hit_at_k": 1.0,
+                "hit_at_k": 1.0,
+            }
 
 
 # ── 组织隔离 list/detail/export/trend ───────────────────────────────────

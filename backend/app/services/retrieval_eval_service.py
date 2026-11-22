@@ -494,11 +494,12 @@ async def run_eval(
 # ── 运行历史（显式 opt-in 持久化）────────────────────────────────────────
 
 
-def case_set_fingerprint(cases: list[RetrievalEvalCase], *, top_k: int) -> str:
+def case_set_fingerprint(cases: list[RetrievalEvalCase]) -> str:
     """对本次评测输入生成稳定哈希（用例 id + query + 文档级金标，排序后拼接）。
 
-    ``top_k`` 属于评测口径而非测试集，故单独经报告接口写入导出文件；哈希只锁
-    用例集内容，避免同一测试集在不同截断深度下被误判为「不同数据集」。
+    ``top_k`` 有意**不**入哈希：它是评测口径而非测试集内容，单独写在运行记录的
+    ``top_k`` 列与导出文件里。这样同一测试集在不同截断深度下仍可比对，同时
+    比较方应先校验 top_k 一致再比较指标。
     """
     payload = sorted(
         (
@@ -533,7 +534,7 @@ async def persist_run(
         top_k=int(report["top_k"]),
         case_ids=[case.id for case in cases],
         case_scope=case_scope,
-        case_set_hash=case_set_fingerprint(cases, top_k=int(report["top_k"])),
+        case_set_hash=case_set_fingerprint(cases),
         counts=dict(report["counts"]),
         metrics=dict(report["metrics"]),
         error_case_ids=list(report["error_case_ids"]),

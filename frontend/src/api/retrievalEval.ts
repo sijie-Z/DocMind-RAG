@@ -31,7 +31,7 @@ export interface EvalRunSummary {
 }
 
 export interface EvalRunDetail extends EvalRunSummary {
-  results: Array<Record<string, unknown>>
+  results: Array<{ recall_at_k?: number | null; [key: string]: unknown }>
 }
 
 export interface EvalTrend {
