@@ -7,7 +7,8 @@
 3. provider / model 映射写错 → provider/model 用例红；
 4. token / error 字段漏映射或回显原文 → token/error 用例红；
 5. JSONL 键集变化或导出异常穿透 → 契约/容错用例红；
-6. 配置默认值/校验被改 → 配置用例红。
+6. 配置默认值/校验被改 → 配置用例红；
+7. 删掉 append_llm_call_record 里包住导出入口的 try/except → 外层防御用例红。
 """
 
 from __future__ import annotations
@@ -303,6 +304,35 @@ def test_exporter_failure_never_breaks_llm_call_path(
     import json
 
     assert set(json.loads(line)) == LEGACY_FIELDS
+
+
+def test_outer_export_guard_is_swallowed_by_append(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """导出入口在内部 try 之外失败时，外层 try/except 必须兜住。
+
+    在 `app.agent.otel_genai` 模块上注入失败：调用点 `from ... import
+    export_gen_ai_span` 取到这个替身，一进入即抛 RuntimeError。这与内部
+    tracer 失败不同——删除 append_llm_call_record 的外层 try/except 后本用例红。
+    断言：不抛异常、JSONL 仍写入、返回值只由 JSONL 写入决定。
+    """
+    import json
+
+    import app.agent.otel_genai as otel_mod
+
+    def _boom(record):  # pragma: no cover - 被调用即证明进入导出路径
+        raise RuntimeError("export entry unavailable")
+
+    monkeypatch.setattr(otel_mod, "export_gen_ai_span", _boom)
+    monkeypatch.setattr(settings, "OTEL_GEN_AI_EXPORT_ENABLED", True)
+    monkeypatch.setattr(settings, "LLM_CALL_LOG_ENABLED", True)
+    monkeypatch.setattr(settings, "LLM_CALL_LOG_FILE", str(tmp_path / "calls.jsonl"))
+    monkeypatch.setattr(settings, "LLM_CALL_LOG_PER_RUN", False)
+
+    record = build_llm_call_record(task_id="t", request_id="r", model="deepseek-chat")
+    assert append_llm_call_record(record) is True
+    written = json.loads((tmp_path / "calls.jsonl").read_text(encoding="utf-8").strip())
+    assert set(written) == LEGACY_FIELDS
 
 
 def test_export_works_when_jsonl_is_disabled(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
