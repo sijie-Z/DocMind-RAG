@@ -418,20 +418,33 @@ def append_llm_call_record(record: dict[str, Any]) -> bool:
     通过配置 ``LLM_CALL_LOG_FILE`` 指定目录。
     """
     settings = _settings()
-    if not bool(getattr(settings, "LLM_CALL_LOG_ENABLED", True)):
+    jsonl_enabled = bool(getattr(settings, "LLM_CALL_LOG_ENABLED", True))
+    otel_enabled = bool(getattr(settings, "OTEL_GEN_AI_EXPORT_ENABLED", False))
+    if not jsonl_enabled and not otel_enabled:
         return False
-    try:
-        target = resolve_log_path(record.get("task_id"))
-        if target is None:
-            return False
-        if target.parent and str(target.parent) not in ("", "."):
-            target.parent.mkdir(parents=True, exist_ok=True)
-        line = json.dumps(record, ensure_ascii=False, separators=(",", ":"))
-        with _append_lock:
-            # newline="\n"：Windows 文本模式默认写 \r\n；JSONL 跨平台保持 LF。
-            with open(target, "a", encoding="utf-8", newline="\n") as f:
-                f.write(line + "\n")
-        return True
-    except Exception as exc:  # noqa: BLE001 — 观测写入不得影响主流程
-        logger.debug("LLM call JSONL write skipped (%s)", type(exc).__name__)
-        return False
+    jsonl_written = False
+    if jsonl_enabled:
+        try:
+            target = resolve_log_path(record.get("task_id"))
+            if target is None:
+                return False
+            if target.parent and str(target.parent) not in ("", "."):
+                target.parent.mkdir(parents=True, exist_ok=True)
+            line = json.dumps(record, ensure_ascii=False, separators=(",", ":"))
+            with _append_lock:
+                # newline="\n"：Windows 文本模式默认写 \r\n；JSONL 跨平台保持 LF。
+                with open(target, "a", encoding="utf-8", newline="\n") as f:
+                    f.write(line + "\n")
+            jsonl_written = True
+        except Exception as exc:  # noqa: BLE001 — 观测写入不得影响主流程
+            logger.debug("LLM call JSONL write skipped (%s)", type(exc).__name__)
+    # 可选 GenAI 导出独立于 JSONL 开关：只开 OTel 时仍创建 span；
+    # exporter/tracer 异常由 export_gen_ai_span 内部吞掉，返回值仍只表示 JSONL 成败。
+    if otel_enabled:
+        try:
+            from app.agent.otel_genai import export_gen_ai_span
+
+            export_gen_ai_span(record)
+        except Exception as exc:  # noqa: BLE001 — 观测层绝不阻断 LLM 调用
+            logger.debug("OTel GenAI export skipped (%s)", type(exc).__name__)
+    return jsonl_written

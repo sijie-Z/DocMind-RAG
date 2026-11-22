@@ -237,6 +237,47 @@ def setup_opentelemetry(app):
 
 **两套可以共存**:OpenTelemetry 抓基础设施 span,Langfuse 抓 LLM span。
 
+### 4.4 GenAI 语义属性导出(可选,默认关闭)
+
+**位置**:`backend/app/agent/otel_genai.py`(映射层) + `backend/app/agent/llm_call_log.py` 的既有写入点。
+映射快照版本常量:`SEMCONV_VERSION = "genai-semconv-draft-2026-01-19"` —— `gen_ai.*` 规范仍是
+Development/Experimental,所以属性名与语义**钉在该快照**,不随 `opentelemetry-api` 包升级自动漂移。
+升级映射必须显式改常量、白名单、测试与本文档。
+
+启用方式(两个独立维度):
+
+| 开关 | 默认值 | 作用 |
+|---|---|---|
+| `OTEL_GEN_AI_EXPORT_ENABLED` | `false` | 是否在既有 LLM 调用 JSONL 写入点额外创建 GenAI span;默认完全 no-op |
+| `ENABLE_TRACING` / `OTLP_ENDPOINT` | `false` / `http://localhost:4317` | 既有 `app/core/tracing.py` 的 OTLP provider/transport;只开 GenAI 开关不会启动 exporter |
+
+不新增第三方依赖:只复用已安装的 `opentelemetry-api` / `opentelemetry-sdk`。不重写 JSONL、
+层级 reader、prompt 版本 trace,也不另接 OTLP transport。span 名固定 `gen_ai.chat`,
+属性来自既有记录,不读请求正文。
+
+**导出属性白名单**(没有 `gen_ai.prompt` / `gen_ai.completion` / query / `error.message`):
+
+| 属性 | 来源(既有 JSONL 元数据) |
+|---|---|
+| `gen_ai.operation.name` | 固定 `chat` |
+| `gen_ai.provider.name` | 由 `model` 的已知前缀保守推断;无法判定即 `unknown`,**不把配置里的模型名当身份声明** |
+| `gen_ai.request.model` / `gen_ai.response.model` | `model` |
+| `gen_ai.usage.input_tokens` / `gen_ai.usage.output_tokens` / `gen_ai.response.tool_calls` / `gen_ai.response.duration_ms` | `tokens_in` / `tokens_out` / `tool_calls` / `latency_ms` |
+| `error.type` | 错误类名或固定类别(`timeout`/`rate_limit`/`auth`/`connection`/`validation`),**绝不是原始异常文本** |
+| `gen_ai.conversation.id` / `gen_ai.request.id` | `task_id` / `request_id` |
+| `gen_ai.prompt.id` / `gen_ai.prompt.version` / `gen_ai.prompt.label` / `gen_ai.experiment.id` | 同名可选元数据字段(只含窄化后的标量标识) |
+| `gen_ai.trace.span_id` / `parent_span_id` / `span_type` / `start_time` / `end_time` | 层级 trace 同名可选字段 |
+| `gen_ai.semconv.version` | 固定映射快照版本 |
+
+标识类字段带字符集闸门(拒空格/换行/控制符),数值字段拒 bool/NaN/inf,输出键再做一次
+白名单自检——任何异常都降级为空属性,不进入 span。导出 failure(provider 缺失、exporter
+抛错等)只 debug 留痕:JSONL 仍写入、返回码不变、LLM 调用不受影响。
+
+**与私有 JSONL 的取舍**:JSONL 是默认开启的本地调用事实源(含 `prompt_hash`、层级 span id、
+prompt 版本,便于只读回放与对账);GenAI 属性导出是**默认关闭**的标准互操作层,只把同一份元数据
+投影到企业既有 OTel 后端,便于与基础设施 trace 联动。代价是:属性面受白名单限制,不提供正文与
+本地回放能力;semconv 仍在演进,跨后端查询语法不一致。二者互补,不是替代关系。
+
 ---
 
 ## 5. Agent TraceStore(自建)
