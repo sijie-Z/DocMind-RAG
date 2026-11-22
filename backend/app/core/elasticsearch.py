@@ -151,10 +151,14 @@ async def close_elasticsearch():
 # Index management
 # ---------------------------------------------------------------------------
 def _source_provenance_mapping_properties() -> dict:
-    """Additive fields for original-text provenance; retrieval mapping stays unchanged."""
+    """Additive fields for provenance/manual override; retrieval mapping stays unchanged."""
     return {
         "original_text": {"type": "text", "index": False},
         "text_provenance": {"type": "keyword"},
+        # 分块级启停与人工检索文本标记：独立于 text_provenance，
+        # strict 原文 replay 只看后者，人工文本不能冒充 parser 原文。
+        "is_chunk_enabled": {"type": "boolean"},
+        "retrieval_text_provenance": {"type": "keyword"},
     }
 
 

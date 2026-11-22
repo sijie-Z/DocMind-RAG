@@ -512,6 +512,16 @@ The knowledge page’s “Retrieval eval run history” (`/knowledge/eval-runs`)
 - `GET /eval/runs` (list, optional `case_set_hash` filter), `GET /eval/runs/{id}` (detail), `GET /eval/runs/trend` (last 30 runs; failed runs excluded from metric averages), and `GET /eval/runs/{id}/export?format=json|csv` (same-source export for regression comparison).
 - Audit records contain only organization, user, counts, format and field names — `query`, case names and result bodies never enter the audit log; per-case results appear only in the org-scoped detail page.
 
+### 4.2.1 Chunk browsing and manual correction
+
+The document detail page’s “Browse & correct chunks” panel (URL parameter `chunkBrowser=1`, shareable) opens a read-first chunk workbench:
+
+- `GET /api/v1/documents/{id}/chunks` returns paginated chunk index, indexed text, parser-original availability, page/char-span/clause locators, enabled state and manual-override state. Organization, private-document ACL and viewer identity are all derived server-side; clients cannot declare an organization context.
+- The document owner or an organization admin can save correction text into a separate audited `document_chunk_overrides` row (`PUT .../chunks/override`). `apply_to_retrieval=false` saves a draft only; `true` switches retrieval text immediately and labels it `manual_override`. `parser_original` / `original_text` / `quote_sha256` and review evidence snapshots are **never rewritten**; strict evidence replay still reads only the parser original.
+- `PATCH .../chunks/enabled` immediately writes chunk-level `is_chunk_enabled` to ES so disabled chunks stop being recalled; `DELETE .../chunks/override` reverts manual text and restores parser retrieval text. Failed ES writes leave the DB unchanged to avoid drift; caches are cleared per organization.
+- Audit records contain only document/chunk ids, action, booleans and a hash/character count of correction text — never private body text or correction text in the audit log. Older indices without `is_chunk_enabled` treat chunks as enabled; run `scripts/add_rag_source_provenance_mapping.py` to add the additive mapping.
+- **Tradeoff**: manual correction does not recompute embeddings or rebuild the index; it changes only the ES retrieval text and the auditable override row. Rebuild/re-parse creates new chunk ids, so existing corrections are not migrated automatically and must be reconfirmed on the new chunks. This preserves strict evidence replay: manual text never enters the parser-original evidence chain.
+
 ### 4.3 Chat and deep analysis
 
 The chat page (`/chat`) has two modes, selected by the "Quick Q&A / Deep analysis" radio in the input area (`frontend/src/views/chat/components/ChatInput.vue`):

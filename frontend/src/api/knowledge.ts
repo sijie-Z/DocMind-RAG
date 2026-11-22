@@ -150,6 +150,74 @@ export interface DocumentChunkPreview {
   section_title?: string | null
 }
 
+export interface DocumentChunkBrowserItem {
+  chunk_id: string
+  chunk_index: number
+  document_id: string
+  document_title: string
+  indexed_text: string
+  parser_original_available: boolean
+  parser_original_text: string | null
+  text_provenance: 'parser_original' | 'legacy_unverified'
+  page_number: number | null
+  start_pos: number | null
+  end_pos: number | null
+  section_title: string | null
+  clause_no: number[]
+  section_no: string[]
+  is_enabled: boolean
+  override_state: 'none' | 'active'
+  /** 实际用于检索的 provenance：manual_override 与 parser_original 严格区分。 */
+  effective_text_provenance: 'parser_original' | 'legacy_unverified' | 'manual_override'
+  override_text: string | null
+  override_id: string | null
+  override_updated_at: string | null
+}
+
+export interface DocumentChunkBrowserResponse {
+  items: DocumentChunkBrowserItem[]
+  total: number
+  page: number
+  page_size: number
+  pages: number
+  document: { id: string; title: string; organization_id: number }
+}
+
+/** 分页浏览单篇文档的 chunk；viewer/org 由后端派生，前端不传组织上下文。 */
+export const getDocumentChunks = async (
+  documentId: string,
+  params: { page?: number; page_size?: number; enabled?: boolean; override_state?: 'active' | 'draft' | 'disabled'; q?: string } = {},
+  options?: SilentRequestOptions
+): Promise<AxiosResponse<{ data: DocumentChunkBrowserResponse }>> => {
+  return request.get(`/documents/${encodeURIComponent(documentId)}/chunks`, {
+    params,
+    ...(options?.silent ? SILENT_HEADERS : {})
+  })
+}
+
+export const setDocumentChunkOverride = async (
+  documentId: string,
+  body: { chunk_id: string; text: string | null; apply_to_retrieval: boolean }
+): Promise<AxiosResponse<{ data: DocumentChunkBrowserItem }>> => {
+  return request.put(`/documents/${encodeURIComponent(documentId)}/chunks/override`, body)
+}
+
+export const setDocumentChunkEnabled = async (
+  documentId: string,
+  body: { chunk_id: string; enabled: boolean }
+): Promise<AxiosResponse<{ data: DocumentChunkBrowserItem }>> => {
+  return request.patch(`/documents/${encodeURIComponent(documentId)}/chunks/enabled`, body)
+}
+
+export const resetDocumentChunkOverride = async (
+  documentId: string,
+  chunkId: string
+): Promise<AxiosResponse<{ data: DocumentChunkBrowserItem }>> => {
+  return request.delete(`/documents/${encodeURIComponent(documentId)}/chunks/override`, {
+    params: { chunk_id: chunkId }
+  })
+}
+
 /** 按引用分块取回原文（与全文预览同口径；仅用于已校验归属的文档）。 */
 export interface ChunkRequestOptions extends SilentRequestOptions {
   /** 覆盖请求层自动重试预算（主动重试时用 1，避免一次点击等 4 轮退避）。 */
