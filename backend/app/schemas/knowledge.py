@@ -51,6 +51,13 @@ class KnowledgeSearchRequest(BaseModel):
             "多字段为 AND；无过滤时查询结构与旧实现一致"
         ),
     )
+    # P2 多知识库：可选 KB id。None = 旧行为（组织内全部文档）；
+    # 显式值收窄到该组织内此知识库的文档，零匹配必须返回零，不回退全组织。
+    knowledge_base_id: str | None = Field(
+        None,
+        max_length=36,
+        description="可选知识库 ID；缺省/null = 组织内全部文档（旧行为不变）",
+    )
     # 检索自测：返回每臂候选/RRF/rerank/MMR 诊断（仅本次请求，不落库）。
     debug: bool = Field(False, description="是否返回检索诊断信息")
 
@@ -63,6 +70,14 @@ class KnowledgeSearchRequest(BaseModel):
         from app.rag.metadata_filter import normalize_metadata_filters
 
         return normalize_metadata_filters(value)
+
+    @field_validator("knowledge_base_id")
+    @classmethod
+    def validate_knowledge_base_id(cls, value: str | None) -> str | None:
+        """空白 id 不得转成「不限定」全组织检索；入口即拒绝。"""
+        if value is not None and not value.strip():
+            raise ValueError("knowledge_base_id 不能为空字符串")
+        return value.strip() if value is not None else None
 
     @field_validator("document_ids")
     @classmethod

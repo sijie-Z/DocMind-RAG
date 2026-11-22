@@ -4,6 +4,7 @@ from app.models.agent_tool_call import AgentToolCall, AgentToolResult, ToolCallS
 from app.models.api_key import ApiKey
 from app.models.chat import ChatMessage, ChatSession, DeletedChatSession
 from app.models.document import Document
+from app.models.knowledge_base import KnowledgeBase
 from app.models.knowledge_job import KnowledgeJobStatus, KnowledgeProcessingJob
 from app.models.manual import SystemManual
 from app.models.notification import Notification
@@ -73,6 +74,7 @@ __all__ = [
     "UserActivityLog",
     "KnowledgeProcessingJob",
     "KnowledgeJobStatus",
+    "KnowledgeBase",
     "UserSettings",
     "Workflow",
     "WorkflowExecution",

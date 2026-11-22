@@ -218,10 +218,10 @@ DocMind/
 │   │   │   └── tools/               #   extended tools (20; 31 built-in tools total)
 │   │   ├── rag/                     # retriever / reranker / pipeline / cache
 │   │   ├── api/v1/
-│   │   │   ├── router.py            # main router (29 modules registered)
-│   │   │   └── endpoints/           # Endpoint implementations (29 files)
-│   │   ├── services/                # business services (36 services)
-│   │   ├── models/                  # ORM models (21 model files)
+│   │   │   ├── router.py            # main router (30 modules registered)
+│   │   │   └── endpoints/           # Endpoint implementations (30 files)
+│   │   ├── services/                # business services (37 services)
+│   │   ├── models/                  # ORM models (22 model files)
 │   │   ├── core/                    # config / DB / Redis / ES / MinIO / Kafka / JWT
 │   │   └── worker/                  # Kafka consumer (parse → chunk → embed → index)
 │   ├── tests/                       # backend tests (unit + API + integration)
@@ -237,7 +237,7 @@ DocMind/
 
 ### 🌐 API Layer (`backend/app/api/v1/`)
 
-29 endpoint modules under `/api/v1`:
+30 endpoint modules under `/api/v1`:
 
 | Module | Prefix | Description |
 |--------|--------|-------------|
@@ -247,7 +247,8 @@ DocMind/
 | Files | `/files` | Upload/download/delete, MinIO storage, chunked upload |
 | Documents | `/documents` | Document parsing, vectorization, knowledge base indexing, status tracking |
 | Chat | `/chat` | Session CRUD, SSE streaming Q&A, strict mode, debug endpoints |
-| Knowledge | `/knowledge` | Knowledge base CRUD, retrieval, statistics, settings |
+| Knowledge | `/knowledge` | Knowledge retrieval, statistics, settings
+| Knowledge Bases | `/knowledge-bases` | Multi-knowledge-base entity CRUD (organization-scoped) |
 | Contract Review | `/reviews` | Review cases / items / evidence snapshots + deterministic extraction and V1/V2 alignment + per-item decisions and report export (parser-original quotes + version hashes) |
 | Organizations | `/organizations` | Org CRUD, member management, role assignment |
 | Organization Settings | `/organizations` | Org-level settings and audit (shared prefix with Organizations) |
