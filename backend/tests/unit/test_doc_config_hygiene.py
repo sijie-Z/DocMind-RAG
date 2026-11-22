@@ -262,6 +262,12 @@ def test_env_templates_cover_required_keys():
     assert _key_declared(docker_env, "ELASTICSEARCH_INDEX_NAME"), (
         "backend/.env.docker.example 缺少 ELASTICSEARCH_INDEX_NAME"
     )
+    for key in ("OTEL_GEN_AI_EXPORT_ENABLED",):
+        assert _key_declared(env, key), f"backend/.env.example 缺少 {key}"
+        assert _key_declared(docker_env, key), f"backend/.env.docker.example 缺少 {key}"
+        assert _active_value(env, key) == _active_value(docker_env, key) == "false", (
+            f"{key} 两份模板都必须默认关闭且口径一致"
+        )
 
     # 模板中声明的键必须有真实消费方（防止文档化不存在的配置）。
     ai_config = _read("backend/app/core/config/ai.py")
