@@ -412,6 +412,8 @@ async def test_run_computes_recall_and_mrr_from_fake_pipeline(env):
     assert report["metrics"]["hit_at_k"] == report["metrics"]["document_hit_at_k"]
 
     by_name = {row["name"]: row for row in report["results"]}
+    # error_code 在所有结果行形状一致：ok=None，stale/generic 为稳定机器码。
+    assert all(row["error_code"] is None for row in report["results"])
     assert by_name["c1"]["first_hit_rank"] == 2
     assert by_name["c1"]["reciprocal_rank"] == pytest.approx(0.5)
     assert by_name["c2"]["first_hit_rank"] == 1
@@ -488,6 +490,7 @@ async def test_run_single_query_error_counted_not_in_denominator(env):
     assert boom["status"] == "error"
     # 只回显异常类型，绝不把可能含 query 的异常正文写进响应（反泄漏契约）。
     assert boom["error"] == "RuntimeError"
+    assert boom["error_code"] == "RETRIEVAL_ERROR"
 
 
 async def test_run_case_ids_subset(env):

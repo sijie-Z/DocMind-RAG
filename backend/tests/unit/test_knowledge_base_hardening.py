@@ -442,6 +442,23 @@ class TestMigration033StaticShape:
         assert "if not _is_sqlite() and FK not in _foreign_keys(DOC_TABLE):" in source
         assert 'op.create_foreign_key(FK, DOC_TABLE, TABLE, [COLUMN], ["id"])' in source
 
+    def test_orm_kb_index_matches_migration(self):
+        """create_all 与 alembic 路径的 KB 索引必须同形。
+
+        变异点：把 KnowledgeBase.organization_id 改回 index=True（生成
+        ix_knowledge_bases_organization_id）或删掉复合 Index，本用例红。
+        """
+        module, source = self._module()
+        from app.models.knowledge_base import KnowledgeBase
+
+        orm_indexes = {
+            idx.name: tuple(col.name for col in idx.columns)
+            for idx in KnowledgeBase.__table__.indexes
+        }
+        assert orm_indexes[module.KB_ORG_INDEX] == ("organization_id", "created_at")
+        assert "ix_knowledge_bases_organization_id" not in orm_indexes
+        assert 'op.create_index(KB_ORG_INDEX, TABLE, ["organization_id", "created_at"])' in source
+
     def test_downgrade_drops_doc_objects_before_kb_table(self):
         """Static order assertion: SQLite cannot ALTER DROP FK, but the
         downgrade must still drop constraint -> index -> column -> KB index ->

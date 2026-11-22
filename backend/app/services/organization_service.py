@@ -26,6 +26,7 @@ from app.models.organization import Organization, user_organization
 from app.models.organization_settings import OrganizationSettings
 from app.models.prompt import PromptTemplate
 from app.models.rbac import ORG_ADMIN_ROLE_NAME, Role, user_organization_role_association
+from app.models.retrieval_eval import RetrievalEvalCase
 from app.models.review import ReviewCase, ReviewExport, ReviewRuleSet
 from app.models.scheduled_task import ScheduledTask
 from app.models.token_usage import TokenUsageRecord
@@ -364,6 +365,9 @@ class OrganizationService:
         # P2 多知识库实体：knowledge_bases.organization_id 有 RESTRICT 外键，
         # 未纳入清理会在 MySQL 上以 1451 失败；同样必须先转移。
         ("知识库", KnowledgeBase),
+        # P2 检索评测用例：retrieval_eval_case.organization_id 有 RESTRICT 外键，
+        # 未纳入清理会在 MySQL 上以 1451 失败；评测资产同样先转移。
+        ("检索评测用例", RetrievalEvalCase),
         ("工作流", Workflow),
         ("提示词模板", PromptTemplate),
         ("用量记录", TokenUsageRecord),

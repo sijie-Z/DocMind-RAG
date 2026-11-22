@@ -47,6 +47,11 @@ from evals.harness import RetrieveFn
 from evals.harness import run_eval as harness_run_eval
 from evals.metrics import ItemOutcome, aggregate
 
+# 运行结果的稳定机器码：stale 与一般检索失败都提供 error_code，
+# error 字段继续保留兼容值（机器码或异常类型名），调用方无需分支猜键。
+ERROR_CODE_STALE_GOLDEN = "STALE_GOLDEN_DOCUMENTS"
+ERROR_CODE_RETRIEVAL = "RETRIEVAL_ERROR"
+
 
 # 一次运行中所有用例共享的可检索性快照（组织状态 + viewer ACL 各查一次）。
 @dataclass(frozen=True)
@@ -394,8 +399,8 @@ async def run_eval(
             "name": case.name,
             "query": case.query,
             "status": "error",
-            "error": "STALE_GOLDEN_DOCUMENTS",
-            "error_code": "STALE_GOLDEN_DOCUMENTS",
+            "error": ERROR_CODE_STALE_GOLDEN,
+            "error_code": ERROR_CODE_STALE_GOLDEN,
             "expected_document_ids": list(case.expected_document_ids or []),
             "retrieved_document_ids": [],
             "recall_at_k": None,
@@ -415,6 +420,7 @@ async def run_eval(
                 # 只回显异常类型：harness 的 error 字符串含原始异常消息
                 # （可能带 query 原文），禁止进入响应/日志。
                 "error": (run.outcome.error or "retrieval_error").split(":", 1)[0],
+                "error_code": ERROR_CODE_RETRIEVAL,
                 "expected_document_ids": expected,
                 "retrieved_document_ids": [],
                 "recall_at_k": None,
@@ -429,6 +435,7 @@ async def run_eval(
             "query": case.query,
             "status": "ok",
             "error": None,
+            "error_code": None,
             "expected_document_ids": expected,
             "retrieved_document_ids": retrieved[:top_k],
             **score,
