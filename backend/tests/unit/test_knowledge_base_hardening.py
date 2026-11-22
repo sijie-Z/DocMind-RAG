@@ -219,7 +219,7 @@ class TestExactCacheGateForKbScope:
         session.__aenter__ = AsyncMock(return_value=session)
         session.__aexit__ = AsyncMock(return_value=False)
         pipeline.cache.get = AsyncMock(side_effect=AssertionError("exact cache must be skipped"))
-
+        pipeline.cache.set = AsyncMock(side_effect=AssertionError("exact cache must be skipped"))
         seen: dict = {}
 
         async def _fake_resolve(db, org_id, kb_id):
@@ -230,9 +230,12 @@ class TestExactCacheGateForKbScope:
 
         async def _fake_retrieve(*args, **kwargs):
             seen["document_ids"] = args[3] if len(args) > 3 else kwargs.get("document_ids")
-            return [], [], None, []
+            # 非空且通过 provenance gate 的结果才会触达写缓存门控。
+            return [_approval_hit("doc-kb")], [0.1, 0.2], {}, []
 
         pipeline.retriever.retrieve = AsyncMock(side_effect=_fake_retrieve)
+        pipeline.semantic_cache = MagicMock()
+        pipeline.semantic_cache.enabled = False
         with (
             patch("app.core.database.AsyncSessionLocal", return_value=session),
             patch(

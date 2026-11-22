@@ -15,13 +15,17 @@
 
 import json
 import logging
+import os
+import subprocess
+import sys
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
 import httpx
 import pytest
-from sqlalchemy import select
+from sqlalchemy import event, select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
 
@@ -162,7 +166,7 @@ async def env():
 
     with patch.object(audit_service, "log_activity", state.audit):
         async with httpx.AsyncClient(transport=transport, base_url="http://eval") as client:
-            yield SimpleNamespace(client=client, state=state, factory=factory)
+            yield SimpleNamespace(client=client, state=state, factory=factory, engine=engine)
     app.dependency_overrides.clear()
     await engine.dispose()
 
@@ -336,7 +340,10 @@ async def test_list_is_org_isolated(env):
     _as(env, USER_B, ORG_B)
     r = await env.client.get(CASES)
     assert r.status_code == 200, r.text
-    assert r.json()["data"]["total"] == 0
+    payload = r.json()["data"]
+    assert payload["total"] == 0
+    # 只断言 total 不够：rows 的组织过滤若被删掉，total=0 仍可能绿而数据已泄露。
+    assert payload["data"] == []
 
 
 async def test_delete_is_org_isolated_and_404(env):
@@ -797,13 +804,19 @@ async def test_run_reports_revoked_private_golden_as_stale_error(env):
     assert fake.calls == []
 
 
-async def test_strict_search_option_controls_generic_exception_semantics():
-    """strict 默认 False 吞异常；仅 strict=True 上抛（默认端点行为不变）。"""
+async def test_strict_search_option_controls_generic_exception_semantics(caplog):
+    """strict 默认 False 吞异常；仅 strict=True 上抛（默认端点行为不变）。
+
+    变异点：把 knowledge_service 兜底日志改回 ``{e}`` 时 caplog 必含 sentinel。
+    """
     from app.services.knowledge_service import KnowledgeService
 
     sentinel = "leak_" + "c71d2b"
     mock = AsyncMock(side_effect=RuntimeError("boom " + sentinel))
-    with patch("app.services.rag_service.rag_service.search_knowledge_base", mock):
+    with (
+        caplog.at_level(logging.ERROR),
+        patch("app.services.rag_service.rag_service.search_knowledge_base", mock),
+    ):
         results, debug = await KnowledgeService().search_knowledge_with_meta(
             "query", str(ORG_A), top_k=5
         )
@@ -812,6 +825,8 @@ async def test_strict_search_option_controls_generic_exception_semantics():
             await KnowledgeService().search_knowledge_with_meta(
                 "query", str(ORG_A), top_k=5, strict=True
             )
+    assert sentinel not in caplog.text
+    assert "RuntimeError" in caplog.text
 
 
 async def test_downstream_exception_is_error_not_zero_recall_and_no_log_leak(env, caplog):
@@ -898,6 +913,78 @@ async def test_full_run_cap_and_case_ids_cap(env):
     with patch("app.api.v1.endpoints.knowledge.knowledge_service.search_knowledge_with_meta", fake):
         r2 = await env.client.post(RUN, json={"case_ids": [str(uuid4())]})
     assert r2.status_code == 200, r2.text
+
+
+async def test_update_case_keeps_org_predicate_even_with_stale_loaded_case(env):
+    """update 的 SQL 组织条件是独立于 get_case 的第二道租户门。
+
+    变异点：删掉 update_case 中 WHERE 的 `RetrievalEvalCase.organization_id ==
+    organization_id`，本用例中 ORG_B 的调用就会把 ORG_A 的用例改名，断言红。
+    """
+    from app.services import retrieval_eval_service
+
+    async with env.factory() as s:
+        case = await _create(env, name="original", query="q", ids=[DOC_A1])
+        # 绕过上游 get_case，模拟 TOCTOU / 缓存了错误租户对象的防御场景。
+        loaded = await s.get(RetrievalEvalCase, case["id"])
+        with patch.object(retrieval_eval_service, "get_case", new=AsyncMock(return_value=loaded)):
+            await retrieval_eval_service.update_case(
+                s,
+                organization_id=ORG_B,
+                case_id=case["id"],
+                viewer_user_id=USER_A,
+                changes={"name": "cross-tenant-write"},
+            )
+        await s.refresh(loaded)
+        assert loaded.name == "original"
+
+
+async def test_full_run_cap_prefetch_is_bounded(env):
+    """全量上限必须在 SQL 层 LIMIT 101，不能先取无限行再在内存里拒绝。
+
+    变异点：删掉 load_cases 的 `.limit(MAX_CASES_PER_RUN + 1)` 后，监听器记录的
+    SQL 不再含 LIMIT，本测试变红（即使响应仍为 400 也要抓“先无界取行”）。
+    """
+
+    # 变异点：删掉上限后 SQL 会变无界，即使响应仍 400 也必须抓到无 LIMIT 的取行。
+    from app.services import retrieval_eval_service
+
+    def _see_sql(conn, cursor, statement, parameters, context, executemany):
+        if "retrieval_eval_case" in statement and "SELECT" in statement.upper():
+            seen["selects"].append((statement, tuple(parameters or ())))
+
+    seen: dict[str, list[tuple[str, tuple]]] = {"selects": []}
+    event.listen(env.engine.sync_engine, "before_cursor_execute", _see_sql)
+    try:
+        async with env.factory() as s:
+            cases = await retrieval_eval_service.load_cases(s, organization_id=ORG_A, case_ids=None)
+        assert cases == []
+    finally:
+        event.remove(env.engine.sync_engine, "before_cursor_execute", _see_sql)
+    assert seen["selects"], "load_cases 必须实际执行 SELECT"
+    statements = [sql for sql, _ in seen["selects"]]
+    parameters = [params for _, params in seen["selects"]]
+    assert any("LIMIT" in sql.upper() for sql in statements), statements
+    # SQLAlchemy 把 limit(101) 编成绑定参数；断言参数而非 SQL 字面量。
+    assert any(101 in params for params in parameters), parameters
+
+
+async def test_service_case_ids_cap_is_enforced_before_db_read(env):
+    """service 层 case_ids 上限是 schema 之外的第二道门，必须直接测到。
+
+    变异点：删除 load_cases 中 `len(case_ids) > MAX_CASE_IDS_PER_RUN` 分支后，
+    本测试不再抛 ValidationError，断言变红。
+    """
+    from app.exceptions import ValidationError
+    from app.services import retrieval_eval_service
+
+    async with env.factory() as s:
+        with pytest.raises(ValidationError):
+            await retrieval_eval_service.load_cases(
+                s,
+                organization_id=ORG_A,
+                case_ids=[str(uuid4()) for _ in range(51)],
+            )
 
 
 async def test_document_hit_at_k_is_document_level_not_clause_level(env):
@@ -1005,15 +1092,47 @@ async def test_hit_at_k_uses_k_not_k_plus_one():
     assert report["metrics"]["mrr"] == 0.0
 
 
-def test_models_registry_contains_retrieval_eval_case():
-    """导入 app.models 后表注册必须包含 retrieval_eval_case。
+_BACKEND = Path(__file__).resolve().parents[2]
 
-    变异点：从 app/models/__init__.py 移除 RetrievalEvalCase 导入/导出，
-    Base.metadata.tables 不再有该表，本测试失败。
+
+def test_models_registry_contains_retrieval_eval_case():
+    """独立进程只 import app.models，确认表注册、FK 与索引来自 __init__ 导出。
+
+    变异点：从 app/models/__init__.py 移除 RetrievalEvalCase 导入/导出后，
+    子进程中 Base.metadata.tables 不再有该表，本测试失败。直接在本测试模块
+    `from app.models.retrieval_eval import RetrievalEvalCase` 会自证式污染注册表，
+    因此这里必须在干净进程里验证。
     """
-    assert "retrieval_eval_case" in Base.metadata.tables
-    table = Base.metadata.tables["retrieval_eval_case"]
-    assert {col.name for col in table.columns} >= {
+    script = r"""
+import json
+import app.models
+from app.core.database import Base
+t = Base.metadata.tables.get("retrieval_eval_case")
+print("RESULT_JSON=" + json.dumps({
+    "exists": t is not None,
+    "columns": sorted(c.name for c in t.columns) if t is not None else [],
+    "fks": sorted(fk.target_fullname for fk in t.foreign_keys) if t is not None else [],
+    "indexes": [
+        {"name": idx.name, "columns": [c.name for c in idx.columns]}
+        for idx in t.indexes
+    ] if t is not None else [],
+}))
+"""
+    proc = subprocess.run(
+        [sys.executable, "-c", script],
+        cwd=str(_BACKEND),
+        env=os.environ.copy(),
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        timeout=120,
+    )
+    assert proc.returncode == 0, proc.stderr
+    lines = [line for line in proc.stdout.splitlines() if line.startswith("RESULT_JSON=")]
+    assert lines, proc.stdout
+    payload = json.loads(lines[-1].split("RESULT_JSON=", 1)[1])
+    assert payload["exists"] is True, payload
+    assert set(payload["columns"]) >= {
         "id",
         "organization_id",
         "name",
@@ -1024,15 +1143,11 @@ def test_models_registry_contains_retrieval_eval_case():
         "created_at",
         "updated_at",
     }
-    # ORM 层的 FK 与复合索引（变异点：删掉 ForeignKey/Index 即失败）。
-    assert {fk.target_fullname for fk in table.foreign_keys} >= {
-        "organizations.id",
-        "users.id",
-    }
+    assert set(payload["fks"]) >= {"organizations.id", "users.id"}
     assert any(
-        idx.name == "ix_retrieval_eval_case_org_created"
-        and [col.name for col in idx.columns] == ["organization_id", "created_at"]
-        for idx in table.indexes
+        idx["name"] == "ix_retrieval_eval_case_org_created"
+        and idx["columns"] == ["organization_id", "created_at"]
+        for idx in payload["indexes"]
     )
 
 
