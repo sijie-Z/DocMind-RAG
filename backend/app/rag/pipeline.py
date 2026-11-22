@@ -249,6 +249,9 @@ class RAGPipeline:
             # 即使结果随后被 ACL 过滤，缓存命中数与 sources 仍会泄漏存在性。
             blocked_ids: list[str] = []
             acl_enabled = viewer_user_id is not None
+            # 知识库范围是文档范围的另一种形态：键里没有 kb id，必须和
+            # document_ids / ACL 一样跳过共享缓存的读与写。
+            kb_scoped = bool(knowledge_base_id)
             if acl_enabled or metadata_filters or knowledge_base_id:
                 from app.core.database import AsyncSessionLocal
                 from app.rag.knowledge_base_filter import (
@@ -305,8 +308,8 @@ class RAGPipeline:
                     settings.RAG_SOURCE_PROVENANCE_MODE
                 )
 
-            # Exact cache (skip for document-scoped or ACL-scoped queries)
-            if not document_ids and not acl_enabled:
+            # Exact cache (skip for document-scoped / KB-scoped / ACL-scoped queries)
+            if not document_ids and not acl_enabled and not kb_scoped:
                 cached = await self.cache.get(
                     query,
                     organization_id,
@@ -361,7 +364,13 @@ class RAGPipeline:
             # sources 的代价不可接受，故默认路径不再计算语义缓存用的 embedding。
             semantic_cache_enabled = bool(getattr(self.semantic_cache, "enabled", True))
             query_vector = None
-            if document_ids or search_mode or acl_enabled or not semantic_cache_enabled:
+            if (
+                document_ids
+                or search_mode
+                or acl_enabled
+                or kb_scoped
+                or not semantic_cache_enabled
+            ):
                 if debug and debug_info is not None:
                     debug_info["cache"] = {
                         "cache_type": "semantic",
@@ -372,6 +381,8 @@ class RAGPipeline:
                             if document_ids
                             else "acl_scoped"
                             if acl_enabled
+                            else "kb_scoped"
+                            if kb_scoped
                             else "explicit_search_mode"
                             if search_mode
                             else "namespace_disabled"
@@ -711,7 +722,7 @@ class RAGPipeline:
             cache_safe = not failures and not degraded_reasons and not rerank_degraded
             # 文档级 ACL：带 viewer 的结果绝不写组织级共享缓存——否则 A 的
             # 私有文档结果会被 B 的无 viewer 请求命中（读侧已跳过，写侧必须对称）
-            if not document_ids and not acl_enabled and result and cache_safe:
+            if not document_ids and not acl_enabled and not kb_scoped and result and cache_safe:
                 # issue #225 决策 7A：精确缓存键带模式段（None=自动路由，键与修前逐字节相同）。
                 await self.cache.set(
                     query,
@@ -744,6 +755,7 @@ class RAGPipeline:
                 and not search_mode
                 and not document_ids
                 and not acl_enabled
+                and not kb_scoped
             ):
                 # 检索缓存条目 answer 为空（仅 sources），写入检索专用命名空间（R4）
                 await self.semantic_cache.set(

@@ -657,6 +657,7 @@ There are **30 endpoint modules** (`docs/facts.json` → `endpoint_modules`, der
 | documents | `/api/v1/documents` | upload, parse, embed, status |
 | chat | `/api/v1/chat` | session CRUD, SSE Q&A |
 | knowledge | `/api/v1/knowledge` | retrieval, stats, rebuild, graph |
+| knowledge_bases | `/api/v1/knowledge-bases` | multi-knowledge-base entity CRUD (organization-scoped) |
 | reviews | `/api/v1/reviews` | contract review: cases, items, evidence snapshots (parser original + version hashes; Batch 2) |
 | organizations | `/api/v1/organizations` | org CRUD, members, roles |
 | organization_settings | `/api/v1/organizations` | org-level settings (shared prefix) |

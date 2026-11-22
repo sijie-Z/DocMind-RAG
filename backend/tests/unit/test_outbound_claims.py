@@ -184,7 +184,7 @@ def test_product_definition_image_capability_matches_code():
 
 
 def test_architecture_numbers_match_code():
-    """架构页数字与代码一致：31 个内置工具（默认注入 10 个）、28 个路由模块，且不得虚报 Celery。"""
+    """架构页数字与代码一致：31 个内置工具（默认注入 10 个）、30 个路由模块，且不得虚报 Celery。"""
     _assert_absent(
         "docs/architecture.html",
         [

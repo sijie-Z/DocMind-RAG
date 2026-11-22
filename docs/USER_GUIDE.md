@@ -664,6 +664,7 @@ API 前缀 `/api/v1/workflows`：工作流 CRUD、执行、调试、节点定义
 | documents | `/api/v1/documents` | 文档上传、解析、向量化、状态 |
 | chat | `/api/v1/chat` | 会话 CRUD、SSE 流式问答 |
 | knowledge | `/api/v1/knowledge` | 知识检索、统计、重建、图谱 |
+| knowledge_bases | `/api/v1/knowledge-bases` | 多知识库实体 CRUD（组织隔离） |
 | reviews | `/api/v1/reviews` | 合同核验：案件/核验项/证据快照（parser 原文 + 版本哈希；Batch 2） |
 | organizations | `/api/v1/organizations` | 组织 CRUD、成员与角色 |
 | organization_settings | `/api/v1/organizations` | 组织级设置（与组织管理共用前缀） |
