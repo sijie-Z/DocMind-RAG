@@ -3,13 +3,14 @@
 """
 
 import asyncio
+import json
 import logging
 import time
 from contextlib import suppress
 from datetime import datetime
 from typing import Any
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy import desc, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -1269,6 +1270,15 @@ async def _retrieval_eval_org_id(current_user: User, db: AsyncSession) -> int:
     return await require_organization(current_user, db)
 
 
+def _eval_audit_detail(organization_id: int, user_id: int, **extra: Any) -> str:
+    """评测审计 detail：只含 org/user/条数与字段名，绝不记 query 或用例名。"""
+    return json.dumps(
+        {"organization_id": organization_id, "user_id": user_id, **extra},
+        ensure_ascii=False,
+        sort_keys=True,
+    )
+
+
 def _make_retrieve_fn(organization_id: int, viewer_user_id: int):
     """把知识库检索封装成 evals.harness 的 ``RetrieveFn``（每条用例一次检索）。"""
 
@@ -1278,6 +1288,9 @@ def _make_retrieve_fn(organization_id: int, viewer_user_id: int):
             organization_id=organization_id,
             top_k=top_k,
             viewer_user_id=viewer_user_id,
+            # 评测必须区分「检索失败」与「零召回」；strict 仅此路径开启，
+            # 其它端点仍走原有 best-effort 降级语义。
+            strict=True,
         )
         return RetrievalObservation(results=list(results or []))
 
@@ -1294,6 +1307,7 @@ def _make_retrieve_fn(organization_id: int, viewer_user_id: int):
 )
 async def create_retrieval_eval_case(
     body: RetrievalEvalCaseCreate,
+    request: Request,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -1310,11 +1324,22 @@ async def create_retrieval_eval_case(
             tags=body.tags,
             viewer_user_id=current_user.id,
         )
+        await audit_service.log_activity(
+            user_id=current_user.id,
+            action="create_retrieval_eval_case",
+            target_type="retrieval_eval_case",
+            target_id=case.id,
+            detail=_eval_audit_detail(
+                org_id, current_user.id, expected_count=len(case.expected_document_ids)
+            ),
+            request=request,
+            db=db,
+        )
         return {"success": True, "data": retrieval_eval_service.case_to_dict(case)}
     except (AppError, NotFoundError, ValidationError, AuthorizationError):
         raise
     except Exception as e:
-        logger.error(f"Create retrieval eval case failed: {type(e).__name__}: {e}")
+        logger.error("Create retrieval eval case failed: %s", type(e).__name__)
         raise AppError("创建检索评测用例失败") from e
 
 
@@ -1342,7 +1367,7 @@ async def list_retrieval_eval_cases(
     except (AppError, NotFoundError, ValidationError, AuthorizationError):
         raise
     except Exception as e:
-        logger.error(f"List retrieval eval cases failed: {type(e).__name__}: {e}")
+        logger.error("List retrieval eval cases failed: %s", type(e).__name__)
         raise AppError("获取检索评测用例失败") from e
 
 
@@ -1382,6 +1407,7 @@ async def get_retrieval_eval_case(
 async def update_retrieval_eval_case(
     case_id: str,
     body: RetrievalEvalCaseUpdate,
+    request: Request,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -1395,6 +1421,16 @@ async def update_retrieval_eval_case(
             case_id=case_id,
             viewer_user_id=current_user.id,
             changes=changes,
+        )
+        await audit_service.log_activity(
+            user_id=current_user.id,
+            action="update_retrieval_eval_case",
+            target_type="retrieval_eval_case",
+            target_id=case.id,
+            # 只记被改字段名，不记 query / 用例名 / 金标 id。
+            detail=_eval_audit_detail(org_id, current_user.id, fields=sorted(changes)),
+            request=request,
+            db=db,
         )
         return {"success": True, "data": retrieval_eval_service.case_to_dict(case)}
     except (AppError, NotFoundError, ValidationError, AuthorizationError):
@@ -1414,6 +1450,7 @@ async def update_retrieval_eval_case(
 )
 async def delete_retrieval_eval_case(
     case_id: str,
+    request: Request,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -1421,11 +1458,20 @@ async def delete_retrieval_eval_case(
     try:
         org_id = await _retrieval_eval_org_id(current_user, db)
         await retrieval_eval_service.delete_case(db, organization_id=org_id, case_id=case_id)
+        await audit_service.log_activity(
+            user_id=current_user.id,
+            action="delete_retrieval_eval_case",
+            target_type="retrieval_eval_case",
+            target_id=case_id,
+            detail=_eval_audit_detail(org_id, current_user.id),
+            request=request,
+            db=db,
+        )
         return {"success": True, "data": {"id": case_id}}
     except (AppError, NotFoundError, ValidationError, AuthorizationError):
         raise
     except Exception as e:
-        logger.error(f"Delete retrieval eval case failed: {type(e).__name__}: {e}")
+        logger.error("Delete retrieval eval case failed: %s", type(e).__name__)
         raise AppError("删除检索评测用例失败") from e
 
 
@@ -1439,25 +1485,51 @@ async def delete_retrieval_eval_case(
 )
 async def run_retrieval_eval(
     body: RetrievalEvalRunRequest,
+    request: Request,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     """运行本组织保存的评测集：返回逐条结果与文档级 recall@k / MRR（默认不写库）。
 
     空测试集安全返回（全零计数 + 指标 null），不是错误；单条检索失败如实记为
-    ``status=error`` 并单独计数，不进任何比例的分母。
+    ``status=error`` 并单独计数，不进任何比例的分母。金标在运行时失效（文档
+    被删/停用/未索引、或 viewer 私有权限被撤销）同样记 error + 机器码，
+    绝不报成 recall=0。
     """
     try:
         org_id = await _retrieval_eval_org_id(current_user, db)
         cases = await retrieval_eval_service.load_cases(
             db, organization_id=org_id, case_ids=body.case_ids
         )
+        # 运行开始时取一次可检索性快照（含 viewer ACL），与检索路径同一口径。
+        searchable = await retrieval_eval_service.load_searchable_docs(
+            db, organization_id=org_id, viewer_user_id=current_user.id
+        )
         report = await retrieval_eval_service.run_eval(
-            cases, _make_retrieve_fn(org_id, current_user.id), body.top_k
+            cases,
+            _make_retrieve_fn(org_id, current_user.id),
+            body.top_k,
+            searchable=searchable,
+        )
+        await audit_service.log_activity(
+            user_id=current_user.id,
+            action="run_retrieval_eval",
+            target_type="retrieval_eval_run",
+            target_id=None,
+            # 只记条数/top_k/错误数，不记 query、用例名或金标 id。
+            detail=_eval_audit_detail(
+                org_id,
+                current_user.id,
+                cases=len(cases),
+                top_k=body.top_k,
+                errors=report["counts"]["errors"],
+            ),
+            request=request,
+            db=db,
         )
         return {"success": True, "data": report}
     except (AppError, NotFoundError, ValidationError, AuthorizationError):
         raise
     except Exception as e:
-        logger.error(f"Run retrieval eval failed: {type(e).__name__}: {e}")
+        logger.error("Run retrieval eval failed: %s", type(e).__name__)
         raise AppError("运行检索评测失败") from e

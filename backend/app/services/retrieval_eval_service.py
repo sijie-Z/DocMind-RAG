@@ -15,26 +15,76 @@
 - 单条 reciprocal rank = 第一个命中期望文档的名次的倒数（未命中记 0）；
 - 汇总 = 对 ``status=ok`` 的用例取宏平均（错误用例单独计数）。
 
+指标命名：``document_hit_at_k`` 是**文档级** hit（top-k 里是否出现任一期望
+``document_id``），与条款级 ``clause_hit@k``（文件名 + 条号定义位）不同口径；
+``hit_at_k`` 保留为同一文档级值的历史别名。运行 top_k 默认为 5，是 rank-5
+产品评测的固定口径，与组织设置 ``retrieval_top_k``（线上检索返回条数）无关，
+也不读取/覆盖它。
+
+金标时效性：创建/更新只接受本组织、索引完成（``status=indexed``）、启用且
+viewer 可见的文档；运行前再校验一次，失效金标记为 ``status=error`` +
+机器码（``STALE_GOLDEN_DOCUMENTS``），绝不伪装成 recall=0。
+
 日志/错误纪律：query 与文档正文只以「条数/长度」参与日志；错误响应只回显
-异常类型名，不回显可能包含 query 内容的异常字符串。
+异常类型名或固定机器码，不回显可能包含 query 内容的异常字符串。
 """
 
 from __future__ import annotations
 
 import uuid
+from dataclasses import dataclass
 from typing import Any
 
 from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.exceptions import NotFoundError, ValidationError
-from app.models.document import Document
+from app.models.document import Document, DocumentStatus
 from app.models.retrieval_eval import RetrievalEvalCase
 from app.services.document_acl import get_blocked_document_ids
 from evals.golden import GoldenItem, Locator
 from evals.harness import RetrieveFn
 from evals.harness import run_eval as harness_run_eval
 from evals.metrics import ItemOutcome, aggregate
+
+
+# 一次运行中所有用例共享的可检索性快照（组织状态 + viewer ACL 各查一次）。
+@dataclass(frozen=True)
+class _SearchableDocs:
+    """本组织内当前可被检索命中的文档 id 集合，以及 viewer 的 ACL 屏蔽集合。"""
+
+    searchable_ids: frozenset[str]
+    blocked_ids: frozenset[str]
+
+
+async def load_searchable_docs(
+    session: AsyncSession, *, organization_id: int, viewer_user_id: int | None
+) -> _SearchableDocs:
+    """按正常检索口径读取可搜索文档（索引完成 + 启用），不改变 ACL fail-closed 语义。
+
+    与 ``app.rag.retriever.build_retrieval_filters``（``is_enabled=False`` 排除）
+    及 ``knowledge_service.get_knowledge_stats``（``status=INDEXED`` 才算已索引）
+    保持一致。ACL 完全委托既有 ``get_blocked_document_ids``，不在评测里另写一套。
+    """
+    ids = list(
+        (
+            await session.execute(
+                select(Document.id).where(
+                    Document.organization_id == organization_id,
+                    Document.status == DocumentStatus.INDEXED,
+                    Document.is_enabled.is_(True),
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    blocked = set(await get_blocked_document_ids(session, organization_id, viewer_user_id))
+    return _SearchableDocs(frozenset(ids), frozenset(blocked))
+
+
+def _is_searchable(snapshot: _SearchableDocs, doc_id: str) -> bool:
+    return doc_id in snapshot.searchable_ids and doc_id not in snapshot.blocked_ids
 
 
 def case_to_dict(case: RetrievalEvalCase) -> dict[str, Any]:
@@ -58,29 +108,33 @@ async def _validate_expected_docs(
     organization_id: int,
     ids: list[str],
     viewer_user_id: int | None,
+    snapshot: _SearchableDocs | None = None,
 ) -> list[str]:
-    """校验金标：去重 + 必须属于本组织 + 对调用者可见（创建与更新共用）。"""
+    """去重 + 属于本组织 + 可检索（已索引/启用）+ viewer 可见（创建与更新共用）。
+
+    跨组织、停用/未索引、私有不可见的金标永远不可能被该用户的检索合法命中，
+    留着只会把评测变成结构性 miss，甚至把私有文档 id 固化成可读元数据。
+    fail-closed 的 ACL 语义完全沿用 ``get_blocked_document_ids``。
+    """
     unique = list(dict.fromkeys(ids))
-    found = (
-        await session.execute(
-            select(func.count(func.distinct(Document.id))).where(
-                Document.id.in_(unique), Document.organization_id == organization_id
-            )
+    if snapshot is None:
+        snapshot = await load_searchable_docs(
+            session, organization_id=organization_id, viewer_user_id=viewer_user_id
         )
-    ).scalar() or 0
-    if int(found) != len(unique):
+    # ACL 命中先判且不带计数：否则 found=1/0 可区分「无权看的私有文档」与
+    # 「不存在的文档」，等于把私有文档存在性泄漏给同组织其他成员。
+    if snapshot.blocked_ids.intersection(unique):
         raise ValidationError(
-            "expected_document_ids 含不属于当前组织的文档 id",
+            "expected_document_ids 含不属于当前组织或不可检索的文档 id",
+            field="expected_document_ids",
+        )
+    found = sum(1 for doc_id in unique if doc_id in snapshot.searchable_ids)
+    if found != len(unique):
+        raise ValidationError(
+            "expected_document_ids 含不属于当前组织或不可检索的文档 id",
             field="expected_document_ids",
             expected=len(unique),
             found=int(found),
-        )
-    blocked = set(await get_blocked_document_ids(session, organization_id, viewer_user_id))
-    if blocked.intersection(unique):
-        # 不回显具体 id：无权者连「哪个是不可见私有文档」都不该据此探测。
-        raise ValidationError(
-            "expected_document_ids 含当前用户无权访问的文档",
-            field="expected_document_ids",
         )
     return unique
 
@@ -96,10 +150,10 @@ async def create_case(
     tags: list[str] | None = None,
     viewer_user_id: int | None = None,
 ) -> RetrievalEvalCase:
-    """创建用例；期望文档必须属于调用者组织且对调用者可见。
+    """创建用例；期望文档必须属于调用者组织、可检索且对调用者可见。
 
-    跨组织或私有不可见的金标永远不可能被该用户的检索合法命中，留着只会把
-    评测变成结构性 miss，甚至把私有文档 id 固化成可读元数据——必须拒绝。
+    跨组织、停用/未索引、私有不可见的金标永远不可能被该用户的检索合法命中，
+    留着只会把评测变成结构性 miss，甚至把私有文档 id 固化成可读元数据——必须拒绝。
     """
     ids = await _validate_expected_docs(
         session,
@@ -171,7 +225,7 @@ async def update_case(
     viewer_user_id: int | None,
     changes: dict[str, Any],
 ) -> RetrievalEvalCase:
-    """更新本组织用例；跨组织 404，金标变更复用创建时的组织/ACL 校验。"""
+    """更新本组织用例；跨组织 404，金标变更复用创建时的组织/ACL/可检索校验。"""
     case = await get_case(session, organization_id=organization_id, case_id=case_id)
     if "expected_document_ids" in changes:
         changes = dict(changes)
@@ -208,20 +262,46 @@ async def delete_case(session: AsyncSession, *, organization_id: int, case_id: s
         raise NotFoundError("评测用例不存在")
 
 
+MAX_CASES_PER_RUN = 100
+MAX_CASE_IDS_PER_RUN = 50  # 与 RetrievalEvalRunRequest.case_ids 的 schema 上限一致
+
+
 async def load_cases(
     session: AsyncSession,
     *,
     organization_id: int,
     case_ids: list[str] | None = None,
 ) -> list[RetrievalEvalCase]:
-    """读取本组织用例（可按 id 子集过滤）；外组织 id 不会出现在结果里。"""
+    """读取本组织用例（可按 id 子集过滤）；外组织 id 不会出现在结果里。
+
+    ``case_ids`` 为显式子集时最多 50 条（schema 已限）；``None`` = 全量运行，
+    最多 100 条，超出直接 ValidationError —— 每次运行都要逐条真实检索，
+    不能让一个组织无限量地把评测端点变成检索放大/DoS 入口。
+    """
     stmt = select(RetrievalEvalCase).where(RetrievalEvalCase.organization_id == organization_id)
     # None = 全部用例；显式 [] = 空子集（不能回落成全量运行，否则用户以为只跑
     # 零条却把整个测试集都执行了）。
     if case_ids is not None:
+        if len(case_ids) > MAX_CASE_IDS_PER_RUN:
+            raise ValidationError(
+                f"单次评测最多指定 {MAX_CASE_IDS_PER_RUN} 条用例",
+                field="case_ids",
+                expected=MAX_CASE_IDS_PER_RUN,
+                found=len(case_ids),
+            )
         stmt = stmt.where(RetrievalEvalCase.id.in_(case_ids))
+    else:
+        stmt = stmt.limit(MAX_CASES_PER_RUN + 1)
     stmt = stmt.order_by(RetrievalEvalCase.created_at.asc(), RetrievalEvalCase.id.asc())
-    return list((await session.execute(stmt)).scalars().all())
+    rows = list((await session.execute(stmt)).scalars().all())
+    if case_ids is None and len(rows) > MAX_CASES_PER_RUN:
+        raise ValidationError(
+            f"全量评测最多 {MAX_CASES_PER_RUN} 条用例，请通过 case_ids 分批运行",
+            field="case_ids",
+            expected=MAX_CASES_PER_RUN,
+            found=len(rows),
+        )
+    return rows
 
 
 def retrieved_document_ids(results: list[dict]) -> list[str]:
@@ -283,62 +363,95 @@ async def run_eval(
     cases: list[RetrievalEvalCase],
     retrieve: RetrieveFn,
     top_k: int,
+    *,
+    searchable: _SearchableDocs | None = None,
 ) -> dict[str, Any]:
-    """对用例集跑检索并汇总（不写库）；逐条执行直接复用 evals.harness.run_eval。"""
-    by_id = {case.id: case for case in cases}
-    runs = await harness_run_eval([_case_to_golden(case) for case in cases], retrieve, top_k)
+    """对用例集跑检索并汇总（不写库）；逐条执行直接复用 evals.harness.run_eval。
 
-    results: list[dict[str, Any]] = []
+    ``searchable`` 为运行开始时的文档可检索性快照（含 viewer ACL）：失效金标
+    直接记 ``status=error`` + 机器码，不调用检索、不进 recall 分母。
+    """
+    by_id = {case.id: case for case in cases}
+    stale_ids = (
+        {
+            case.id
+            for case in cases
+            if any(not _is_searchable(searchable, doc_id) for doc_id in case.expected_document_ids)
+        }
+        if searchable is not None
+        else set()
+    )
+    runnable = [case for case in cases if case.id not in stale_ids]
+    runs = await harness_run_eval([_case_to_golden(case) for case in runnable], retrieve, top_k)
+
+    results_by_id: dict[str, dict[str, Any]] = {}
+    # 失效金标（机器码，不回显具体 id 或异常文本），不调用检索、不进分母。
+    for case in cases:
+        if case.id not in stale_ids:
+            continue
+        results_by_id[case.id] = {
+            "case_id": case.id,
+            "name": case.name,
+            "query": case.query,
+            "status": "error",
+            "error": "STALE_GOLDEN_DOCUMENTS",
+            "error_code": "STALE_GOLDEN_DOCUMENTS",
+            "expected_document_ids": list(case.expected_document_ids or []),
+            "retrieved_document_ids": [],
+            "recall_at_k": None,
+            "first_hit_rank": None,
+            "reciprocal_rank": None,
+        }
     for run in runs:
         case = by_id[run.item.id]
         expected = list(case.expected_document_ids or [])
         retrieved = retrieved_document_ids(run.results)
         if run.outcome.status == "error":
-            results.append(
-                {
-                    "case_id": case.id,
-                    "name": case.name,
-                    "query": case.query,
-                    "status": "error",
-                    # 只回显异常类型：harness 的 error 字符串含原始异常消息
-                    # （可能带 query 原文），禁止进入响应/日志。
-                    "error": (run.outcome.error or "retrieval_error").split(":", 1)[0],
-                    "expected_document_ids": expected,
-                    "retrieved_document_ids": [],
-                    "recall_at_k": None,
-                    "first_hit_rank": None,
-                    "reciprocal_rank": None,
-                }
-            )
-            continue
-        score = score_case(expected, retrieved, top_k)
-        results.append(
-            {
+            results_by_id[case.id] = {
                 "case_id": case.id,
                 "name": case.name,
                 "query": case.query,
-                "status": "ok",
-                "error": None,
+                "status": "error",
+                # 只回显异常类型：harness 的 error 字符串含原始异常消息
+                # （可能带 query 原文），禁止进入响应/日志。
+                "error": (run.outcome.error or "retrieval_error").split(":", 1)[0],
                 "expected_document_ids": expected,
-                "retrieved_document_ids": retrieved[:top_k],
-                **score,
+                "retrieved_document_ids": [],
+                "recall_at_k": None,
+                "first_hit_rank": None,
+                "reciprocal_rank": None,
             }
-        )
+            continue
+        score = score_case(expected, retrieved, top_k)
+        results_by_id[case.id] = {
+            "case_id": case.id,
+            "name": case.name,
+            "query": case.query,
+            "status": "ok",
+            "error": None,
+            "expected_document_ids": expected,
+            "retrieved_document_ids": retrieved[:top_k],
+            **score,
+        }
+    # 维持输入用例顺序：stale 不是新用例，不能因预填而跑到结果列表最前面。
+    results = [results_by_id[case.id] for case in cases]
 
     # MRR / hit@k 由 evals.metrics.aggregate 计算（与条款级评测同一口径实现，
     # 错误项自动剔除分母）；recall@k 是文档级特有指标（期望集合的召回比例），
-    # 只在以上结果行上做宏平均。
+    # 只在以上结果行上做宏平均。outcomes 以**结果行**为准（含失效金标），
+    # 不能与 harness runs 按位置 zip：stale 行没有对应 run。
+    result_counts = {run.item.id: len(run.results) for run in runs}
     outcomes = [
         ItemOutcome(
-            item_id=run.item.id,
+            item_id=row["case_id"],
             item_type="retrieval_eval_case",
             expect="hit",
             status=row["status"],
             error=row["error"],
             gold_rank=row["first_hit_rank"],
-            n_results=len(run.results),
+            n_results=result_counts.get(row["case_id"], 0),
         )
-        for run, row in zip(runs, results, strict=True)
+        for row in results
     ]
     agg = aggregate(outcomes, cutoffs=(top_k,))
     recalls = [
@@ -357,6 +470,9 @@ async def run_eval(
         "metrics": {
             "recall_at_k": round(sum(recalls) / len(recalls), 4) if recalls else None,
             "mrr": agg["mrr"],
+            # 原名 hit_at_k 沿用（历史前端/CI 依赖），但口径其实是文档级 hit，
+            # 与条款级 clause_hit@k（文件名 + 条号定义位）不同，故补明确别名。
+            "document_hit_at_k": agg[f"clause_hit@{top_k}"],
             "hit_at_k": agg[f"clause_hit@{top_k}"],
         },
         "results": results,
