@@ -93,12 +93,24 @@ class RetrievalEvalCaseUpdate(BaseModel):
 
 
 class RetrievalEvalRunRequest(BaseModel):
-    """运行评测：缺省跑本组织全部用例；默认不写库。"""
+    """运行评测：缺省跑本组织全部用例（最多 100 条）；默认不写库。
+
+    ``top_k=5`` 是**有意固定的 rank-5 产品评测口径**（衡量期望文档是否进入
+    前 5 名），与组织设置 ``retrieval_top_k``（线上检索实际返回条数）无关：
+    本字段只决定本次评测检索/截断深度，不读取、不写入组织设置。
+    """
 
     case_ids: list[str] | None = Field(
-        None, max_length=50, description="只跑指定用例；缺省 = 本组织全部用例"
+        None,
+        max_length=50,
+        description="只跑指定用例（最多 50 条）；缺省 = 本组织全部用例（最多 100 条）",
     )
-    top_k: int = Field(5, ge=1, le=50, description="每条用例检索条数（1..50，默认 5）")
+    top_k: int = Field(
+        5,
+        ge=1,
+        le=50,
+        description="本次评测的检索/截断深度（1..50，默认 5=rank-5 产品口径；与组织 retrieval_top_k 无关）",
+    )
 
     @field_validator("case_ids")
     @classmethod

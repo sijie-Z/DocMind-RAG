@@ -13,8 +13,10 @@
 - top_k 透传与默认值：请求 top_k 进入检索调用与截断。
 """
 
+import json
+import logging
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
 import httpx
@@ -142,7 +144,7 @@ async def env():
         )
         await s.commit()
 
-    state = SimpleNamespace(user=_make_user())
+    state = SimpleNamespace(user=_make_user(), audit=AsyncMock())
 
     async def _override_db():
         async with factory() as session:
@@ -154,8 +156,13 @@ async def env():
     app.dependency_overrides[get_db] = _override_db
     app.dependency_overrides[get_current_user] = _override_user
     transport = httpx.ASGITransport(app=app, raise_app_exceptions=False)
-    async with httpx.AsyncClient(transport=transport, base_url="http://eval") as client:
-        yield SimpleNamespace(client=client, state=state, factory=factory)
+    # 审计写独立 MySQL session（测试环境无该库）：patch 掉真实写入并记录调用，
+    # 以便断言 action/组织/user，同时不把日志/DB 故障混进评测断言。
+    from app.services.audit_service import audit_service
+
+    with patch.object(audit_service, "log_activity", state.audit):
+        async with httpx.AsyncClient(transport=transport, base_url="http://eval") as client:
+            yield SimpleNamespace(client=client, state=state, factory=factory)
     app.dependency_overrides.clear()
     await engine.dispose()
 
@@ -362,7 +369,12 @@ async def test_run_is_org_isolated(env):
     assert r.status_code == 200, r.text
     report = r.json()["data"]
     assert report["counts"] == {"cases": 0, "evaluated": 0, "errors": 0}
-    assert report["metrics"] == {"recall_at_k": None, "mrr": None, "hit_at_k": None}
+    assert report["metrics"] == {
+        "recall_at_k": None,
+        "mrr": None,
+        "document_hit_at_k": None,
+        "hit_at_k": None,
+    }
     assert fake.calls == []
 
 
@@ -394,7 +406,10 @@ async def test_run_computes_recall_and_mrr_from_fake_pipeline(env):
     assert report["counts"] == {"cases": 2, "evaluated": 2, "errors": 0}
     assert report["metrics"]["recall_at_k"] == pytest.approx(1.0)
     assert report["metrics"]["mrr"] == pytest.approx(0.75)
-    assert report["metrics"]["hit_at_k"] == pytest.approx(1.0)
+    # document_hit_at_k 是文档级口径；hit_at_k 是历史别名，二者必须一致，
+    # 且与条款级 clause_hit@k 不是同一判定（见服务 docstring）。
+    assert report["metrics"]["document_hit_at_k"] == pytest.approx(1.0)
+    assert report["metrics"]["hit_at_k"] == report["metrics"]["document_hit_at_k"]
 
     by_name = {row["name"]: row for row in report["results"]}
     assert by_name["c1"]["first_hit_rank"] == 2
@@ -448,7 +463,12 @@ async def test_run_empty_test_set_is_safe(env):
     assert r.status_code == 200, r.text
     report = r.json()["data"]
     assert report["counts"] == {"cases": 0, "evaluated": 0, "errors": 0}
-    assert report["metrics"] == {"recall_at_k": None, "mrr": None, "hit_at_k": None}
+    assert report["metrics"] == {
+        "recall_at_k": None,
+        "mrr": None,
+        "document_hit_at_k": None,
+        "hit_at_k": None,
+    }
     assert report["results"] == []
 
 
@@ -623,16 +643,29 @@ async def test_run_uses_viewer_acl_retrieval_path_and_does_not_count_blocked_doc
     assert result2.json()["data"]["results"][0]["retrieved_document_ids"][0] == DOC_PRIVATE
 
 
-def test_run_eval_reuses_harness_loop():
-    """变异点：若 service 自建循环而不再调用 evals.harness.run_eval，本测试失败。"""
-    import inspect
+async def test_run_eval_reuses_harness_loop():
+    """行为 spy：运行评测必须真的调用 evals.harness.run_eval（非源码文本断言）。
 
+    变异点：service 自建循环（或只写诱饵注释）时 spy 不被调用，本测试失败。
+    """
     from app.services import retrieval_eval_service as svc
-    from evals import harness
 
-    source = inspect.getsource(svc.run_eval)
-    assert "harness_run_eval" in source, "运行评测必须直接调用 evals.harness.run_eval"
-    assert harness.run_eval is not None
+    class _Case:
+        id = "c1"
+        name = "x"
+        query = "q"
+        expected_document_ids = [DOC_A1]
+
+    async def _retrieve(query, top_k):
+        return SimpleNamespace(results=[])
+
+    spy = AsyncMock(side_effect=AssertionError("harness loop was bypassed"))
+    with patch.object(svc, "harness_run_eval", spy):
+        with pytest.raises(AssertionError, match="harness loop was bypassed"):
+            await svc.run_eval([_Case()], _retrieve, 7)
+    assert spy.await_count == 1
+    args = spy.await_args.args
+    assert len(args[0]) == 1 and args[2] == 7
 
 
 def test_error_response_does_not_leak_query_text():
@@ -677,3 +710,370 @@ def test_retrieved_document_ids_accepts_both_shapes():
             {"id": "a"},
         ]
     ) == ["a", "b", "c"]
+
+
+# ── P2 独立评审修复：金标可检索性 / strict 故障语义 / 审计 / 泄漏 / 上限 ──
+
+
+async def test_create_and_update_reject_non_searchable_golden_docs(env):
+    """停用/未索引的金标必须在写入时拒绝（正常检索侧这两类文档都不召回）。
+
+    变异点：把 _validate_expected_docs 的 status/is_enabled 条件删掉，本测试
+    的两组 400 断言立即失败。
+    """
+    _as(env)
+    disabled = str(uuid4())
+    unindexed = str(uuid4())
+    async with env.factory() as s:
+        d1 = _doc(disabled, ORG_A, USER_A)
+        d1.is_enabled = False
+        d2 = _doc(unindexed, ORG_A, USER_A)
+        d2.status = DocumentStatus.PARSING
+        s.add_all([d1, d2])
+        await s.commit()
+
+    for bad_id in (disabled, unindexed, str(uuid4())):
+        r = await env.client.post(
+            CASES, json={"name": "bad", "query": "q", "expected_document_ids": [bad_id]}
+        )
+        assert r.status_code == 400, r.text
+
+    case = await _create(env)
+    r = await env.client.put(f"{CASES}/{case['id']}", json={"expected_document_ids": [disabled]})
+    assert r.status_code == 400, r.text
+    async with env.factory() as s:
+        persisted = await s.get(RetrievalEvalCase, case["id"])
+        assert persisted.expected_document_ids == [DOC_A1]
+
+
+async def test_run_reports_stale_golden_as_error_not_zero_recall(env):
+    """运行时金标失效（文档停用）→ error + 机器码，不进分母。
+
+    变异点：删掉 run_eval 的 searchable 快照检查，失效文档会被当成正常零召回，
+    recall=0.0 且 status=ok，本测试失败。
+    """
+    _as(env)
+    stale = await _create(env, name="stale", query="q1", ids=[DOC_A2])
+    healthy = await _create(env, name="healthy", query="q2", ids=[DOC_A1])
+    async with env.factory() as s:
+        doc = await s.get(Document, DOC_A2)
+        doc.is_enabled = False
+        await s.commit()
+
+    fake = _FakeKnowledge({"q1": [DOC_A2], "q2": [DOC_A1]})
+    with patch("app.api.v1.endpoints.knowledge.knowledge_service.search_knowledge_with_meta", fake):
+        r = await env.client.post(RUN, json={})
+    assert r.status_code == 200, r.text
+    report = r.json()["data"]
+    assert report["counts"] == {"cases": 2, "evaluated": 1, "errors": 1}
+    rows = {row["case_id"]: row for row in report["results"]}
+    assert rows[stale["id"]]["status"] == "error"
+    assert rows[stale["id"]]["error"] == "STALE_GOLDEN_DOCUMENTS"
+    assert rows[stale["id"]]["error_code"] == "STALE_GOLDEN_DOCUMENTS"
+    assert rows[stale["id"]]["recall_at_k"] is None
+    assert rows[stale["id"]]["retrieved_document_ids"] == []
+    assert rows[healthy["id"]]["status"] == "ok"
+    assert rows[healthy["id"]]["recall_at_k"] == 1.0
+    assert report["metrics"]["recall_at_k"] == pytest.approx(1.0)
+    assert stale["id"] in report["error_case_ids"]
+    assert [call["query"] for call in fake.calls] == ["q2"]  # stale 不触发检索
+
+
+async def test_run_reports_revoked_private_golden_as_stale_error(env):
+    """运行者私有权限被撤销 → ACL 屏蔽，金标失效报 error（不泄露文档存在性）。"""
+    owner = await _create(env, name="private", query="q", ids=[DOC_PRIVATE])
+    _as(env, USER_C, ORG_A)
+    fake = _FakeKnowledge({"q": [DOC_PRIVATE]})
+    with patch("app.api.v1.endpoints.knowledge.knowledge_service.search_knowledge_with_meta", fake):
+        r = await env.client.post(RUN, json={"case_ids": [owner["id"]]})
+    assert r.status_code == 200, r.text
+    row = r.json()["data"]["results"][0]
+    assert row["status"] == "error"
+    assert row["error"] == "STALE_GOLDEN_DOCUMENTS"
+    assert row["recall_at_k"] is None
+    assert fake.calls == []
+
+
+async def test_strict_search_option_controls_generic_exception_semantics():
+    """strict 默认 False 吞异常；仅 strict=True 上抛（默认端点行为不变）。"""
+    from app.services.knowledge_service import KnowledgeService
+
+    sentinel = "leak_" + "c71d2b"
+    mock = AsyncMock(side_effect=RuntimeError("boom " + sentinel))
+    with patch("app.services.rag_service.rag_service.search_knowledge_base", mock):
+        results, debug = await KnowledgeService().search_knowledge_with_meta(
+            "query", str(ORG_A), top_k=5
+        )
+        assert (results, debug) == ([], None)
+        with pytest.raises(RuntimeError):
+            await KnowledgeService().search_knowledge_with_meta(
+                "query", str(ORG_A), top_k=5, strict=True
+            )
+
+
+async def test_downstream_exception_is_error_not_zero_recall_and_no_log_leak(env, caplog):
+    """真实 knowledge_service 下游抛异常 → 逐条 error、响应/日志都不含异常正文。
+
+    变异点：把 _make_retrieve_fn 的 strict=True 去掉，异常被吞成 []，本用例
+    变 status=ok + recall=0.0，断言失败；把 knowledge_service 的日志恢复成
+    回显异常字符串，caplog 中会出现 sentinel，断言失败。sentinel 运行时拼接。
+    """
+    _as(env)
+    await _create(env, name="boom", query="q1", ids=[DOC_A1])
+    sentinel = "secret_query_" + "b47f0c"
+    mock = AsyncMock(side_effect=RuntimeError("failure with " + sentinel))
+    with (
+        caplog.at_level(logging.ERROR),
+        patch("app.services.rag_service.rag_service.search_knowledge_base", mock),
+    ):
+        r = await env.client.post(RUN, json={})
+    assert r.status_code == 200, r.text
+    report = r.json()["data"]
+    row = report["results"][0]
+    assert row["status"] == "error"
+    assert row["error"] == "RuntimeError"
+    assert row["recall_at_k"] is None
+    assert report["counts"]["errors"] == 1
+    assert report["metrics"]["recall_at_k"] is None
+    assert sentinel not in r.text
+    assert sentinel not in caplog.text
+
+
+async def test_endpoint_exception_logs_class_name_only(env, caplog):
+    """端点兜底日志只记异常类型，不记消息（消息可能含 query 原文）。"""
+    _as(env)
+    sentinel = "raw_message_" + "d3a91f"
+    with (
+        caplog.at_level(logging.ERROR),
+        patch(
+            "app.api.v1.endpoints.knowledge.retrieval_eval_service.create_case",
+            new=AsyncMock(side_effect=RuntimeError(sentinel)),
+        ),
+    ):
+        r = await env.client.post(
+            CASES, json={"name": "x", "query": sentinel, "expected_document_ids": [DOC_A1]}
+        )
+    assert r.status_code == 500, r.text
+    assert sentinel not in caplog.text
+    assert sentinel not in r.text
+    assert "RuntimeError" in caplog.text
+
+
+async def test_full_run_cap_and_case_ids_cap(env):
+    """全量运行最多 100 条；case_ids 最多 50 条（schema + service 双层）。"""
+    from pydantic import ValidationError
+
+    from app.schemas.retrieval_eval import RetrievalEvalRunRequest
+
+    _as(env)
+    with pytest.raises(ValidationError):
+        RetrievalEvalRunRequest(case_ids=[str(uuid4()) for _ in range(51)])
+
+    async with env.factory() as s:
+        s.add_all(
+            [
+                RetrievalEvalCase(
+                    id=str(uuid4()),
+                    organization_id=ORG_A,
+                    name=f"bulk-{i}",
+                    query="q",
+                    expected_document_ids=[DOC_A1],
+                    tags=[],
+                    created_by=USER_A,
+                )
+                for i in range(101)
+            ]
+        )
+        await s.commit()
+    fake = _FakeKnowledge({})
+    with patch("app.api.v1.endpoints.knowledge.knowledge_service.search_knowledge_with_meta", fake):
+        r = await env.client.post(RUN, json={})
+    assert r.status_code == 400, r.text
+    assert "100" in r.text
+    assert fake.calls == []
+    # 显式子集仍可运行（50 条以内），不受全量上限影响。
+    with patch("app.api.v1.endpoints.knowledge.knowledge_service.search_knowledge_with_meta", fake):
+        r2 = await env.client.post(RUN, json={"case_ids": [str(uuid4())]})
+    assert r2.status_code == 200, r2.text
+
+
+async def test_document_hit_at_k_is_document_level_not_clause_level(env):
+    """文档级命中只看 document_id：没有 filename/条号也命中（与 clause_hit@k 不同）。
+
+    变异点：若把 document_hit_at_k 接回 clause_hit@k 的判定，本测试失败。
+    """
+    _as(env)
+    await _create(env, name="doc-level", query="q1", ids=[DOC_A1])
+    fake = _FakeKnowledge({})
+    with (
+        patch("app.api.v1.endpoints.knowledge.knowledge_service.search_knowledge_with_meta", fake),
+        patch(
+            "app.services.retrieval_eval_service.retrieved_document_ids",
+            new=lambda results: [DOC_A1],
+        ),
+    ):
+        r = await env.client.post(RUN, json={})
+    assert r.status_code == 200, r.text
+    metrics = r.json()["data"]["metrics"]
+    assert metrics["document_hit_at_k"] == 1.0
+    assert metrics["hit_at_k"] == 1.0
+
+
+async def test_eval_crud_and_run_are_audited_without_query(env):
+    """create/update/delete/run 均有审计记录，detail 只含 org/user 与计数。
+
+    变异点：删掉任一 audit_service.log_activity 调用，对应 action 断言失败；
+    把 query 写入 detail，sentinel 断言失败。
+    """
+    _as(env)
+    sentinel = "audit_secret_" + "f82c1e"
+    case = await _create(env, name="audit", query=sentinel, ids=[DOC_A1])
+    r = await env.client.put(f"{CASES}/{case['id']}", json={"name": "renamed"})
+    assert r.status_code == 200, r.text
+    with patch(
+        "app.api.v1.endpoints.knowledge.knowledge_service.search_knowledge_with_meta",
+        _FakeKnowledge({}),
+    ):
+        rr = await env.client.post(RUN, json={"case_ids": [case["id"]]})
+    assert rr.status_code == 200, rr.text
+    assert (await env.client.delete(f"{CASES}/{case['id']}")).status_code == 200
+
+    calls = env.state.audit.await_args_list
+    actions = [call.kwargs["action"] for call in calls]
+    assert actions == [
+        "create_retrieval_eval_case",
+        "update_retrieval_eval_case",
+        "run_retrieval_eval",
+        "delete_retrieval_eval_case",
+    ]
+    for call in calls:
+        detail = json.loads(call.kwargs["detail"])
+        assert detail["organization_id"] == ORG_A
+        assert detail["user_id"] == USER_A
+        assert call.kwargs["user_id"] == USER_A
+        assert sentinel not in call.kwargs["detail"]
+    assert "cases" in json.loads(calls[2].kwargs["detail"])
+
+
+def test_top_k_default_is_documented_rank5_contract():
+    """默认 top_k=5 是 rank-5 产品口径，且显式区别于组织 retrieval_top_k。"""
+    from app.schemas.retrieval_eval import RetrievalEvalRunRequest
+
+    field = RetrievalEvalRunRequest.model_fields["top_k"]
+    assert field.default == 5
+    assert "rank-5" in (field.description or "")
+    assert "retrieval_top_k" in (field.description or "")
+
+
+async def test_hit_at_k_uses_k_not_k_plus_one():
+    """命中在 rank k+1 且检索返回 k+1 条时，hit@k / MRR 必须按 k 截断。
+
+    变异点：aggregate(outcomes, cutoffs=(top_k+1,)) 会让 hit@2=1.0、mrr=0.5，
+    本测试断言 0.0/0.0，立即变红。
+    """
+    from app.services import retrieval_eval_service as svc
+
+    class _Case:
+        id = "c-bound"
+        name = "boundary"
+        query = "q"
+        expected_document_ids = [DOC_A1]
+
+    from evals.harness import RetrievalObservation
+
+    async def _retrieve(query, top_k):
+        # 返回 k+1 条，但期望文档只在第 3 名（k=2 时位于 k+1）。
+        return RetrievalObservation(
+            results=[{"document_id": DOC_B1}, {"document_id": DOC_A2}, {"document_id": DOC_A1}][
+                : top_k + 1
+            ]
+        )
+
+    real_aggregate = svc.aggregate
+    spy = MagicMock(side_effect=real_aggregate)
+    with patch.object(svc, "aggregate", spy):
+        report = await svc.run_eval([_Case()], _retrieve, 2)
+    # 变异点：cutoffs=(top_k+1,) 时此断言失败，无需依赖假结果恰好命中 k+1。
+    assert spy.call_args.kwargs["cutoffs"] == (2,)
+    row = report["results"][0]
+    assert row["first_hit_rank"] is None  # rank 2 是错文档，rank 3 命中
+    assert row["reciprocal_rank"] == 0.0
+    assert report["metrics"]["document_hit_at_k"] == 0.0
+    assert report["metrics"]["mrr"] == 0.0
+
+
+def test_models_registry_contains_retrieval_eval_case():
+    """导入 app.models 后表注册必须包含 retrieval_eval_case。
+
+    变异点：从 app/models/__init__.py 移除 RetrievalEvalCase 导入/导出，
+    Base.metadata.tables 不再有该表，本测试失败。
+    """
+    assert "retrieval_eval_case" in Base.metadata.tables
+    table = Base.metadata.tables["retrieval_eval_case"]
+    assert {col.name for col in table.columns} >= {
+        "id",
+        "organization_id",
+        "name",
+        "query",
+        "expected_document_ids",
+        "tags",
+        "created_by",
+        "created_at",
+        "updated_at",
+    }
+    # ORM 层的 FK 与复合索引（变异点：删掉 ForeignKey/Index 即失败）。
+    assert {fk.target_fullname for fk in table.foreign_keys} >= {
+        "organizations.id",
+        "users.id",
+    }
+    assert any(
+        idx.name == "ix_retrieval_eval_case_org_created"
+        and [col.name for col in idx.columns] == ["organization_id", "created_at"]
+        for idx in table.indexes
+    )
+
+
+def test_retrieval_eval_migration_creates_fks_and_index(tmp_path, monkeypatch):
+    """034 迁移升级后的真实 schema 必须有双 FK 与组织+创建时间索引。
+
+    变异点：迁移里删掉 organization_id/created_by FK 或复合索引，本测试失败。
+    临时 sqlite 库放在 pytest 的 basetemp（工作树 _scratch 下）。
+    """
+    import sqlite3
+    from pathlib import Path
+
+    from alembic.config import Config
+    from alembic.script import ScriptDirectory
+
+    from alembic import command
+    from app.core.config import settings
+
+    db_path = Path(str(tmp_path)) / "eval_migration.db"
+    backend_root = Path(__file__).resolve().parents[2]
+
+    monkeypatch.setattr(settings, "DATABASE_URL", f"sqlite+aiosqlite:///{db_path.as_posix()}")
+    cfg = Config(str(backend_root / "alembic.ini"))
+    cfg.set_main_option("script_location", str(backend_root / "alembic"))
+
+    script = ScriptDirectory.from_config(cfg)
+    assert len(script.get_heads()) == 1
+    command.upgrade(cfg, "head")
+
+    with sqlite3.connect(str(db_path)) as conn:
+        cols = conn.execute("PRAGMA table_info(retrieval_eval_case)").fetchall()
+        fks = conn.execute("PRAGMA foreign_key_list(retrieval_eval_case)").fetchall()
+        indexes = conn.execute("PRAGMA index_list(retrieval_eval_case)").fetchall()
+        index_cols = {
+            row[1]: tuple(col[2] for col in conn.execute(f"PRAGMA index_info({row[1]})"))
+            for row in indexes
+        }
+    assert {row[1] for row in cols} >= {
+        "id",
+        "organization_id",
+        "expected_document_ids",
+        "created_by",
+        "created_at",
+    }
+    assert {row[2] for row in fks} >= {"organizations", "users"}
+    assert {row[3] for row in fks} >= {"organization_id", "created_by"}
+    assert ("organization_id", "created_at") in index_cols.values(), index_cols
