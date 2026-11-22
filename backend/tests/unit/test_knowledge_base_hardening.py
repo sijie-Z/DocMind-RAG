@@ -464,7 +464,7 @@ class TestMigration033StaticShape:
 
     def test_downgrade_drops_doc_objects_before_kb_table(self):
         """Static order assertion: SQLite cannot ALTER DROP FK, but the
-        downgrade must still drop constraint -> index -> column -> KB index ->
+        downgrade must still drop constraint -> document index -> column ->
         KB table in that order on MySQL. Mutation = moving `op.drop_table(TABLE)`
         above the document-column block -> red.
         """
@@ -474,10 +474,12 @@ class TestMigration033StaticShape:
             downgrade.index("op.drop_constraint(FK, DOC_TABLE"),
             downgrade.index("op.drop_index(INDEX, table_name=DOC_TABLE)"),
             downgrade.index("op.drop_column(DOC_TABLE, COLUMN)"),
-            downgrade.index("op.drop_index(KB_ORG_INDEX, table_name=TABLE)"),
             downgrade.index("op.drop_table(TABLE)"),
         ]
         assert positions == sorted(positions)
+        # MySQL 外键需要 (organization_id, created_at) 索引的左前缀；单独删该
+        # 索引会触发 1553，必须随 drop_table 一起删除。
+        assert "op.drop_index(KB_ORG_INDEX, table_name=TABLE)" not in downgrade
 
 
 class TestSchemaBlankKnowledgeBaseId:

@@ -4,6 +4,8 @@
 - ``documents.knowledge_base_id`` 可空：NULL = 旧语义「组织内全部文档」，
   不隐式归入任何库；检索侧只在显式给出 kb_id 时收窄文档集合。
 - MySQL DDL 非事务，upgrade/downgrade 均按对象存在性幂等执行（沿用 027/032 先例）。
+- downgrade 直接 drop_table，由数据库随表删除 KB 索引；不显式 drop_index
+  （create_all 路径下复合索引是 organization_id 外键的支撑索引，MySQL 会报 1553）。
 """
 
 from __future__ import annotations
@@ -103,6 +105,6 @@ def downgrade() -> None:
             op.drop_index(INDEX, table_name=DOC_TABLE)
         op.drop_column(DOC_TABLE, COLUMN)
     if TABLE in sa.inspect(op.get_bind()).get_table_names():
-        if KB_ORG_INDEX in _indexes(TABLE):
-            op.drop_index(KB_ORG_INDEX, table_name=TABLE)
+        # MySQL 的 organization_id 外键依赖 (organization_id, created_at) 索引的
+        # 左前缀；单独 DROP INDEX 会报 1553。drop_table 会随表删除该表索引。
         op.drop_table(TABLE)

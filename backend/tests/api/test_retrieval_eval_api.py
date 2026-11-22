@@ -1195,3 +1195,11 @@ def test_retrieval_eval_migration_creates_fks_and_index(tmp_path, monkeypatch):
     assert {row[2] for row in fks} >= {"organizations", "users"}
     assert {row[3] for row in fks} >= {"organization_id", "created_by"}
     assert ("organization_id", "created_at") in index_cols.values(), index_cols
+    # MySQL 下 organization_id 外键依赖上述索引的左前缀；downgrade 不能先显式
+    # DROP INDEX（会触发 1553），必须随 drop_table 删除。
+    migration = (backend_root / "alembic" / "versions" / "034_retrieval_eval_case.py").read_text(
+        encoding="utf-8"
+    )
+    downgrade = migration.split("def downgrade() -> None:", 1)[1]
+    assert "op.drop_table(TABLE)" in downgrade
+    assert "op.drop_index(INDEX, table_name=TABLE)" not in downgrade

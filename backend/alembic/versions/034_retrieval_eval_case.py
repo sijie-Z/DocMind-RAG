@@ -4,7 +4,9 @@
 用例，按组织隔离。运行评测只读本表（默认不写结果），不改既有检索/判定。
 
 幂等分步（与 032 先例一致）：MySQL DDL 非事务，上一次执行可能建了表却未
-推进版本戳——已存在的对象跳过；downgrade 先摘索引再删表。
+推进版本戳——已存在的对象跳过；downgrade 直接 drop_table，由数据库随表删除
+索引，不显式 drop_index（MySQL 外键约束需要 organization_id 的左前缀索引，
+先删索引会触发 1553）。
 """
 
 from __future__ import annotations
@@ -69,6 +71,6 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     if TABLE in sa.inspect(op.get_bind()).get_table_names():
-        if INDEX in _indexes(TABLE):
-            op.drop_index(INDEX, table_name=TABLE)
+        # MySQL 的 organization_id 外键依赖 (organization_id, created_at) 索引的
+        # 左前缀；单独 DROP INDEX 会报 1553。drop_table 会随表删除该表索引。
         op.drop_table(TABLE)
