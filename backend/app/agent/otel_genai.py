@@ -80,16 +80,18 @@ FIELD_TO_ATTRIBUTE: dict[str, str] = {
 
 # 只有能明确判定 provider 的模型名前缀才映射；其余一律 "unknown"，绝不把
 # 配置中的模型名当身份声明（也不猜测 provider）。
+# o1/o3/o4 走专门的严格形态匹配（见 _provider_for_model），不放进通用前缀表：
+# 否则 "o1-private-router" 这类私有别名会被误判为 openai。
 _PROVIDER_PREFIXES: tuple[tuple[str, str], ...] = (
     ("deepseek", "deepseek"),
     ("gpt-", "openai"),
-    ("o1", "openai"),
-    ("o3", "openai"),
     ("claude", "anthropic"),
     ("gemini", "google"),
     ("qwen", "alibaba"),
     ("llama", "meta"),
 )
+# OpenAI reasoning 系列的闭集形态：o1 / o3 / o4，可跟一个已知后缀段。
+_OPENAI_REASONING_MODEL = re.compile(r"\Ao[134](?:-[a-z0-9]+)?\Z")
 # 错误类别闭集：从错误文本中只取这些类别词，绝不回显自由文本。
 _ERROR_CATEGORIES: tuple[str, ...] = (
     "timeout",
@@ -140,10 +142,12 @@ def _safe_number(value: Any) -> int | float | None:
 
 
 def _provider_for_model(model: str | None) -> str:
-    """仅从已知前缀推断 provider；"unknown" 是显式缺省，不是身份声明。"""
+    """仅从已知形态推断 provider；"unknown" 是显式缺省，不是身份声明。"""
     if not model:
         return "unknown"
     lowered = model.lower()
+    if _OPENAI_REASONING_MODEL.fullmatch(lowered):
+        return "openai"
     for prefix, provider in _PROVIDER_PREFIXES:
         if lowered.startswith(prefix):
             return provider

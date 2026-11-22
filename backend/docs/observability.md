@@ -263,7 +263,7 @@ Development/Experimental,所以属性名与语义**钉在该快照**,不随 `ope
 | `gen_ai.provider.name` | 由 `model` 的已知前缀保守推断;无法判定即 `unknown`,**不把配置里的模型名当身份声明** |
 | `gen_ai.request.model` / `gen_ai.response.model` | `model` |
 | `gen_ai.usage.input_tokens` / `gen_ai.usage.output_tokens` / `gen_ai.response.tool_calls` / `gen_ai.response.duration_ms` | `tokens_in` / `tokens_out` / `tool_calls` / `latency_ms` |
-| `error.type` | 错误类名或固定类别(`timeout`/`rate_limit`/`auth`/`connection`/`validation`),**绝不是原始异常文本** |
+| `error.type` | 错误类名或固定类别(`timeout`/`rate_limit`/`auth`/`connection`/`validation`),**绝不是原始异常文本**。生产记录的 `error` 多为字符串:命中上述类别关键词才映射为对应类别,未命中的字符串一律折叠为固定值 `error`(不回显文本);异常对象则优先取类名(如 `RuntimeError`)与同类闭集类别。 |
 | `gen_ai.conversation.id` / `gen_ai.request.id` | `task_id` / `request_id` |
 | `gen_ai.prompt.id` / `gen_ai.prompt.version` / `gen_ai.prompt.label` / `gen_ai.experiment.id` | 同名可选元数据字段(只含窄化后的标量标识) |
 | `gen_ai.trace.span_id` / `parent_span_id` / `span_type` / `start_time` / `end_time` | 层级 trace 同名可选字段 |

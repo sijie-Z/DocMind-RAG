@@ -20,7 +20,6 @@ import pytest
 from app.agent.llm_call_log import append_llm_call_record, build_llm_call_record
 from app.agent.otel_genai import (
     ALLOWED_ATTRIBUTE_KEYS,
-    SEMCONV_VERSION,
     build_gen_ai_attributes,
     export_gen_ai_span,
 )
@@ -64,18 +63,23 @@ def _record(**overrides: Any) -> dict[str, Any]:
 
 
 def test_export_disabled_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
-    """生产默认必须关闭；monkeypatch 掉全局 tracer 确保 no-op 不触碰 OTel。"""
+    """生产默认必须关闭：用计数器断言 get_tracer 从未被调用（异常会被吞掉，不能用抛错做哨兵）。"""
+    import opentelemetry.trace as otel_trace
+
     from app.core.config.base import BaseAppSettings
 
     assert BaseAppSettings.model_fields["OTEL_GEN_AI_EXPORT_ENABLED"].default is False
 
-    def _boom():  # pragma: no cover - 一旦被调用就证明默认开关失效
-        raise AssertionError("disabled export must not touch tracer")
+    calls = 0
 
-    import opentelemetry.trace as otel_trace
+    def _count_get_tracer(*args, **kwargs):  # pragma: no cover - 一旦被调用即证明开关失效
+        nonlocal calls
+        calls += 1
+        raise AssertionError("disabled export must not call get_tracer")
 
-    monkeypatch.setattr(otel_trace, "get_tracer", _boom)
+    monkeypatch.setattr(otel_trace, "get_tracer", _count_get_tracer)
     assert export_gen_ai_span(_record()) is False
+    assert calls == 0, "默认关闭时不得触碰 OTel tracer"
 
 
 def test_mapping_is_pure_and_independent_of_switch(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -83,7 +87,7 @@ def test_mapping_is_pure_and_independent_of_switch(monkeypatch: pytest.MonkeyPat
     monkeypatch.setattr(settings, "OTEL_GEN_AI_EXPORT_ENABLED", False)
     attrs = build_gen_ai_attributes(_record())
     assert attrs["gen_ai.operation.name"] == "chat"
-    assert attrs["gen_ai.semconv.version"] == SEMCONV_VERSION
+    assert attrs["gen_ai.semconv.version"] == "genai-semconv-draft-2026-01-19"
 
 
 # ── 2. 白名单 / 无正文泄漏 ───────────────────────────────────────────────
@@ -135,10 +139,15 @@ def test_prompt_hash_is_not_exported_as_body() -> None:
     [
         ("deepseek-chat", "deepseek"),
         ("gpt-4o-mini", "openai"),
+        ("o1", "openai"),
+        ("o3-mini", "openai"),
+        ("o4", "openai"),
         ("claude-3-5-sonnet", "anthropic"),
         ("gemini-2.5-pro", "google"),
         ("qwen3-8b", "alibaba"),
         ("llama3", "meta"),
+        ("o1-private-router", "unknown"),
+        ("o3-our-internal-alias", "unknown"),
         ("our-private-router-alias", "unknown"),
         ("", "unknown"),
     ],
@@ -210,19 +219,73 @@ def test_span_attributes_come_from_existing_record(monkeypatch: pytest.MonkeyPat
     monkeypatch.setattr(otel_trace, "get_tracer_provider", lambda: provider)
     monkeypatch.setattr(settings, "OTEL_GEN_AI_EXPORT_ENABLED", True)
 
-    record = _record(prompt_id="42", prompt_version="7", experiment_id="exp-A")
+    record = _record(
+        prompt_id="42",
+        prompt_version="7",
+        experiment_id="exp-A",
+        span_id="span-7",
+        parent_span_id="span-6",
+        span_type="llm",
+        start_time="2026-01-02T03:04:05.000+00:00",
+        end_time="2026-01-02T03:04:05.842+00:00",
+        error="provider returned invalid status ZX81",
+    )
     assert export_gen_ai_span(record) is True
 
     spans = exporter.get_finished_spans()
     assert len(spans) == 1
     assert spans[0].name == "gen_ai.chat"
-    assert dict(spans[0].attributes) == build_gen_ai_attributes(record)
+    attrs = dict(spans[0].attributes)
+    # 固定断言：不得用 build_gen_ai_attributes(record) 自己验自己。
+    assert attrs["gen_ai.semconv.version"] == "genai-semconv-draft-2026-01-19"
+    assert attrs["gen_ai.operation.name"] == "chat"
+    assert attrs["gen_ai.provider.name"] == "deepseek"
+    assert attrs["gen_ai.request.model"] == "deepseek-chat"
+    assert attrs["gen_ai.response.model"] == "deepseek-chat"
+    assert attrs["gen_ai.usage.input_tokens"] == 120
+    assert attrs["gen_ai.usage.output_tokens"] == 30
+    assert attrs["gen_ai.response.tool_calls"] == 2
+    assert attrs["gen_ai.response.duration_ms"] == 842.5
+    assert attrs["gen_ai.conversation.id"] == "task-7"
+    assert attrs["gen_ai.request.id"] == "req-7"
+    assert attrs["gen_ai.prompt.id"] == "42"
+    assert attrs["gen_ai.prompt.version"] == "7"
+    assert attrs["gen_ai.experiment.id"] == "exp-A"
+    # 层级 trace 投影（含时间归一化到 UTC ISO-8601 毫秒）。
+    assert attrs["gen_ai.trace.span_id"] == "span-7"
+    assert attrs["gen_ai.trace.parent_span_id"] == "span-6"
+    assert attrs["gen_ai.trace.span_type"] == "llm"
+    assert attrs["gen_ai.trace.start_time"] == "2026-01-02T03:04:05.000+00:00"
+    assert attrs["gen_ai.trace.end_time"] == "2026-01-02T03:04:05.842+00:00"
+    # 字符串错误且不含闭集类别词 → 明确契约 collapse 为 "error"，绝不回显原文。
+    assert attrs["error.type"] == "error"
+    assert "ZX81" not in repr(attrs)
+    assert set(attrs) <= ALLOWED_ATTRIBUTE_KEYS
+
+
+def test_exporter_failure_is_swallowed_by_export_function(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """直接调用导出函数注入 tracer 失败：必须返回 False 且不抛异常。
+
+    变异点：删除 export_gen_ai_span 内部 try/except → 本用例红（此前只经
+    append_llm_call_record 外层兜底，删掉内部保护仍绿）。
+    """
+    import opentelemetry.trace as otel_trace
+
+    def _boom(*args, **kwargs):
+        raise RuntimeError("exporter down")
+
+    monkeypatch.setattr(otel_trace, "get_tracer", _boom)
+    monkeypatch.setattr(settings, "OTEL_GEN_AI_EXPORT_ENABLED", True)
+
+    assert export_gen_ai_span(_record()) is False
 
 
 def test_exporter_failure_never_breaks_llm_call_path(
     tmp_path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """tracer 抛错必须吞掉；JSONL 仍成功写入且键集不变。"""
+    """导出异常不得影响 JSONL：仍成功写入且 10 字段键集不变。"""
     import opentelemetry.trace as otel_trace
 
     def _boom(*args, **kwargs):
