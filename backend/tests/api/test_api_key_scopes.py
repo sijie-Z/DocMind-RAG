@@ -243,6 +243,43 @@ async def test_chunk_browser_scopes_accept_matching_keys(env):
     assert write_response.status_code in (200, 404), write_response.text
 
 
+# ── 合同审查模板库：写端点逐条要求 knowledge:write ─────────────────────────
+TEMPLATE_LIST = "/api/v1/reviews/templates"
+TEMPLATE_CREATE_CALLS = (
+    ("create", "post", TEMPLATE_LIST, {"name": "scope-template"}),
+    (
+        "bootstrap",
+        "post",
+        f"{TEMPLATE_LIST}/bootstrap",
+        {"name": "scope-bootstrap"},
+    ),
+)
+
+
+@pytest.mark.asyncio
+async def test_template_list_requires_knowledge_read_scope(env):
+    """模板列表读要求 knowledge:read；rpc-only / write-only key 都不得读。"""
+    for scopes in (["rpc"], ["knowledge:write"]):
+        raw = await _make_key(env, scopes)
+        _assert_scope_denied(await env.client.get(TEMPLATE_LIST, headers=_auth(raw)))
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("name,method,path,body", TEMPLATE_CREATE_CALLS)
+async def test_template_write_endpoints_require_knowledge_write_scope(
+    env, name, method, path, body
+):
+    """模板写端点按端点验证 knowledge:write；rpc-only / read-only key 一律 403。
+
+    变异点：删除 create_review_template / bootstrap_review_template 的
+    `_WRITE_DEPS` 中 require_scope("knowledge:write") → 对应参数化用例红。
+    """
+    for scopes in (["rpc"], ["knowledge:read"]):
+        raw = await _make_key(env, scopes)
+        response = await getattr(env.client, method)(path, json=body, headers=_auth(raw))
+        _assert_scope_denied(response)
+
+
 # ── chat:read：可读会话，不可写 ─────────────────────────────────────────────
 
 
