@@ -151,10 +151,14 @@ async def close_elasticsearch():
 # Index management
 # ---------------------------------------------------------------------------
 def _source_provenance_mapping_properties() -> dict:
-    """Additive fields for original-text provenance; retrieval mapping stays unchanged."""
+    """Additive fields for provenance/manual override; retrieval mapping stays unchanged."""
     return {
         "original_text": {"type": "text", "index": False},
         "text_provenance": {"type": "keyword"},
+        # 分块级启停与人工检索文本标记：独立于 text_provenance，
+        # strict 原文 replay 只看后者，人工文本不能冒充 parser 原文。
+        "is_chunk_enabled": {"type": "boolean"},
+        "retrieval_text_provenance": {"type": "keyword"},
     }
 
 
@@ -444,9 +448,21 @@ class ElasticsearchTools:
             return None
 
     @staticmethod
-    async def update_document(doc_id: str, document: dict):
+    async def update_document(doc_id: str, document: dict, *, refresh: bool = True):
+        """更新单个 ES 文档；默认 ``refresh=True`` 让启停/修正即刻可检索。
+
+        文档级启停走 ``update_by_query(refresh=True)``；分块级写入也必须
+        显式 refresh，否则「停用立即生效」只是文档里的承诺——refresh 前
+        旧 `_source` 仍会被检索命中。显式传 ``refresh=False`` 仅用于批量
+        写入后统一刷新，不用于用户可见的单块操作。
+        """
         client = await get_elasticsearch()
-        return await client.update(index=settings.ELASTICSEARCH_INDEX_NAME, id=doc_id, doc=document)
+        return await client.update(
+            index=settings.ELASTICSEARCH_INDEX_NAME,
+            id=doc_id,
+            doc=document,
+            refresh=refresh,
+        )
 
     @staticmethod
     async def update_documents_by_query(query: dict, script: dict) -> dict:

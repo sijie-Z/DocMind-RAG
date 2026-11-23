@@ -422,6 +422,63 @@ class TestBuildReferencedDocumentContext:
         assert ctx is not None and "只有描述" in ctx
         assert any("未检索到相关正文" in w for w in warnings)
 
+    @pytest.mark.asyncio
+    async def test_direct_read_fallback_excludes_disabled_chunks(self, doc_factory, monkeypatch):
+        """评审 IMPORTANT 2：@引用的按 document_id 直读兜底必须带分块启停过滤。
+
+        变异点：删除 ``build_referenced_document_context`` 直读查询里的
+        ``with_chunk_enabled_filter`` → 本用例在 must 断言处精确红。
+        """
+        await _add_doc(doc_factory, "d9")
+        captured: list[dict] = []
+
+        async def _search(query):
+            captured.append(query)
+            return {"hits": {"hits": [_es_chunk(original=True)]}}
+
+        monkeypatch.setattr(ElasticsearchTools, "search_documents", AsyncMock(side_effect=_search))
+
+        ctx, warnings = await build_referenced_document_context(
+            ["d9"], "总结这份文档", 1, pipeline=_FixedPipeline([])
+        )
+
+        assert captured, "query 检索零命中后必须走直读兜底"
+        must = captured[0]["query"]["bool"]["must"]
+        assert {"bool": {"must_not": [{"term": {"is_chunk_enabled": False}}]}} in must
+        assert any("organization_id" in cond.get("term", {}) for cond in must)
+        assert ctx is not None and ORIGINAL_TEXT in ctx
+        assert warnings == []
+
+    @pytest.mark.asyncio
+    async def test_direct_read_fallback_disabled_chunk_cannot_enter_context(
+        self, doc_factory, monkeypatch
+    ):
+        """行为级：禁用块被 ES 过滤掉后，@引用上下文不得出现其正文。"""
+        await _add_doc(doc_factory, "d10")
+        secret = "DISABLED-REFDOC-CANARY-3384"
+        safe = {
+            "_source": {
+                "content": "启用块正文",
+                "original_text": "启用块正文",
+                "text_provenance": "parser_original",
+            }
+        }
+
+        async def _search(query):
+            assert {"bool": {"must_not": [{"term": {"is_chunk_enabled": False}}]}} in query[
+                "query"
+            ]["bool"]["must"]
+            return {"hits": {"hits": [safe]}}
+
+        monkeypatch.setattr(ElasticsearchTools, "search_documents", AsyncMock(side_effect=_search))
+
+        ctx, _warnings = await build_referenced_document_context(
+            ["d10"], "总结这份文档", 1, pipeline=_FixedPipeline([])
+        )
+
+        assert secret not in str(ctx)
+        assert "启用块正文" in str(ctx)
+
 
 # ── loop 接线 ────────────────────────────────────────────────────────────────
 

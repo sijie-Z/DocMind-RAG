@@ -30,6 +30,7 @@ from app.models.document import (
     Document,
     DocumentAcl,
     DocumentChunk,
+    DocumentChunkOverride,
     DocumentStatus,
     DocumentTag,
     DocumentType,
@@ -208,6 +209,8 @@ async def delete_harness(monkeypatch):
         Document.__table__,
         DocumentAcl.__table__,
         DocumentChunk.__table__,
+        # 批次四：删除链会先删 override 子表（FK 无 ON DELETE CASCADE）
+        DocumentChunkOverride.__table__,
         DocumentTag.__table__,
         KnowledgeProcessingJob.__table__,
         ReviewDocumentMeta.__table__,

@@ -2,6 +2,35 @@ import request from '@/utils/request'
 import type { AxiosResponse } from 'axios'
 import type { ApiResponse } from '@/types/common'
 
+/**
+ * 结构化索引阶段/错误（闭集，后端 app/services/index_progress.py）。
+ * 与 status / parse_error 的既有语义并行；不替换任何旧字段。
+ */
+export type IndexStage = 'parse' | 'chunk' | 'embed' | 'index'
+export type IndexErrorCode =
+  | 'PARSE_PROFILE_INVALID'
+  | 'PARSE_UNSUPPORTED_FORMAT'
+  | 'PARSE_FAILED'
+  | 'CHUNK_EMPTY'
+  | 'CHUNK_FAILED'
+  | 'EMBED_COUNT_MISMATCH'
+  | 'EMBED_FAILED'
+  | 'INDEX_WRITE_FAILED'
+  | 'INDEX_VERIFICATION_FAILED'
+  | 'INDEX_FAILED'
+  | 'DOCUMENT_NOT_FOUND'
+  | 'JOB_SCHEDULE_FAILED'
+  | 'UNEXPECTED'
+
+export interface IndexPipeline {
+  stage: IndexStage | null
+  /** 阶段边界粗粒度进度 0-100；完成与否仍以 status 为准 */
+  progress: number
+  error_code: IndexErrorCode | null
+  /** 脱敏运维提示；不含异常原文/正文/查询 */
+  error_detail: string | null
+}
+
 export interface KnowledgeBase {
   id: string
   title: string
@@ -22,6 +51,8 @@ export interface KnowledgeBase {
   preview_provenance?: DocumentContent['text_provenance']
   preview_truncated?: boolean
   parse_error?: string
+  /** 结构化索引阶段/错误；旧文档可能为 null */
+  index_pipeline?: IndexPipeline
   raw_status?: string
   created_at: string
   updated_at: string
@@ -50,6 +81,7 @@ export interface KnowledgeJob {
   status: 'queued' | 'processing' | 'success' | 'failed'
   retry_count: number
   error_message?: string
+  index_pipeline?: IndexPipeline
   started_at?: string
   finished_at?: string
   created_at?: string
@@ -63,6 +95,7 @@ export interface DocumentDetail {
   file_type: string
   status: string
   parse_error?: string
+  index_pipeline?: IndexPipeline
   created_at?: string
   description?: string
   keywords?: string[]
@@ -148,6 +181,74 @@ export interface DocumentChunkPreview {
   start_pos?: number | null
   end_pos?: number | null
   section_title?: string | null
+}
+
+export interface DocumentChunkBrowserItem {
+  chunk_id: string
+  chunk_index: number
+  document_id: string
+  document_title: string
+  indexed_text: string
+  parser_original_available: boolean
+  parser_original_text: string | null
+  text_provenance: 'parser_original' | 'legacy_unverified'
+  page_number: number | null
+  start_pos: number | null
+  end_pos: number | null
+  section_title: string | null
+  clause_no: number[]
+  section_no: string[]
+  is_enabled: boolean
+  override_state: 'none' | 'active' | 'draft' | 'disabled'
+  /** 实际用于检索的 provenance：manual_override 与 parser_original 严格区分。 */
+  effective_text_provenance: 'parser_original' | 'legacy_unverified' | 'manual_override'
+  override_text: string | null
+  override_id: string | null
+  override_updated_at: string | null
+}
+
+export interface DocumentChunkBrowserResponse {
+  items: DocumentChunkBrowserItem[]
+  total: number
+  page: number
+  page_size: number
+  pages: number
+  document: { id: string; title: string; organization_id: number }
+}
+
+/** 分页浏览单篇文档的 chunk；viewer/org 由后端派生，前端不传组织上下文。 */
+export const getDocumentChunks = async (
+  documentId: string,
+  params: { page?: number; page_size?: number; enabled?: boolean; override_state?: 'active' | 'draft' | 'disabled'; q?: string } = {},
+  options?: SilentRequestOptions
+): Promise<AxiosResponse<{ data: DocumentChunkBrowserResponse }>> => {
+  return request.get(`/documents/${encodeURIComponent(documentId)}/chunks`, {
+    params,
+    ...(options?.silent ? SILENT_HEADERS : {})
+  })
+}
+
+export const setDocumentChunkOverride = async (
+  documentId: string,
+  body: { chunk_id: string; text: string | null; apply_to_retrieval: boolean }
+): Promise<AxiosResponse<{ data: DocumentChunkBrowserItem }>> => {
+  return request.put(`/documents/${encodeURIComponent(documentId)}/chunks/override`, body)
+}
+
+export const setDocumentChunkEnabled = async (
+  documentId: string,
+  body: { chunk_id: string; enabled: boolean }
+): Promise<AxiosResponse<{ data: DocumentChunkBrowserItem }>> => {
+  return request.patch(`/documents/${encodeURIComponent(documentId)}/chunks/enabled`, body)
+}
+
+export const resetDocumentChunkOverride = async (
+  documentId: string,
+  chunkId: string
+): Promise<AxiosResponse<{ data: DocumentChunkBrowserItem }>> => {
+  return request.delete(`/documents/${encodeURIComponent(documentId)}/chunks/override`, {
+    params: { chunk_id: chunkId }
+  })
 }
 
 /** 按引用分块取回原文（与全文预览同口径；仅用于已校验归属的文档）。 */

@@ -519,6 +519,16 @@ python scripts/reconcile_knowledge_index.py --reindex --limit 10
 - `GET /eval/runs`（列表，可按 `case_set_hash` 过滤）、`GET /eval/runs/{id}`（详情）、`GET /eval/runs/trend`（最近 30 次趋势，失败运行不计入指标均值）、`GET /eval/runs/{id}/export?format=json|csv`（同源导出，用于回归比较）。
 - 审计只写组织、用户、条数、格式与字段名，`query`/用例名/逐条正文不进审计日志；逐条结果只在本组织授权详情页可见。
 
+### 4.2.1 分块浏览与人工纠正
+
+文档详情页的「浏览与纠正分块」（URL 参数 `chunkBrowser=1`，可分享）打开只读优先的分块工作台：
+
+- `GET /api/v1/documents/{id}/chunks` 分页返回分块索引、检索文本、parser 原文可用性、页码/字符区间/条款定位、启停与人工修正状态；组织、私有文档 ACL 与 viewer 全部由服务端推导，客户端不能声明组织上下文。
+- 文档所有者或组织管理员可把修正文本写入独立的 `document_chunk_overrides` 审计行（`PUT .../chunks/override`）。`apply_to_retrieval=false` 仅保存草稿；`true` 时检索文本立即切换为人工文本并标 `manual_override`。`parser_original` / `original_text` / `quote_sha256` 与合同证据快照**永不改写**；strict 原文回放仍只读 parser 原文。
+- `PATCH .../chunks/enabled` 立即把分块级 `is_chunk_enabled` 刷到 ES，停用块退出检索；`DELETE .../chunks/override` 撤销人工文本并恢复 parser 检索文本。写操作失败时 DB 不提交，避免 ES/DB 状态漂移；缓存按组织清理。
+- 审计记录只含文档/分块 id、操作、布尔值与修正文本哈希/字符数，绝不写私有正文或修正正文到审计日志。旧索引缺 `is_chunk_enabled` 字段时按启用处理，需执行 `scripts/add_rag_source_provenance_mapping.py` 补齐 additive mapping。
+- **取舍**：人工修正不重算向量、也不重建索引；它只改 ES 的检索文本与独立审计行。文档重建/重新解析会生成新的分块 id，旧修正不会自动迁移到新块，需要按新块重新确认；这也是 strict 原文回放始终可信的前提——人工文本永不进入 parser 原文证据链。
+
 ### 4.3 对话与深度分析
 
 对话页（`/chat`）有两个模式，入口是输入区的「快速问答 / 深度分析」二选一开关（`frontend/src/views/chat/components/ChatInput.vue`）：

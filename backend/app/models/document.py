@@ -22,6 +22,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
 
 from app.core.database import Base
+from app.core.time_utils import utcnow as _utcnow_model_default
 
 
 class DocumentStatus(enum.Enum):
@@ -79,7 +80,24 @@ class Document(Base):
     status: Mapped[DocumentStatus] = mapped_column(
         Enum(DocumentStatus), default=DocumentStatus.PENDING, index=True, comment="处理状态"
     )
-    parse_error: Mapped[str | None] = mapped_column(Text, comment="解析错误信息")
+    parse_error: Mapped[str | None] = mapped_column(
+        Text, comment="解析错误信息（保留原始诊断文本）"
+    )
+
+    # 结构化索引进度/错误（竞品批次四）：与 parse_error/status 完全并行，
+    # 不改变任何既有状态语义。闭集码与阶段见 app.services.index_progress。
+    index_stage: Mapped[str | None] = mapped_column(
+        String(16), nullable=True, comment="处理阶段闭集：parse/chunk/embed/index"
+    )
+    index_progress: Mapped[int] = mapped_column(
+        Integer, default=0, server_default=sa.text("0"), comment="阶段边界进度 0-100"
+    )
+    index_error_code: Mapped[str | None] = mapped_column(
+        String(64), nullable=True, comment="稳定错误码闭集；成功/在途中为 NULL"
+    )
+    index_error_detail: Mapped[str | None] = mapped_column(
+        String(256), nullable=True, comment="脱敏且有界的运维提示；不含异常原文/正文/查询"
+    )
 
     # 文档级可见性（对标 Onyx 的文档 ACL 最小版）：
     #   organization = 组织内全员可见（默认，行为与旧版一致）
@@ -223,10 +241,90 @@ class DocumentChunk(Base):
 
     # 关联关系
     document: Mapped[Optional["Document"]] = relationship("Document", back_populates="chunks")
+    override: Mapped[Optional["DocumentChunkOverride"]] = relationship(
+        "DocumentChunkOverride",
+        back_populates="chunk",
+        uselist=False,
+        cascade="all, delete-orphan",
+    )
 
     # 不在此声明 collation：全库统一继承数据库默认值（canonical =
     # utf8mb4_unicode_ci，由部署配置与 CI 保证），避免迁移路径与 create_all
     # 路径因逐表覆盖而产生分歧。
+
+
+class DocumentChunkOverride(Base):
+    """分块人工修正/启停的独立审计记录（不可变证据的旁路）。
+
+    本表**不触碰** ``DocumentChunk.original_text`` / ``chunk_text`` /
+    ``meta_data``，也绝不改写合同证据的 ``quote_sha256``。检索文本使用
+    ``override_text`` 时，``text_provenance`` 固定为 ``manual_override``，
+    strict 原文 replay 仍然只读 parser 原文，不会把人工文本当原文。
+    """
+
+    __tablename__ = "document_chunk_overrides"
+    __table_args__ = (
+        UniqueConstraint("document_chunk_id", name="uq_document_chunk_override_chunk"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    document_chunk_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("document_chunks.id", ondelete="CASCADE"),
+        index=True,
+        comment="目标分块 DB id",
+    )
+    document_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("documents.id", ondelete="CASCADE"), index=True, comment="所属文档"
+    )
+    organization_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("organizations.id"), index=True, comment="所属组织（租户隔离键）"
+    )
+    override_text: Mapped[str | None] = mapped_column(
+        Text, comment="人工检索文本；为 NULL 表示仅启停变更"
+    )
+    is_enabled: Mapped[bool] = mapped_column(
+        Boolean,
+        default=True,
+        server_default=sa.text("1"),
+        nullable=False,
+        comment="分块级启停；false 不参与检索召回",
+    )
+    apply_to_retrieval: Mapped[bool] = mapped_column(
+        Boolean,
+        default=False,
+        server_default=sa.text("0"),
+        nullable=False,
+        comment="人工文本是否用于检索；false 时只保留草稿/审计",
+    )
+    created_by: Mapped[int] = mapped_column(
+        Integer, ForeignKey("users.id"), nullable=False, comment="首次创建人"
+    )
+    updated_by: Mapped[int] = mapped_column(
+        Integer, ForeignKey("users.id"), nullable=False, comment="最后修改人"
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        # Python 侧默认值（与应用侧写入口径同为 naive UTC）：MySQL 无
+        # INSERT ... RETURNING，只靠 server_default 时 flush 后该列仍是
+        # expired，同事务内投影一读就触发异步 lazy load（MissingGreenlet）。
+        default=_utcnow_model_default,
+        comment="创建时间",
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        default=_utcnow_model_default,
+        comment="最后修改时间",
+    )
+
+    chunk: Mapped[Optional["DocumentChunk"]] = relationship(
+        "DocumentChunk",
+        back_populates="override",
+        uselist=False,
+    )
 
 
 class DocumentTag(Base):

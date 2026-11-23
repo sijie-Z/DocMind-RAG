@@ -134,8 +134,18 @@
             </div>
           </header>
 
+          <div
+            v-if="detail?.index_pipeline && detail.status === 'failed' && detail.index_pipeline.error_code"
+            class="mt-4 rounded-lg border border-red-200 bg-red-50/60 px-3 py-2 text-sm text-red-700 dark:border-red-900/60 dark:bg-red-950/30 dark:text-red-300"
+            role="status"
+            data-testid="document-index-pipeline-error"
+          >
+            <span class="font-semibold">{{ indexStageLabel(detail.index_pipeline.stage) }}</span>
+            {{ indexErrorMessage(detail.index_pipeline.error_code) }}
+          </div>
+
           <n-alert
-            v-if="detail?.parse_error"
+            v-if="detail?.parse_error && !detail?.index_pipeline?.error_code"
             type="error"
             :bordered="false"
             class="mt-4 break-words"
@@ -329,6 +339,34 @@
               <n-empty :description="emptyContentHint" />
             </div>
           </section>
+
+          <section
+            v-if="!evidenceId && detail?.id"
+            class="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-slate-200 bg-white px-5 py-3 dark:border-slate-700 dark:bg-slate-900"
+          >
+            <div class="min-w-0">
+              <h3 class="text-sm font-semibold text-slate-800 dark:text-slate-100">
+                {{ t('knowledge.chunkBrowser.title') }}
+              </h3>
+              <p class="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
+                {{ t('knowledge.chunkBrowser.subtitle') }}
+              </p>
+            </div>
+            <n-button
+              size="small"
+              secondary
+              data-testid="open-chunk-browser"
+              @click="openChunkBrowser"
+            >
+              {{ t('knowledge.chunkBrowser.open') }}
+            </n-button>
+          </section>
+
+          <ChunkBrowser
+            v-if="!evidenceId && detail?.id && chunkBrowserOpen"
+            :key="detail.id"
+            :document-id="detail.id"
+          />
         </template>
       </div>
     </div>
@@ -366,6 +404,8 @@ import { setPageTitleKey, setPageTitleText } from '@/locales'
 import { useDedupedMessage } from '@/utils/message'
 import { parseTrustedDownloadUrl } from '@/views/chat/utils/downloadUrl'
 import { docIconColor, docStatusLabel, docStatusType } from './docDisplay'
+import ChunkBrowser from './components/ChunkBrowser.vue'
+import { indexErrorMessage, indexPipelineSummary, indexStageLabel } from './indexPipeline'
 
 type ErrorKind = 'notFound' | 'forbidden' | 'failed'
 
@@ -388,6 +428,13 @@ const queryString = (value: unknown): string =>
   typeof value === 'string' ? value : Array.isArray(value) && typeof value[0] === 'string' ? value[0] : ''
 const chunkId = computed(() => queryString(route.query.chunk))
 const evidenceId = computed(() => queryString(route.query.evidence))
+// chunk 浏览器是显式打开的运维面板（URL 可分享），默认不挂载，避免文档预览页
+// 为一小部分读者多做一次分页请求。
+const chunkBrowserOpen = computed(() => queryString(route.query.chunkBrowser) === '1')
+const openChunkBrowser = async () => {
+  const query = { ...route.query, chunkBrowser: '1' }
+  await router.replace({ name: 'KnowledgeDocument', params: { documentId: documentId.value }, query })
+}
 
 const loading = ref(false)
 const detail = ref<DocumentDetail | null>(null)

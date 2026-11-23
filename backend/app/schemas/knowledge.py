@@ -8,6 +8,8 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from app.services.index_progress import IndexErrorCode, IndexStage
+
 
 class SearchMode(str, Enum):
     """搜索模式（本次请求强制采用的检索臂组合，issue #225）"""
@@ -98,7 +100,12 @@ class SearchResult(BaseModel):
         None, description="展示正文（parser_original 为原文片段；legacy 为检索片段）"
     )
     text_provenance: str | None = Field(
-        None, description="parser_original / legacy_unverified；缺失按 legacy 处理"
+        None, description="parser_original / legacy_unverified；仅证明 parser 原文，不证明展示正文"
+    )
+    # 分块人工修正标记：展示正文来自检索文本时可能为 manual_override。
+    # 它与 text_provenance 严格分离——strict 原文证据只认后者。
+    retrieval_text_provenance: str | None = Field(
+        None, description="检索文本来源：manual_override / 缺省为 parser/legacy 原口径"
     )
     score: float = Field(..., description="相对排序分（融合阶段，仅用于排序/序位，不是相关度）")
     # issue #185：重排绝对分（local CE logit / zhipu relevance_score）；无重排分时为 null。
@@ -200,6 +207,51 @@ class BatchDeleteRequest(BaseModel):
     organization_id: int | None = Field(None, description="组织ID")
 
 
+class IndexPipelineStatus(BaseModel):
+    """结构化索引阶段/错误（闭集；与 status/parse_error 语义并行）。
+
+    ``index_status``（检索空结果诊断）与本结构完全独立：前者描述「索引里有没有
+    数据」，本结构描述「某文档的 parse→chunk→embed→index 流水线走到哪一步、
+    为什么失败」。
+    """
+
+    model_config = ConfigDict(extra="forbid", use_enum_values=True)
+
+    stage: IndexStage | None = Field(None, description="处理阶段闭集")
+    progress: int = Field(0, ge=0, le=100, description="阶段边界进度 0-100")
+    error_code: IndexErrorCode | None = Field(
+        None,
+        description=(
+            "稳定错误码闭集：PARSE_PROFILE_INVALID / PARSE_UNSUPPORTED_FORMAT / "
+            "PARSE_FAILED / CHUNK_EMPTY / CHUNK_FAILED / "
+            "EMBED_COUNT_MISMATCH / EMBED_FAILED / INDEX_WRITE_FAILED / "
+            "INDEX_VERIFICATION_FAILED / INDEX_FAILED / DOCUMENT_NOT_FOUND / "
+            "JOB_SCHEDULE_FAILED / UNEXPECTED"
+        ),
+    )
+    error_detail: str | None = Field(
+        None, max_length=256, description="脱敏且有界的运维提示（不含异常原文/正文/查询）"
+    )
+
+
+class KnowledgeJobInfo(BaseModel):
+    """处理任务条目（既有 jobs / events 字段 + 结构化索引进度）。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: int
+    document_id: str | None = None
+    organization_id: int | None = None
+    trigger_type: str
+    status: str
+    retry_count: int
+    error_message: str | None = None
+    index_pipeline: IndexPipelineStatus
+    started_at: str | None = None
+    finished_at: str | None = None
+    created_at: str | None = None
+
+
 class DocumentChunkInfo(BaseModel):
     """文档分块信息"""
 
@@ -229,6 +281,9 @@ class DocumentDetail(BaseModel):
     parsed_at: datetime | None = Field(None, description="解析完成时间")
     indexed_at: datetime | None = Field(None, description="索引完成时间")
     chunks: list[DocumentChunkInfo] = Field(default_factory=list, description="分块列表")
+    index_pipeline: IndexPipelineStatus | None = Field(
+        None, description="结构化索引阶段/错误（旧文档可能为 null）"
+    )
 
 
 class DocumentDownloadUrl(BaseModel):

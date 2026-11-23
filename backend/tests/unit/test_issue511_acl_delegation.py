@@ -222,9 +222,17 @@ async def test_cross_document_filename_fallback_excludes_private_doc(monkeypatch
     async def fake_search(query):
         es_queries.append(query)
         # The ACL filter must exclude the private document in BOTH queries.
+        # 按内容定位 ACL 子句而不是取 must 末位：批次四在末尾追加了
+        # chunk 启停过滤，位置断言会把 must_not 误读成 is_chunk_enabled。
         must = query["query"]["bool"]["must"]
-        must_not = must[-1].get("bool", {}).get("must_not")
-        if must_not and PRIVATE_ID in must_not[0]["terms"]["document_id"]:
+        blocked = False
+        for clause in must:
+            bool_clause = clause.get("bool", {})
+            for must_not in bool_clause.get("must_not", []):
+                terms = must_not.get("terms", {})
+                if PRIVATE_ID in terms.get("document_id", []):
+                    blocked = True
+        if blocked:
             return {"hits": {"hits": []}}
         return {"hits": {"hits": [_es_hit(PRIVATE_ID, SECRET)]}}
 

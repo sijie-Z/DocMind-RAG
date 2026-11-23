@@ -95,6 +95,20 @@ async def get_blocked_document_ids(
             raise RetrievalUnavailableError("文档 ACL 查询失败，检索已拒绝") from exc
 
 
+def with_chunk_enabled_filter(filters: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """追加分块级启停过滤，供主检索与 Agent 直读 ES 路径共用。
+
+    ``bool.must_not`` 对「旧索引缺 ``is_chunk_enabled`` 字段」的文档是匹配的，
+    因此迁移 036 之前写入的 chunk 仍照旧召回；新写入的 disabled chunk 立即
+    退出召回。任何自建 ES 查询（摘要/分析/跨文档分析）都必须经过这里，
+    否则分块级禁用只影响 hybrid 检索、Agent 仍能直读到已禁用正文。
+    """
+    return [
+        *filters,
+        {"bool": {"must_not": [{"term": {"is_chunk_enabled": False}}]}},
+    ]
+
+
 def with_acl_filter(filters: list[dict[str, Any]], blocked_ids: list[str]) -> list[dict[str, Any]]:
     """把不可见文档追加为 ``must_not terms``（空列表时原样返回）。"""
     if not blocked_ids:

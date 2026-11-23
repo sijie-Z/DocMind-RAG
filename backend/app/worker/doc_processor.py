@@ -13,6 +13,8 @@ import time
 import uuid
 from collections.abc import Callable
 from contextlib import suppress
+from contextvars import ContextVar
+from typing import Any
 
 from sqlalchemy import delete, select, update
 
@@ -36,8 +38,58 @@ from app.services.document_status import (
 )
 from app.services.document_status import verify_indexed as _verify_indexed
 from app.services.embedding_service import embedding_service
+from app.services.index_progress import (
+    STAGE_PROGRESS,
+    SUCCESS_PROGRESS,
+    IndexErrorCode,
+    IndexPipelineError,
+    IndexStage,
+    build_error_detail,
+    fallback_code,
+)
 
 logger = logging.getLogger(__name__)
+
+# 本次处理 run 的结构化阶段/错误码上下文。processor 是跨并发任务共享的单例，
+# 因此用 ContextVar（每个 asyncio task 独立）而非实例属性，避免串写。
+# 只承载元数据，不改变任何既有状态机或返回值契约。
+_current_stage: ContextVar[IndexStage | None] = ContextVar("index_stage", default=None)
+_current_code: ContextVar[IndexErrorCode | None] = ContextVar("index_error_code", default=None)
+_current_exception: ContextVar[BaseException | None] = ContextVar("index_exception", default=None)
+
+
+def _enter_stage(stage: IndexStage) -> None:
+    """在阶段边界更新上下文；无 I/O，不影响既有 on_progress 心跳回调。"""
+    _current_stage.set(stage)
+
+
+def _set_error_code(code: IndexErrorCode) -> None:
+    """记录本次失败的稳定码；后设置者更具体（如 index 写失败 → 校验失败）。"""
+    _current_code.set(code)
+
+
+def _structured_fields(
+    *, success: bool = False, code: IndexErrorCode | None = None
+) -> dict[str, Any]:
+    """供 DB UPDATE 使用的结构化字段；不触碰 parse_error/error_message。"""
+    stage = _current_stage.get()
+    if success:
+        return {
+            "index_stage": IndexStage.INDEX.value,
+            "index_progress": SUCCESS_PROGRESS,
+            "index_error_code": None,
+            "index_error_detail": None,
+        }
+    resolved = code or _current_code.get() or fallback_code(stage)
+    return {
+        "index_stage": stage.value if stage is not None else None,
+        "index_progress": STAGE_PROGRESS.get(stage, 0),
+        "index_error_code": resolved.value,
+        "index_error_detail": build_error_detail(
+            stage, _current_exception.get(), code=resolved.value
+        ),
+    }
+
 
 # 文档处理并发锁：Redis SETNX + TTL 兜底，防止同一文档被并发重复处理
 #
@@ -380,6 +432,10 @@ class DocumentProcessor:
           偏移被提交后文档永久卡 PARSING）。
         """
         notify = on_progress or _noop
+        # 每次 run 从干净的结构化上下文开始；processor 单例被并发任务共享。
+        _current_stage.set(None)
+        _current_code.set(None)
+        _current_exception.set(None)
         self._lock_lost.discard(document_id)
         lock_acquired = await self._acquire_processing_lock(document_id)
         if lock_acquired is False:
@@ -404,6 +460,8 @@ class DocumentProcessor:
                 # 消息自身的永久缺陷：按终局失败处理（文档/job 落 FAILED，
                 # 返回 True 让 consumer 提交偏移），绝不抛出去变成毒消息重投。
                 # 外层 finally 仍会释放 processing 锁/心跳，不留悬挂状态。
+                _current_stage.set(IndexStage.PARSE)
+                _set_error_code(IndexErrorCode.PARSE_PROFILE_INVALID)
                 logger.error(
                     "[DOC_PROC] invalid parse_profile, terminal failure document_id=%s "
                     "job_id=%s error=%s",
@@ -420,6 +478,8 @@ class DocumentProcessor:
                 profile,
             )
             doc = await self._load_and_mark_parsing(document_id, job_id)
+            if doc is None:
+                _set_error_code(IndexErrorCode.DOCUMENT_NOT_FOUND)
             if doc is STALE_RUN:
                 # A3-P0：该 job 已 SUCCESS（INDEXED 与 job 成功同事务提交）。
                 # 这是「成功提交后、偏移提交前」崩溃造成的重投：绝不能再进入
@@ -441,15 +501,29 @@ class DocumentProcessor:
 
             # auto 走原有两参调用，兼容既有 parser 替身/自定义实现；
             # 非 auto 才传第三参（档位差异仅在 PDF 解析内部生效）。
-            if profile == "auto":
-                parse_result = await self.parser.parse_document(
-                    doc.file_path, str(doc.organization_id)
+            _enter_stage(IndexStage.PARSE)
+            try:
+                if profile == "auto":
+                    parse_result = await self.parser.parse_document(
+                        doc.file_path, str(doc.organization_id)
+                    )
+                else:
+                    parse_result = await self.parser.parse_document(
+                        doc.file_path, str(doc.organization_id), parse_profile=profile
+                    )
+            except Exception as exc:
+                # 保留原异常文本（parse_error 契约不变），只附加稳定码。
+                text = str(exc)
+                code = (
+                    IndexErrorCode.PARSE_UNSUPPORTED_FORMAT
+                    if "不支持的文件格式" in text
+                    else IndexErrorCode.PARSE_FAILED
                 )
-            else:
-                parse_result = await self.parser.parse_document(
-                    doc.file_path, str(doc.organization_id), parse_profile=profile
-                )
+                raise IndexPipelineError(text, code=code) from exc
             self._checkpoint(document_id, notify)
+            # 分块阶段：parse_document 内部完成语义切分；此处对分块结果做校验
+            # （空白块剔除/空内容护栏），失败归 chunk 阶段。
+            _enter_stage(IndexStage.CHUNK)
             # 下游 chunk meta_data 来自 chunk["metadata"]：强制把实际档位注入，
             # 兼容 parser 替身/旧实现不写该字段的情况（无 DB migration）。
             profile_used = parse_result.get("parse_profile_used", profile)
@@ -471,17 +545,24 @@ class DocumentProcessor:
                 )
             chunks_data = non_empty
             if not chunks_data:
+                _set_error_code(IndexErrorCode.CHUNK_EMPTY)
                 raise ValueError(
                     "文件解析后无有效文本内容：可能为空文件、扫描件（OCR 依赖不可用）或解析失败。"
                 )
 
+            # 嵌入阶段：向量化入口即进入 embed，任何失败都归 embed 阶段。
+            _enter_stage(IndexStage.EMBED)
             embeddings = await self._get_embeddings([c["chunk_text"] for c in chunks_data])
             self._checkpoint(document_id, notify)
             if len(embeddings) != len(chunks_data):
+                _set_error_code(IndexErrorCode.EMBED_COUNT_MISMATCH)
                 raise ValueError(
                     f"向量生成数量与文本块数量不匹配: {len(embeddings)} vs {len(chunks_data)}"
                 )
 
+            # 索引阶段：DB chunk 替换 + ES delete/bulk/回读校验都在此完成。
+            # 必须先把阶段切到 index，否则这些失败会被误标为 embed 阶段。
+            _enter_stage(IndexStage.INDEX)
             await self._replace_document_state(doc, chunks_data, embeddings)
             self._checkpoint(document_id, notify)
             await self._mark_success(document_id, chunks_data, job_id)
@@ -506,6 +587,10 @@ class DocumentProcessor:
             )
             return DEFERRED
         except Exception as e:
+            # 包装异常时以原始 cause 的类名写脱敏详情，便于运维定位真实故障源。
+            _current_exception.set(e.__cause__ if isinstance(e, IndexPipelineError) else e)
+            if isinstance(e, IndexPipelineError):
+                _set_error_code(e.index_error_code)
             logger.error("[DOC_PROC] failed document_id=%s: %s", document_id, e, exc_info=True)
             preserve_indexed = (
                 getattr(doc, "_reprocess_previous_status", None) == DocumentStatus.INDEXED
@@ -592,9 +677,17 @@ class DocumentProcessor:
             doc._es_delete_started = False
             doc.status = DocumentStatus.PARSING
             doc.parse_error = None
+            doc.index_stage = IndexStage.PARSE.value
+            doc.index_progress = STAGE_PROGRESS[IndexStage.PARSE]
+            doc.index_error_code = None
+            doc.index_error_detail = None
             if job:
                 job.status = KnowledgeJobStatus.PROCESSING
                 job.started_at = utcnow()
+                job.index_stage = IndexStage.PARSE.value
+                job.index_progress = STAGE_PROGRESS[IndexStage.PARSE]
+                job.index_error_code = None
+                job.index_error_detail = None
             await session.commit()
             return doc
 
@@ -613,6 +706,7 @@ class DocumentProcessor:
                     status=KnowledgeJobStatus.FAILED,
                     error_message=error,
                     finished_at=utcnow(),
+                    **_structured_fields(),
                 )
                 .execution_options(synchronize_session=False)
             )
@@ -754,19 +848,27 @@ class DocumentProcessor:
                 f"{remaining} old chunk(s) remain"
             )
 
-        await ElasticsearchTools.bulk_index_documents(es_docs)
+        try:
+            await ElasticsearchTools.bulk_index_documents(es_docs)
+        except Exception:
+            _set_error_code(IndexErrorCode.INDEX_WRITE_FAILED)
+            raise
         # 回读确认把「INDEXED ⟹ 可检索」变成可执行断言（issue #181；
         # bulk 的 raise_on_error 只防部分失败，不能代替这条断言——
         # 完整说明见 document_status.verify_indexed 的 docstring；
         # 校验范围在 #224 加严：embedding 有效性与 organization_id 一致性）。
         # 替换成功还必须精确匹配条数且所有 chunk 完整可检索，不能只 warning。
-        await _verify_indexed(
-            client,
-            doc.id,
-            len(es_docs),
-            organization_id=str(doc.organization_id),
-            require_complete=True,
-        )
+        try:
+            await _verify_indexed(
+                client,
+                doc.id,
+                len(es_docs),
+                organization_id=str(doc.organization_id),
+                require_complete=True,
+            )
+        except Exception:
+            _set_error_code(IndexErrorCode.INDEX_VERIFICATION_FAILED)
+            raise
 
         # 替换成功后按组织清空 RAG 缓存，避免旧内容仍命中缓存
         from app.rag.cache import RetrievalCache, SemanticCache
@@ -797,6 +899,8 @@ class DocumentProcessor:
                     indexed_at=now,
                     content_length=sum(len(c["chunk_text"]) for c in chunks_data),
                     parse_error=None,
+                    # 成功终态：结构化进度收敛到 100%，错误码/详情清空。
+                    **_structured_fields(success=True),
                 )
                 .execution_options(synchronize_session=False)
             )
@@ -806,6 +910,8 @@ class DocumentProcessor:
                     job.status = KnowledgeJobStatus.SUCCESS
                     job.error_message = None
                     job.finished_at = utcnow()
+                    for key, value in _structured_fields(success=True).items():
+                        setattr(job, key, value)
             await session.commit()
             if not getattr(result, "rowcount", 0):
                 # SQLAlchemy 的 MySQL 方言启用 CLIENT.FOUND_ROWS，rowcount 为
@@ -827,6 +933,10 @@ class DocumentProcessor:
         """写入失败终态；符合条件的 ES 前重建失败恢复最后可用版本。"""
         target_status = DocumentStatus.INDEXED if preserve_indexed else DocumentStatus.FAILED
         parse_error = None if preserve_indexed else error
+        # 重建失败但保留旧版 INDEXED 时，不往文档写任何新错误字段：文档仍是旧版
+        # 可检索内容，写失败码会误导运维。结构化上下文只在真正 FAILED 时落文档。
+        doc_fields: dict[str, Any] = {} if preserve_indexed else _structured_fields()
+        job_fields = _structured_fields()
         async with AsyncSessionLocal() as session:
             result = await session.execute(
                 update(Document)
@@ -834,7 +944,7 @@ class DocumentProcessor:
                     Document.id == document_id,
                     Document.status != DocumentStatus.INDEXED,
                 )
-                .values(status=target_status, parse_error=parse_error)
+                .values(status=target_status, parse_error=parse_error, **doc_fields)
                 .execution_options(synchronize_session=False)
             )
             await session.commit()
@@ -860,6 +970,7 @@ class DocumentProcessor:
                         status=KnowledgeJobStatus.FAILED,
                         error_message=error,
                         finished_at=utcnow(),
+                        **job_fields,
                     )
                     .execution_options(synchronize_session=False)
                 )
