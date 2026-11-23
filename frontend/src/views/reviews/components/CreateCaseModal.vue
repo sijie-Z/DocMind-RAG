@@ -78,6 +78,53 @@
         </div>
       </div>
 
+      <div class="rounded-lg border border-slate-200 p-3 dark:border-slate-700">
+        <div class="mb-1 flex items-center justify-between text-xs font-medium text-gray-500 dark:text-gray-400">
+          <span>{{ t('reviewTemplates.templateSelect') }}</span>
+          <n-button
+            text
+            size="small"
+            type="primary"
+            data-testid="create-template-manager"
+            @click="openTemplateManager"
+          >
+            {{ t('reviewTemplates.templateOpenManager') }}
+          </n-button>
+        </div>
+        <n-select
+          v-model:value="templateId"
+          :options="templateOptions"
+          :placeholder="t('reviewTemplates.templateNone')"
+          :aria-label="t('reviewTemplates.templateSelect')"
+          :loading="templatesLoading"
+          clearable
+          filterable
+          data-testid="create-template-select"
+          @update:value="onTemplateChange"
+        />
+        <div v-if="templateLoadError" class="mt-1 text-[11px] text-amber-600 dark:text-amber-400">
+          {{ t('reviewTemplates.templateLoadFailed') }}
+          <n-button text size="tiny" type="primary" @click="loadTemplates">{{ t('reviews.retry') }}</n-button>
+        </div>
+        <div v-if="templateId" class="mt-2">
+          <div class="mb-1 text-xs font-medium text-gray-500 dark:text-gray-400">
+            {{ t('reviewTemplates.templateVersion') }}
+          </div>
+          <n-select
+            v-model:value="templateVersionNo"
+            :options="templateVersionOptions"
+            :placeholder="t('reviewTemplates.templateVersionLatest', { n: selectedTemplate?.latest_version ?? 0 })"
+            :aria-label="t('reviewTemplates.templateVersion')"
+            :loading="versionsLoading"
+            clearable
+            data-testid="create-template-version-select"
+          />
+          <p class="mt-1 text-[11px] text-slate-500 dark:text-slate-400">
+            {{ t('reviewTemplates.templateSelectHint') }}
+          </p>
+        </div>
+      </div>
+
       <div v-if="crossDocWarning" class="text-[11px] text-amber-600 dark:text-amber-400" data-testid="cross-doc-warning">
         {{ crossDocWarning }}
       </div>
@@ -198,14 +245,18 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { useRouter } from 'vue-router'
 import { NAlert, NButton, NInput, NInputNumber, NModal, NSelect, NTag, useMessage } from 'naive-ui'
 import {
   reviewsApi,
+  type ReviewCaseCreatePayload,
   type ReviewCandidate,
   type ReviewCandidateMeta,
   type ReviewMetaPayload,
   type ReviewReadiness,
-  type ReviewSide
+  type ReviewSide,
+  type ReviewTemplateSummary,
+  type ReviewTemplateVersionSummary
 } from '@/api/reviews'
 import { apiUnwrap } from '@/utils/apiUnwrap'
 import { getErrorMessage } from '@/utils/apiError'
@@ -219,6 +270,7 @@ const emit = defineEmits<{
 
 const { t } = useI18n()
 const message = useMessage()
+const router = useRouter()
 
 const SIDES: ReviewSide[] = ['policy', 'base', 'revised']
 
@@ -240,6 +292,30 @@ let candidatesToken = 0
 let searchDebounce: ReturnType<typeof setTimeout> | null = null
 const readiness = reactive<Partial<Record<ReviewSide, ReviewReadiness>>>({})
 const submitting = ref(false)
+
+// 模板选择（可选）：模板版本提供核验项；服务端仍会固化为不可变规则快照。
+const templates = ref<ReviewTemplateSummary[]>([])
+const templatesLoading = ref(false)
+const templateLoadError = ref(false)
+const templateId = ref<string | null>(null)
+const templateVersionNo = ref<number | null>(null)
+const templateVersions = ref<ReviewTemplateVersionSummary[]>([])
+const versionsLoading = ref(false)
+const selectedTemplate = computed(
+  () => templates.value.find((row) => row.id === templateId.value) || null
+)
+const templateOptions = computed(() =>
+  templates.value.map((row) => ({
+    value: row.id,
+    label: `${row.name} (v${row.latest_version})`
+  }))
+)
+const templateVersionOptions = computed(() =>
+  templateVersions.value.map((row) => ({
+    value: row.version_no,
+    label: row.version_label
+  }))
+)
 
 const metaSide = ref<ReviewSide | null>(null)
 const metaSaving = ref(false)
@@ -478,13 +554,55 @@ watch(
       candidates.value = []
       candidateTotal.value = 0
       activeQuery.value = ''
+      templateId.value = null
+      templateVersionNo.value = null
+      templateVersions.value = []
       void loadCandidates()
+      void loadTemplates()
     } else {
       clearSearchDebounce()
       dropdownOpen.value = false
     }
   }
 )
+
+async function loadTemplates() {
+  templatesLoading.value = true
+  templateLoadError.value = false
+  try {
+    const data = apiUnwrap<{ items: ReviewTemplateSummary[] }>(
+      await reviewsApi.templates.list({ status: 'active', page: 1, page_size: 100 })
+    )
+    templates.value = data?.items ?? []
+  } catch {
+    templateLoadError.value = true
+    templates.value = []
+  } finally {
+    templatesLoading.value = false
+  }
+}
+
+async function onTemplateChange(value: string | null) {
+  templateVersionNo.value = null
+  templateVersions.value = []
+  if (!value) return
+  versionsLoading.value = true
+  try {
+    const data = apiUnwrap<{ items: ReviewTemplateVersionSummary[] }>(
+      await reviewsApi.templates.versions(value, { page: 1, page_size: 100 })
+    )
+    templateVersions.value = data?.items ?? []
+  } catch {
+    templateVersions.value = []
+  } finally {
+    versionsLoading.value = false
+  }
+}
+
+function openTemplateManager() {
+  emit('update:show', false)
+  router.push('/reviews/templates')
+}
 
 function onShowChange(value: boolean) {
   emit('update:show', value)
@@ -567,15 +685,21 @@ async function submit() {
   }
   submitting.value = true
   try {
-    const created = apiUnwrap<{ id: string }>(
-      await reviewsApi.createCase({
-        title: form.title.trim(),
-        policy_document_id: ids[0]!,
-        base_document_id: ids[1]!,
-        revised_document_id: ids[2]!,
-        checklist_version: 'v1'
-      })
-    )
+    const payload: ReviewCaseCreatePayload = {
+      title: form.title.trim(),
+      policy_document_id: ids[0]!,
+      base_document_id: ids[1]!,
+      revised_document_id: ids[2]!,
+      checklist_version: 'v1'
+    }
+    if (templateId.value) {
+      payload.template_id = templateId.value
+      // 版本留空 = 服务端取该模板最新版（口径与选择器占位一致）；
+      // 不写 template_version_no: undefined —— 序列化会把它整个丢掉，
+      // 但「字段是否存在」在契约测试与调试载荷里应保持干净。
+      if (templateVersionNo.value) payload.template_version_no = templateVersionNo.value
+    }
+    const created = apiUnwrap<{ id: string }>(await reviewsApi.createCase(payload))
     emit('created', created.id)
     emit('update:show', false)
   } catch (error) {
@@ -601,6 +725,14 @@ defineExpose({
   saveMeta,
   openMeta,
   loadCandidates,
-  refreshReadiness
+  refreshReadiness,
+  templates,
+  templateId,
+  templateVersionNo,
+  templateOptions,
+  templateVersionOptions,
+  templateLoadError,
+  loadTemplates,
+  onTemplateChange
 })
 </script>

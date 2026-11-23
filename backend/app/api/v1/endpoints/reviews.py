@@ -3,6 +3,10 @@
 
 证据只来自 parser 原文快照；legacy 分块选择时与 Batch 1 同口径返回 409
 ``SOURCE_ORIGINAL_UNAVAILABLE``，绝不回退检索增强文本。
+
+批次五追加：组织级模板/playbook 库（``/reviews/templates``）——模板头 CRUD、
+不可变版本（新增/列表/查看）、只读 diff 与归档。模板只提供规则内容，建案
+仍固化为不可变 ``ReviewRuleSet`` 快照；模板编辑不改变任何历史案件。
 """
 
 import json
@@ -24,11 +28,21 @@ from app.exceptions import AppError, AuthorizationError, ConflictError, NotFound
 from app.models.rbac import PermissionType
 from app.models.user import User
 from app.rag.source_provenance import SourceProvenanceUnavailableError
-from app.schemas.review import ReviewCaseCreate, ReviewDecisionUpsert, ReviewEvidenceSelect
+from app.schemas.review import (
+    ReviewCaseCreate,
+    ReviewDecisionUpsert,
+    ReviewEvidenceSelect,
+    ReviewTemplateBootstrap,
+    ReviewTemplateCreate,
+    ReviewTemplateUpdate,
+    ReviewTemplateVersionCreate,
+)
 from app.services import review_analysis_service as analysis_service
 from app.services import review_case_service as case_service
 from app.services import review_document_service as document_service
 from app.services import review_export_service as export_service
+from app.services import review_template_service as template_service
+from app.services.audit_service import audit_service
 from app.services.review_rule_snapshot import case_rule_metadata
 
 router = APIRouter()
@@ -50,7 +64,11 @@ async def create_review_case(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """建案：三份文档必须同组织/角色正确；不满足时案件以 blocked 落库带原因码。"""
+    """建案：三份文档必须同组织/角色正确；不满足时案件以 blocked 落库带原因码。
+
+    可选 ``template_id``/``template_version_no``：规则项从该模板版本读取并继续
+    固化为不可变规则快照；模板/文档任一跨组织都按 404/403 处理。
+    """
     try:
         docs = {
             "policy": await get_document_for_user(db, current_user, body.policy_document_id),
@@ -64,6 +82,8 @@ async def create_review_case(
             checklist_version=body.checklist_version,
             created_by=current_user.id,
             assignee_id=body.assignee_id,
+            template_id=body.template_id,
+            template_version_no=body.template_version_no,
         )
         return {"success": True, "data": await case_service.case_detail(db, case)}
     except (NotFoundError, AuthorizationError):
@@ -73,6 +93,422 @@ async def create_review_case(
     except Exception as e:
         logger.error(f"Create review case failed: {type(e).__name__}: {e}")
         raise AppError("创建核验案件失败") from e
+
+
+def _template_audit_detail(organization_id: int, user_id: int, **extra) -> str:
+    """模板审计 detail：只记 org/user/id/版本号/项数/哈希前缀与字段名。
+
+    规则项内容（关键词/label）属于用户业务配置，不进审计明细；排障时按
+    模板 id + 版本号回查版本行即可（版本行本身就带 payload_sha256）。
+    """
+    return json.dumps(
+        {"organization_id": organization_id, "user_id": user_id, **extra},
+        ensure_ascii=False,
+        sort_keys=True,
+    )
+
+
+# ── 模板/playbook 库（批次五）──────────────────────────────────────────────
+# 路由必须声明在 ``/{review_id}`` 之前：``templates`` 是固定段，晚声明会被
+# 当成案件 id（与 ``/candidates`` 同一原因）。版本行不可变，读取/对比全只读。
+
+
+@router.get("/templates", response_model=dict, dependencies=_READ_DEPS)
+async def list_review_templates(
+    status: Literal["active", "archived", "all"] = Query(
+        "active", description="模板状态过滤：默认只看活跃模板"
+    ),
+    q: str | None = Query(None, max_length=100, description="按模板名称模糊过滤"),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """列出本组织的模板（默认活跃；归档模板须显式筛选）。"""
+    try:
+        org_id = await require_organization(current_user, db)
+        data = await template_service.list_templates(
+            db,
+            organization_id=org_id,
+            status=status,
+            q=q,
+            page=page,
+            page_size=page_size,
+        )
+        return {"success": True, "data": data}
+    except (NotFoundError, AuthorizationError):
+        raise
+    except AppError:
+        raise
+    except Exception as e:
+        logger.error(f"List review templates failed: {type(e).__name__}")
+        raise AppError("获取核验模板列表失败") from e
+
+
+@router.post("/templates", response_model=dict, dependencies=_WRITE_DEPS)
+async def create_review_template(
+    body: ReviewTemplateCreate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """创建模板（可选同时写入首版 v1）；同名模板 409。"""
+    try:
+        org_id = await require_organization(current_user, db)
+        # 先校验首版规则再落模板头：否则无效 items 会先提交模板行、再因版本
+        # 校验失败留下「没有版本的空模板」，且同名重试会被 409 卡住。
+        if body.items is not None:
+            template_service.compose_version_items([item.model_dump() for item in body.items])
+        template = await template_service.create_template(
+            db,
+            organization_id=org_id,
+            created_by=current_user.id,
+            name=body.name,
+            description=body.description,
+        )
+        version = None
+        if body.items is not None:
+            version = await template_service.create_version(
+                db,
+                template=template,
+                items=[item.model_dump() for item in body.items],
+                created_by=current_user.id,
+                change_note=body.change_note,
+            )
+        await audit_service.log_activity(
+            user_id=current_user.id,
+            action="create_review_template",
+            target_type="review_template",
+            target_id=template.id,
+            detail=_template_audit_detail(
+                org_id,
+                current_user.id,
+                version_no=version.version_no if version else None,
+                item_count=version.item_count if version else 0,
+            ),
+            db=db,
+        )
+        data = template_service.template_to_dict(template)
+        if version is not None:
+            data["version"] = template_service.version_to_dict(version)
+        return {"success": True, "data": data}
+    except (NotFoundError, AuthorizationError):
+        raise
+    except AppError:
+        raise
+    except Exception as e:
+        logger.error(f"Create review template failed: {type(e).__name__}")
+        raise AppError("创建核验模板失败") from e
+
+
+@router.post(
+    "/templates/bootstrap",
+    response_model=dict,
+    dependencies=_WRITE_DEPS,
+)
+async def bootstrap_review_template(
+    body: ReviewTemplateBootstrap,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """从进程级 checklist（默认 4 项 + REVIEW_CHECKLIST_JSON）初始化模板 v1。
+
+    只读环境配置、不改环境；同名模板 409。供存量部署把现行清单固化成可
+    版本化的起点，之后的新版本均在库内编辑。
+    """
+    try:
+        org_id = await require_organization(current_user, db)
+        template, version = await template_service.bootstrap_from_checklist(
+            db,
+            organization_id=org_id,
+            created_by=current_user.id,
+            name=body.name,
+        )
+        await audit_service.log_activity(
+            user_id=current_user.id,
+            action="bootstrap_review_template",
+            target_type="review_template",
+            target_id=template.id,
+            detail=_template_audit_detail(
+                org_id,
+                current_user.id,
+                version_no=version.version_no,
+                item_count=version.item_count,
+            ),
+            db=db,
+        )
+        data = template_service.template_to_dict(template)
+        data["version"] = template_service.version_to_dict(version, include_items=False)
+        return {"success": True, "data": data}
+    except (NotFoundError, AuthorizationError):
+        raise
+    except AppError:
+        raise
+    except Exception as e:
+        logger.error(f"Bootstrap review template failed: {type(e).__name__}")
+        raise AppError("初始化核验模板失败") from e
+
+
+@router.get("/templates/{template_id}", response_model=dict, dependencies=_READ_DEPS)
+async def get_review_template(
+    template_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """模板头 + 最新版本内容（无版本时 version=null）。"""
+    try:
+        org_id = await require_organization(current_user, db)
+        template = await template_service.get_template(
+            db, organization_id=org_id, template_id=template_id
+        )
+        data = template_service.template_to_dict(template)
+        data["version"] = None
+        latest_no = int(template.latest_version or 0)
+        if latest_no > 0:
+            version = await template_service.get_template_version(
+                db, organization_id=org_id, template=template, version_no=latest_no
+            )
+            data["version"] = template_service.version_to_dict(version)
+        return {"success": True, "data": data}
+    except (NotFoundError, AuthorizationError):
+        raise
+    except AppError:
+        raise
+    except Exception as e:
+        logger.error(f"Get review template failed: {type(e).__name__}")
+        raise AppError("获取核验模板失败") from e
+
+
+@router.put("/templates/{template_id}", response_model=dict, dependencies=_WRITE_DEPS)
+async def update_review_template(
+    template_id: str,
+    body: ReviewTemplateUpdate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """更新模板头（名称/说明）；归档模板 409。规则内容走版本接口，不在此处。"""
+    try:
+        org_id = await require_organization(current_user, db)
+        template = await template_service.get_template(
+            db, organization_id=org_id, template_id=template_id
+        )
+        updated = await template_service.update_template(
+            db,
+            template=template,
+            name=body.name,
+            description=body.description,
+            clear_description=body.clear_description,
+            updated_by=current_user.id,
+        )
+        await audit_service.log_activity(
+            user_id=current_user.id,
+            action="update_review_template",
+            target_type="review_template",
+            target_id=updated.id,
+            detail=_template_audit_detail(
+                org_id,
+                current_user.id,
+                fields=sorted(
+                    key
+                    for key, present in (
+                        ("name", body.name is not None),
+                        ("description", body.description is not None or body.clear_description),
+                    )
+                    if present
+                ),
+            ),
+            db=db,
+        )
+        return {"success": True, "data": template_service.template_to_dict(updated)}
+    except (NotFoundError, AuthorizationError):
+        raise
+    except AppError:
+        raise
+    except Exception as e:
+        logger.error(f"Update review template failed: {type(e).__name__}")
+        raise AppError("更新核验模板失败") from e
+
+
+@router.post("/templates/{template_id}/archive", response_model=dict, dependencies=_WRITE_DEPS)
+async def archive_review_template(
+    template_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """归档模板（只读终态）：不可再新增版本、不可再被新案件选择。
+
+    **不删除任何行**：模板版本是审计资产，且历史案件已固化到规则快照；
+    归档不触碰任何案件或快照。
+    """
+    try:
+        org_id = await require_organization(current_user, db)
+        template = await template_service.get_template(
+            db, organization_id=org_id, template_id=template_id
+        )
+        archived = await template_service.archive_template(
+            db, template=template, user_id=current_user.id
+        )
+        await audit_service.log_activity(
+            user_id=current_user.id,
+            action="archive_review_template",
+            target_type="review_template",
+            target_id=archived.id,
+            detail=_template_audit_detail(org_id, current_user.id),
+            db=db,
+        )
+        return {"success": True, "data": template_service.template_to_dict(archived)}
+    except (NotFoundError, AuthorizationError):
+        raise
+    except AppError:
+        raise
+    except Exception as e:
+        logger.error(f"Archive review template failed: {type(e).__name__}")
+        raise AppError("归档核验模板失败") from e
+
+
+@router.get("/templates/{template_id}/versions", response_model=dict, dependencies=_READ_DEPS)
+async def list_review_template_versions(
+    template_id: str,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, ge=1, le=100),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """版本历史（倒序；列表不带规则正文，查看单版走详情端点）。"""
+    try:
+        org_id = await require_organization(current_user, db)
+        template = await template_service.get_template(
+            db, organization_id=org_id, template_id=template_id
+        )
+        data = await template_service.list_versions(
+            db,
+            organization_id=org_id,
+            template=template,
+            page=page,
+            page_size=page_size,
+        )
+        return {"success": True, "data": data}
+    except (NotFoundError, AuthorizationError):
+        raise
+    except AppError:
+        raise
+    except Exception as e:
+        logger.error(f"List review template versions failed: {type(e).__name__}")
+        raise AppError("获取模板版本历史失败") from e
+
+
+@router.post(
+    "/templates/{template_id}/versions",
+    response_model=dict,
+    dependencies=_WRITE_DEPS,
+)
+async def create_review_template_version(
+    template_id: str,
+    body: ReviewTemplateVersionCreate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """新增不可变版本（编辑=新增，旧版本永不改写）；归档模板 409。"""
+    try:
+        org_id = await require_organization(current_user, db)
+        template = await template_service.get_template(
+            db, organization_id=org_id, template_id=template_id
+        )
+        version = await template_service.create_version(
+            db,
+            template=template,
+            items=[item.model_dump() for item in body.items],
+            created_by=current_user.id,
+            change_note=body.change_note,
+        )
+        await audit_service.log_activity(
+            user_id=current_user.id,
+            action="create_review_template_version",
+            target_type="review_template_version",
+            target_id=version.id,
+            detail=_template_audit_detail(
+                org_id,
+                current_user.id,
+                template_id=template.id,
+                version_no=version.version_no,
+                item_count=version.item_count,
+                sha=version.payload_sha256[:12],
+            ),
+            db=db,
+        )
+        return {"success": True, "data": template_service.version_to_dict(version)}
+    except (NotFoundError, AuthorizationError):
+        raise
+    except AppError:
+        raise
+    except Exception as e:
+        logger.error(f"Create review template version failed: {type(e).__name__}")
+        raise AppError("创建模板版本失败") from e
+
+
+@router.get(
+    "/templates/{template_id}/versions/{version_no}",
+    response_model=dict,
+    dependencies=_READ_DEPS,
+)
+async def get_review_template_version(
+    template_id: str,
+    version_no: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """查看单个版本（含规则项；intact=false 表示内容哈希校验失败）。"""
+    try:
+        org_id = await require_organization(current_user, db)
+        template = await template_service.get_template(
+            db, organization_id=org_id, template_id=template_id
+        )
+        version = await template_service.get_template_version(
+            db, organization_id=org_id, template=template, version_no=version_no
+        )
+        return {"success": True, "data": template_service.version_to_dict(version)}
+    except (NotFoundError, AuthorizationError):
+        raise
+    except AppError:
+        raise
+    except Exception as e:
+        logger.error(f"Get review template version failed: {type(e).__name__}")
+        raise AppError("获取模板版本失败") from e
+
+
+@router.get(
+    "/templates/{template_id}/diff",
+    response_model=dict,
+    dependencies=_READ_DEPS,
+)
+async def diff_review_template_versions(
+    template_id: str,
+    base_version: int = Query(..., ge=1, description="基准版本号"),
+    target_version: int = Query(..., ge=1, description="对比版本号"),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """只读版本 diff（按 item key 对齐、关键词按集合语义）；不改写任何行。"""
+    try:
+        org_id = await require_organization(current_user, db)
+        template = await template_service.get_template(
+            db, organization_id=org_id, template_id=template_id
+        )
+        base_row = await template_service.get_template_version(
+            db, organization_id=org_id, template=template, version_no=base_version
+        )
+        target_row = await template_service.get_template_version(
+            db, organization_id=org_id, template=template, version_no=target_version
+        )
+        data = template_service.diff_versions(base_row, target_row)
+        data["template_id"] = template.id
+        return {"success": True, "data": data}
+    except (NotFoundError, AuthorizationError):
+        raise
+    except AppError:
+        raise
+    except Exception as e:
+        logger.error(f"Diff review template versions failed: {type(e).__name__}")
+        raise AppError("对比模板版本失败") from e
 
 
 @router.get("", response_model=dict, dependencies=_READ_DEPS)
