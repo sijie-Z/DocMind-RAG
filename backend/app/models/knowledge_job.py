@@ -43,6 +43,19 @@ class KnowledgeProcessingJob(Base):
         comment="本机处理标记；启动对账回收未完成的本机任务（A3-P0）",
     )
     error_message: Mapped[str | None] = mapped_column(Text)
+    # 结构化索引进度/错误：与 error_message/status 并行，不替换既有字段语义。
+    index_stage: Mapped[str | None] = mapped_column(
+        String(16), nullable=True, comment="处理阶段闭集：parse/chunk/embed/index"
+    )
+    index_progress: Mapped[int] = mapped_column(
+        Integer, default=0, server_default="0", comment="阶段边界进度 0-100"
+    )
+    index_error_code: Mapped[str | None] = mapped_column(
+        String(64), nullable=True, comment="稳定错误码闭集"
+    )
+    index_error_detail: Mapped[str | None] = mapped_column(
+        String(256), nullable=True, comment="脱敏且有界的运维提示"
+    )
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

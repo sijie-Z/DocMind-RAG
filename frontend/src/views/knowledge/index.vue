@@ -256,6 +256,28 @@
                           <span class="text-xs text-gray-500 dark:text-gray-400">{{ formatFileSize(item.file_size) }}</span>
                         </div>
                         
+                        <!-- 结构化阶段进度：文字+数字+进度条三重表达，不只靠颜色 -->
+                        <div
+                          v-if="item.index_pipeline && isInProgressDoc(item.status)"
+                          class="mt-2 flex items-center gap-2 text-xs text-slate-600 dark:text-slate-300"
+                          :aria-label="`${indexStageLabel(item.index_pipeline.stage)} ${item.index_pipeline.progress}%`"
+                        >
+                          <span class="shrink-0">{{ indexStageLabel(item.index_pipeline.stage) }}</span>
+                          <span class="h-1 flex-1 overflow-hidden rounded bg-slate-200 dark:bg-slate-700">
+                            <span class="block h-full bg-blue-600" :style="{ width: `${item.index_pipeline.progress}%` }" />
+                          </span>
+                          <span class="shrink-0 tabular-nums">{{ item.index_pipeline.progress }}%</span>
+                        </div>
+                        <!-- 结构化错误码 → 可操作提示；无稳定码时才回退旧原文 -->
+                        <div
+                          v-if="item.status === 'failed' && item.index_pipeline?.error_code"
+                          class="mt-2 text-xs leading-4 text-red-600 dark:text-red-400 bg-red-50/70 dark:bg-red-900/20 border border-red-100 dark:border-red-800/50 rounded-md px-2 py-1.5 break-words"
+                          data-testid="index-pipeline-error"
+                        >
+                          <span class="font-bold">{{ indexStageLabel(item.index_pipeline.stage) }}</span>
+                          {{ indexErrorMessage(item.index_pipeline.error_code) }}
+                        </div>
+
                         <div class="flex gap-1 kb-card-actions">
                            <n-tooltip trigger="hover">
                              <template #trigger>
@@ -301,8 +323,8 @@
                            </n-button>
                         </div>
                         </div>
-                        <div 
-                          v-if="item.status === 'failed' && item.parse_error"
+                        <div
+                          v-if="item.status === 'failed' && item.parse_error && !item.index_pipeline?.error_code"
                           class="mt-2 text-xs leading-4 text-red-600 dark:text-red-400 bg-red-50/70 dark:bg-red-900/20 border border-red-100 dark:border-red-800/50 rounded-md px-2 py-1.5 break-all line-clamp-2 cursor-pointer hover:bg-red-100 dark:hover:bg-red-900/30 transition-colors shadow-sm"
                           :title="item.parse_error"
                           @click.stop="showErrorDetail(item.parse_error)"
@@ -375,8 +397,23 @@
                             >
                               {{ getStatusLabel(item) }}
                             </n-tag>
-                            <div 
-                              v-if="item.status === 'failed' && item.parse_error"
+                            <!-- 结构化阶段/进度（列表视图，与卡片视图同源） -->
+                            <div
+                              v-if="item.index_pipeline && isInProgressDoc(item.status)"
+                              class="text-xs tabular-nums text-slate-600 dark:text-slate-300"
+                              :aria-label="`${indexStageLabel(item.index_pipeline.stage)} ${item.index_pipeline.progress}%`"
+                            >
+                              {{ indexStageLabel(item.index_pipeline.stage) }} {{ item.index_pipeline.progress }}%
+                            </div>
+                            <div
+                              v-if="item.status === 'failed' && item.index_pipeline?.error_code"
+                              class="text-xs text-red-600 dark:text-red-400 max-w-[220px] break-words"
+                              data-testid="index-pipeline-error"
+                            >
+                              {{ indexPipelineSummary(item.index_pipeline) }}
+                            </div>
+                            <div
+                              v-if="item.status === 'failed' && item.parse_error && !item.index_pipeline?.error_code"
                               class="text-xs text-red-600 dark:text-red-400 max-w-[220px] truncate cursor-pointer hover:underline decoration-dotted"
                               :title="item.parse_error"
                               @click.stop="showErrorDetail(item.parse_error)"
@@ -545,6 +582,11 @@ import { getRagMetrics, type RagMetrics } from '@/api/rag'
 import { useUserStore } from '@/stores/user'
 import { getUsers } from '@/api/user'
 import { docIconColor, docStatusLabel, docStatusType, isInProgressDoc, computeDocStats } from './docDisplay'
+import {
+  indexErrorMessage,
+  indexPipelineSummary,
+  indexStageLabel
+} from './indexPipeline'
 import KnowledgeUploadPanel from './components/KnowledgeUploadPanel.vue'
 import KnowledgeDetailModals from './components/KnowledgeDetailModals.vue'
 

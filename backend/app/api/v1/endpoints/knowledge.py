@@ -61,6 +61,7 @@ from app.schemas.retrieval_eval import (
 from app.services import retrieval_eval_service
 from app.services.audit_service import audit_service
 from app.services.embedding_service import embedding_service
+from app.services.index_progress import IndexErrorCode, build_error_detail, pipeline_payload
 from app.services.knowledge_service import knowledge_service
 from app.services.organization_settings_service import (
     organization_settings_service,
@@ -251,6 +252,8 @@ async def list_knowledge_bases(
                     "tags": doc.keywords if doc.keywords else [],
                     "description": doc.description,
                     "parse_error": doc.parse_error,
+                    # 结构化进度：与 parse_error/status 并行，不改变既有语义。
+                    "index_pipeline": pipeline_payload(doc),
                     "created_at": doc.created_at.isoformat() if doc.created_at else "",
                     "updated_at": doc.updated_at.isoformat() if doc.updated_at else "",
                     "status": status_map.get(doc_status, "failed"),
@@ -607,7 +610,14 @@ async def rebuild_document_knowledge(
                 Document.id == document_id,
                 Document.status != DocumentStatus.INDEXED,
             )
-            .values(status=DocumentStatus.PENDING, parse_error=None)
+            .values(
+                status=DocumentStatus.PENDING,
+                parse_error=None,
+                # 重建入口清除旧错误码/详情：只改状态 reporting，不改重试语义。
+                index_error_code=None,
+                index_error_detail=None,
+                index_progress=0,
+            )
             .execution_options(synchronize_session=False)
         )
         await db.commit()
@@ -688,7 +698,11 @@ async def rebuild_document_knowledge(
                             ),
                         )
                         .values(
-                            error_message=(f"本地处理任务启动失败（待启动对账重试）: {proc_err}")
+                            error_message=(f"本地处理任务启动失败（待启动对账重试）: {proc_err}"),
+                            index_stage="parse",
+                            index_progress=0,
+                            index_error_code=IndexErrorCode.JOB_SCHEDULE_FAILED.value,
+                            index_error_detail=build_error_detail("parse", proc_err, job_id=job.id),
                         )
                         .execution_options(synchronize_session=False)
                     )
@@ -803,6 +817,7 @@ async def list_knowledge_jobs(
                 "status": job.status.value if hasattr(job.status, "value") else str(job.status),
                 "retry_count": job.retry_count,
                 "error_message": job.error_message,
+                "index_pipeline": pipeline_payload(job),
                 "started_at": job.started_at.isoformat() if job.started_at else None,
                 "finished_at": job.finished_at.isoformat() if job.finished_at else None,
                 "created_at": job.created_at.isoformat() if job.created_at else None,
@@ -857,6 +872,7 @@ async def get_document_job_events(
                 "status": job.status.value if hasattr(job.status, "value") else str(job.status),
                 "retry_count": job.retry_count,
                 "error_message": job.error_message,
+                "index_pipeline": pipeline_payload(job),
                 "started_at": job.started_at.isoformat() if job.started_at else None,
                 "finished_at": job.finished_at.isoformat() if job.finished_at else None,
                 "created_at": job.created_at.isoformat() if job.created_at else None,
