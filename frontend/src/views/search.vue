@@ -390,7 +390,7 @@
         <div class="space-y-1">
           <h4 class="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">{{ t('search.captureQueryLabel') }}</h4>
           <div class="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm break-words text-slate-800 dark:border-slate-700 dark:bg-slate-800/50 dark:text-slate-100" data-testid="search-capture-query">
-            {{ searchQuery.trim() }}
+            {{ captureExecutedQuery }}
           </div>
         </div>
 
@@ -567,6 +567,10 @@ const CAPTURE_MAX_EXPECTED = 50
 
 const captureTooMany = computed(() => captureExpectedIds.value.length > CAPTURE_MAX_EXPECTED)
 
+// 捕获的是「产生当前结果的那次检索」的 query，而不是输入框里尚未提交的新文本。
+// 用户在出结果后改输入框、或清空输入框，都不能改变本次评测用例的语义。
+const captureExecutedQuery = computed(() => (lastResponse.value?.query ?? '').trim())
+
 const openCaptureModal = () => {
   captureName.value = ''
   captureSelectedIds.value = []
@@ -601,7 +605,7 @@ const loadCaptureDocumentOptions = async (query = '') => {
 }
 
 const submitCapture = async () => {
-  const query = searchQuery.value.trim()
+  const query = captureExecutedQuery.value
   const ids = captureExpectedIds.value
   if (!query) {
     captureError.value = t('search.captureQueryMissing')

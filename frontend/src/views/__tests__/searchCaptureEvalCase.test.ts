@@ -91,7 +91,7 @@ async function mountAndSearch(locale: 'zh' | 'en' = 'zh', results: SearchResult[
   await flushPromises()
 
   mockedSearch.mockResolvedValue({
-    query: '', results, total_count: results.length, search_mode: 'hybrid', index_status: 'ok',
+    query: 'alpha', results, total_count: results.length, search_mode: 'hybrid', index_status: 'ok',
   })
   await wrapper.find('input').setValue('alpha')
   const btn = wrapper.findAll('button').find((b) => (b.attributes('class') || '').includes('search-submit'))
@@ -193,6 +193,29 @@ describe('搜索页 · 保存为评测用例', () => {
     await nextTick()
     const closedCard = document.querySelector('.search-capture-modal') as HTMLElement | null
     expect(closedCard === null || closedCard.style.display === 'none', '保存成功后弹窗应关闭').toBe(true)
+    wrapper.unmount()
+  })
+
+  it('输入框在出结果后被改动/清空：保存的仍是产生结果的 query', async () => {
+    mockedCapture.mockResolvedValue({
+      created: true,
+      case: {
+        id: 'case-2', organization_id: 3, name: 'alpha', query: 'alpha',
+        expected_document_ids: ['doc-1'], tags: [], created_by: 1,
+        created_at: null, updated_at: null,
+      },
+    })
+    const wrapper = await mountAndSearch('zh')
+    // 模拟用户看到结果后修改搜索框但未重新搜索。
+    await wrapper.find('input').setValue('未提交的另一个查询')
+    await openCapture(wrapper)
+    expect(document.querySelector('[data-testid="search-capture-query"]')?.textContent?.trim()).toBe('alpha')
+    ;(document.querySelector('[data-testid="search-capture-results"] [role="checkbox"]') as HTMLElement).click()
+    await flushPromises()
+    ;(document.querySelector('[data-testid="search-capture-submit"]') as HTMLButtonElement).click()
+    await flushPromises()
+    expect(mockedCapture).toHaveBeenCalledTimes(1)
+    expect(mockedCapture.mock.calls[0][0].query).toBe('alpha')
     wrapper.unmount()
   })
 
