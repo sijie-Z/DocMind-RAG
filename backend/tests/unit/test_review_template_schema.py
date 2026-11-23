@@ -57,7 +57,8 @@ def test_039_schema_and_downgrade_roundtrip(tmp_path, monkeypatch):
         }
         assert {"review_template", "review_template_version"} <= tables
 
-        template_cols = {row[1] for row in conn.execute("PRAGMA table_info(review_template)")}
+        template_info = {row[1]: row for row in conn.execute("PRAGMA table_info(review_template)")}
+        template_cols = set(template_info)
         assert template_cols == {
             "id",
             "organization_id",
@@ -76,6 +77,12 @@ def test_039_schema_and_downgrade_roundtrip(tmp_path, monkeypatch):
         assert template_cols == {
             column.name for column in Base.metadata.tables["review_template"].columns
         }, "迁移列与 ORM 模型漂移"
+
+        # 默认值必须只由 ORM/服务层提供；MySQL 特有的 server_default 会让
+        # check_schema.py 报「列定义与模型声明不一致」（issue #150），
+        # SQLite 读回同样可见，避免只靠 CI 的 MySQL 检查发现漂移。
+        assert template_info["latest_version"][4] is None
+        assert template_info["lock_version"][4] is None
 
         version_cols = {
             row[1] for row in conn.execute("PRAGMA table_info(review_template_version)")

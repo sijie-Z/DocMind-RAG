@@ -158,8 +158,8 @@ async def create_review_template(
     ``latest_version=0`` 的孤立模板（本批不提供物理删除入口）。
     """
     try:
-        org_id = await require_organization(current_user, db)
         try:
+            org_id = await require_organization(current_user, db)
             template = await template_service.create_template(
                 db,
                 organization_id=org_id,
@@ -212,11 +212,10 @@ async def create_review_template(
         if version is not None:
             data["version"] = template_service.version_to_dict(version)
         return {"success": True, "data": data}
-    except (NotFoundError, AuthorizationError):
-        await db.rollback()
-        raise
     except AppError:
-        await db.rollback()
+        # 放行 try 体内直接抛出的 ConflictError/ValidationError：宽 except
+        # 会把 4xx 包装成 500（issue #98 缺陷模式，CI 静态门禁）。
+        # 事务内的失败已由内层处理器 rollback；提交后的 AppError 无需回滚。
         raise
     except Exception as e:
         await db.rollback()
