@@ -179,19 +179,10 @@ def downgrade() -> None:
         op.drop_column("review_case", "template_version_no")
 
     if "review_template_version" in _tables():
-        version_indexes = _indexes("review_template_version")
-        for name in (
-            "ix_review_template_version_template_created",
-            "ix_review_template_version_organization_id",
-            "ix_review_template_version_template_id",
-        ):
-            if name in version_indexes:
-                op.drop_index(name, table_name="review_template_version")
+        # MySQL 不允许先删 FK 依赖的二级索引（1553）；drop_table 会随表删除
+        # 这些索引，SQLite 回滚也会如此，无需也不应逐个 drop_index。
         op.drop_table("review_template_version")
 
     if "review_template" in _tables():
-        template_indexes = _indexes("review_template")
-        for name in ("ix_review_template_org_status", "ix_review_template_org_created"):
-            if name in template_indexes:
-                op.drop_index(name, table_name="review_template")
+        # 同理，模板头表的索引由 drop_table 一并移除。
         op.drop_table("review_template")
