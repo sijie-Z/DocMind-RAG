@@ -18,10 +18,12 @@ from __future__ import annotations
 import hashlib
 import uuid
 from contextlib import asynccontextmanager
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from httpx import ASGITransport, AsyncClient
+from sqlalchemy import inspect as sa_inspect
 from sqlalchemy import select as sa_select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
@@ -506,3 +508,165 @@ async def test_es_single_doc_update_refreshes_by_default():
         )
     assert client.update.await_args_list[0].kwargs["refresh"] is True
     assert client.update.await_args_list[1].kwargs["refresh"] is False
+
+
+@pytest.mark.asyncio
+async def test_browse_override_state_uses_strip_semantics(factory):
+    """列表过滤与 ``_override_state`` 同口径：纯空白 override 不算 active/draft。
+
+    变异点：把 ``func.trim`` 去掉（退回只比长度）→ 空白行被当成 active，用例红。
+    """
+    maker, chunk_ids = factory
+    patches = _patch_external()
+    with patches[0], patches[1], patches[2]:
+        async with maker() as db:
+            # 直接落库绕过写入校验，模拟历史/外部写入的纯空白文本。
+            db.add(
+                DocumentChunkOverride(
+                    id="blank-override",
+                    document_chunk_id=chunk_ids[2],
+                    document_id=DOC,
+                    organization_id=ORG,
+                    created_by=OWNER,
+                    updated_by=OWNER,
+                    is_enabled=True,
+                    apply_to_retrieval=True,
+                    override_text="   ",
+                )
+            )
+            await db.commit()
+            actives = await svc.browse_chunks(
+                db, _user(OWNER), DOC, page=1, page_size=20, override_state="active"
+            )
+    assert [row["chunk_id"] for row in actives["data"]["items"]] == []
+    assert (
+        svc._override_state(
+            SimpleNamespace(is_enabled=True, apply_to_retrieval=True, override_text="   ")
+        )
+        == "none"
+    )
+
+
+# ── MySQL（无 INSERT ... RETURNING）语义的判别用例 ────────────────────
+
+
+# ── MySQL（无 INSERT ... RETURNING）语义的判别用例 ────────────────────
+
+
+def _mysql_like_engine(db_path):
+    """构造一个「没有 RETURNING」的 SQLite 引擎，模拟生产 mysql+aiomysql。
+
+    生产库是 MySQL：``INSERT`` 不返回任何列，SQLAlchemy 只能把带
+    ``server_default`` 的 ``created_at`` / ``updated_at`` 标记为 expired，
+    留待下一次属性访问再取。此后同步上下文里的属性读取就是异步会话上的
+    lazy load → ``MissingGreenlet``。SQLite 默认支持 RETURNING（本机 SQLite
+    3.35+），会把服务端默认值直接回填，恰好把这个缺陷藏住；因此判别用例
+    必须显式关掉 RETURNING，只测生产语义。
+    """
+    from sqlalchemy.ext.asyncio import create_async_engine as _create
+
+    engine = _create(f"sqlite+aiosqlite:///{db_path}")
+    assert engine.dialect.insert_returning is True, "前提：SQLite 默认有 RETURNING"
+    engine.dialect.insert_returning = False
+    engine.dialect.insert_executemany_returning = False
+    return engine
+
+
+@pytest.mark.asyncio
+async def test_first_enable_patch_does_not_lazy_load_timestamps_on_mysql(tmp_path):
+    """首次 PATCH /chunks/enabled（无既有 override 行）不得触发时间戳 lazy load。
+
+    变异点：删掉 ``set_chunk_enabled`` 新建行上的 ``updated_at``/``created_at``
+    显式赋值，也删掉模型侧 ``default=`` → 本用例在生产语义下红
+    （``override.updated_at`` 读成 MissingGreenlet / 仍是 expired）。
+    """
+    maker_engine = _mysql_like_engine(tmp_path / "mysql-like.db")
+    async with maker_engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    maker = async_sessionmaker(maker_engine, expire_on_commit=False)
+    async with maker() as db:
+        db.add_all(
+            [
+                Organization(id=ORG, name="Org A", owner_id=OWNER),
+                _user(OWNER, ORG),
+                _doc(DOC, ORG),
+                _chunk("chunk-mysql-0", DOC, 0, original=ORIGINAL, indexed=INDEXED),
+            ]
+        )
+        await db.commit()
+
+    patches = _patch_external()
+    try:
+        with patches[0], patches[1], patches[2]:
+            async with maker() as db:
+                item = await svc.set_chunk_enabled(
+                    db, _user(OWNER), DOC, "chunk-mysql-0", enabled=False
+                )
+                # 投影必须拿到真实时间戳（不是 None、不是异常），且读取
+                # 不依赖数据库回填。
+                assert item["override_updated_at"] is not None
+                override = await db.get(DocumentChunkOverride, item["override_id"])
+                unloaded = set(sa_inspect(override).unloaded)
+                assert "updated_at" not in unloaded, (
+                    "新建 override 的 updated_at 不得依赖 post-fetch：MySQL 无 "
+                    f"INSERT ... RETURNING，expired 属性会触发 MissingGreenlet，unloaded={unloaded}"
+                )
+                assert "created_at" not in unloaded
+                # 显式构造的同一语义（不经 flush）：default= 在 INSERT 时才求值，
+                # 因此这里断言的是「赋值走模型列默认」——实例化后首次 flush
+                # 前并非已填值；真正的判别在上面的 unloaded / 投影时间戳。
+                fresh = DocumentChunkOverride(
+                    id="probe",
+                    document_chunk_id="x",
+                    document_id="y",
+                    organization_id=ORG,
+                    created_by=OWNER,
+                    updated_by=OWNER,
+                    is_enabled=True,
+                )
+                db.add(fresh)
+                await db.flush()
+                assert set(sa_inspect(fresh).unloaded).isdisjoint({"created_at", "updated_at"}), (
+                    "客户端 default= 必须在 flush 后直接可用（不依赖 RETURNING 回填）"
+                )
+                db.expunge(fresh)
+    finally:
+        await maker_engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_upsert_override_timestamps_do_not_rely_on_returning(tmp_path):
+    """upsert 新建行的 updated_at 同样不得依赖 post-fetch（生产 MySQL 语义）。"""
+    maker_engine = _mysql_like_engine(tmp_path / "mysql-like-upsert.db")
+    async with maker_engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    maker = async_sessionmaker(maker_engine, expire_on_commit=False)
+    async with maker() as db:
+        db.add_all(
+            [
+                Organization(id=ORG, name="Org A", owner_id=OWNER),
+                _user(OWNER, ORG),
+                _doc(DOC, ORG),
+                _chunk("chunk-upsert-0", DOC, 0, original=ORIGINAL, indexed=INDEXED),
+            ]
+        )
+        await db.commit()
+
+    patches = _patch_external()
+    try:
+        with patches[0], patches[1], patches[2]:
+            async with maker() as db:
+                item = await svc.upsert_chunk_override(
+                    db,
+                    _user(OWNER),
+                    DOC,
+                    "chunk-upsert-0",
+                    text="人工文本",
+                    apply_to_retrieval=True,
+                )
+                assert item["override_updated_at"] is not None
+                override = await db.get(DocumentChunkOverride, item["override_id"])
+                unloaded = set(sa_inspect(override).unloaded)
+                assert "updated_at" not in unloaded, f"unloaded={unloaded}"
+    finally:
+        await maker_engine.dispose()

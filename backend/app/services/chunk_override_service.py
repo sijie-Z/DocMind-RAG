@@ -255,7 +255,11 @@ async def browse_chunks(
         (DocumentChunkOverride.is_enabled.is_(None), True),
         else_=DocumentChunkOverride.is_enabled,
     )
-    has_text = func.length(func.coalesce(DocumentChunkOverride.override_text, "")) > 0
+    # 与 _override_state() 的 ``.strip()`` 同口径：纯空白文本不算有内容。
+    # ``trim`` 只裁空格（MySQL/SQLite 都支持的标准形态）；制表符/换行无法
+    # 经写入接口落库——validate_override_text 对纯空白直接拒绝——因此两条
+    # 判定在可达数据上等价。
+    has_text = func.length(func.trim(func.coalesce(DocumentChunkOverride.override_text, ""))) > 0
     if override_state == "active":
         conditions.append(not_disabled)
         conditions.append(DocumentChunkOverride.apply_to_retrieval.is_(True))
@@ -498,6 +502,11 @@ async def set_chunk_enabled(
     """分块级启停：同步刷 ES 字段，立即影响检索（旧索引缺字段按启用处理）。"""
     doc, chunk, override = await load_chunk_for_update(db, current_user, document_id, chunk_id)
     if override is None:
+        # ``updated_at`` / ``created_at`` 只声明了 server_default，MySQL（无
+        # INSERT ... RETURNING）flush 后该列被标记为 expired；随后投影立刻读
+        # 它会触发异步 lazy load（MissingGreenlet）——首次 PATCH 必 500。
+        # 显式赋值（与 upsert_chunk_override 同口径）让模型自带值，不走后取。
+        now = utcnow()
         override = DocumentChunkOverride(
             id=str(uuid.uuid4()),
             document_chunk_id=chunk.id,
@@ -506,6 +515,8 @@ async def set_chunk_enabled(
             created_by=current_user.id,
             updated_by=current_user.id,
             is_enabled=bool(enabled),
+            created_at=now,
+            updated_at=now,
         )
         db.add(override)
     else:

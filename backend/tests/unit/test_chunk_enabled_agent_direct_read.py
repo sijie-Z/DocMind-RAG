@@ -3,6 +3,10 @@
 变异点：
 - 把任一 summarize_document / extract_insights / cross_document_analysis 的
   ``with_chunk_enabled_filter`` 去掉 → 对应用例精确红（断言 must 含 must_not）；
+- 把 compare_documents 自建查询的 ``with_chunk_enabled_filter`` 去掉 →
+  ``test_compare_documents_...`` 红；
+- 把 @引用直读兜底（agent.service）的 ``with_chunk_enabled_filter`` 去掉 →
+  ``test_referenced_direct_read_...`` 红；
 - 把共享 helper 改成空过滤 → hybrid + Agent 全部红。
 """
 
@@ -14,6 +18,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from app.agent import core_tools
+from app.agent.tools import data_analysis as data_analysis_tool
 from app.core.elasticsearch import ElasticsearchTools
 from app.rag.source_provenance import PARSER_ORIGINAL
 
@@ -149,3 +154,69 @@ async def test_agent_disabled_chunk_cannot_reach_summary_body():
 
     assert secret not in str(captured)
     assert secret not in str(out)
+
+
+# ── compare_documents（评审 IMPORTANT 1）────────────────────────────────────
+
+
+async def _allow_all(*_args, **_kwargs):
+    return None
+
+
+def _assert_chunk_filter_at_must(query: dict) -> None:
+    """compare_documents 的 must 是 list（ACL 另行拼接前的形态）。"""
+    must = query["query"]["bool"]["must"]
+    assert isinstance(must, list)
+    assert CHUNK_DISABLED in must, "compare_documents 自建查询必须排除禁用 chunk"
+
+
+@pytest.mark.asyncio
+async def test_compare_documents_queries_exclude_disabled_chunks():
+    """compare_documents 自建 ES 查询必须带分块启停过滤（不绕 shared helper）。
+
+    变异点：删除 data_analysis.compare_documents 里的 with_chunk_enabled_filter
+    → 本用例在断言处精确红。
+    """
+    calls: list[dict] = []
+
+    async def _search(query):
+        calls.append(query)
+        return {"hits": {"hits": [_hit("doc-1")]}}
+
+    with (
+        patch.object(core_tools, "_ensure_document_readable", _allow_all),
+        patch.object(ElasticsearchTools, "search_documents", AsyncMock(side_effect=_search)),
+    ):
+        out = await data_analysis_tool.compare_documents(["doc-1", "doc-2"], organization_id=1)
+
+    assert isinstance(out, str), out
+    assert len(calls) == 2
+    for query in calls:
+        _assert_chunk_filter_at_must(query)
+
+
+@pytest.mark.asyncio
+async def test_compare_documents_disabled_chunk_never_reaches_preview():
+    """行为级：ES 按 filter 只回启用块时，compare_documents 输出不含禁用块正文。"""
+    secret = "DISABLED-COMPARE-CANARY-7712"
+    enabled = {
+        "_source": {
+            "filename": "a.txt",
+            "chunk_text": "可对比正文",
+            "original_text": "可对比正文",
+            "text_provenance": PARSER_ORIGINAL,
+        }
+    }
+
+    async def _search(query):
+        _assert_chunk_filter_at_must(query)
+        return {"hits": {"hits": [enabled]}}
+
+    with (
+        patch.object(core_tools, "_ensure_document_readable", _allow_all),
+        patch.object(ElasticsearchTools, "search_documents", AsyncMock(side_effect=_search)),
+    ):
+        out = await data_analysis_tool.compare_documents(["doc-1", "doc-2"], organization_id=1)
+
+    assert secret not in str(out)
+    assert "可对比正文" in str(out)

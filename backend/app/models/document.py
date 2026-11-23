@@ -22,6 +22,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
 
 from app.core.database import Base
+from app.core.time_utils import utcnow as _utcnow_model_default
 
 
 class DocumentStatus(enum.Enum):
@@ -286,12 +287,19 @@ class DocumentChunkOverride(Base):
         Integer, ForeignKey("users.id"), nullable=False, comment="最后修改人"
     )
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now(), comment="创建时间"
+        DateTime(timezone=True),
+        server_default=func.now(),
+        # Python 侧默认值（与应用侧写入口径同为 naive UTC）：MySQL 无
+        # INSERT ... RETURNING，只靠 server_default 时 flush 后该列仍是
+        # expired，同事务内投影一读就触发异步 lazy load（MissingGreenlet）。
+        default=_utcnow_model_default,
+        comment="创建时间",
     )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         server_default=func.now(),
         onupdate=func.now(),
+        default=_utcnow_model_default,
         comment="最后修改时间",
     )
 

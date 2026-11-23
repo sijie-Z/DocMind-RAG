@@ -9,6 +9,7 @@ import csv
 import io
 import json
 from datetime import datetime, timedelta
+from pathlib import Path
 from types import SimpleNamespace
 from uuid import uuid4
 
@@ -487,7 +488,6 @@ def test_035_migration_single_head_schema_and_downgrade(tmp_path, monkeypatch):
     assert script.get_revision("035_retrieval_eval_run").down_revision == (
         "034_retrieval_eval_case"
     )
-    assert set(script.get_heads()) == {"036_chunk_override"}
     command.upgrade(cfg, "head")
 
     with sqlite3.connect(str(db_path)) as conn:
@@ -521,3 +521,22 @@ def test_035_migration_single_head_schema_and_downgrade(tmp_path, monkeypatch):
     downgrade = migration.split("def downgrade() -> None:", 1)[1]
     assert "op.drop_table(TABLE)" in downgrade
     assert "op.drop_index(INDEX" not in downgrade
+
+
+def test_migration_chain_has_single_head_including_036_chunk_override(tmp_path, monkeypatch):
+    """迁移链必须单头，且 036 是当前 head、接在 035 之后。
+
+    本断言原先挂在 035 的 schema 用例里——那个用例守的是「035 表结构」，
+    与「最新 head 是谁」无关；每次新增迁移都会迫使其连带改名/改断言。
+    单独成例后，新增迁移只需改这里的一处（或本断言随 head 一同前移）。
+    """
+    from alembic.config import Config
+    from alembic.script import ScriptDirectory
+
+    backend = Path(__file__).resolve().parents[2]
+    cfg = Config(str(backend / "alembic.ini"))
+    cfg.set_main_option("script_location", str(backend / "alembic"))
+    script = ScriptDirectory.from_config(cfg)
+    heads = set(script.get_heads())
+    assert heads == {"036_chunk_override"}
+    assert script.get_revision("036_chunk_override").down_revision == ("035_retrieval_eval_run")
