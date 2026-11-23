@@ -294,6 +294,42 @@ async def test_post_header_version_failure_rolls_back_template(factory, monkeypa
 
 
 @pytest.mark.asyncio
+async def test_create_failure_invokes_explicit_session_rollback(factory, monkeypatch):
+    """失败路径必须显式调用 session.rollback，不能依赖测试夹具的隐式回滚。
+
+    变异点：删除端点异常处理里的 `db.rollback()` → 本用例红。
+    """
+    from sqlalchemy.ext.asyncio import AsyncSession
+
+    monkeypatch.setattr(
+        "app.core.security.permission_service.get_user_permissions",
+        _grant(PermissionType.DOCUMENT_READ, PermissionType.DOCUMENT_UPDATE),
+    )
+    original_rollback = AsyncSession.rollback
+    rollbacks = {"count": 0}
+
+    async def _failing_create_version(*args, **kwargs):
+        raise RuntimeError("forced version failure")
+
+    async def _counting_rollback(self, *args, **kwargs):
+        rollbacks["count"] += 1
+        return await original_rollback(self, *args, **kwargs)
+
+    monkeypatch.setattr(
+        "app.api.v1.endpoints.reviews.template_service.create_version",
+        _failing_create_version,
+    )
+    monkeypatch.setattr(AsyncSession, "rollback", _counting_rollback)
+    async with _Ctx(_user(superuser=True), factory) as ac:
+        failed = await ac.post(
+            "/api/v1/reviews/templates",
+            json={"name": "rollback-probe", "items": template_items()},
+        )
+    assert failed.status_code >= 400, failed.text
+    assert rollbacks["count"] >= 1, "失败路径必须显式 rollback（不能靠夹具收尾掩盖）"
+
+
+@pytest.mark.asyncio
 async def test_template_payload_byte_budget_is_422(factory, monkeypatch):
     """schema 合法字符数但总字节超限的请求应在落库前 422。
 
