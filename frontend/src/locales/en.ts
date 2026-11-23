@@ -1278,6 +1278,7 @@ export default {
     startHint: 'Enter a question or keyword to search your knowledge base',
     fileContent: 'File Content',
     legacyTextWarning: 'Some or all sources of this result have no parser original text; the displayed text may include system-generated background summaries and must not be treated as original-text evidence.',
+    manualOverrideWarning: 'This retrieval text was manually corrected; parser original text remains the evidence baseline.',
     searchFailed: 'Search failed',
     askAIQuestion: 'About the file "{filename}": {query}',
     askAIQuestionGeneric: 'Regarding the file "{filename}", please summarize its key points'

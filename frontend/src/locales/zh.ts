@@ -1285,6 +1285,7 @@ export default {
     startHint: '输入问题或关键词，开始检索你的知识库',
     fileContent: '文件内容',
     legacyTextWarning: '该结果的部分或全部来源缺少解析器原文，展示文本可能包含系统生成的背景摘要，不能作为原文证据。',
+    manualOverrideWarning: '该检索文本经人工修正；原文证据仍以解析器原文为准。',
     searchFailed: '搜索失败',
     // E11-①：问问 AI 跨页问题组句（文件名 + 当前搜索词 / 无搜索词时的兜底）
     askAIQuestion: '关于文件「{filename}」：{query}',

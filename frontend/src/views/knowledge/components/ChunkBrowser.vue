@@ -91,8 +91,8 @@
           <n-tag size="small" quaternary round data-testid="chunk-provenance">
             {{ provenanceLabel(item.effective_text_provenance) }}
           </n-tag>
-          <n-tag v-if="item.override_state === 'active'" size="small" quaternary round>
-            {{ t('knowledge.chunkBrowser.overrideActive') }}
+          <n-tag v-if="item.override_state !== 'none'" size="small" quaternary round>
+            {{ overrideStateLabel(item.override_state) }}
           </n-tag>
           <span class="text-xs tabular-nums text-slate-500 dark:text-slate-400">
             {{ locatorLabel(item) }}
@@ -130,7 +130,7 @@
             {{ item.is_enabled ? t('knowledge.chunkBrowser.disable') : t('knowledge.chunkBrowser.enable') }}
           </n-button>
           <n-button
-            v-if="item.override_state === 'active'"
+            v-if="item.override_state === 'active' || item.override_state === 'draft'"
             size="small"
             quaternary
             data-testid="chunk-reset"
@@ -352,6 +352,13 @@ const provenanceLabel = (value: string): string => {
   return t('knowledge.chunkBrowser.provenanceLegacy')
 }
 
+const overrideStateLabel = (value: string): string => {
+  if (value === 'active') return t('knowledge.chunkBrowser.overrideActive')
+  if (value === 'draft') return t('knowledge.chunkBrowser.overrideDraft')
+  if (value === 'disabled') return t('knowledge.chunkBrowser.disabled')
+  return ''
+}
+
 const locatorLabel = (item: DocumentChunkBrowserItem): string => {
   const parts: string[] = []
   if (item.page_number) parts.push(t('knowledge.documentDetail.pageMeta', { page: item.page_number }))
@@ -433,6 +440,23 @@ const resetOverride = async (item: DocumentChunkBrowserItem) => {
   }
 }
 
+/** URL 是筛选/分页的真相：前进后退或外部改 query 都要同步本地状态并重取。 */
+const syncFromUrl = () => {
+  const nextPage = readPage()
+  const nextEnabled = queryString(route.query.chunkEnabled)
+  const nextOverride = queryString(route.query.chunkOverride)
+  page.value = nextPage
+  enabledFilter.value =
+    nextEnabled === 'enabled' || nextEnabled === 'disabled' ? nextEnabled : 'all'
+  overrideFilter.value = ['active', 'draft', 'disabled'].includes(nextOverride)
+    ? (nextOverride as 'active' | 'draft' | 'disabled')
+    : 'all'
+  searchInput.value = queryString(route.query.chunkQuery)
+  appliedQuery.value = searchInput.value
+  editingId.value = ''
+  void load()
+}
+
 watch(
   () => props.documentId,
   () => {
@@ -441,5 +465,11 @@ watch(
     void load()
   },
   { immediate: true }
+)
+watch(
+  () => [props.documentId, route.query.chunkPage, route.query.chunkEnabled, route.query.chunkOverride, route.query.chunkQuery],
+  () => {
+    syncFromUrl()
+  }
 )
 </script>

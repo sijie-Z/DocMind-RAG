@@ -11,9 +11,21 @@ from typing import Any
 
 PARSER_ORIGINAL = "parser_original"
 LEGACY_UNVERIFIED = "legacy_unverified"
+# 检索文本被人工修正时的独立标记。它**不证明** parser 原文，strict replay
+# 仍只认 text_provenance == parser_original 且 original_text 非空的行。
+MANUAL_OVERRIDE = "manual_override"
 COMPAT = "compat"
 STRICT = "strict"
 CACHE_SCHEMA_VERSION = "v3"
+
+
+def is_manual_override_result(item: dict[str, Any]) -> bool:
+    """True only for an explicit manual marker on the retrieval text.
+
+    This marker says nothing about parser originality: callers must still read
+    ``provenance_of`` / ``original_text_of`` for evidence decisions.
+    """
+    return item.get("retrieval_text_provenance") == MANUAL_OVERRIDE
 
 
 def normalize_mode(mode: str | None) -> str:

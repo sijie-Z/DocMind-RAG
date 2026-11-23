@@ -1285,6 +1285,7 @@ export default {
     startHint: '質問またはキーワードを入力して検索を開始してください',
     fileContent: 'ファイル内容',
     legacyTextWarning: 'この結果の一部またはすべての出典にパーサー原文がありません。表示テキストにはシステム生成の背景要約が含まれる可能性があり、原文の証拠として扱えません。',
+    manualOverrideWarning: 'この検索テキストは手動修正されています。原文の証拠はパーサー原文を基準とします。',
     askAIQuestion: 'ファイル「{filename}」について：{query}',
     askAIQuestionGeneric: 'ファイル「{filename}」の主な内容を要約してください',
   },

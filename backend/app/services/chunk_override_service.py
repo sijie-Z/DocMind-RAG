@@ -26,6 +26,7 @@ from sqlalchemy import case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.security import get_document_for_user, is_org_admin
+from app.core.time_utils import utcnow
 from app.exceptions import AuthorizationError, NotFoundError, ValidationError
 from app.models.document import (
     Document,
@@ -34,12 +35,15 @@ from app.models.document import (
     DocumentVisibility,
 )
 from app.models.user import User
-from app.rag.source_provenance import LEGACY_UNVERIFIED, PARSER_ORIGINAL
+from app.rag.source_provenance import (
+    LEGACY_UNVERIFIED,
+    MANUAL_OVERRIDE,
+    PARSER_ORIGINAL,
+)
 from app.services.document_preview import _is_original
 
 logger = logging.getLogger(__name__)
 
-MANUAL_OVERRIDE = "manual_override"
 MAX_OVERRIDE_CHARS = 100_000
 MAX_PAGE_SIZE = 100
 DEFAULT_PAGE_SIZE = 20
@@ -67,6 +71,28 @@ class ChunkBrowserItem:
     override_text: str | None
     override_id: str | None
     override_updated_at: datetime | None
+
+
+def _override_state(override: DocumentChunkOverride | None) -> str:
+    """单一投影口径：draft / active / disabled / none。
+
+    browse_chunks 的过滤和写入响应共用此口径，避免「列表说 draft、详情说 none」
+    这类前端 reset/徽标漂移。disabled 优先于 active：禁用块即便有生效修正，
+    也必须显出 disabled，防止 UI 暗示它还在参与检索。
+    """
+    if override is None:
+        return "none"
+    if not bool(override.is_enabled):
+        return "disabled"
+    if (
+        bool(override.apply_to_retrieval)
+        and isinstance(override.override_text, str)
+        and override.override_text.strip()
+    ):
+        return "active"
+    if isinstance(override.override_text, str) and override.override_text.strip():
+        return "draft"
+    return "none"
 
 
 def _meta_dict(value: Any) -> dict[str, Any]:
@@ -146,7 +172,9 @@ def chunk_to_item(
         clause_no=clauses,
         section_no=sections,
         is_enabled=bool(override.is_enabled) if override is not None else True,
-        override_state="active" if active_override is not None else "none",
+        # 与 browse_chunks 的 override_state 过滤（active/draft/disabled/none）
+        # 用同一套判定：UI reset 按钮也必须按这里的结果显隐。
+        override_state=_override_state(override),
         effective_text_provenance=MANUAL_OVERRIDE
         if active_override is not None
         else (PARSER_ORIGINAL if original_available else LEGACY_UNVERIFIED),
@@ -222,13 +250,20 @@ async def browse_chunks(
             else_=DocumentChunkOverride.is_enabled,
         )
         conditions.append(enabled_expr == enabled)
+    # 与 _override_state() 同口径：disabled 优先，draft/active 只在启用块里判定。
+    not_disabled = case(
+        (DocumentChunkOverride.is_enabled.is_(None), True),
+        else_=DocumentChunkOverride.is_enabled,
+    )
+    has_text = func.length(func.coalesce(DocumentChunkOverride.override_text, "")) > 0
     if override_state == "active":
+        conditions.append(not_disabled)
         conditions.append(DocumentChunkOverride.apply_to_retrieval.is_(True))
+        conditions.append(has_text)
     elif override_state == "draft":
-        conditions.append(
-            DocumentChunkOverride.apply_to_retrieval.is_(False)
-            & DocumentChunkOverride.override_text.is_not(None)
-        )
+        conditions.append(not_disabled)
+        conditions.append(DocumentChunkOverride.apply_to_retrieval.is_(False))
+        conditions.append(has_text)
     elif override_state == "disabled":
         conditions.append(DocumentChunkOverride.is_enabled.is_(False))
     needle = (query or "").strip()
@@ -415,18 +450,24 @@ async def upsert_chunk_override(
             document_id=doc.id,
             organization_id=doc.organization_id,
             created_by=current_user.id,
+            is_enabled=True,
         )
         db.add(override)
+    # 保存修正绝不改变启停：只有显式 PATCH /chunks/enabled 才能改 is_enabled。
+    # 此前无条件置 True 会把已禁用 chunk 重新放回检索——这是一条静默越权路径。
+    effective_enabled = bool(override.is_enabled)
     override.override_text = clean_text
     override.apply_to_retrieval = bool(apply_to_retrieval)
-    override.is_enabled = True
     override.updated_by = current_user.id
+    # 显式赋值避免 onupdate 在 flush 后把该列标记为 expired ——
+    # 随后同事务内投影响应会触发异步 lazy load（MissingGreenlet）。
+    override.updated_at = utcnow()
     await db.flush()
     await _sync_es(
         db,
         doc,
         chunk,
-        enabled=True,
+        enabled=effective_enabled,
         retrieval_text=clean_text,
         apply_to_retrieval=bool(apply_to_retrieval),
     )
@@ -437,7 +478,11 @@ async def upsert_chunk_override(
         "upsert_chunk_override",
         doc,
         chunk,
-        {"text": clean_text or "", "apply_to_retrieval": bool(apply_to_retrieval)},
+        {
+            "text": clean_text or "",
+            "apply_to_retrieval": bool(apply_to_retrieval),
+            "is_enabled": effective_enabled,
+        },
     )
     return item_to_dict(chunk_to_item(chunk, doc, override))
 
@@ -466,6 +511,7 @@ async def set_chunk_enabled(
     else:
         override.is_enabled = bool(enabled)
         override.updated_by = current_user.id
+        override.updated_at = utcnow()
     await db.flush()
     await _sync_es(
         db,
@@ -500,6 +546,7 @@ async def reset_chunk_override(
     override.override_text = None
     override.apply_to_retrieval = False
     override.updated_by = current_user.id
+    override.updated_at = utcnow()
     await db.flush()
     await _sync_es(
         db,

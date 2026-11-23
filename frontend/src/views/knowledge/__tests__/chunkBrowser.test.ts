@@ -218,4 +218,40 @@ describe('ChunkBrowser 行为', () => {
     expect(router.currentRoute.value.query.chunkQuery).toBe('付款')
     expect(get.mock.calls.at(-1)?.[1]?.params?.q).toBe('付款')
   })
+
+  it('draft/active 状态都显示撤销入口；none 不显示', async () => {
+    get.mockResolvedValue({
+      data: {
+        data: {
+          items: [
+            { ...ITEM, override_state: 'draft', override_text: '草稿' },
+            { ...ITEM, chunk_id: 'c-2', override_state: 'none' }
+          ],
+          total: 2, page: 1, page_size: 20, pages: 1
+        }
+      }
+    })
+    const { w } = await mountBrowser()
+    const rows = w.findAll('[data-testid="chunk-browser-row"]')
+    expect(rows[0].find('[data-testid="chunk-reset"]').exists()).toBe(true)
+    expect(rows[0].text()).toContain('仅草稿')
+    expect(rows[1].find('[data-testid="chunk-reset"]').exists()).toBe(false)
+  })
+
+  it('URL query 变化（前进后退）同步筛选状态并重新请求', async () => {
+    const { router } = await mountBrowser()
+    const before = get.mock.calls.length
+    await router.push({
+      name: 'KnowledgeDocument',
+      params: { documentId: 'doc-1' },
+      query: { chunkEnabled: 'disabled', chunkOverride: 'active', chunkQuery: '外部链接' }
+    })
+    await flushPromises()
+    await nextTick()
+    expect(get.mock.calls.length).toBeGreaterThan(before)
+    const params = get.mock.calls.at(-1)?.[1]?.params
+    expect(params?.enabled).toBe(false)
+    expect(params?.override_state).toBe('active')
+    expect(params?.q).toBe('外部链接')
+  })
 })

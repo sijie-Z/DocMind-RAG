@@ -18,7 +18,7 @@ from __future__ import annotations
 import hashlib
 import uuid
 from contextlib import asynccontextmanager
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from httpx import ASGITransport, AsyncClient
@@ -426,3 +426,83 @@ async def test_api_pagination_bounds_and_private_text_leak(factory):
         )
         assert leak.status_code == 200  # 超管有审计访问权
         assert SECRET in leak.text  # 超管可见正文，这是授权路径
+
+
+# ── 评审 REQUEST CHANGES 的判别用例 ────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_correction_keeps_disabled_state(factory):
+    """保存修正不得静默重新启用 chunk；只有显式 PATCH enabled 才能改。"""
+    maker, chunk_ids = factory
+    patches = _patch_external()
+    with patches[0] as es, patches[1], patches[2]:
+        async with maker() as db:
+            await svc.set_chunk_enabled(db, _user(OWNER), DOC, chunk_ids[0], enabled=False)
+            es.reset_mock()
+            item = await svc.upsert_chunk_override(
+                db,
+                _user(OWNER),
+                DOC,
+                chunk_ids[0],
+                text="禁用后仍可修正文本",
+                apply_to_retrieval=True,
+            )
+    assert item["is_enabled"] is False
+    assert item["override_state"] == "disabled"
+    assert es.await_args.args[1]["is_chunk_enabled"] is False
+    assert es.await_args.args[1]["retrieval_text_provenance"] == svc.MANUAL_OVERRIDE
+
+
+@pytest.mark.asyncio
+async def test_override_state_projections_draft_active_disabled(factory):
+    """列表过滤与写入响应共用 draft/active/disabled/none 投影。"""
+    maker, chunk_ids = factory
+    patches = _patch_external()
+    with patches[0], patches[1], patches[2]:
+        async with maker() as db:
+            draft = await svc.upsert_chunk_override(
+                db, _user(OWNER), DOC, chunk_ids[0], text="草稿正文", apply_to_retrieval=False
+            )
+            assert draft["override_state"] == "draft"
+            active = await svc.upsert_chunk_override(
+                db, _user(OWNER), DOC, chunk_ids[1], text="生效正文", apply_to_retrieval=True
+            )
+            assert active["override_state"] == "active"
+            disabled = await svc.set_chunk_enabled(
+                db, _user(OWNER), DOC, chunk_ids[1], enabled=False
+            )
+            assert disabled["override_state"] == "disabled"
+            drafts = await svc.browse_chunks(
+                db, _user(OWNER), DOC, page=1, page_size=20, override_state="draft"
+            )
+            actives = await svc.browse_chunks(
+                db, _user(OWNER), DOC, page=1, page_size=20, override_state="active"
+            )
+            disableds = await svc.browse_chunks(
+                db, _user(OWNER), DOC, page=1, page_size=20, override_state="disabled"
+            )
+    assert [row["chunk_id"] for row in drafts["data"]["items"]] == [chunk_ids[0]]
+    assert [row["chunk_id"] for row in actives["data"]["items"]] == []
+    assert [row["chunk_id"] for row in disableds["data"]["items"]] == [chunk_ids[1]]
+
+
+@pytest.mark.asyncio
+async def test_es_single_doc_update_refreshes_by_default():
+    """分块级 ES 写入必须 refresh=True，否则「立即生效」是假承诺。"""
+    from app.core import elasticsearch as es_mod
+    from app.core.elasticsearch import ElasticsearchTools
+
+    client = MagicMock()
+
+    async def _update(**kwargs):
+        return kwargs
+
+    client.update = AsyncMock(side_effect=_update)
+    with patch.object(es_mod, "get_elasticsearch", AsyncMock(return_value=client)):
+        await ElasticsearchTools.update_document("doc_chunk-1", {"is_chunk_enabled": False})
+        await ElasticsearchTools.update_document(
+            "doc_chunk-1", {"is_chunk_enabled": True}, refresh=False
+        )
+    assert client.update.await_args_list[0].kwargs["refresh"] is True
+    assert client.update.await_args_list[1].kwargs["refresh"] is False

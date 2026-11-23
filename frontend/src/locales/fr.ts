@@ -1286,6 +1286,7 @@ export default {
     startHint: 'Saisissez une question ou un mot-clé pour lancer la recherche',
     fileContent: 'Contenu du fichier',
     legacyTextWarning: "Certaines sources, voire toutes, de ce résultat n'ont pas de texte original issu du parseur ; le texte affiché peut contenir des résumés de contexte générés et ne doit pas servir de preuve du texte original.",
+    manualOverrideWarning: 'Ce texte de recherche a été corrigé manuellement ; le texte original du parseur reste la référence de preuve.',
     askAIQuestion: 'À propos du fichier « {filename} » : {query}',
     askAIQuestionGeneric: 'À propos du fichier « {filename} », veuillez résumer les points clés',
   },

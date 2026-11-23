@@ -166,7 +166,7 @@ export interface DocumentChunkBrowserItem {
   clause_no: number[]
   section_no: string[]
   is_enabled: boolean
-  override_state: 'none' | 'active'
+  override_state: 'none' | 'active' | 'draft' | 'disabled'
   /** 实际用于检索的 provenance：manual_override 与 parser_original 严格区分。 */
   effective_text_provenance: 'parser_original' | 'legacy_unverified' | 'manual_override'
   override_text: string | null

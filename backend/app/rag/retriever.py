@@ -437,10 +437,11 @@ def build_retrieval_filters(
     filters: list[dict] = [
         {"term": {"organization_id": str(organization_id)}},
         {"bool": {"must_not": [{"term": {"is_enabled": False}}]}},
-        # 分块级启停：must_not 对「旧索引缺字段」的文档是匹配的，因此 036 之前
-        # 写入的 chunk 仍照旧召回；新写入的 disabled chunk 立即退出召回。
-        {"bool": {"must_not": [{"term": {"is_chunk_enabled": False}}]}},
     ]
+    # 分块级启停与 Agent 直读路径共用同一 helper，避免两套 must_not 漂移。
+    from app.services.document_acl import with_chunk_enabled_filter
+
+    filters = with_chunk_enabled_filter(filters)
     if document_ids:
         doc_ids = [str(d) for d in document_ids if d]
         if doc_ids:

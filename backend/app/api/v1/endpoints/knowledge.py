@@ -343,6 +343,8 @@ async def search_knowledge(
                     # O 派生展示正文 + 逐条溯源；legacy 行不得被当作原文证据。
                     "content": r.get("content"),
                     "text_provenance": r.get("text_provenance"),
+                    # 人工修正文本标记独立透传；下游展示/严格模式不得把它当 parser 原文。
+                    "retrieval_text_provenance": r.get("retrieval_text_provenance"),
                     "score": r.get("score") or r.get("relevance_score") or 0,
                     # issue #185：重排绝对分单独透传（score 是相对排序分）；
                     # null 表示无重排分，前端不得按百分比相关度展示。

@@ -16,7 +16,14 @@ from app.core.db_conflicts import is_retryable_mysql_conflict
 from app.core.elasticsearch import get_elasticsearch
 from app.core.log_safety import log_safe
 from app.exceptions import AppError, ConflictError, ServiceUnavailableError
-from app.models.document import Document, DocumentAcl, DocumentChunk, DocumentStatus, DocumentTag
+from app.models.document import (
+    Document,
+    DocumentAcl,
+    DocumentChunk,
+    DocumentChunkOverride,
+    DocumentStatus,
+    DocumentTag,
+)
 from app.models.knowledge_job import KnowledgeProcessingJob
 from app.models.review import ReviewCase, ReviewDocumentMeta
 from app.rag.errors import RetrievalUnavailableError
@@ -94,6 +101,9 @@ def _coerce_organization_id(organization_id: str | int | None) -> int:
 _DOCUMENT_CHILD_MODELS: tuple[type, ...] = (
     DocumentAcl,
     DocumentChunk,
+    # 036 新增的 override 行也引用 documents.id（且 FK 无 ON DELETE CASCADE），
+    # 漏掉会让「彻底删除文档」被 MySQL 1451 挡住。
+    DocumentChunkOverride,
     DocumentTag,
     KnowledgeProcessingJob,
     ReviewDocumentMeta,
@@ -216,6 +226,9 @@ class KnowledgeService:
                         # 不得把 legacy 文本当原文证据（PR4 消费者）。
                         "content": res.get("snippet"),
                         "text_provenance": res.get("text_provenance"),
+                        # 分块人工修正标记必须逐层透传：端点再做一次投影，
+                        # 任一层漏搬都会让 UI 把人工文本当成 parser 原文展示。
+                        "retrieval_text_provenance": res.get("retrieval_text_provenance"),
                         "score": res.get("score"),
                         # issue #185：相对排序分（score）与重排绝对分分开透传；
                         # 无重排分时保持 None，绝不拿 score 回填。
