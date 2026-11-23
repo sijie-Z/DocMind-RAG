@@ -625,27 +625,29 @@ async def bootstrap_from_checklist(
     版本化的起点」。
     """
     items = items_from_checklist(load_checklist())
-    template = await create_template(
-        session,
-        organization_id=organization_id,
-        created_by=created_by,
-        name=name,
-        description="从进程级核验清单（REVIEW_CHECKLIST_JSON）初始化",
-        commit=False,
-    )
-    version = await create_version(
-        session,
-        template=template,
-        items=items,
-        created_by=created_by,
-        change_note="bootstrap from REVIEW_CHECKLIST_JSON",
-        source="bootstrap",
-        full_items=True,
-        commit=False,
-    )
     try:
+        template = await create_template(
+            session,
+            organization_id=organization_id,
+            created_by=created_by,
+            name=name,
+            description="从进程级核验清单（REVIEW_CHECKLIST_JSON）初始化",
+            commit=False,
+        )
+        version = await create_version(
+            session,
+            template=template,
+            items=items,
+            created_by=created_by,
+            change_note="bootstrap from REVIEW_CHECKLIST_JSON",
+            source="bootstrap",
+            full_items=True,
+            commit=False,
+        )
         await session.commit()
     except IntegrityError as exc:
+        # create_version 的 SELECT 会 autoflush 待提交的模板头；重名冲突可能
+        # 早于显式 commit 抛出，必须在整个原子写入块外统一映射为 409。
         await session.rollback()
         raise ConflictError("同名模板已存在", error_code="REVIEW_TEMPLATE_NAME_CONFLICT") from exc
     await session.refresh(template)
