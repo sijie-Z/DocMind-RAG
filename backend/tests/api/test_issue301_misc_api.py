@@ -30,7 +30,17 @@ class _FakeMinioBackend:
 
 
 def _s3_error(code: str) -> S3Error:
-    return S3Error(None, code, f"test-{code}", "/docmind/avatars/1.png", "req-1", "host-1")
+    # minio 7.2.3 与 7.2.20 调整了位置参数顺序；参数名保持一致，用关键字构造
+    # 才能在两种版本下都把 code 放到正确字段（否则在 7.2.3 下 NoSuchKey 会
+    # 落入 message，/files 的 404/503 分流被测试 helper 自己破坏）。
+    return S3Error(
+        response=None,
+        code=code,
+        message=f"test-{code}",
+        resource="/docmind/avatars/1.png",
+        request_id="req-1",
+        host_id="host-1",
+    )
 
 
 def _pin_minio_failure(monkeypatch, exc):
