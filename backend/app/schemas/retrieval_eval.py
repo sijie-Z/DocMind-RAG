@@ -48,6 +48,59 @@ class RetrievalEvalCaseCreate(BaseModel):
         return _strip_items(value, "tags", max_len=50)
 
 
+class RetrievalEvalCaseCapture(BaseModel):
+    """bad-case 捕获：把一次不理想的检索（query + 期望文档）保存为用例。
+
+    ``name`` 可缺省：缺省时取 query 前 100 字符作为用例名（用户可在保存前改）。
+    其余字段约束与 ``RetrievalEvalCaseCreate`` 完全一致——捕获是「预填创建」，
+    不是另一套更宽松的入口。
+    """
+
+    query: str = Field(
+        ..., min_length=1, max_length=2000, description="检索 query（即那次未命中的查询）"
+    )
+    expected_document_ids: list[str] = Field(
+        ..., min_length=1, max_length=50, description="期望命中的文档 id（至少 1 个，最多 50）"
+    )
+    name: str | None = Field(None, max_length=255, description="用例名称；缺省取 query 前 100 字符")
+    tags: list[str] = Field(
+        default_factory=list, max_length=20, description="标签（可选，最多 20 个）"
+    )
+
+    @field_validator("query")
+    @classmethod
+    def _strip_capture_query(cls, value: str) -> str:
+        stripped = value.strip()
+        if not stripped:
+            raise ValueError("不能为空白")
+        return stripped
+
+    @field_validator("name")
+    @classmethod
+    def _strip_capture_name(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        stripped = value.strip()
+        return stripped or None
+
+    @field_validator("expected_document_ids")
+    @classmethod
+    def _validate_capture_ids(cls, value: list[str]) -> list[str]:
+        return _strip_items(value, "expected_document_ids", max_len=36)
+
+    @field_validator("tags")
+    @classmethod
+    def _validate_capture_tags(cls, value: list[str]) -> list[str]:
+        return _strip_items(value, "tags", max_len=50)
+
+    @model_validator(mode="after")
+    def _default_name_from_query(self) -> "RetrievalEvalCaseCapture":
+        # 只在此处补默认名，不改变 query 字段本身：query 是检索输入，不能被截断。
+        if self.name is None:
+            self.name = self.query[:100]
+        return self
+
+
 class RetrievalEvalCaseUpdate(BaseModel):
     """更新用例：至少提供一个字段；None 表示显式清空可选字段 tags。"""
 

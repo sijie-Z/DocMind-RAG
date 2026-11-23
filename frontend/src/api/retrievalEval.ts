@@ -3,6 +3,54 @@ import request from '@/utils/request'
 import type { AxiosResponse } from 'axios'
 import type { ApiResponse } from '@/types/common'
 
+export interface RetrievalEvalCase {
+  id: string
+  organization_id: number
+  name: string
+  query: string
+  expected_document_ids: string[]
+  tags: string[]
+  created_by: number
+  created_at: string | null
+  updated_at: string | null
+}
+
+/**
+ * 保存为评测用例的载荷（bad-case 捕获，POST /knowledge/eval/cases/capture）。
+ * 不传 name 时后端取 query 前 100 字符；同组织同 query + 同金标集合幂等返回
+ * 既有用例（响应 `created=false`）。
+ */
+export interface CaptureEvalCasePayload {
+  query: string
+  expected_document_ids: string[]
+  name?: string
+  tags?: string[]
+}
+
+export interface CaptureEvalCaseResult {
+  case: RetrievalEvalCase
+  /** true = 新建；false = 命中同组织既有用例（幂等，未产生新行） */
+  created: boolean
+}
+
+/**
+ * 把一次不理想的检索保存为评测用例。
+ *
+ * 后端信封为 `{ success, created, data }`——`created` 与 `data` 并列，不能走
+ * 通用的「取 data.data」解包假设，这里显式读取两个字段，避免把标志丢掉。
+ */
+export const captureEvalCase = async (
+  payload: CaptureEvalCasePayload
+): Promise<CaptureEvalCaseResult> => {
+  const response = await request.post('/knowledge/eval/cases/capture', payload)
+  const body = response.data as {
+    success?: boolean
+    created?: boolean
+    data?: RetrievalEvalCase
+  }
+  return { case: body.data as RetrievalEvalCase, created: body.created === true }
+}
+
 export interface EvalRunMetrics {
   recall_at_k: number | null
   mrr: number | null

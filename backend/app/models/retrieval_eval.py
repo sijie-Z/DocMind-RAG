@@ -14,6 +14,13 @@ case_ids + 用例集哈希一起固化，用于回归与趋势对比。case_set_
 id + 金标集合 + query 取稳定哈希（排序、定分隔符），与 top_k 一起写入导出
 文件：哈希相同即评测输入集合相同，跨运行指标可比。审计 detail 只记
 org/user/条数与字段名，绝不写 query 或用例名。
+
+去重（bad-case 捕获闭环）：组织内「同 query + 同金标集合」只保留一行。
+``dedup_key`` 对该二元组取 sha256（query 去首尾空白、金标按集合排序），
+``(organization_id, dedup_key)`` 唯一索引是 DB 层兜底；服务层先查再插，
+并发撞唯一索引时回读既有行（幂等），绝不静默产生重复行。迁移 038 前已存在
+的旧行 ``dedup_key`` 为 NULL（多行 NULL 不违反唯一索引），即历史重复不在
+迁移里被强删；它们只是不再参与去重，新建行始终带键。
 """
 
 from datetime import datetime
@@ -33,6 +40,14 @@ class RetrievalEvalCase(Base):
     __table_args__ = (
         # 列表/运行/删除都按组织过滤并按创建时间取序；复合索引覆盖三者。
         Index("ix_retrieval_eval_case_org_created", "organization_id", "created_at"),
+        # 组织内「同 query + 同金标集合」去重：dedup_key 为 NULL 的旧行不受约束
+        # （MySQL/SQLite 唯一索引允许多行 NULL），新建行总带键。
+        Index(
+            "uq_retrieval_eval_case_org_dedup",
+            "organization_id",
+            "dedup_key",
+            unique=True,
+        ),
     )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
@@ -48,6 +63,10 @@ class RetrievalEvalCase(Base):
         JSON, nullable=False, comment="期望命中的文档 id 列表（文档级金标）"
     )
     tags: Mapped[Any | None] = mapped_column(JSON, comment="标签列表")
+    dedup_key: Mapped[str | None] = mapped_column(
+        String(64),
+        comment="组织内去重键：sha256(query 去首尾空白 + 金标集合排序)；历史行可为 NULL",
+    )
     created_by: Mapped[int] = mapped_column(
         Integer, ForeignKey("users.id"), nullable=False, comment="创建人"
     )

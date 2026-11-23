@@ -78,7 +78,7 @@ register document identity → readiness gate → create case (blocked/ready + r
 
 | Area | What it does | Key facts |
 |------|--------------|-----------|
-| Knowledge base / RAG | multi-format parsing (OCR included), semantic chunking, hybrid retrieval, reranking, query rewriting/HyDE, semantic cache, strict mode, chunk browsing and manual correction | scoring happens on enhanced text; **the evidence exit only exposes parser-original text**; unusable documents return `SOURCE_ORIGINAL_UNAVAILABLE`; manual corrections are stored in a separate audited row labeled `manual_override` and never overwrite originals or evidence hashes |
+| Knowledge base / RAG | multi-format parsing (OCR included), semantic chunking, hybrid retrieval, reranking, query rewriting/HyDE, semantic cache, strict mode, chunk browsing and manual correction, one-click bad case → eval case | scoring happens on enhanced text; **the evidence exit only exposes parser-original text**; unusable documents return `SOURCE_ORIGINAL_UNAVAILABLE`; manual corrections are stored in a separate audited row labeled `manual_override` and never overwrite originals or evidence hashes; eval cases deduplicate by organization-scoped query + golden set, so repeated saves return the existing case |
 | Agent | PER loop, DAG-based parallel scheduling, timeout/retry/fallback, adversarial reviewer, RunReport, replay, experience memory | **31 Built-In Tools** (10 tools are injected by default; terminal/Feishu/delegation are gated) |
 | Contract review | document role/family/version/content hash, readiness, review cases, evidence snapshots, deterministic extraction and alignment | text facts and change types only (modified/renumbered/…); no legal conclusions; ambiguous facts are never guessed |
 | Platform | multi-tenant org isolation, RBAC + API-Key scopes, audit logs, Prometheus/Grafana, OpenTelemetry, 24 SSE event types | org isolation spans retrieval/chat/documents/cache/WS; failure semantics are decidable (4xx + error_code) |
@@ -247,7 +247,7 @@ DocMind/
 | Files | `/files` | Upload/download/delete, MinIO storage, chunked upload |
 | Documents | `/documents` | Document parsing, vectorization, knowledge base indexing, status tracking, paginated chunk browsing, manual correction and chunk-level enable/disable |
 | Chat | `/chat` | Session CRUD, SSE streaming Q&A, strict mode, debug endpoints |
-| Knowledge | `/knowledge` | Knowledge retrieval, statistics, settings |
+| Knowledge | `/knowledge` | Knowledge retrieval, statistics, settings, retrieval eval cases and run history (bad case capture) |
 | Knowledge Bases | `/knowledge-bases` | Multi-knowledge-base entity CRUD (organization-scoped) |
 | Contract Review | `/reviews` | Review cases / items / evidence snapshots + deterministic extraction and V1/V2 alignment + per-item decisions and report export (parser-original quotes + version hashes) |
 | Organizations | `/organizations` | Org CRUD, member management, role assignment |

@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **bad case → 检索评测用例（竞品批次五）**：搜索页结果状态栏新增「保存为评测用例」，
+  把本次 query 与「本该命中的文档」直接存为 `RetrievalEvalCase`（`POST /api/v1/knowledge/eval/cases/capture`）；
+  与 `POST /eval/cases` 共用同一条 `retrieval_eval_service.create_case`，复用组织隔离、
+  viewer ACL 金标校验与审计，只接受本组织、已索引启用且可见的文档。组织内「同 query +
+  同金标集合」去重：重复保存幂等返回既有用例（响应 `created=false`），并发由
+  `(organization_id, dedup_key)` 唯一索引兜底；更新成与另一条重复的内容返回 409
+  `EVAL_CASE_DUPLICATE`。迁移 `038_eval_case_dedup` 只加可空 `dedup_key` 列与唯一索引，
+  不回填/不删除历史行。前端四语词条、弹窗内期望文档勾选 + 组织文档补充。
 - **会话 Fork / Seed / 谱系（#476）**：新增 `POST /api/v1/sessions/{id}/fork`
   与 `GET /api/v1/sessions/{id}/lineage`。fork 只能落在已结算轮次（前缀以
   assistant 结尾或为空；assistant 中间消息 / 开放轮次 409），复制前缀消息并
