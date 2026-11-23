@@ -22,6 +22,7 @@ import time
 from typing import Any
 
 from app.agent.registry import ToolResult, register_tool
+from app.agent.run_context import is_internal_system_task
 
 logger = logging.getLogger(__name__)
 
@@ -95,11 +96,9 @@ async def delegate_subtask(
         )
     # issue #511 P0-1: subagents inherit the viewer's identity. Without a
     # real user_id, a delegated search would run as loop default 0 and skip
-    # private-document ACLs. Only an explicitly marked internal system task
-    # may delegate without a viewer. The marker is server-side RunContext only.
-    internal_system_task = bool(
-        run_context is not None and run_context.extra.get("internal_system_task", False)
-    )
+    # private-document ACLs. Only a server-side internal system task may
+    # delegate without a viewer; the marker cannot be forged via tool args.
+    internal_system_task = is_internal_system_task(run_context)
     if not user_id and not internal_system_task:
         return ToolResult.fail(
             code="auth_required",

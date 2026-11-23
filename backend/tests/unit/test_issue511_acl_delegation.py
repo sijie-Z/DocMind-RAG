@@ -19,7 +19,7 @@ import app.agent.core_tools as core_tools
 import app.agent.subagent as subagent
 import app.agent.tools  # noqa: F401 — register delegate_subtask
 from app.agent.registry import tool_registry
-from app.agent.run_context import RunContext
+from app.agent.run_context import RunContext, run_context_for_internal_system_task
 from app.core.elasticsearch import ElasticsearchTools
 
 SECRET = "TOP-SECRET-ALPHA-CONTRACT-CLAUSE"
@@ -166,6 +166,34 @@ async def test_delegation_without_viewer_is_rejected(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_forged_delegation_marker_is_rejected(monkeypatch):
+    called = False
+
+    async def fake_delegate(*args, **kwargs):
+        nonlocal called
+        called = True
+        yield SimpleNamespace(type="chunk", content="done")
+
+    monkeypatch.setattr(subagent, "delegate_task", fake_delegate)
+    ctx = RunContext(
+        user_id=0,
+        organization_id=7,
+        extra={"internal_system_task": True},
+    )
+    with patch("app.dependencies.get_rag_pipeline", return_value=_pipeline_with_llm()):
+        result = await tool_registry.execute_detailed(
+            "delegate_subtask",
+            {"tasks": ["nightly index check"]},
+            organization_id=7,
+            user_id=0,
+            run_context=ctx,
+        )
+    assert not result.success
+    assert result.error.code == "auth_required"
+    assert called is False, "a forged extra marker must not enable viewer-less delegation"
+
+
+@pytest.mark.asyncio
 async def test_internal_system_task_can_delegate_without_viewer(monkeypatch):
     captured = {}
 
@@ -176,11 +204,7 @@ async def test_internal_system_task_can_delegate_without_viewer(monkeypatch):
 
     monkeypatch.setattr(subagent, "delegate_task", fake_delegate)
     pipeline = _pipeline_with_llm()
-    ctx = RunContext(
-        user_id=0,
-        organization_id=7,
-        extra={"internal_system_task": True},
-    )
+    ctx = run_context_for_internal_system_task(organization_id=7)
     with patch("app.dependencies.get_rag_pipeline", return_value=pipeline):
         result = await tool_registry.execute_detailed(
             "delegate_subtask",
@@ -285,16 +309,30 @@ async def test_direct_read_fails_closed_without_viewer_in_user_run(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_internal_system_task_keeps_org_level_read():
+    ctx = run_context_for_internal_system_task(organization_id=7)
+    result = await core_tools._ensure_document_readable(PRIVATE_ID, 7, 0, run_context=ctx)
+    assert result is None, "internal system task must still work"
+
+
+@pytest.mark.asyncio
+async def test_forged_internal_marker_is_rejected():
+    """A string in RunContext.extra must not be trusted as an internal marker."""
     ctx = RunContext(
         user_id=0,
         organization_id=7,
         extra={"internal_system_task": True},
     )
     result = await core_tools._ensure_document_readable(PRIVATE_ID, 7, 0, run_context=ctx)
-    assert result is None, "internal system task must still work"
+    assert result is not None
+    assert result.success is False
+    assert result.error.code == "not_found"
 
 
 @pytest.mark.asyncio
-async def test_legacy_call_without_run_context_preserves_internal_behavior():
-    result = await core_tools._ensure_document_readable(PRIVATE_ID, 7, None)
-    assert result is None
+@pytest.mark.parametrize("viewer", [0, None], ids=["zero-viewer", "none-viewer"])
+async def test_missing_run_context_fails_closed_for_viewerless_request(viewer):
+    """Legacy no-context calls no longer read private documents at org scope."""
+    result = await core_tools._ensure_document_readable(PRIVATE_ID, 7, viewer)
+    assert result is not None
+    assert result.success is False
+    assert result.error.code == "not_found"

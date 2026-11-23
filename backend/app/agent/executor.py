@@ -39,7 +39,7 @@ from app.agent.registry import (
     tool_registry,
 )
 from app.agent.retry_policy import compute_backoff, get_policy
-from app.agent.run_context import RunContext
+from app.agent.run_context import RunContext, run_context_for_internal_system_task
 from app.agent.usage import record_llm_call_error, record_llm_usage
 from app.core.circuit_breaker import CircuitBreaker
 from app.core.config import ai as ai_config
@@ -828,6 +828,8 @@ class Executor:
         # A2 P0（fail-closed）：工具调用必须携带真实组织，默认值不再回落到 1 号组织。
         if organization_id is None:
             raise ValueError("Executor.execute 缺少 organization_id，拒绝在无组织上下文下运行")
+        if getattr(self, "internal_system_task", False) and user_id:
+            raise ValueError("internal_system_task=True 不得同时携带真实 user_id")
         if human_guidance:
             self.human_guidance = human_guidance
         self.document_context = document_context or ""
@@ -2356,25 +2358,38 @@ class Executor:
             # Execute tool (with timeout + error classification)
             start = time.perf_counter()
             try:
-                run_context = RunContext(
-                    user_id=user_id,
-                    organization_id=organization_id,
-                    session_id=getattr(self.config, "agent_id", None),
-                    agent_id=getattr(self.config, "agent_id", "default"),
-                    config=getattr(self.config, "model_config", {}) or {},
-                    # 工具内 LLM 记账（issue #239 minor-2）：把本轮 ExecutionContext
-                    # 挂上 run_context，声明了 `run_context` 形参的工具（注册表按
-                    # 签名注入）即可经 usage.ctx_from_run_context 取到 ctx，
-                    # 使任务级 total_tokens 包含工具内部的 LLM 调用。
-                    # issue #509：skills 内部 execute_detailed 的 disabled_tools
-                    # 预检与执行层同源（见 tools/skills.py::_consume_tool_output）。
-                    extra={
-                        "disabled_tools": sorted(self._disabled_tool_names()),
-                        **({"exec_ctx": ctx} if ctx is not None else {}),
-                        # ACL P0（issue #511）：唯一允许无 viewer 走组织级可读的
-                        # 通道是调用方显式声明的内部系统任务；缺省 0 不再等价。
-                        "internal_system_task": getattr(self, "internal_system_task", False),
-                    },
+                # issue #511: the internal marker is a private RunContext
+                # field. Only a server-side loop configured as a system task
+                # produces one; tool arguments cannot forge it.
+                run_context = (
+                    run_context_for_internal_system_task(
+                        organization_id=organization_id,
+                        session_id=getattr(self.config, "agent_id", None),
+                        agent_id=getattr(self.config, "agent_id", "default"),
+                        config=getattr(self.config, "model_config", {}) or {},
+                        extra={
+                            "disabled_tools": sorted(self._disabled_tool_names()),
+                            **({"exec_ctx": ctx} if ctx is not None else {}),
+                        },
+                    )
+                    if getattr(self, "internal_system_task", False)
+                    else RunContext(
+                        user_id=user_id,
+                        organization_id=organization_id,
+                        session_id=getattr(self.config, "agent_id", None),
+                        agent_id=getattr(self.config, "agent_id", "default"),
+                        config=getattr(self.config, "model_config", {}) or {},
+                        # 工具内 LLM 记账（issue #239 minor-2）：把本轮 ExecutionContext
+                        # 挂上 run_context，声明了 `run_context` 形参的工具（注册表按
+                        # 签名注入）即可经 usage.ctx_from_run_context 取到 ctx，
+                        # 使任务级 total_tokens 包含工具内部的 LLM 调用。
+                        # issue #509：skills 内部 execute_detailed 的 disabled_tools
+                        # 预检与执行层同源（见 tools/skills.py::_consume_tool_output）。
+                        extra={
+                            "disabled_tools": sorted(self._disabled_tool_names()),
+                            **({"exec_ctx": ctx} if ctx is not None else {}),
+                        },
+                    )
                 )
                 raw_result = await asyncio.wait_for(
                     tool_registry.execute_detailed(

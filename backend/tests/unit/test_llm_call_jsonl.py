@@ -440,14 +440,13 @@ async def test_executor_failed_call_logs_exactly_one_error_row(log_path, monkeyp
 @pytest.mark.asyncio
 async def test_tool_llm_failure_writes_one_redacted_error_row(log_path, monkeypatch):
     """工具内 LLM 调用失败同样必须留一行（M2 回归钉子）。"""
-    from app.agent.run_context import RunContext
+    from app.agent.run_context import run_context_for_internal_system_task
     from app.agent.tools.translation import translate_text
 
     ctx = ExecutionContext(query="q", task_id="t", request_id="r")
-    run_context = RunContext(
-        user_id=0,
+    run_context = run_context_for_internal_system_task(
         organization_id=1,
-        extra={"exec_ctx": ctx, "internal_system_task": True},
+        extra={"exec_ctx": ctx},
     )
     client = MagicMock()
     client.chat.completions.create = AsyncMock(
@@ -485,7 +484,7 @@ async def test_tool_llm_failure_writes_one_redacted_error_row(log_path, monkeypa
 async def test_core_tool_llm_failure_writes_one_row(log_path, monkeypatch, tool_name, call_kwargs):
     """core_tools 四个工具内 LLM 失败同样各留恰好一行（M2 覆盖）。"""
     import app.agent.core_tools as core_tools_mod
-    from app.agent.run_context import RunContext
+    from app.agent.run_context import run_context_for_internal_system_task
     from app.core.elasticsearch import ElasticsearchTools
 
     async def _search(_query):
@@ -512,10 +511,9 @@ async def test_core_tool_llm_failure_writes_one_row(log_path, monkeypatch, tool_
     )
 
     ctx = ExecutionContext(query="q", task_id="t", request_id="r")
-    run_context = RunContext(
-        user_id=0,
+    run_context = run_context_for_internal_system_task(
         organization_id=1,
-        extra={"exec_ctx": ctx, "internal_system_task": True},
+        extra={"exec_ctx": ctx},
     )
     tool = getattr(core_tools_mod, tool_name)
     await tool(organization_id=1, run_context=run_context, **call_kwargs)
@@ -553,7 +551,7 @@ async def test_context_summarizer_failure_writes_one_row(log_path):
 @pytest.mark.asyncio
 async def test_tool_pre_call_failure_does_not_write_llm_row(log_path, monkeypatch):
     """MINOR-2 钉子：pipeline 获取失败 = 没有发生 LLM 调用，不得记失败行。"""
-    from app.agent.run_context import RunContext
+    from app.agent.run_context import run_context_for_internal_system_task
     from app.agent.tools.translation import translate_text
 
     def _boom():
@@ -561,10 +559,9 @@ async def test_tool_pre_call_failure_does_not_write_llm_row(log_path, monkeypatc
 
     monkeypatch.setattr("app.dependencies.get_rag_pipeline", _boom)
     ctx = ExecutionContext(query="q", task_id="t", request_id="r")
-    run_context = RunContext(
-        user_id=0,
+    run_context = run_context_for_internal_system_task(
         organization_id=1,
-        extra={"exec_ctx": ctx, "internal_system_task": True},
+        extra={"exec_ctx": ctx},
     )
 
     result = await translate_text("hello world", "zh", run_context=run_context)
