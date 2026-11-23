@@ -13,6 +13,8 @@ MAX_TEMPLATE_LABEL_CHARS = 100
 MAX_TEMPLATE_NAME_CHARS = 100
 MAX_TEMPLATE_DESCRIPTION_CHARS = 500
 MAX_TEMPLATE_CHANGE_NOTE_CHARS = 200
+# 与服务层同值：请求级关键词总字节上限，避免 schema 合法但服务 payload 超限。
+MAX_TEMPLATE_REQUEST_KEYWORD_BYTES = 48 * 1024
 
 
 class ReviewMetaUpsert(BaseModel):
@@ -123,6 +125,31 @@ class ReviewTemplateCreate(BaseModel):
         return value
 
     @model_validator(mode="after")
+    def _byte_budget(self) -> "ReviewTemplateCreate":
+        if len(self.name.encode("utf-8")) > MAX_TEMPLATE_NAME_CHARS * 4:
+            raise ValueError("模板名称过长")
+        if (
+            self.description
+            and len(self.description.encode("utf-8")) > MAX_TEMPLATE_DESCRIPTION_CHARS * 4
+        ):
+            raise ValueError("模板说明过长")
+        if (
+            self.change_note
+            and len(self.change_note.encode("utf-8")) > MAX_TEMPLATE_CHANGE_NOTE_CHARS * 4
+        ):
+            raise ValueError("变更说明过长")
+        if self.items:
+            budget = sum(
+                len(item.key.encode("utf-8"))
+                + sum(len(word.encode("utf-8")) for word in item.keywords)
+                + len((item.label or "").encode("utf-8"))
+                for item in self.items
+            )
+            if budget > MAX_TEMPLATE_REQUEST_KEYWORD_BYTES:
+                raise ValueError("模板首版内容超过大小上限")
+        return self
+
+    @model_validator(mode="after")
     def _change_note_requires_items(self) -> "ReviewTemplateCreate":
         if self.change_note is not None and self.items is None:
             raise ValueError("change_note 仅用于首版创建，必须同时提供 items")
@@ -168,6 +195,18 @@ class ReviewTemplateVersionCreate(BaseModel):
     change_note: str | None = Field(
         None, max_length=MAX_TEMPLATE_CHANGE_NOTE_CHARS, description="变更说明（可选）"
     )
+
+    @model_validator(mode="after")
+    def _byte_budget(self) -> "ReviewTemplateVersionCreate":
+        budget = sum(
+            len(item.key.encode("utf-8"))
+            + sum(len(word.encode("utf-8")) for word in item.keywords)
+            + len((item.label or "").encode("utf-8"))
+            for item in self.items
+        )
+        if budget > MAX_TEMPLATE_REQUEST_KEYWORD_BYTES:
+            raise ValueError("模板版本内容超过大小上限")
+        return self
 
 
 class ReviewTemplateBootstrap(BaseModel):

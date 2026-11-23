@@ -14,6 +14,7 @@ import logging
 from typing import Literal
 
 from fastapi import APIRouter, Depends, Query, Response
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
@@ -151,19 +152,20 @@ async def create_review_template(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """创建模板（可选同时写入首版 v1）；同名模板 409。"""
+    """创建模板（可选同时写入首版 v1）；同名模板 409。
+
+    模板头与首版在同一事务内提交：任一失败整体回滚，避免留下
+    ``latest_version=0`` 的孤立模板（本批不提供物理删除入口）。
+    """
     try:
         org_id = await require_organization(current_user, db)
-        # 先校验首版规则再落模板头：否则无效 items 会先提交模板行、再因版本
-        # 校验失败留下「没有版本的空模板」，且同名重试会被 409 卡住。
-        if body.items is not None:
-            template_service.compose_version_items([item.model_dump() for item in body.items])
         template = await template_service.create_template(
             db,
             organization_id=org_id,
             created_by=current_user.id,
             name=body.name,
             description=body.description,
+            commit=False,
         )
         version = None
         if body.items is not None:
@@ -173,7 +175,21 @@ async def create_review_template(
                 items=[item.model_dump() for item in body.items],
                 created_by=current_user.id,
                 change_note=body.change_note,
+                commit=False,
             )
+        try:
+            await db.commit()
+        except IntegrityError as exc:
+            await db.rollback()
+            raise ConflictError(
+                "同名模板已存在", error_code="REVIEW_TEMPLATE_NAME_CONFLICT"
+            ) from exc
+        except Exception:
+            await db.rollback()
+            raise
+        if version is not None:
+            await db.refresh(version)
+        await db.refresh(template)
         await audit_service.log_activity(
             user_id=current_user.id,
             action="create_review_template",
@@ -192,10 +208,13 @@ async def create_review_template(
             data["version"] = template_service.version_to_dict(version)
         return {"success": True, "data": data}
     except (NotFoundError, AuthorizationError):
+        await db.rollback()
         raise
     except AppError:
+        await db.rollback()
         raise
     except Exception as e:
+        await db.rollback()
         logger.error(f"Create review template failed: {type(e).__name__}")
         raise AppError("创建核验模板失败") from e
 
@@ -232,7 +251,9 @@ async def bootstrap_review_template(
                 org_id,
                 current_user.id,
                 version_no=version.version_no,
+                version_id=version.id,
                 item_count=version.item_count,
+                source="bootstrap",
             ),
             db=db,
         )

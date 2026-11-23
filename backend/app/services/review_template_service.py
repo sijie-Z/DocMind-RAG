@@ -55,6 +55,9 @@ MAX_NAME_CHARS = 100
 MAX_DESCRIPTION_CHARS = 500
 MAX_CHANGE_NOTE_CHARS = 200
 MAX_PAYLOAD_BYTES = 64 * 1024
+# schema 层前置请求上限：UTF-8 中文按 3 字节、预留 JSON 结构开销，
+# 避免 schema 合法但 canonical payload 超 64 KiB 的请求先落模板头再失败。
+MAX_TEMPLATE_REQUEST_KEYWORD_BYTES = 48 * 1024
 MAX_VERSIONS_PER_TEMPLATE = 100
 MAX_TEMPLATES_PER_ORG = 200
 
@@ -451,8 +454,14 @@ async def create_template(
     created_by: int,
     name: str,
     description: str | None = None,
+    commit: bool = True,
 ) -> ReviewTemplate:
-    """创建空模板头（尚无版本）；首版通过 ``create_version`` 写入。"""
+    """创建空模板头（尚无版本）；首版通过 ``create_version`` 写入。
+
+    ``commit=False`` 供「模板头 + 首版」同事务写入使用：调用方必须在同一
+    session 上显式 commit，失败时回滚两边，避免留下 latest_version=0 的
+    孤立模板。
+    """
     name = _check_name(name)
     description = _check_optional_text(
         description, field="description", limit=MAX_DESCRIPTION_CHARS
@@ -485,12 +494,15 @@ async def create_template(
         lock_version=1,
     )
     session.add(row)
-    try:
-        await session.commit()
-    except IntegrityError as exc:
-        await session.rollback()
-        raise ConflictError("同名模板已存在", error_code="REVIEW_TEMPLATE_NAME_CONFLICT") from exc
-    await session.refresh(row)
+    if commit:
+        try:
+            await session.commit()
+        except IntegrityError as exc:
+            await session.rollback()
+            raise ConflictError(
+                "同名模板已存在", error_code="REVIEW_TEMPLATE_NAME_CONFLICT"
+            ) from exc
+        await session.refresh(row)
     return row
 
 
@@ -546,6 +558,7 @@ async def create_version(
     change_note: str | None = None,
     source: str = "manual",
     full_items: bool = False,
+    commit: bool = True,
 ) -> ReviewTemplateVersion:
     """新增一个不可变版本；版本号由 (template_id, max+1) 分配。
 
@@ -585,15 +598,16 @@ async def create_version(
     template.latest_version = version_no
     template.updated_by = created_by
     template.lock_version = int(template.lock_version or 1) + 1
-    try:
-        await session.commit()
-    except IntegrityError as exc:
-        await session.rollback()
-        raise ConflictError(
-            "模板版本并发冲突，请重试", error_code="REVIEW_TEMPLATE_VERSION_CONFLICT"
-        ) from exc
-    await session.refresh(row)
-    await session.refresh(template)
+    if commit:
+        try:
+            await session.commit()
+        except IntegrityError as exc:
+            await session.rollback()
+            raise ConflictError(
+                "模板版本并发冲突，请重试", error_code="REVIEW_TEMPLATE_VERSION_CONFLICT"
+            ) from exc
+        await session.refresh(row)
+        await session.refresh(template)
     return row
 
 
@@ -617,6 +631,7 @@ async def bootstrap_from_checklist(
         created_by=created_by,
         name=name,
         description="从进程级核验清单（REVIEW_CHECKLIST_JSON）初始化",
+        commit=False,
     )
     version = await create_version(
         session,
@@ -626,7 +641,15 @@ async def bootstrap_from_checklist(
         change_note="bootstrap from REVIEW_CHECKLIST_JSON",
         source="bootstrap",
         full_items=True,
+        commit=False,
     )
+    try:
+        await session.commit()
+    except IntegrityError as exc:
+        await session.rollback()
+        raise ConflictError("同名模板已存在", error_code="REVIEW_TEMPLATE_NAME_CONFLICT") from exc
+    await session.refresh(template)
+    await session.refresh(version)
     return template, version
 
 

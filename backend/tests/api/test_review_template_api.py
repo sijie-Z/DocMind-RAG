@@ -254,6 +254,72 @@ async def test_invalid_first_version_does_not_leave_orphan_template(factory, mon
 
 
 @pytest.mark.asyncio
+async def test_post_header_version_failure_rolls_back_template(factory, monkeypatch):
+    """模板头已写入、首版提交失败时必须整体回滚，不能留下无版本模板。
+
+    变异点：把 create_template 改回独立 commit、或端点失败时不再 rollback →
+    第二次同名请求被 409 挡住，本用例红。
+    """
+    from app.services import review_template_service as template_service
+
+    monkeypatch.setattr(
+        "app.core.security.permission_service.get_user_permissions",
+        _grant(PermissionType.DOCUMENT_READ, PermissionType.DOCUMENT_UPDATE),
+    )
+    original_create_version = template_service.create_version
+    calls = {"count": 0}
+
+    async def _flaky_create_version(*args, **kwargs):
+        calls["count"] += 1
+        if calls["count"] == 1:
+            raise RuntimeError("version insert failed")
+        return await original_create_version(*args, **kwargs)
+
+    monkeypatch.setattr(
+        "app.api.v1.endpoints.reviews.template_service.create_version",
+        _flaky_create_version,
+    )
+    async with _Ctx(_user(superuser=True), factory) as ac:
+        failed = await ac.post(
+            "/api/v1/reviews/templates",
+            json={"name": "事务回滚模板", "items": template_items()},
+        )
+        assert failed.status_code >= 400, failed.text
+        retry = await ac.post(
+            "/api/v1/reviews/templates",
+            json={"name": "事务回滚模板", "items": template_items()},
+        )
+        assert retry.status_code == 200, retry.text
+        assert retry.json()["data"]["latest_version"] == 1
+
+
+@pytest.mark.asyncio
+async def test_template_payload_byte_budget_is_422(factory, monkeypatch):
+    """schema 合法字符数但总字节超限的请求应在落库前 422。
+
+    变异点：删除 ReviewTemplateCreate._byte_budget → 该请求落库后服务精确校验
+    也会 400，但本用例要求 422（请求级前置），因此变红。
+    """
+    monkeypatch.setattr(
+        "app.core.security.permission_service.get_user_permissions",
+        _grant(PermissionType.DOCUMENT_READ, PermissionType.DOCUMENT_UPDATE),
+    )
+    oversized = [
+        {
+            "key": f"item_{index}",
+            "keywords": [f"{word:02d}" + "x" * 62 for word in range(30)],
+        }
+        for index in range(26)
+    ]
+    async with _Ctx(_user(superuser=True), factory) as ac:
+        r = await ac.post(
+            "/api/v1/reviews/templates",
+            json={"name": "超限模板", "items": oversized},
+        )
+    assert r.status_code == 422, r.text
+
+
+@pytest.mark.asyncio
 async def test_template_update_and_duplicate_name(factory, monkeypatch):
     """改名生效；同组织重名 409；空更新 422（schema 层）。"""
     monkeypatch.setattr(
