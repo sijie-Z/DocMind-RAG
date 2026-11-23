@@ -1,8 +1,8 @@
 """删除文档的子表清理回归（issue #174）。
 
 背景：`delete_knowledge_thoroughly` 原先只清了 `document_chunks` 一张子表，而
-`documents.id` 实测被 **3 张表**引用（document_chunks / document_tags /
-knowledge_processing_jobs，外键均**无 ON DELETE CASCADE**）——每次上传必然写入一条
+`documents.id` 被多张子表引用（document_chunks / document_chunk_overrides /
+document_tags / knowledge_processing_jobs，外键均**无 ON DELETE CASCADE**）——每次上传必然写入一条
 `knowledge_processing_jobs` 行，于是**上传过的文档基本删不掉**：
 `DELETE /api/v1/knowledge/document/{id}` 必然被 MySQL 1451 外键错误挡住 → 500。
 
@@ -12,8 +12,8 @@ knowledge_processing_jobs，外键均**无 ON DELETE CASCADE**）——每次上
    （`_DOCUMENT_CHILD_MODELS`）必须与 information_schema 里**真实引用 documents
    的表**逐表一致。新增一张引用 documents 的子表（模型 + 迁移）而忘了加清理时，
    本用例变红 —— 清单不再靠记忆，而是与库核对出来的。
-2. **行为**：一个文档在 3 张子表都有引用行时，删除必须成功（2xx），且删完后
-   三张表里引用它的行数全为 0。
+2. **行为**：一个文档在多张子表都有引用行时，删除必须成功（2xx），且删完后
+   这些表里引用它的行数全为 0。
 
 覆盖面：服务层（delete_knowledge_thoroughly）、批量路径（batch_delete_knowledge）、
 以及从上传到删除的完整 HTTP 链路（upload → delete，pin 掉 MinIO/Kafka/文档处理/
