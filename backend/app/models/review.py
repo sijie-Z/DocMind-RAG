@@ -452,3 +452,124 @@ class ReviewTemplateVersion(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), comment="创建时间"
     )
+
+
+# ── inbound redline ledger（竞品批次六 · 特性 B）────────────────────────
+# 对方 DOCX 的 OOXML 修订/批注按原始文本入库。常量只在此定义一次，服务层与
+# 写接口校验必须引用它们，不能复制字面量；状态/类型保存为字符串（不建
+# MySQL ENUM），避免新增枚举值需要 ALTER TABLE。
+REVIEW_REDLINE_SUBMISSION_STATUSES = ("parsed", "partial")
+"""解析批次状态：parsed 全部可解析；partial 存在无法解析的变更（仍保留行）。"""
+
+REVIEW_REDLINE_ROW_TYPES = ("insertion", "deletion", "comment", "unparsed")
+"""修订行类型，unparsed 表示 OOXML 结构无法归类但原文仍需留档。"""
+
+REVIEW_REDLINE_DISPOSITIONS = ("pending", "reviewed", "needs_clarification", "not_relevant")
+"""逐行人工处置状态；pending 为初始态，不计入已完成。"""
+
+REVIEW_REDLINE_TEXT_PROVENANCE = "counterparty_docx_ooxml"
+"""文本溯源标记：只能是对方 DOCX 的 OOXML 原文，绝不冒充 parser_original。"""
+
+
+class ReviewRedlineSubmission(Base):
+    """对方回传 DOCX 一次上传的修订台账头（不可变解析快照）。
+
+    同案内 ``sequence_no`` 自增且唯一，文件哈希用于幂等/去重；
+    ``parse_warnings`` 记录无法归类的 OOXML 结构，行级原文另存于
+    ``ReviewRedlineRow``。组织列同时供租户隔离与组织删除保护。
+    """
+
+    __tablename__ = "review_redline_submission"
+    __table_args__ = (
+        UniqueConstraint("case_id", "sequence_no", name="uq_review_redline_submission_case_seq"),
+        Index("ix_review_redline_submission_org_created", "organization_id", "created_at"),
+        Index("ix_review_redline_submission_case_created", "case_id", "created_at"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    organization_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("organizations.id"), nullable=False, index=True
+    )
+    case_id: Mapped[str] = mapped_column(String(36), ForeignKey("review_case.id"), nullable=False)
+    sequence_no: Mapped[int] = mapped_column(Integer, nullable=False)
+    filename: Mapped[str] = mapped_column(String(255), nullable=False)
+    file_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    file_size: Mapped[int] = mapped_column(Integer, nullable=False)
+    storage_object_name: Mapped[str] = mapped_column(String(512), nullable=False)
+    parser_version: Mapped[str] = mapped_column(String(32), nullable=False)
+    status: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="parsed", comment="parsed/partial"
+    )
+    revision_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    comment_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    unparsed_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    parse_warnings: Mapped[Any] = mapped_column(JSON, nullable=False, default=list)
+    uploaded_by: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True).with_variant(mysql.DATETIME(fsp=6), "mysql"),
+        server_default=func.now(),
+        nullable=False,
+    )
+
+
+class ReviewRedlineRow(Base):
+    """修订台账行：一条插入/删除/批注/无法解析记录，原文只来自对方 DOCX。
+
+    ``evidence_id`` 刻意**不建外键**：证据快照的生命周期独立于修订台账，
+    且历史导出必须可审计。``text_provenance`` 恒为
+    ``counterparty_docx_ooxml``，与 ReviewEvidence 的 parser_original 严格区分。
+    处置字段是人工覆盖层（含乐观锁），不改写原文与哈希。
+    """
+
+    __tablename__ = "review_redline_row"
+    __table_args__ = (
+        Index("ix_review_redline_row_submission_ordinal", "submission_id", "ordinal"),
+        Index("ix_review_redline_row_case_item", "case_id", "item_id"),
+        Index("ix_review_redline_row_org_created", "organization_id", "created_at"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    submission_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("review_redline_submission.id"), nullable=False
+    )
+    case_id: Mapped[str] = mapped_column(String(36), ForeignKey("review_case.id"), nullable=False)
+    organization_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("organizations.id"), nullable=False, index=True
+    )
+    ordinal: Mapped[int] = mapped_column(Integer, nullable=False)
+    revision_type: Mapped[str] = mapped_column(String(16), nullable=False)
+    pair_key: Mapped[str | None] = mapped_column(String(64))
+    before_text: Mapped[str | None] = mapped_column(String(4000))
+    after_text: Mapped[str | None] = mapped_column(String(4000))
+    before_sha256: Mapped[str | None] = mapped_column(String(64))
+    after_sha256: Mapped[str | None] = mapped_column(String(64))
+    author: Mapped[str | None] = mapped_column(String(200))
+    authored_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    comment_id: Mapped[str | None] = mapped_column(String(64))
+    comment_author: Mapped[str | None] = mapped_column(String(200))
+    comment_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    location: Mapped[Any] = mapped_column(JSON, nullable=False, default=dict)
+    clause_no: Mapped[Any | None] = mapped_column(JSON)
+    section_no: Mapped[Any | None] = mapped_column(JSON)
+    unparsed_reason: Mapped[Any | None] = mapped_column(JSON)
+    text_provenance: Mapped[str] = mapped_column(
+        String(32), nullable=False, default=REVIEW_REDLINE_TEXT_PROVENANCE
+    )
+    item_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("review_item.id"))
+    # 证据/导出快照的生命周期独立于修订台账，故意不建外键。
+    evidence_id: Mapped[str | None] = mapped_column(String(36))
+    disposition: Mapped[str] = mapped_column(
+        String(24), nullable=False, default="pending", comment="pending/reviewed/..."
+    )
+    note: Mapped[str | None] = mapped_column(String(2000))
+    disposition_by: Mapped[int | None] = mapped_column(Integer, ForeignKey("users.id"))
+    disposition_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    lock_version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True).with_variant(mysql.DATETIME(fsp=6), "mysql"),
+        server_default=func.now(),
+        nullable=False,
+    )
+    updated_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), onupdate=func.now()
+    )

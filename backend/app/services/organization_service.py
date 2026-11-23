@@ -30,6 +30,8 @@ from app.models.retrieval_eval import RetrievalEvalCase, RetrievalEvalRun
 from app.models.review import (
     ReviewCase,
     ReviewExport,
+    ReviewRedlineRow,
+    ReviewRedlineSubmission,
     ReviewRuleSet,
     ReviewTemplate,
     ReviewTemplateVersion,
@@ -390,6 +392,11 @@ class OrganizationService:
         # 有组织外键），模板头亦然；未纳入清理会触发 MySQL 1451，必须先转移。
         ("核验模板", ReviewTemplate),
         ("核验模板版本", ReviewTemplateVersion),
+        # 批次六：对方 DOCX 修订台账。两张表都以 organization_id 外键引用
+        # organizations，未纳入清理会触发 MySQL 1451；行是审计留档资产，
+        # 必须先转移再删组织。
+        ("对方修订台账", ReviewRedlineSubmission),
+        ("对方修订台账行", ReviewRedlineRow),
     )
 
     async def _assert_org_has_no_attached_data(self, db: AsyncSession, org_ids: list[int]) -> None:

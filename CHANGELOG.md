@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **对方红线变更事实台账（竞品批次六）**：合同核验案件详情新增对方 DOCX 红线上传与逐条事实台账
+  （迁移 `040_inbound_redline_ledger`，新增 `review_redline_submission` / `review_redline_row` 两表）。
+  后端用 `zipfile` + `defusedxml` 在内存中确定性解析 `w:ins`/`w:del`/批注，20 MB/2000 行/4000 字硬上限；
+  moves、格式修订、嵌套修订等无法无损表达的结构显式入表为 `unparsed` 并附原因码，超限标 `partial`，绝不静默丢弃。
+  原文 DOCX 按 `{org}/{case}/{submission}.docx` 存 MinIO，无下载端点；每行固定 `text_provenance='counterparty_docx_ooxml'`，
+  哈希覆盖原始字节与精确解析文本。4 个端点（上传/列表/台账/乐观锁 disposition）沿用案件 ACL 与 RBAC，
+  跨租户 404、归档只读、`REVIEW_REDLINE_CONFLICT` 409；台账 append-only，disposition 只写 id/状态到同事务审计，
+  绝不写条款文本或作者姓名。前端在案件详情导出历史下方嵌入台账面板（上传/批次选择/筛选/before→after/关联/处置）
+  与 zh/en/ja/fr 四语词条，永久免责声明：**只记录文本变化事实，不构成法律意见**。
 - **bad case → 检索评测用例（竞品批次五）**：搜索页结果状态栏新增「保存为评测用例」，
   把本次 query 与「本该命中的文档」直接存为 `RetrievalEvalCase`（`POST /api/v1/knowledge/eval/cases/capture`）；
   与 `POST /eval/cases` 共用同一条 `retrieval_eval_service.create_case`，复用组织隔离、

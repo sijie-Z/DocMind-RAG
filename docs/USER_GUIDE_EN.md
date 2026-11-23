@@ -533,6 +533,18 @@ The document detail page’s “Browse & correct chunks” panel (URL parameter 
 - Audit records contain only document/chunk ids, action, booleans and a hash/character count of correction text — never private body text or correction text in the audit log. Older indices without `is_chunk_enabled` treat chunks as enabled; run `scripts/add_rag_source_provenance_mapping.py` to add the additive mapping.
 - **Tradeoff**: manual correction does not recompute embeddings or rebuild the index; it changes only the ES retrieval text and the auditable override row. Rebuild/re-parse creates new chunk ids, so existing corrections are not migrated automatically and must be reconfirmed on the new chunks. This preserves strict evidence replay: manual text never enters the parser-original evidence chain.
 
+### 4.2.3 Inbound counterparty redline ledger (contract review)
+
+The “Redline ledger” panel on a case detail page records **what textual changes occurred** in a counterparty-returned DOCX; it is not a legal review conclusion:
+
+1. Create a contract-review case first; then upload the counterparty's tracked-changes DOCX below the export history on the detail page (20 MB per upload).
+2. Each upload is appended as a `review_redline_submission` with a monotonically increasing per-case sequence number. The original DOCX is stored in MinIO at `redlines/{org}/{case}/{submission}.docx`; **there is no download endpoint**. The parser uses in-memory bytes, `zipfile` and `defusedxml` only — no model, retrieval or network calls.
+3. Ledger rows are typed `insertion` / `deletion` / `comment` / `unparsed`; adjacent deletion→insertion pairs share a `pair_key` while both rows are preserved. Moves, formatting revisions (rPrChange etc.) and nested revisions that cannot be represented losslessly become explicit `unparsed` rows with reason codes; overlapping revisions produce warnings; caps (2000 rows / 4000 characters per text) mark the submission `partial` instead of silently dropping content.
+4. Every row carries `text_provenance='counterparty_docx_ooxml'`. The raw DOCX bytes and the exact parsed before/after text are hashed with SHA-256. Audit logs contain only ids and dispositions — never clause text or author names.
+5. Humans may link a review item/evidence and set a disposition (pending/reviewed/needs_clarification/not_relevant) with `expected_lock_version` optimistic locking; a stale version returns 409 `REVIEW_REDLINE_CONFLICT`. The ledger is read-only once the case is archived. Ledger rows cannot be edited or deleted, and the case, items, evidence, exports and rule snapshots are never rewritten.
+
+**Permanent disclaimer**: Records only factual textual changes; it is not legal advice.
+
 ### 4.3 Chat and deep analysis
 
 The chat page (`/chat`) has two modes, selected by the "Quick Q&A / Deep analysis" radio in the input area (`frontend/src/views/chat/components/ChatInput.vue`):
@@ -689,7 +701,7 @@ There are **30 endpoint modules** (`docs/facts.json` → `endpoint_modules`, der
 | chat | `/api/v1/chat` | session CRUD, SSE Q&A |
 | knowledge | `/api/v1/knowledge` | retrieval, stats, rebuild, graph |
 | knowledge_bases | `/api/v1/knowledge-bases` | multi-knowledge-base entity CRUD (organization-scoped) |
-| reviews | `/api/v1/reviews` | contract review: cases, items, evidence snapshots (parser original + version hashes); org template library at `/reviews/templates` (immutable versions + read-only diff) |
+| reviews | `/api/v1/reviews` | contract review: cases, items, evidence snapshots (parser original + version hashes); org template library at `/reviews/templates` (immutable versions + read-only diff); inbound redline ledger at `/reviews/{id}/redlines` (upload/list/ledger/optimistic-locking disposition) |
 | organizations | `/api/v1/organizations` | org CRUD, members, roles |
 | organization_settings | `/api/v1/organizations` | org-level settings (shared prefix) |
 | monitoring | `/api/v1/monitoring` | metrics, health, alerts, RAG quality |
@@ -818,7 +830,7 @@ alembic revision --autogenerate -m "desc"   # create a migration (dev)
 ```
 
 - Config: `backend/alembic.ini`; the runtime URL is overridden from `settings.DATABASE_URL` in `backend/alembic/env.py`.
-- Current head: `011_organization_settings` (`backend/alembic/versions/011_organization_settings.py`).
+- Current head: `040_inbound_redline_ledger` (`backend/alembic/versions/040_inbound_redline_ledger.py`).
 - `init_db()` runs `create_all` **only on an empty database**; existing databases are not auto-upgraded. `USE_ALEMBIC=true` skips `create_all` entirely (`backend/app/core/database.py`).
 - **Release order**: new code may read new tables/columns (e.g. `organization_settings` and `prompt_templates.scope` from 011). Upgrade existing deployments by running migrations **before** routing traffic to new instances; do not create personal prompt templates during the rolling window (old instances treat them as organization-visible).
 - 011's `downgrade` is **lossy**: dropping `organization_settings` loses overrides; dropping `scope` makes personal templates organization-visible. Export/disable related data first (migration header).
@@ -1018,7 +1030,7 @@ python scripts/check_doc_facts.py                                  # three-way c
 | Endpoint modules | `backend/app/api/v1/router.py`; numbers in `docs/facts.json` |
 | Supported formats and parsing | `backend/app/services/document_parser.py` |
 | Index reconciliation / reindex | `backend/scripts/reconcile_knowledge_index.py` |
-| Migrations | `backend/alembic/versions/` (head: `011_organization_settings`) |
+| Migrations | `backend/alembic/versions/` (head: `040_inbound_redline_ledger`) |
 | Agent architecture and events | `AGENT_ARCHITECTURE.md`, `backend/app/agent/events.py` |
 | Admin semantics and knowledge-base boundaries | `docs/decisions/ADR-001-路线冻结.md` (D3 / D5 historical semantics), `backend/app/models/knowledge_base.py`, `backend/app/rag/knowledge_base_filter.py`, `backend/app/rag/metadata_filter.py` (current behavior) |
 | Deployment and production checklist | `deploy/README.md`, `SETUP.md` |

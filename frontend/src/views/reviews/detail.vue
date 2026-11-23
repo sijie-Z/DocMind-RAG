@@ -544,6 +544,12 @@
               </div>
             </div>
           </div>
+
+          <RedlineLedger
+            :case-id="caseId"
+            :items="detail.items"
+            :archived="!!detail.archived_at"
+          />
         </template>
       </n-spin>
     </div>
@@ -572,6 +578,7 @@ import { parseApiDate } from '@/utils/format'
 import { getErrorMessage } from '@/utils/apiError'
 import { reasonLabel, reasonsLabel } from './reviewReasons'
 import { buildEvidencePermalink, buildEvidenceLinkTarget } from './evidenceLink'
+import RedlineLedger from './components/RedlineLedger.vue'
 
 const SIDES: ReviewSide[] = ['policy', 'base', 'revised']
 

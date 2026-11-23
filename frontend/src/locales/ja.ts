@@ -2335,6 +2335,39 @@ export default {
     reasonUndecided: '未決のレビュー項目があります',
     reasonNotAnalyzed: '分析が未実行です',
     reasonSideSeparator: '：',
+    redlines: {
+      title: '修正履歴台帳',
+      uploadLabel: '修正・コメント付き契約書をアップロード',
+      uploadButton: 'アップロードして記録',
+      uploadSuccess: '修正履歴を記録しました',
+      uploadFailed: '修正履歴のアップロードに失敗しました',
+      loadFailed: '修正履歴の読み込みに失敗しました',
+      ledgerLoadFailed: '修正履歴明細の読み込みに失敗しました',
+      noSubmissions: '修正履歴はまだありません',
+      selectSubmission: '修正履歴を選択',
+      filters: { revisionType: '変更種別', disposition: '処理状態', all: 'すべて' },
+      revisionTypes: { insertion: '追加', deletion: '削除', comment: 'コメント', unparsed: '解析不可' },
+      dispositions: {
+        label: '処理状態', pending: '未処理', reviewed: '確認済み',
+        needsClarification: '確認が必要', notRelevant: '対象外'
+      },
+      columns: {
+        ordinal: '番号', revisionType: '種別', before: '変更前', after: '変更後',
+        author: '修正者', time: '日時', location: '位置', reason: '理由',
+        disposition: '処理状態', actions: '関連付けと処理'
+      },
+      author: '修正者', time: '日時', location: '位置', reason: '解析不可の理由',
+      note: '処理メモ', save: '処理を保存', saveSuccess: '処理を保存しました',
+      saveFailed: '処理の保存に失敗しました',
+      itemLink: 'レビュー項目', evidenceLink: '証拠', none: 'なし',
+      disclaimer: '記録されるのはテキストの変更事実のみであり、法的助言ではありません。',
+      disclaimerZh: '只记录文本变化事实，不构成法律意见',
+      disclaimerEn: 'Only textual changes are recorded; this is not legal advice.',
+      disclaimerJa: '記録されるのはテキストの変更事実のみであり、法的助言ではありません。',
+      disclaimerFr: 'Seules les modifications de texte sont enregistrées ; ceci ne constitue pas un avis juridique.',
+      hasUnparsed: '解析できなかった変更があります。手動で確認してください',
+      counts: { revision: 'テキスト変更 {count} 件', comment: 'コメント {count} 件', unparsed: '解析不可 {count} 件' }
+    }
   },
   reviewTemplates: {
     subtitle:

@@ -540,6 +540,18 @@ python scripts/reconcile_knowledge_index.py --reindex --limit 10
 - 审计记录只含文档/分块 id、操作、布尔值与修正文本哈希/字符数，绝不写私有正文或修正正文到审计日志。旧索引缺 `is_chunk_enabled` 字段时按启用处理，需执行 `scripts/add_rag_source_provenance_mapping.py` 补齐 additive mapping。
 - **取舍**：人工修正不重算向量、也不重建索引；它只改 ES 的检索文本与独立审计行。文档重建/重新解析会生成新的分块 id，旧修正不会自动迁移到新块，需要按新块重新确认；这也是 strict 原文回放始终可信的前提——人工文本永不进入 parser 原文证据链。
 
+### 4.2.3 对方红线变更台账（合同核验）
+
+案件详情页的「对方红线台账」用于记录对方返回 DOCX 里**发生了哪些文本变化**，不是法律审查结论：
+
+1. 先建好合同核验案件；在详情页导出历史下方上传对方返回的带修订 DOCX（单次上限 20 MB）。
+2. 上传后按批次追加为 `review_redline_submission`（序号在案件内单调递增），原始 DOCX 存入 MinIO 的 `redlines/{org}/{case}/{submission}.docx`，**不提供下载端点**；解析器只用内存字节、`zipfile` + `defusedxml`，不调用模型、检索或网络。
+3. 台账行区分 `insertion` / `deletion` / `comment` / `unparsed`；相邻删除→插入共享 `pair_key` 但保留两行。moves、格式修订（rPrChange 等）、嵌套修订等无法无损表达的结构显式写成 `unparsed` 并带原因码，重叠修订写入 warnings；超限（2000 行 / 单段 4000 字）标 `partial`，绝不静默丢弃。
+4. 每行固定带 `text_provenance='counterparty_docx_ooxml'`，原文哈希取原始 DOCX 字节、文本哈希取精确解析文本；审计只写 id/处置，不写条款文本或作者姓名。
+5. 人工关联核验项/证据并做 disposition（pending/reviewed/needs_clarification/not_relevant）时带 `expected_lock_version` 乐观锁；版本过期返回 409 `REVIEW_REDLINE_CONFLICT`。案件归档后台账只读。台账不可修改或删除，也不改写案件/核验项/证据/导出/规则快照。
+
+**永久免责声明**：只记录文本变化事实，不构成法律意见。
+
 ### 4.3 对话与深度分析
 
 对话页（`/chat`）有两个模式，入口是输入区的「快速问答 / 深度分析」二选一开关（`frontend/src/views/chat/components/ChatInput.vue`）：
@@ -696,7 +708,7 @@ API 前缀 `/api/v1/workflows`：工作流 CRUD、执行、调试、节点定义
 | chat | `/api/v1/chat` | 会话 CRUD、SSE 流式问答 |
 | knowledge | `/api/v1/knowledge` | 知识检索、统计、重建、图谱 |
 | knowledge_bases | `/api/v1/knowledge-bases` | 多知识库实体 CRUD（组织隔离） |
-| reviews | `/api/v1/reviews` | 合同核验：案件/核验项/证据快照（parser 原文 + 版本哈希）；组织级模板库 `/reviews/templates`（不可变版本 + 只读 diff） |
+| reviews | `/api/v1/reviews` | 合同核验：案件/核验项/证据快照（parser 原文 + 版本哈希）；组织级模板库 `/reviews/templates`（不可变版本 + 只读 diff）；对方红线台账 `/reviews/{id}/redlines`（上传/列表/明细/乐观锁 disposition） |
 | organizations | `/api/v1/organizations` | 组织 CRUD、成员与角色 |
 | organization_settings | `/api/v1/organizations` | 组织级设置（与组织管理共用前缀） |
 | monitoring | `/api/v1/monitoring` | 性能指标、健康、告警、RAG 质量 |
@@ -822,7 +834,7 @@ alembic revision --autogenerate -m "描述"   # 新增迁移（开发）
 ```
 
 - 配置：`backend/alembic.ini`；运行时的连接串由 `backend/alembic/env.py` 从 `settings.DATABASE_URL` 覆盖。
-- 当前 head：`011_organization_settings`（`backend/alembic/versions/011_organization_settings.py`）。
+- 当前 head：`040_inbound_redline_ledger`（`backend/alembic/versions/040_inbound_redline_ledger.py`）。
 - 应用启动时的 `init_db()` 只在**空库**执行 `create_all`；已有库不会自动补表。`USE_ALEMBIC=true` 时完全跳过 `create_all`（`backend/app/core/database.py`）。
 - **发布顺序**：新代码可能读取新表/新列（例如 011 引入的 `organization_settings` 与 `prompt_templates.scope`）。升级既有部署时，**先跑迁移，再放流量到新实例**；滚动窗口内不要创建个人提示词模板（旧实例会把它当组织模板可见）。
 - 011 的 `downgrade` 是**有损**的：删除 `organization_settings` 会丢失组织覆盖值；删除 `scope` 会让个人模板退化为组织可见。回滚前先导出/停用相关数据（迁移文件头注释）。
@@ -1022,7 +1034,7 @@ python scripts/check_doc_facts.py                                  # 校验三�
 | 端点模块清单 | `backend/app/api/v1/router.py`；数字口径 `docs/facts.json` |
 | 文档格式与解析 | `backend/app/services/document_parser.py` |
 | 索引对账/重索引 | `backend/scripts/reconcile_knowledge_index.py` |
-| 迁移 | `backend/alembic/versions/`（head：`011_organization_settings`） |
+| 迁移 | `backend/alembic/versions/`（head：`040_inbound_redline_ledger`） |
 | Agent 架构与事件 | `AGENT_ARCHITECTURE.md`、`backend/app/agent/events.py` |
 | 管理员语义与知识库边界 | `docs/decisions/ADR-001-路线冻结.md`（D3 / D5 历史语义）、`backend/app/models/knowledge_base.py`、`backend/app/rag/knowledge_base_filter.py`、`backend/app/rag/metadata_filter.py`（现状） |
 | 部署与生产检查 | `deploy/README.md`、`SETUP.md` |

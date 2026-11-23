@@ -2336,6 +2336,39 @@ export default {
     reasonUndecided: 'Certains éléments d’examen ne sont pas décidés',
     reasonNotAnalyzed: 'L’analyse n’a pas encore été exécutée',
     reasonSideSeparator: ' : ',
+    redlines: {
+      title: 'Registre des modifications',
+      uploadLabel: 'Importer un contrat avec révisions ou commentaires',
+      uploadButton: 'Importer et enregistrer',
+      uploadSuccess: 'Modifications enregistrées',
+      uploadFailed: 'Échec de l’import des modifications',
+      loadFailed: 'Échec du chargement des imports',
+      ledgerLoadFailed: 'Échec du chargement du registre',
+      noSubmissions: 'Aucune modification importée',
+      selectSubmission: 'Sélectionner un import',
+      filters: { revisionType: 'Type de changement', disposition: 'Traitement', all: 'Tous' },
+      revisionTypes: { insertion: 'Ajout', deletion: 'Suppression', comment: 'Commentaire', unparsed: 'Non analysé' },
+      dispositions: {
+        label: 'Traitement', pending: 'En attente', reviewed: 'Vérifié',
+        needsClarification: 'À préciser', notRelevant: 'Non pertinent'
+      },
+      columns: {
+        ordinal: 'N°', revisionType: 'Type', before: 'Avant', after: 'Après',
+        author: 'Auteur', time: 'Date', location: 'Emplacement', reason: 'Motif',
+        disposition: 'Traitement', actions: 'Liens et traitement'
+      },
+      author: 'Auteur', time: 'Date', location: 'Emplacement', reason: 'Motif (non analysé)',
+      note: 'Note de traitement', save: 'Enregistrer le traitement',
+      saveSuccess: 'Traitement enregistré', saveFailed: 'Échec de l’enregistrement du traitement',
+      itemLink: 'Élément de revue lié', evidenceLink: 'Preuve liée', none: 'Aucun',
+      disclaimer: 'Seules les modifications de texte sont enregistrées ; ceci ne constitue pas un avis juridique.',
+      disclaimerZh: '只记录文本变化事实，不构成法律意见',
+      disclaimerEn: 'Only textual changes are recorded; this is not legal advice.',
+      disclaimerJa: '記録されるのはテキストの変更事実のみであり、法的助言ではありません。',
+      disclaimerFr: 'Seules les modifications de texte sont enregistrées ; ceci ne constitue pas un avis juridique.',
+      hasUnparsed: 'Certaines modifications n’ont pas pu être analysées ; vérifiez-les manuellement',
+      counts: { revision: '{count} changements de texte', comment: '{count} commentaires', unparsed: '{count} non analysés' }
+    }
   },
   reviewTemplates: {
     subtitle:

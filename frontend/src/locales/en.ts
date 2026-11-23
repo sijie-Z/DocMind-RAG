@@ -2349,6 +2349,39 @@ export default {
     reasonUndecided: 'Some review items are undecided',
     reasonNotAnalyzed: 'Analysis has not been run yet',
     reasonSideSeparator: ': ',
+    redlines: {
+      title: 'Redline ledger',
+      uploadLabel: 'Upload a contract with revisions or comments',
+      uploadButton: 'Upload and record',
+      uploadSuccess: 'Redline submission recorded',
+      uploadFailed: 'Failed to upload the redline submission',
+      loadFailed: 'Failed to load redline submissions',
+      ledgerLoadFailed: 'Failed to load the redline ledger',
+      noSubmissions: 'No redline submissions yet',
+      selectSubmission: 'Select a redline submission',
+      filters: { revisionType: 'Change type', disposition: 'Disposition', all: 'All' },
+      revisionTypes: { insertion: 'Insertion', deletion: 'Deletion', comment: 'Comment', unparsed: 'Unparsed' },
+      dispositions: {
+        label: 'Disposition', pending: 'Pending', reviewed: 'Reviewed',
+        needsClarification: 'Needs clarification', notRelevant: 'Not relevant'
+      },
+      columns: {
+        ordinal: 'No.', revisionType: 'Type', before: 'Before', after: 'After',
+        author: 'Author', time: 'Time', location: 'Location', reason: 'Reason',
+        disposition: 'Disposition', actions: 'Links and disposition'
+      },
+      author: 'Author', time: 'Time', location: 'Location', reason: 'Unparsed reason',
+      note: 'Disposition note', save: 'Save disposition', saveSuccess: 'Disposition saved',
+      saveFailed: 'Failed to save the disposition',
+      itemLink: 'Linked review item', evidenceLink: 'Linked evidence', none: 'None',
+      disclaimer: 'Only textual changes are recorded; this is not legal advice.',
+      disclaimerZh: '只记录文本变化事实，不构成法律意见',
+      disclaimerEn: 'Only textual changes are recorded; this is not legal advice.',
+      disclaimerJa: '記録されるのはテキストの変更事実のみであり、法的助言ではありません。',
+      disclaimerFr: 'Seules les modifications de texte sont enregistrées ; ceci ne constitue pas un avis juridique.',
+      hasUnparsed: 'Some changes could not be parsed; check them manually',
+      counts: { revision: '{count} textual changes', comment: '{count} comments', unparsed: '{count} unparsed' }
+    }
   },
   reviewTemplates: {
     subtitle:
