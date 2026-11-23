@@ -384,6 +384,10 @@ export interface RedlineLedgerResponse {
   counts: { revision: number; comment: number; unparsed: number }
   disclaimer: string
   has_unparsed: boolean
+  /** 批次解析期告警（不受当前页过滤影响）。 */
+  parse_warnings?: string[]
+  /** 解析达到行/文本上限，展示可能不完整的警示。 */
+  has_truncation?: boolean
 }
 
 export interface RedlineDispositionUpdate {

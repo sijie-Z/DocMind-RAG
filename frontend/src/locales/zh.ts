@@ -2388,6 +2388,9 @@ export default {
       disclaimerJa: '記録されるのはテキストの変更事実のみであり、法的助言ではありません。',
       disclaimerFr: 'Seules les modifications de texte sont enregistrées ; ceci ne constitue pas un avis juridique.',
       hasUnparsed: '存在未解析的改动，请人工核对',
+      parseWarnings: '解析告警：{warnings}',
+      hasTruncation: '解析达到上限，台账可能不完整，请核对原文',
+      conflictReloaded: '数据已被他人更新，已刷新为最新台账',
       counts: { revision: '文本变化 {count} 条', comment: '批注 {count} 条', unparsed: '未解析 {count} 条' }
     }
   },

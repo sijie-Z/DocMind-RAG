@@ -39,10 +39,13 @@ USER_ID = 21
 OTHER_USER_ID = 22
 CASE_ID = "11111111-1111-4111-8111-111111111111"
 OTHER_CASE_ID = "22222222-2222-4222-8222-222222222222"
+OTHER_CASE_ID_IN_ORG = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
 ITEM_ID = "33333333-3333-4333-8333-333333333333"
 EVIDENCE_ID = "44444444-4444-4444-8444-444444444444"
 SECRET_CLAUSE = "第9条 绝对保密条款不得外泄"
 SECRET_AUTHOR = "对方首席律师张伟"
+OTHER_ITEM_ID = "88888888-8888-4888-8888-888888888888"
+OTHER_EVIDENCE_ID = "99999999-9999-4999-8999-999999999999"
 
 
 @pytest.fixture
@@ -128,7 +131,11 @@ async def _seed(factory, *, archived: bool = False) -> None:
                     uploaded_by=USER_ID,
                 )
             )
-        for case_id, org_id in ((CASE_ID, ORG_ID), (OTHER_CASE_ID, OTHER_ORG_ID)):
+        for case_id, org_id in (
+            (CASE_ID, ORG_ID),
+            (OTHER_CASE_ID_IN_ORG, ORG_ID),  # 同组织、不同案件
+            (OTHER_CASE_ID, OTHER_ORG_ID),
+        ):
             session.add(
                 ReviewCase(
                     id=case_id,
@@ -168,6 +175,35 @@ async def _seed(factory, *, archived: bool = False) -> None:
                 chunk_index=0,
                 quote_text=SECRET_CLAUSE,
                 quote_sha256="b" * 64,
+                text_provenance="parser_original",
+            )
+        )
+        # 与 CASE_ID 同组织、但属于另一案件的 item/evidence：用于证明绑定校验
+        # 必须按 case_id 而不只是按 organization_id；随机 UUID 测不出这个差别。
+        session.add(
+            ReviewItem(
+                id=OTHER_ITEM_ID,
+                case_id=OTHER_CASE_ID_IN_ORG,
+                item_key="other_case_payment_term",
+                ordinal=1,
+                status="pending",
+            )
+        )
+        session.add(
+            ReviewEvidence(
+                id=OTHER_EVIDENCE_ID,
+                case_id=OTHER_CASE_ID_IN_ORG,
+                item_id=OTHER_ITEM_ID,
+                side="revised",
+                role="main",
+                selected=True,
+                document_id="d3",
+                doc_role="contract",
+                document_sha256="e" * 64,
+                chunk_id_at_capture="chunk-other-case",
+                chunk_index=0,
+                quote_text="另一案件的保密约定",
+                quote_sha256="f" * 64,
                 text_provenance="parser_original",
             )
         )
@@ -246,7 +282,29 @@ async def test_upload_sequence_increment_and_minio_object(factory, no_network):
         assert all(row.text_provenance == REVIEW_REDLINE_TEXT_PROVENANCE for row in rows)
         assert all(row.disposition == "pending" and row.lock_version == 1 for row in rows)
         assert rows[0].pair_key == rows[1].pair_key
-        assert (await session.execute(select(func.count(UserActivityLog.id)))).scalar() == 0
+        # M2：每次上传都在同事务写一条审计，仅含 id/哈希前缀，不含条款正文/作者。
+        logs = (await session.execute(select(UserActivityLog))).scalars().all()
+        assert len(logs) == 2
+        assert {log.action for log in logs} == {"review_redline_upload"}
+        assert {json.loads(log.detail)["submission_id"] for log in logs} == {
+            first["id"],
+            second["id"],
+        }
+        for log in logs:
+            detail = json.loads(log.detail)
+            assert set(detail) == {
+                "organization_id",
+                "user_id",
+                "case_id",
+                "submission_id",
+                "sequence_no",
+                "file_sha256_prefix",
+                "file_size",
+                "status",
+            }
+            assert detail["file_sha256_prefix"] == first["file_sha256"][:16]
+            assert SECRET_CLAUSE not in log.detail
+            assert SECRET_AUTHOR not in log.detail
 
 
 @pytest.mark.asyncio
@@ -268,23 +326,72 @@ async def test_upload_rejects_oversize_without_writing(factory, no_network):
 
 
 @pytest.mark.asyncio
-async def test_storage_failure_rolls_back_database(factory, monkeypatch):
-    await _seed(factory)
+async def test_storage_failure_keeps_referenced_row_and_never_orphans(factory, monkeypatch):
+    """无删除接口：DB 先提交并引用确定对象名，存储失败也没有孤儿对象。"""
 
     def fail(*args, **kwargs):
         raise RuntimeError("minio offline")
 
     monkeypatch.setattr(svc.minio_client, "put_object", fail)
+    await _seed(factory)
     async with factory() as session:
         case = await session.get(ReviewCase, CASE_ID)
         user = await session.get(User, USER_ID)
-        with pytest.raises(ServiceUnavailableError):
+        with pytest.raises(ServiceUnavailableError) as caught:
             await svc.upload_submission(
                 session, case=case, current_user=user, filename="x.docx", data=_docx()
             )
+        assert caught.value.error_code == "REVIEW_REDLINE_STORAGE_UNAVAILABLE"
+
     async with factory() as session:
-        assert (await session.execute(select(func.count(ReviewRedlineSubmission.id)))).scalar() == 0
-        assert (await session.execute(select(func.count(ReviewRedlineRow.id)))).scalar() == 0
+        submissions = (await session.execute(select(ReviewRedlineSubmission))).scalars().all()
+        assert len(submissions) == 1
+        # 行先提交并已引用对象名：对象若后来被补传，绝非无引用孤儿。
+        assert submissions[0].storage_object_name.startswith(f"redlines/{ORG_ID}/{CASE_ID}/")
+        assert (await session.execute(select(func.count(ReviewRedlineRow.id)))).scalar() == 2
+        assert (await session.execute(select(func.count(UserActivityLog.id)))).scalar() == 1
+
+
+@pytest.mark.asyncio
+async def test_integrity_error_does_not_upload_object(factory, monkeypatch, no_network):
+    """M1：强制 DB 提交失败（唯一约束冲突）时，绝不产生 MinIO put_object。"""
+    await _seed(factory)
+    collision_id = "77777777-7777-4777-8777-777777777777"
+    async with factory() as session:
+        # 先占住上传将要生成的 submission id，令 INSERT 命中主键唯一约束。
+        session.add(
+            ReviewRedlineSubmission(
+                id=collision_id,
+                organization_id=ORG_ID,
+                case_id=CASE_ID,
+                sequence_no=1,
+                filename="occupied.docx",
+                file_sha256="f" * 64,
+                file_size=1,
+                storage_object_name="redlines/occupied.docx",
+                parser_version=svc.parser_version,
+                status="parsed",
+                revision_count=0,
+                comment_count=0,
+                unparsed_count=0,
+                parse_warnings=[],
+                uploaded_by=USER_ID,
+            )
+        )
+        await session.commit()
+
+    monkeypatch.setattr(svc.uuid, "uuid4", lambda: uuid.UUID(collision_id))
+    async with factory() as session:
+        case = await session.get(ReviewCase, CASE_ID)
+        user = await session.get(User, USER_ID)
+        with pytest.raises(ConflictError) as caught:
+            await svc.upload_submission(
+                session, case=case, current_user=user, filename="x.docx", data=_docx()
+            )
+        assert caught.value.error_code == "REVIEW_REDLINE_CONFLICT"
+    assert not no_network["calls"]
+    async with factory() as session:
+        assert (await session.execute(select(func.count(UserActivityLog.id)))).scalar() == 0
 
 
 @pytest.mark.asyncio
@@ -379,11 +486,13 @@ async def test_disposition_optimistic_lock_and_audit_privacy(factory):
 
     async with factory() as session:
         logs = (await session.execute(select(UserActivityLog))).scalars().all()
-        assert len(logs) == 1
-        assert logs[0].action == "review_redline_disposition"
-        assert logs[0].target_type == "review_case"
-        assert logs[0].target_id == CASE_ID
-        detail = json.loads(logs[0].detail)
+        assert len(logs) == 2  # 1 条上传审计 + 1 条处置审计
+        dispositions = [log for log in logs if log.action == "review_redline_disposition"]
+        assert len(dispositions) == 1
+        log = dispositions[0]
+        assert log.target_type == "review_case"
+        assert log.target_id == CASE_ID
+        detail = json.loads(log.detail)
         assert set(detail) == {
             "organization_id",
             "user_id",
@@ -393,8 +502,162 @@ async def test_disposition_optimistic_lock_and_audit_privacy(factory):
             "disposition",
             "lock_version",
         }
-        assert SECRET_CLAUSE not in logs[0].detail
-        assert SECRET_AUTHOR not in logs[0].detail
+        assert SECRET_CLAUSE not in log.detail
+        assert SECRET_AUTHOR not in log.detail
+
+
+@pytest.mark.asyncio
+async def test_stale_identity_map_session_cannot_overwrite_concurrent_update(factory):
+    """H1：T1 先读行进身份映射；T2 提交后，T1 持旧版本号必须 409 而非覆盖。
+
+    expire_on_commit=False 下 SELECT FOR UPDATE 会命中身份映射里的旧实例，
+    旧实现因此绕过乐观锁；条件 UPDATE 在数据库层比对 lock_version 才能拦住。
+    """
+    await _seed(factory)
+    async with factory() as session:
+        case = await session.get(ReviewCase, CASE_ID)
+        user = await session.get(User, USER_ID)
+        summary = await svc.upload_submission(
+            session, case=case, current_user=user, filename="x.docx", data=_docx()
+        )
+        row_id = (await svc.get_ledger(session, case=case, submission_id=summary["id"]))["items"][
+            0
+        ]["id"]
+
+    async with factory() as t1:
+        case1 = await t1.get(ReviewCase, CASE_ID)
+        user1 = await t1.get(User, USER_ID)
+        stale_row = await svc.get_row(t1, case=case1, submission_id=summary["id"], row_id=row_id)
+        assert stale_row.lock_version == 1
+        await t1.commit()  # 释放读事务，但身份映射中的旧实例仍在（expire_on_commit=False）
+
+        async with factory() as t2:
+            case2 = await t2.get(ReviewCase, CASE_ID)
+            user2 = await t2.get(User, USER_ID)
+            winner = await svc.update_disposition(
+                t2,
+                case=case2,
+                current_user=user2,
+                submission_id=summary["id"],
+                row_id=row_id,
+                update=RedlineDispositionUpdate(
+                    disposition="reviewed", note="T2 已核对", expected_lock_version=1
+                ),
+            )
+            assert winner["lock_version"] == 2
+
+        with pytest.raises(ConflictError) as caught:
+            await svc.update_disposition(
+                t1,
+                case=case1,
+                current_user=user1,
+                submission_id=summary["id"],
+                row_id=row_id,
+                update=RedlineDispositionUpdate(
+                    disposition="not_relevant", note="T1 覆盖", expected_lock_version=1
+                ),
+            )
+        assert caught.value.error_code == "REVIEW_REDLINE_CONFLICT"
+
+    async with factory() as session:
+        saved = await session.get(ReviewRedlineRow, row_id)
+        assert saved.disposition == "reviewed"
+        assert saved.note == "T2 已核对"
+        assert saved.lock_version == 2
+
+
+@pytest.mark.asyncio
+async def test_superuser_can_write_cross_org_redline(factory, no_network):
+    """M7：超管与 review_case_service 行为一致，不受组织相等性限制。
+
+    写入归属必须来自案件（ORG_ID），不能来自调用方的 primary org（OTHER_ORG_ID）。
+    行/批次组织若误用调用方 org，下面的显式断言会失败。
+    """
+    await _seed(factory)
+    async with factory() as session:
+        case = await session.get(ReviewCase, CASE_ID)  # ORG_ID=11
+        superuser = await session.get(User, OTHER_USER_ID)  # primary org=12
+        superuser.is_superuser = True
+        await session.commit()
+        assert superuser.organization_id == OTHER_ORG_ID != case.organization_id
+        summary = await svc.upload_submission(
+            session, case=case, current_user=superuser, filename="x.docx", data=_docx()
+        )
+        assert summary["case_id"] == CASE_ID
+        async with factory() as verify:
+            saved_submission = await verify.get(ReviewRedlineSubmission, summary["id"])
+            assert saved_submission.organization_id == ORG_ID
+            saved_rows = (await verify.execute(select(ReviewRedlineRow))).scalars().all()
+            assert saved_rows and all(
+                row.organization_id == ORG_ID and row.case_id == CASE_ID for row in saved_rows
+            )
+            assert all(row.organization_id != superuser.organization_id for row in saved_rows)
+        assert no_network["calls"][0]["kwargs"]["object_name"].startswith(
+            f"redlines/{ORG_ID}/{CASE_ID}/"
+        )
+        row_id = (await svc.get_ledger(session, case=case, submission_id=summary["id"]))["items"][
+            0
+        ]["id"]
+        updated = await svc.update_disposition(
+            session,
+            case=case,
+            current_user=superuser,
+            submission_id=summary["id"],
+            row_id=row_id,
+            update=RedlineDispositionUpdate(disposition="reviewed", expected_lock_version=1),
+        )
+        assert updated["disposition"] == "reviewed"
+        assert updated["lock_version"] == 2
+
+
+@pytest.mark.asyncio
+async def test_no_org_superuser_upload_uses_case_organization_for_submission_and_rows(factory):
+    """无 primary org 的超管上传时，批次与每行的 organization_id 必须取案件组织。
+
+    若实现误用 current_user.organization_id（None）或回退到调用方组织，
+    此测试的显式断言会失败；MinIO 对象名也必须带案件组织前缀。
+    """
+    await _seed(factory)
+    async with factory() as session:
+        case = await session.get(ReviewCase, CASE_ID)
+        caller = await session.get(User, OTHER_USER_ID)
+        caller.is_superuser = True
+        caller.organization_id = None  # 无 primary org，且属于另一组织的用户
+        await session.commit()
+
+        summary = await svc.upload_submission(
+            session, case=case, current_user=caller, filename="tenant.docx", data=_docx()
+        )
+        assert summary["case_id"] == CASE_ID
+        assert summary["uploaded_by"] == OTHER_USER_ID
+
+    async with factory() as verify:
+        saved_submission = await verify.get(ReviewRedlineSubmission, summary["id"])
+        assert saved_submission.organization_id == case.organization_id == ORG_ID
+        rows = (
+            (
+                await verify.execute(
+                    select(ReviewRedlineRow).where(ReviewRedlineRow.submission_id == summary["id"])
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert len(rows) == 2
+        assert all(row.organization_id == ORG_ID for row in rows)
+        assert all(row.case_id == CASE_ID for row in rows)
+        assert all(row.organization_id is not None for row in rows)
+        assert saved_submission.storage_object_name.startswith(f"redlines/{ORG_ID}/{CASE_ID}/")
+        logs = (await verify.execute(select(UserActivityLog))).scalars().all()
+        assert len(logs) == 1
+        assert json.loads(logs[0].detail)["organization_id"] == ORG_ID
+
+
+def _column_snapshot(instance) -> dict[str, str]:
+    """按列名逐项稳定序列化，用于「字段字节级未变」断言。"""
+    return {
+        column.name: repr(getattr(instance, column.name)) for column in instance.__table__.columns
+    }
 
 
 @pytest.mark.asyncio
@@ -402,6 +665,8 @@ async def test_no_mutation_of_case_item_evidence_export_or_templates(factory):
     await _seed(factory)
     before_case = await _load(factory, ReviewCase, CASE_ID)
     before_item = await _load(factory, ReviewItem, ITEM_ID)
+    before_item_snapshot = _column_snapshot(before_item)
+    assert before_item_snapshot["status"] == repr("pending")
     before_evidence = await _load(factory, ReviewEvidence, EVIDENCE_ID)
     case_lock = before_case.lock_version
     item_status = before_item.status
@@ -414,18 +679,36 @@ async def test_no_mutation_of_case_item_evidence_export_or_templates(factory):
             session, case=case, current_user=user, filename="x.docx", data=_docx()
         )
         row = (await svc.get_ledger(session, case=case, submission_id=summary["id"]))["items"][0]
-        await svc.update_disposition(
+        updated = await svc.update_disposition(
             session,
             case=case,
             current_user=user,
             submission_id=summary["id"],
             row_id=row["id"],
-            update=RedlineDispositionUpdate(disposition="reviewed", expected_lock_version=1),
+            # 必须真正 link item + evidence：否则本测试对「关联时误改 ReviewItem」
+            # 的实现完全不敏感。
+            update=RedlineDispositionUpdate(
+                disposition="reviewed",
+                note="人工核对过",
+                expected_lock_version=1,
+                item_id=ITEM_ID,
+                evidence_id=EVIDENCE_ID,
+            ),
         )
+        assert (updated["item_id"], updated["evidence_id"]) == (ITEM_ID, EVIDENCE_ID)
+        assert updated["note"] == "人工核对过" and updated["lock_version"] == 2
 
     after_case = await _load(factory, ReviewCase, CASE_ID)
     after_item = await _load(factory, ReviewItem, ITEM_ID)
+    after_item_snapshot = _column_snapshot(after_item)
     after_evidence = await _load(factory, ReviewEvidence, EVIDENCE_ID)
+    # 行本身确实发生了写入：note/lock_version 从种子状态变化，防止测试因
+    # update_disposition 为空操作而假绿。ReviewItem 无 note/lock_version 列，
+    # 它的等价字段是 decision_note/status/decided_by，全部纳入上面的快照。
+    assert after_item_snapshot == before_item_snapshot
+    assert after_item_snapshot["status"] == repr(item_status)
+    assert after_item_snapshot["decided_by"] == repr(None)
+    assert after_item_snapshot["decision_note"] == repr(None)
     assert after_case.lock_version == case_lock
     assert after_case.status == "in_review"
     assert after_case.title == before_case.title
@@ -433,6 +716,10 @@ async def test_no_mutation_of_case_item_evidence_export_or_templates(factory):
     assert after_item.decided_by is None
     assert after_evidence.selected == evidence_selected
     async with factory() as session:
+        saved_row = await session.get(ReviewRedlineRow, updated["id"])
+        assert saved_row.note == "人工核对过"
+        assert saved_row.lock_version == 2
+        assert (saved_row.item_id, saved_row.evidence_id) == (ITEM_ID, EVIDENCE_ID)
         assert (await session.execute(select(func.count(ReviewExport.id)))).scalar() == 1
 
 
@@ -536,6 +823,93 @@ async def test_evidence_binding_requires_same_case_item(factory):
                 ),
             )
         assert caught.value.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_link_item_from_another_case_in_same_org_is_not_found_and_does_not_mutate(factory):
+    """跨案件 item（同组织）不得被链接：随机 UUID 测不出 case_id 校验。"""
+    await _seed(factory)
+    async with factory() as session:
+        case = await session.get(ReviewCase, CASE_ID)
+        user = await session.get(User, USER_ID)
+        summary = await svc.upload_submission(
+            session, case=case, current_user=user, filename="x.docx", data=_docx()
+        )
+        row = (await svc.get_ledger(session, case=case, submission_id=summary["id"]))["items"][0]
+        other_case = await session.get(ReviewCase, OTHER_CASE_ID_IN_ORG)
+        other_item = await session.get(ReviewItem, OTHER_ITEM_ID)
+        assert other_case.organization_id == case.organization_id == ORG_ID
+        assert other_item.case_id == other_case.id != case.id
+
+        with pytest.raises(NotFoundError) as caught:
+            await svc.update_disposition(
+                session,
+                case=case,
+                current_user=user,
+                submission_id=summary["id"],
+                row_id=row["id"],
+                update=RedlineDispositionUpdate(
+                    disposition="reviewed",
+                    expected_lock_version=1,
+                    item_id=OTHER_ITEM_ID,
+                ),
+            )
+        assert caught.value.status_code == 404
+
+    async with factory() as verify:
+        saved = await verify.get(ReviewRedlineRow, row["id"])
+        assert saved.disposition == "pending"
+        assert saved.lock_version == 1
+        assert saved.item_id is None and saved.evidence_id is None
+        assert saved.note is None and saved.disposition_by is None and saved.disposition_at is None
+        logs = (await verify.execute(select(UserActivityLog))).scalars().all()
+        assert len(logs) == 1  # 仅上传审计，未写处置审计
+        assert {log.action for log in logs} == {"review_redline_upload"}
+
+
+@pytest.mark.asyncio
+async def test_link_evidence_and_item_from_another_case_in_same_org_is_not_found(factory):
+    """跨案件 evidence+item（同组织、二者互相匹配）不得被链接。
+
+    仅校验 evidence 存在或 item 匹配而漏掉 case_id 时，本测试会失败。
+    """
+    await _seed(factory)
+    async with factory() as session:
+        case = await session.get(ReviewCase, CASE_ID)
+        user = await session.get(User, USER_ID)
+        summary = await svc.upload_submission(
+            session, case=case, current_user=user, filename="x.docx", data=_docx()
+        )
+        row = (await svc.get_ledger(session, case=case, submission_id=summary["id"]))["items"][0]
+        other_evidence = await session.get(ReviewEvidence, OTHER_EVIDENCE_ID)
+        assert other_evidence.case_id == OTHER_CASE_ID_IN_ORG != case.id
+        assert other_evidence.item_id == OTHER_ITEM_ID  # 绑定关系本身是合法的，只是案子不对
+
+        with pytest.raises(NotFoundError) as caught:
+            await svc.update_disposition(
+                session,
+                case=case,
+                current_user=user,
+                submission_id=summary["id"],
+                row_id=row["id"],
+                update=RedlineDispositionUpdate(
+                    disposition="reviewed",
+                    expected_lock_version=1,
+                    item_id=OTHER_ITEM_ID,
+                    evidence_id=OTHER_EVIDENCE_ID,
+                ),
+            )
+        assert caught.value.status_code == 404
+
+    async with factory() as verify:
+        saved = await verify.get(ReviewRedlineRow, row["id"])
+        assert saved.disposition == "pending"
+        assert saved.lock_version == 1
+        assert saved.item_id is None and saved.evidence_id is None
+        assert saved.note is None and saved.disposition_by is None and saved.disposition_at is None
+        logs = (await verify.execute(select(UserActivityLog))).scalars().all()
+        assert len(logs) == 1
+        assert {log.action for log in logs} == {"review_redline_upload"}
 
 
 @pytest.mark.asyncio

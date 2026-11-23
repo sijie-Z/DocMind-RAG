@@ -28,6 +28,7 @@ from app.models.review import (
     ReviewEvidence,
     ReviewItem,
     ReviewRedlineRow,
+    ReviewRedlineSubmission,
 )
 from app.models.user_audit import UserActivityLog
 from app.schemas.review import (
@@ -213,6 +214,8 @@ async def test_upload_list_ledger_disposition_roundtrip(factory, monkeypatch):
             "counts",
             "disclaimer",
             "has_unparsed",
+            "parse_warnings",
+            "has_truncation",
         }
         assert ledger_data["page"] == 1
         assert ledger_data["page_size"] == 20
@@ -220,6 +223,8 @@ async def test_upload_list_ledger_disposition_roundtrip(factory, monkeypatch):
         assert isinstance(ledger_data["counts"], dict)
         assert isinstance(ledger_data["disclaimer"], str)
         assert isinstance(ledger_data["has_unparsed"], bool)
+        assert isinstance(ledger_data["parse_warnings"], list)
+        assert isinstance(ledger_data["has_truncation"], bool)
         for row in ledger_data["items"]:
             assert RedlineRowResponse.model_validate(row)
             assert row["case_id"] == case_id
@@ -227,7 +232,14 @@ async def test_upload_list_ledger_disposition_roundtrip(factory, monkeypatch):
             assert row["text_provenance"] == REVIEW_REDLINE_TEXT_PROVENANCE
             assert row["disposition"] == "pending"
             assert row["lock_version"] == 1
-        assert RedlineLedgerResponse.model_validate(ledger_data)
+        # Schema 回环：服务输出字段必须被响应模型原样保留（不多也不少）。
+        parsed = RedlineLedgerResponse.model_validate(ledger_data)
+        assert parsed.parse_warnings == ledger_data["parse_warnings"]
+        assert parsed.has_truncation == ledger_data["has_truncation"]
+        model_data = parsed.model_dump(mode="json")
+        assert model_data["parse_warnings"] == ledger_data["parse_warnings"]
+        assert model_data["has_truncation"] == ledger_data["has_truncation"]
+        assert "rows" not in model_data
         assert not _forbidden_keys(ledger_data)
 
         row = ledger_data["items"][0]
@@ -344,33 +356,98 @@ async def test_oversize_upload_is_413_with_limits(factory, monkeypatch):
         assert response.status_code == 413, response.text
         body = response.json()
         assert body["error_code"] == "PAYLOAD_TOO_LARGE"
+        # 小文件的 multipart 整包在整包预算内，由实测文件大小闸门拦截。
         assert body["detail"]["max_body_bytes"] == 512
-        # Content-Length 闸门先于实测文件大小触发，报告的是整个 multipart 包大小。
-        assert body["detail"]["received_bytes"] >= 1024
+        assert body["detail"]["received_bytes"] == 1024
 
 
 @pytest.mark.asyncio
 async def test_content_length_guard_rejects_before_reading_body(factory, monkeypatch):
-    """第一道闸门：声明超大 Content-Length 立即 413，不等文件正文读完。"""
+    """第一道闸门：声明超过整包预算的 Content-Length 立即 413，不等正文读完。"""
+    from app.api.v1.endpoints import reviews as endpoint
     from app.services import review_redline_service as redline_service
 
     _grant_all_users(monkeypatch)
     _patch_storage(monkeypatch)
     monkeypatch.setattr(redline_service, "MAX_REDLINE_UPLOAD_BYTES", 512)
+    body_budget = endpoint._redline_body_budget_bytes()
+    assert body_budget == 512 + 1024 * 1024
     async with _Ctx(_user(superuser=True), factory) as ac:
         case = await _create_case(ac)
+        declared = body_budget + 1
         response = await ac.post(
             f"/api/v1/reviews/{case['id']}/redlines",
             files={"file": ("redlines.docx", _docx_bytes(), "application/octet-stream")},
-            headers={"Content-Length": "1048576"},
+            headers={"Content-Length": str(declared)},
         )
         assert response.status_code == 413, response.text
         body = response.json()
         assert body["error_code"] == "PAYLOAD_TOO_LARGE"
         assert body["detail"] == {
-            "max_body_bytes": 512,
-            "received_bytes": 1048576,
+            "max_body_bytes": body_budget,
+            "received_bytes": declared,
         }
+
+
+@pytest.mark.asyncio
+async def test_multipart_overhead_does_not_trigger_file_size_gate(factory, monkeypatch):
+    """判别点：文件略小于 20MB，但 multipart 整包超过旧阈值时仍应放行。
+
+    这里用合成小字节 + 声明一个大于旧阈值的 Content-Length 模拟真实整包开销；
+    第一道闸门应对 multipart 开销留余量，文件是否超限只看实测字节数。
+    """
+    from app.services import review_redline_service as redline_service
+
+    _grant_all_users(monkeypatch)
+    _patch_storage(monkeypatch)
+    # 保留真实 20MB 文件大小上限，避免制造大文件；只把整包声明值抬到旧阈值之上。
+    assert redline_service.MAX_REDLINE_UPLOAD_BYTES == 20 * 1024 * 1024
+    actual_docx = _docx_bytes()
+    assert len(actual_docx) < redline_service.MAX_REDLINE_UPLOAD_BYTES
+    old_threshold = redline_service.MAX_REDLINE_UPLOAD_BYTES
+    declared = old_threshold + 4096
+    async with _Ctx(_user(superuser=True), factory) as ac:
+        case = await _create_case(ac)
+        response = await ac.post(
+            f"/api/v1/reviews/{case['id']}/redlines",
+            files={"file": ("redlines.docx", actual_docx, "application/octet-stream")},
+            headers={"Content-Length": str(declared)},
+        )
+        assert response.status_code == 200, response.text
+        assert response.json()["data"]["file_size"] == len(actual_docx)
+
+
+@pytest.mark.asyncio
+async def test_ledger_schema_roundtrip_surfaces_parse_warnings_and_truncation(factory, monkeypatch):
+    """判别点：服务快照中的解析警告/截断标记必须原样进入响应模型与 JSON。
+
+    直接给批次写入警告列表，走真实 API 读取台账，验证 schema 与服务输出同形
+    （不是只测 Pydantic 默认值）。
+    """
+    _grant_all_users(monkeypatch)
+    _patch_storage(monkeypatch)
+    warnings = [
+        "row_cap_exceeded:parsed=2001;kept=2000",
+        "text_cap_exceeded:ordinal=9;field=after_text",
+        "overlap:ins:1:del:2",
+    ]
+    async with _Ctx(_user(superuser=True), factory) as ac:
+        case = await _create_case(ac)
+        submission = (await _upload(ac, case["id"])).json()["data"]
+        async with factory() as db:
+            stored = await db.get(ReviewRedlineSubmission, submission["id"])
+            stored.parse_warnings = warnings
+            await db.commit()
+
+        ledger = await ac.get(f"/api/v1/reviews/{case['id']}/redlines/{submission['id']}")
+        assert ledger.status_code == 200, ledger.text
+        data = ledger.json()["data"]
+        assert data["parse_warnings"] == warnings
+        assert data["has_truncation"] is True
+        parsed = RedlineLedgerResponse.model_validate(data)
+        assert parsed.parse_warnings == warnings
+        assert parsed.has_truncation is True
+        assert parsed.model_dump(mode="json")["parse_warnings"] == warnings
 
 
 @pytest.mark.asyncio
@@ -437,6 +514,43 @@ async def test_stale_lock_version_is_409_conflict(factory, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_stale_lock_after_concurrent_write_is_409_with_versions(factory, monkeypatch):
+    """真实并发场景：另一人先提交后，旧版本重试 409 且给出当前版本号。"""
+    _grant_all_users(monkeypatch)
+    _patch_storage(monkeypatch)
+    async with _Ctx(_user(superuser=True), factory) as ac:
+        case = await _create_case(ac)
+        submission = (await _upload(ac, case["id"])).json()["data"]
+        ledger = (await ac.get(f"/api/v1/reviews/{case['id']}/redlines/{submission['id']}")).json()[
+            "data"
+        ]
+        row = ledger["items"][0]
+        url = (
+            f"/api/v1/reviews/{case['id']}/redlines/{submission['id']}/rows/{row['id']}/disposition"
+        )
+        # 第一人用 v1 提交成功，行版本变为 v2。
+        first = await ac.put(
+            url, json={"disposition": "reviewed", "expected_lock_version": row["lock_version"]}
+        )
+        assert first.status_code == 200, first.text
+        assert first.json()["data"]["lock_version"] == row["lock_version"] + 1
+        # 第二人仍持 v1 重试：必须 409，且 detail 指明当前版本，便于前端刷新。
+        stale = await ac.put(
+            url, json={"disposition": "not_relevant", "expected_lock_version": row["lock_version"]}
+        )
+        assert stale.status_code == 409, stale.text
+        body = stale.json()
+        assert body["error_code"] == "REVIEW_REDLINE_CONFLICT"
+        assert body["detail"]["expected_lock_version"] == row["lock_version"]
+        assert body["detail"]["current_lock_version"] == row["lock_version"] + 1
+        reread = (await ac.get(f"/api/v1/reviews/{case['id']}/redlines/{submission['id']}")).json()[
+            "data"
+        ]["items"][0]
+        assert reread["disposition"] == "reviewed"
+        assert reread["lock_version"] == row["lock_version"] + 1
+
+
+@pytest.mark.asyncio
 async def test_evidence_id_without_item_id_is_422(factory, monkeypatch):
     """schema 守卫：evidence_id 必须绑定 item_id。"""
     _grant_all_users(monkeypatch)
@@ -479,6 +593,43 @@ async def test_archived_case_upload_is_409(factory, monkeypatch):
             await db.commit()
         archived = await _upload(ac, case["id"])
         assert archived.status_code == 409, archived.text
+
+
+@pytest.mark.asyncio
+async def test_archived_case_disposition_is_409(factory, monkeypatch):
+    """归档案件只读：归档后不能处置台账行。"""
+    _grant_all_users(monkeypatch)
+    _patch_storage(monkeypatch)
+    async with _Ctx(_user(superuser=True), factory) as ac:
+        case = await _create_case(ac)
+        submission = (await _upload(ac, case["id"])).json()["data"]
+        row = (await ac.get(f"/api/v1/reviews/{case['id']}/redlines/{submission['id']}")).json()[
+            "data"
+        ]["items"][0]
+        async with factory() as db:
+            await db.execute(
+                update(ReviewCase)
+                .where(ReviewCase.id == case["id"])
+                .values(
+                    archived_at=datetime.now(UTC),
+                    archived_by=1,
+                    status="blocked",
+                )
+            )
+            await db.commit()
+        denied = await ac.put(
+            f"/api/v1/reviews/{case['id']}/redlines/{submission['id']}"
+            f"/rows/{row['id']}/disposition",
+            json={"disposition": "reviewed", "expected_lock_version": row["lock_version"]},
+        )
+        assert denied.status_code == 409, denied.text
+        assert denied.json()["error_code"] == "REVIEW_CASE_ARCHIVED"
+        # 归档不应改动台账行状态/版本。
+        reread = (await ac.get(f"/api/v1/reviews/{case['id']}/redlines/{submission['id']}")).json()[
+            "data"
+        ]["items"][0]
+        assert reread["disposition"] == "pending"
+        assert reread["lock_version"] == row["lock_version"]
 
 
 @pytest.mark.asyncio

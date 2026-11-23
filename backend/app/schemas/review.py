@@ -314,12 +314,18 @@ class RedlineSubmissionSummary(BaseModel):
 
 
 class RedlineLedgerResponse(BaseModel):
-    """分页台账：counts 为处置计数，disclaimer 明确不构成法律意见。"""
+    """分页台账：counts 为处置计数，disclaimer 明确不构成法律意见。
+
+    ``parse_warnings`` / ``has_truncation`` 描述整批原文的解析完整性（达到
+    行数/文本上限等），不随当前页筛选变化；与服务层 ``get_ledger`` 输出同形。
+    """
 
     items: list[RedlineRowResponse] = Field(default_factory=list)
     counts: dict[str, int] = Field(default_factory=dict)
     disclaimer: str = ""
     has_unparsed: bool = False
+    parse_warnings: list[str] = Field(default_factory=list)
+    has_truncation: bool = False
     total: int = 0
     page: int = 1
     page_size: int = 20

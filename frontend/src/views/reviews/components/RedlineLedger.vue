@@ -51,12 +51,20 @@ const revisionFilter = ref<RedlineRevisionType | ''>('')
 const dispositionFilter = ref<RedlineDisposition | ''>('')
 const page = ref(1)
 const pageSize = ref(20)
+const pagination = computed(() => ({
+  page: page.value,
+  pageSize: pageSize.value,
+  itemCount: ledger.value?.total ?? 0,
+  showSizePicker: false
+}))
 const draftDisposition = ref<Record<string, RedlineDisposition>>({})
 const draftNote = ref<Record<string, string>>({})
 const draftItem = ref<Record<string, string | null>>({})
 const draftEvidence = ref<Record<string, string | null>>({})
 const savingRowId = ref('')
 const fileInput = ref<HTMLInputElement | null>(null)
+// 路由复用切案时，旧请求可能晚于新请求返回；用递增代号丢弃过期响应。
+let caseEpoch = 0
 const submissionOptions = computed(() =>
   submissions.value.map((row) => ({
     label: `${row.filename} · #${row.sequence_no}`,
@@ -294,10 +302,12 @@ const columns = computed<DataTableColumns<RedlineRowResponse>>(() => [
 ])
 
 async function loadSubmissions() {
+  const epoch = caseEpoch
   loading.value = true
   loadError.value = false
   try {
     const response = await reviewsApi.redlines.list(props.caseId)
+    if (epoch !== caseEpoch) return
     const data = apiUnwrap<RedlineSubmissionList | RedlineSubmissionSummary[]>(response)
     const items = Array.isArray(data) ? data : data?.items ?? []
     submissions.value = items
@@ -305,9 +315,9 @@ async function loadSubmissions() {
       selectedSubmissionId.value = submissions.value[0]?.id ?? null
     }
   } catch {
-    loadError.value = true
+    if (epoch === caseEpoch) loadError.value = true
   } finally {
-    loading.value = false
+    if (epoch === caseEpoch) loading.value = false
   }
 }
 
@@ -316,6 +326,7 @@ async function loadLedger() {
     ledger.value = null
     return
   }
+  const epoch = caseEpoch
   ledgerLoading.value = true
   ledgerLoadError.value = false
   try {
@@ -328,12 +339,16 @@ async function loadLedger() {
       selectedSubmissionId.value,
       params
     )
-    ledger.value = apiUnwrap<RedlineLedgerResponse>(response)
+    if (epoch !== caseEpoch) return
+    const data = apiUnwrap<RedlineLedgerResponse>(response)
+    ledger.value = data
+    // 后端可能对越界页码做收敛，回写以免分页器与数据错位。
+    if (typeof data?.page === 'number' && data.page > 0) page.value = data.page
     clearDrafts()
   } catch {
-    ledgerLoadError.value = true
+    if (epoch === caseEpoch) ledgerLoadError.value = true
   } finally {
-    ledgerLoading.value = false
+    if (epoch === caseEpoch) ledgerLoading.value = false
   }
 }
 
@@ -375,6 +390,13 @@ async function saveDisposition(row: RedlineRowResponse) {
     await loadLedger()
   } catch (error) {
     message.error(getErrorMessage(error, t('reviews.redlines.saveFailed')))
+    // 他人已更新同一行（乐观锁 409）：按后端稳定 error_code 刷新为最新台账。
+    const code = (error as { response?: { data?: { error_code?: string } } })?.response?.data
+      ?.error_code
+    if (code === 'REVIEW_REDLINE_CONFLICT') {
+      await loadLedger()
+      message.warning(t('reviews.redlines.conflictReloaded'))
+    }
   } finally {
     savingRowId.value = ''
   }
@@ -385,6 +407,26 @@ function resetFilters() {
   void loadLedger()
 }
 
+function handlePageChange(nextPage: number) {
+  page.value = nextPage
+  void loadLedger()
+}
+
+function resetForCase() {
+  caseEpoch += 1
+  loading.value = false
+  ledgerLoading.value = false
+  uploading.value = false
+  selectedSubmissionId.value = null
+  ledger.value = null
+  loadError.value = false
+  ledgerLoadError.value = false
+  revisionFilter.value = ''
+  dispositionFilter.value = ''
+  page.value = 1
+  clearDrafts()
+}
+
 watch(selectedSubmissionId, () => {
   page.value = 1
   void loadLedger()
@@ -392,6 +434,13 @@ watch(selectedSubmissionId, () => {
 watch([revisionFilter, dispositionFilter], () => {
   resetFilters()
 })
+watch(
+  () => props.caseId,
+  () => {
+    resetForCase()
+    void loadSubmissions()
+  }
+)
 onMounted(() => {
   void loadSubmissions()
 })
@@ -470,6 +519,24 @@ onMounted(() => {
       <n-alert v-if="ledger?.has_unparsed" type="warning" class="mb-3" :bordered="false">
         {{ t('reviews.redlines.hasUnparsed') }}
       </n-alert>
+      <n-alert
+        v-if="ledger?.parse_warnings?.length"
+        type="warning"
+        class="mb-3"
+        :bordered="false"
+        data-testid="redline-parse-warnings"
+      >
+        {{ t('reviews.redlines.parseWarnings', { warnings: ledger.parse_warnings.join('; ') }) }}
+      </n-alert>
+      <n-alert
+        v-if="ledger?.has_truncation"
+        type="error"
+        class="mb-3"
+        :bordered="false"
+        data-testid="redline-truncation"
+      >
+        {{ t('reviews.redlines.hasTruncation') }}
+      </n-alert>
       <div v-if="ledger?.counts" class="mb-2 flex flex-wrap gap-3 text-xs text-slate-600 dark:text-slate-300">
         <span>{{ t('reviews.redlines.counts.revision', { count: ledger.counts.revision }) }}</span>
         <span>{{ t('reviews.redlines.counts.comment', { count: ledger.counts.comment }) }}</span>
@@ -483,7 +550,9 @@ onMounted(() => {
           :bordered="false"
           :single-line="false"
           :scroll-x="1280"
+          :pagination="pagination"
           data-testid="redline-table"
+          @update:page="handlePageChange"
         />
       </n-spin>
     </template>

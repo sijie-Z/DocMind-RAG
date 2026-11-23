@@ -18,6 +18,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   跨租户 404、归档只读、`REVIEW_REDLINE_CONFLICT` 409；台账 append-only，disposition 只写 id/状态到同事务审计，
   绝不写条款文本或作者姓名。前端在案件详情导出历史下方嵌入台账面板（上传/批次选择/筛选/before→after/关联/处置）
   与 zh/en/ja/fr 四语词条，永久免责声明：**只记录文本变化事实，不构成法律意见**。
+  台账响应同时回传整批解析告警 `parse_warnings` 与截断标记 `has_truncation`，前端在面板中提示原文解析是否触及上限；
+  乐观锁冲突返回 409 `REVIEW_REDLINE_CONFLICT` 时携带 `current_lock_version`，应重新读取台账再以最新版本号重试。
 - **bad case → 检索评测用例（竞品批次五）**：搜索页结果状态栏新增「保存为评测用例」，
   把本次 query 与「本该命中的文档」直接存为 `RetrievalEvalCase`（`POST /api/v1/knowledge/eval/cases/capture`）；
   与 `POST /eval/cases` 共用同一条 `retrieval_eval_service.create_case`，复用组织隔离、

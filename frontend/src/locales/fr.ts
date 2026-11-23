@@ -2367,6 +2367,9 @@ export default {
       disclaimerJa: '記録されるのはテキストの変更事実のみであり、法的助言ではありません。',
       disclaimerFr: 'Seules les modifications de texte sont enregistrées ; ceci ne constitue pas un avis juridique.',
       hasUnparsed: 'Certaines modifications n’ont pas pu être analysées ; vérifiez-les manuellement',
+      parseWarnings: 'Avertissements d’analyse : {warnings}',
+      hasTruncation: 'L’analyse a atteint une limite ; le registre peut être incomplet. Vérifiez le document source.',
+      conflictReloaded: 'Les données ont été modifiées par une autre personne ; le registre a été actualisé.',
       counts: { revision: '{count} changements de texte', comment: '{count} commentaires', unparsed: '{count} non analysés' }
     }
   },

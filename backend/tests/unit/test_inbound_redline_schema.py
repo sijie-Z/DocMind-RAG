@@ -34,6 +34,9 @@ SUBMISSION = "review_redline_submission"
 ROW = "review_redline_row"
 
 
+SUBMISSION_INDEX = "ix_review_redline_submission_organization_id"
+
+
 def _cfg() -> Config:
     cfg = Config(str(BACKEND_ROOT / "alembic.ini"))
     cfg.set_main_option("script_location", str(BACKEND_ROOT / "alembic"))
@@ -43,6 +46,26 @@ def _cfg() -> Config:
 def _revision(db_path: Path) -> set[str]:
     with sqlite3.connect(str(db_path)) as conn:
         return {row[0] for row in conn.execute("SELECT version_num FROM alembic_version")}
+
+
+def test_040_submission_org_index_declared_in_orm():
+    """ORM 侧也必须声明单列 organization_id 索引，否则 create_all 库与迁移库漂移。"""
+    indexes = {idx.name for idx in Base.metadata.tables[SUBMISSION].indexes}
+    assert SUBMISSION_INDEX in indexes
+
+
+def test_040_migration_source_guard():
+    """040 downgrade 不得逐条 drop_index（MySQL 1553：drop_table 会随表删除索引）。
+
+    先例：035 的同款源码扫描（test_retrieval_eval_run_history.py:518）。
+    """
+    migration = (BACKEND_ROOT / "alembic" / "versions" / "040_inbound_redline_ledger.py").read_text(
+        encoding="utf-8"
+    )
+    downgrade = migration.split("def downgrade() -> None:", 1)[1]
+    assert "op.drop_table(ROW)" in downgrade
+    assert "op.drop_table(SUBMISSION)" in downgrade
+    assert "op.drop_index(" not in downgrade
 
 
 def test_040_revision_chain():
@@ -111,9 +134,18 @@ def test_040_schema_and_downgrade_roundtrip(tmp_path, monkeypatch):
 
         submission_indexes = {row[1] for row in conn.execute(f"PRAGMA index_list({SUBMISSION})")}
         assert {
+            SUBMISSION_INDEX,
             "ix_review_redline_submission_org_created",
             "ix_review_redline_submission_case_created",
         } <= submission_indexes
+        # 单列 organization_id 索引是 create_all（ORM index=True）与迁移库的
+        # parity 项；删掉迁移或模型里的索引定义，本断言必须红。
+        org_index_cols = [
+            info[2]
+            for info in conn.execute(f"PRAGMA index_xinfo({SUBMISSION_INDEX})")
+            if info[2] is not None
+        ]
+        assert org_index_cols == ["organization_id"]
         # SQLite 把命名的 UniqueConstraint 渲染成 sqlite_autoindex_*，按列+唯一性
         # 反查，避免把方言差异误判为迁移漏建约束。
         unique_index_cols = set()

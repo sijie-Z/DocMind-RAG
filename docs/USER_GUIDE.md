@@ -546,9 +546,9 @@ python scripts/reconcile_knowledge_index.py --reindex --limit 10
 
 1. 先建好合同核验案件；在详情页导出历史下方上传对方返回的带修订 DOCX（单次上限 20 MB）。
 2. 上传后按批次追加为 `review_redline_submission`（序号在案件内单调递增），原始 DOCX 存入 MinIO 的 `redlines/{org}/{case}/{submission}.docx`，**不提供下载端点**；解析器只用内存字节、`zipfile` + `defusedxml`，不调用模型、检索或网络。
-3. 台账行区分 `insertion` / `deletion` / `comment` / `unparsed`；相邻删除→插入共享 `pair_key` 但保留两行。moves、格式修订（rPrChange 等）、嵌套修订等无法无损表达的结构显式写成 `unparsed` 并带原因码，重叠修订写入 warnings；超限（2000 行 / 单段 4000 字）标 `partial`，绝不静默丢弃。
+3. 台账行区分 `insertion` / `deletion` / `comment` / `unparsed`；相邻删除→插入共享 `pair_key` 但保留两行。moves、格式修订（rPrChange 等）、嵌套修订等无法无损表达的结构显式写成 `unparsed` 并带原因码，重叠修订写入 warnings；超限（2000 行 / 单段 4000 字）标 `partial`，绝不静默丢弃。台账页会把整批解析告警（`parse_warnings`）与截断提示（`has_truncation`）显示出来：看到提示说明原文解析触及上限，台账可能不完整，请回到原始 DOCX 核对后再下结论。
 4. 每行固定带 `text_provenance='counterparty_docx_ooxml'`，原文哈希取原始 DOCX 字节、文本哈希取精确解析文本；审计只写 id/处置，不写条款文本或作者姓名。
-5. 人工关联核验项/证据并做 disposition（pending/reviewed/needs_clarification/not_relevant）时带 `expected_lock_version` 乐观锁；版本过期返回 409 `REVIEW_REDLINE_CONFLICT`。案件归档后台账只读。台账不可修改或删除，也不改写案件/核验项/证据/导出/规则快照。
+5. 人工关联核验项/证据并做 disposition（pending/reviewed/needs_clarification/not_relevant）时带 `expected_lock_version` 乐观锁；版本过期返回 409 `REVIEW_REDLINE_CONFLICT`。**注意**：409 响应会带回 `current_lock_version`；此时应重新读取台账、用最新版本号重试，不要反复提交旧版本或以新值覆盖他人处置。案件归档后台账只读。台账不可修改或删除，也不改写案件/核验项/证据/导出/规则快照。
 
 **永久免责声明**：只记录文本变化事实，不构成法律意见。
 

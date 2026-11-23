@@ -671,6 +671,17 @@ class _RedlineLedgerFilters(BaseModel):
     page_size: int = Field(20, ge=1, le=100)
 
 
+# Content-Length 是整包声明值：除文件正文外还含 multipart 边界、字段名、
+# 文件名和请求头。预检放行这些开销，实际文件大小仍由下面的第二道闸门
+# 严格限制为 MAX_REDLINE_UPLOAD_BYTES（1 MiB 足够覆盖正常文件名/边界开销）。
+_REDLINE_MULTIPART_OVERHEAD_BYTES = 1024 * 1024
+
+
+def _redline_body_budget_bytes() -> int:
+    """整包预算 = 文件大小上限 + multipart 封装开销（含测试对上限的替换）。"""
+    return redline_service.MAX_REDLINE_UPLOAD_BYTES + _REDLINE_MULTIPART_OVERHEAD_BYTES
+
+
 @router.post("/{review_id}/redlines", response_model=dict, dependencies=_WRITE_DEPS)
 async def upload_review_redlines(
     review_id: str,
@@ -681,23 +692,27 @@ async def upload_review_redlines(
 ):
     """上传对方回传 DOCX，解析 OOXML 修订/批注为不可变台账行。"""
     try:
-        # 第一道闸门：Content-Length 是客户端声明的整包大小，在读取文件正文
-        # 之前就能拒绝超限请求（缺头/非法值不拦截，交给下面的实测大小守卫）。
+        # 第一道闸门：Content-Length 是客户端声明的 multipart 整包大小，
+        # 在读取文件正文之前就能拒绝明显超限的请求（缺头/非法值不拦截，
+        # 交给下面的实测大小守卫）。detail.max_body_bytes 是整包预算，
+        # 包含 _REDLINE_MULTIPART_OVERHEAD_BYTES 的封装开销。
         declared_length = request.headers.get("content-length")
         if declared_length is not None:
             try:
                 content_length = int(declared_length)
             except ValueError:
                 content_length = 0
-            if content_length > redline_service.MAX_REDLINE_UPLOAD_BYTES:
+            body_budget = _redline_body_budget_bytes()
+            if content_length > body_budget:
                 raise PayloadTooLargeError(
                     "文件过大，超过红线台账上传上限",
                     detail={
-                        "max_body_bytes": redline_service.MAX_REDLINE_UPLOAD_BYTES,
+                        "max_body_bytes": body_budget,
                         "received_bytes": content_length,
                     },
                 )
         # 第二道闸门：实测上传文件大小，避免伪造 Content-Length 绕过上限。
+        # detail.max_body_bytes 指严格的文件大小上限。
         file.file.seek(0, 2)
         declared_size = file.file.tell()
         await file.seek(0)

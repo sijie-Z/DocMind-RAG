@@ -2380,6 +2380,9 @@ export default {
       disclaimerJa: '記録されるのはテキストの変更事実のみであり、法的助言ではありません。',
       disclaimerFr: 'Seules les modifications de texte sont enregistrées ; ceci ne constitue pas un avis juridique.',
       hasUnparsed: 'Some changes could not be parsed; check them manually',
+      parseWarnings: 'Parse warnings: {warnings}',
+      hasTruncation: 'Parsing hit a limit; the ledger may be incomplete. Check the source document.',
+      conflictReloaded: 'The data was updated by someone else; the ledger has been refreshed.',
       counts: { revision: '{count} textual changes', comment: '{count} comments', unparsed: '{count} unparsed' }
     }
   },

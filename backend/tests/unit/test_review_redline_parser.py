@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import hashlib
 import io
 import zipfile
@@ -215,24 +216,36 @@ def test_unsupported_compression_and_corrupt_deflate_are_400():
 
 
 def test_streamed_decompressed_bytes_are_capped_not_only_declared_sizes(monkeypatch):
-    monkeypatch.setattr("app.services.review_redline_service.MAX_REDLINE_UPLOAD_BYTES", 2000)
-    buffer = io.BytesIO()
-    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
-        archive.writestr(
-            "word/document.xml",
-            f"<w:document {NS}><w:body><w:p><w:r><w:t>{'长' * 5000}</w:t></w:r></w:p></w:body></w:document>",
-        )
-    payload = bytearray(buffer.getvalue())
-    assert len(payload) < 2000  # 压缩后足够小，能通过上传前置检查
+    """声明体积骗过目录预检后，逐块解压计数仍必须给出明确的 400。
 
-    # 伪造目录项：声明解压后只有 10 字节（骗过 file_size 预检），实际流远大于上限。
-    local = payload.find(b"PK\x03\x04")
-    central = payload.find(b"PK\x01\x02")
-    for header, size_offset in ((local, 22), (central, 24)):
-        payload[header + size_offset : header + size_offset + 4] = (10).to_bytes(4, "little")
+    不能只把 ZIP 头的 file_size 改小：zipfile 会按声明值截断读取并抛 Bad CRC，
+    那样即使删掉流式上限测试也会通过（假绿）。这里用真正的 DOCX 字节，仅让
+    infolist() 返回 file_size 被改小的副本，archive.open() 仍读完整 deflate 流；
+    删除流式上限后解析会成功，测试因此转红。
+    """
+    monkeypatch.setattr("app.services.review_redline_service.MAX_REDLINE_UPLOAD_BYTES", 2000)
+    real_body = "长" * 5000
+    payload = _docx(f"<w:p><w:r><w:t>{real_body}</w:t></w:r></w:p>")
+    assert len(payload) < 2000  # 压缩后足够小，能通过上传前置检查
+    with zipfile.ZipFile(io.BytesIO(payload)) as archive:
+        assert archive.getinfo("word/document.xml").file_size > 2000  # 解压后确实超上限
+
+    real_infolist = zipfile.ZipFile.infolist
+
+    def declared_size_lies(self):
+        # 仅伪造目录项的声明体积；真实压缩流与 CRC 保持合法。
+        infos = []
+        for info in real_infolist(self):
+            forged = copy.copy(info)
+            forged.file_size = 10
+            infos.append(forged)
+        return infos
+
+    monkeypatch.setattr(zipfile.ZipFile, "infolist", declared_size_lies)
     with pytest.raises(ValidationError) as caught:
-        parse_redline_docx(bytes(payload))
+        parse_redline_docx(payload)
     assert caught.value.status_code == 400
+    assert "DOCX 成员解压后超过上限" in str(caught.value.message)
 
 
 def test_deeply_nested_xml_yields_unparsed_row_instead_of_recursion_error():
@@ -280,6 +293,128 @@ def test_row_cap_emits_partial_with_explicit_warning():
     assert result.revision_count == MAX_REDLINE_ROWS
     assert result.submission_status == "partial"
     assert any("row_cap_exceeded" in warning for warning in result.parse_warnings)
+
+
+def test_range_marker_only_docx_is_never_reported_as_clean():
+    """只有范围标记的 DOCX 必须留下 unparsed 行与显式告警，不能 0/0/parsed。"""
+    document = (
+        '<w:p><w:moveFromRangeStart w:id="1"/><w:moveFromRangeEnd w:id="1"/>'
+        '<w:moveToRangeStart w:id="2"/><w:moveToRangeEnd w:id="2"/>'
+        '<w:insRangeStart w:id="3"/><w:insRangeEnd w:id="3"/>'
+        '<w:delRangeStart w:id="4"/><w:delRangeEnd w:id="4"/></w:p>'
+    )
+    result = parse_redline_docx(_docx(document))
+    assert result.rows
+    assert result.unparsed_count == 8
+    assert result.submission_status == "partial"
+    assert result.parse_warnings
+    reasons = {reason for row in result.rows for reason in (row["unparsed_reason"] or [])}
+    assert reasons == {"move_range", "revision_range"}
+    # 结束标记没有可见文本也必须留档。
+    assert all(row["before_text"] is None for row in result.rows)
+    _assert_only_facts(result)
+
+
+def test_nested_opposite_revisions_keep_text_on_correct_side():
+    """w:ins 中的 w:del / w:del 中的 w:ins 不能混进对方方向的事实行。"""
+    document = (
+        '<w:p><w:ins w:id="1" w:author="甲">'
+        "<w:r><w:t>新增外层</w:t></w:r>"
+        '<w:del w:id="2" w:author="乙"><w:r><w:delText>内层删除</w:delText></w:r></w:del>'
+        "</w:ins>"
+        '<w:del w:id="3" w:author="甲">'
+        "<w:r><w:delText>删除外层</w:delText></w:r>"
+        '<w:ins w:id="4" w:author="乙"><w:r><w:t>内层新增</w:t></w:r></w:ins>'
+        "</w:del></w:p>"
+    )
+    result = parse_redline_docx(_docx(document))
+    insert = next(row for row in result.rows if row["revision_type"] == "insertion")
+    delete = next(row for row in result.rows if row["revision_type"] == "deletion")
+    assert insert["after_text"] == "新增外层"
+    assert "内层删除" not in (insert["after_text"] or "")
+    assert delete["before_text"] == "删除外层"
+    assert "内层新增" not in (delete["before_text"] or "")
+    overlap_rows = [
+        row
+        for row in result.rows
+        if row["unparsed_reason"] and "nested_opposite_revision" in row["unparsed_reason"]
+    ]
+    assert len(overlap_rows) == 2
+    assert {row["before_text"] for row in overlap_rows} == {"内层删除", "内层新增"}
+    assert all(row["revision_type"] == "unparsed" for row in overlap_rows)
+    assert any("nested_opposite_revision" in warning for warning in result.parse_warnings)
+    assert result.submission_status == "partial"
+    _assert_only_facts(result)
+
+
+def test_comment_body_nested_revisions_are_one_row_with_stable_reasons():
+    document = '<w:p><w:r><w:t>正文</w:t></w:r><w:commentRangeStart w:id="1"/></w:p>'
+    comments = (
+        '<w:comment w:id="1" w:author="李四">'
+        "<w:p><w:r><w:t>批注可见文本</w:t></w:r>"
+        '<w:ins w:id="2"><w:r><w:t>批注内插入</w:t></w:r></w:ins>'
+        '<w:del w:id="3"><w:r><w:delText>批注内删除</w:delText></w:r></w:del>'
+        "</w:p></w:comment>"
+    )
+    result = parse_redline_docx(_docx(document, comments_xml=comments))
+    comment = next(row for row in result.rows if row["revision_type"] == "comment")
+    assert comment["after_text"] == "批注可见文本"
+    nested_rows = [row for row in result.rows if row["revision_type"] == "unparsed"]
+    assert len(nested_rows) == 2  # 每处嵌套修订一行，父/子不双计
+    assert [row["unparsed_reason"] for row in nested_rows] == [
+        ["comment_insertion"],
+        ["comment_deletion"],
+    ]
+    assert all(row["comment_id"] == "1" for row in nested_rows)
+    assert all(row["location"]["source"] == "word/comments.xml" for row in nested_rows)
+    assert sum("comment_nested_revision" in w for w in result.parse_warnings) == 2
+    _assert_only_facts(result)
+
+
+def test_field_result_revision_is_unparsed_not_counted_as_insertion():
+    document = (
+        '<w:p><w:ins w:id="1" w:author="甲">'
+        '<w:fldSimple w:instr="PAGE"><w:r><w:t>字段结果</w:t></w:r></w:fldSimple>'
+        "</w:ins></w:p>"
+    )
+    result = parse_redline_docx(_docx(document))
+    insertion = next(row for row in result.rows if row["revision_type"] == "insertion")
+    assert insertion["after_text"] is None
+    unparsed = [
+        row
+        for row in result.rows
+        if row["unparsed_reason"] and "field_result_revision" in row["unparsed_reason"]
+    ]
+    assert len(unparsed) == 1
+    assert any("field_result_revision" in warning for warning in result.parse_warnings)
+    _assert_only_facts(result)
+
+
+def test_author_and_comment_id_are_bounded_to_orm_column_widths():
+    document = (
+        f'<w:p><w:ins w:id="1" w:author="{"甲" * 300}"><w:r><w:t>新增</w:t></w:r></w:ins>'
+        '<w:commentRangeStart w:id="' + ("9" * 80) + '"/></w:p>'
+    )
+    comment_id = "9" * 80
+    comments = (
+        f'<w:comment w:id="{comment_id}" w:author="{"乙" * 300}">'
+        "<w:p><w:r><w:t>批注</w:t></w:r></w:p></w:comment>"
+    )
+    result = parse_redline_docx(_docx(document, comments_xml=comments))
+    for row in result.rows:
+        assert row["author"] is None or len(row["author"]) <= 200
+        assert row["comment_author"] is None or len(row["comment_author"]) <= 200
+        assert row["comment_id"] is None or len(row["comment_id"]) <= 64
+    _assert_only_facts(result)
+
+
+def test_empty_comment_body_emits_explicit_warning():
+    document = '<w:p><w:commentRangeStart w:id="5"/><w:commentRangeEnd w:id="5"/></w:p>'
+    comments = '<w:comment w:id="5" w:author="李四"><w:p/></w:comment>'
+    result = parse_redline_docx(_docx(document, comments_xml=comments))
+    assert result.comment_count == 1
+    assert any(w.startswith("empty_comment_body:") for w in result.parse_warnings)
+    assert result.submission_status == "partial"
 
 
 def test_plain_document_without_revisions_is_parsed_and_empty():

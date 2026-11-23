@@ -1,7 +1,7 @@
 {
   "$comment": "i18n 键面快照（基准语 zh，全量叶子键排序固化）。任何键面变化（死键清扫/键改名/新增词条）都必须同步提交本文件 diff：更新方式 UPDATE_I18N_KEY_SNAPSHOT=1 npx vitest run src/locales/__tests__/keySnapshot.test.ts。本快照为全量真值（新增键同样需入快照），确保后续任何删除都能被 keySnapshot.test.ts 点名拦截。",
   "source": "zh",
-  "keyCount": 2195,
+  "keyCount": 2198,
   "keys": [
     "about.dataFlowTitle",
     "about.flow.embed",
@@ -1795,6 +1795,7 @@
     "reviews.redlines.columns.reason",
     "reviews.redlines.columns.revisionType",
     "reviews.redlines.columns.time",
+    "reviews.redlines.conflictReloaded",
     "reviews.redlines.counts.comment",
     "reviews.redlines.counts.revision",
     "reviews.redlines.counts.unparsed",
@@ -1812,6 +1813,7 @@
     "reviews.redlines.filters.all",
     "reviews.redlines.filters.disposition",
     "reviews.redlines.filters.revisionType",
+    "reviews.redlines.hasTruncation",
     "reviews.redlines.hasUnparsed",
     "reviews.redlines.itemLink",
     "reviews.redlines.ledgerLoadFailed",
@@ -1820,6 +1822,7 @@
     "reviews.redlines.noSubmissions",
     "reviews.redlines.none",
     "reviews.redlines.note",
+    "reviews.redlines.parseWarnings",
     "reviews.redlines.reason",
     "reviews.redlines.revisionTypes.comment",
     "reviews.redlines.revisionTypes.deletion",

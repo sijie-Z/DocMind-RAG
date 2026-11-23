@@ -2366,6 +2366,9 @@ export default {
       disclaimerJa: '記録されるのはテキストの変更事実のみであり、法的助言ではありません。',
       disclaimerFr: 'Seules les modifications de texte sont enregistrées ; ceci ne constitue pas un avis juridique.',
       hasUnparsed: '解析できなかった変更があります。手動で確認してください',
+      parseWarnings: '解析警告：{warnings}',
+      hasTruncation: '解析が上限に達しました。台帳が不完全な可能性があります。原文を確認してください',
+      conflictReloaded: '他のユーザーにより更新されたため、台帳を最新状態に更新しました',
       counts: { revision: 'テキスト変更 {count} 件', comment: 'コメント {count} 件', unparsed: '解析不可 {count} 件' }
     }
   },

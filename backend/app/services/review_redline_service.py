@@ -18,6 +18,7 @@ import re
 import uuid
 import zipfile
 import zlib
+from collections.abc import Set as AbstractSet
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from io import BytesIO
@@ -27,6 +28,7 @@ from xml.etree.ElementTree import ParseError
 from defusedxml.common import DefusedXmlException
 from defusedxml.ElementTree import fromstring
 from sqlalchemy import func, select
+from sqlalchemy import update as sa_update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -86,9 +88,20 @@ _SUPPORTED = {
 }
 
 # 显式留档的无法归类结构 → 稳定原因码。绝不静默丢弃这些结构里的文本。
+# Word 的范围标记（moveFrom/moveTo/ins/del 的 RangeStart/RangeEnd）本身只描述
+# 修订边界，却常是 DOCX 中唯一的修订痕迹；必须逐条留档，不能因「无可见文本」
+# 被折叠掉，否则整篇只有范围标记的 DOCX 会伪装成 parsed/0 行/0 告警。
 _UNPARSED_REASONS: dict[str, str] = {
     "moveFrom": "move",
     "moveTo": "move",
+    "moveFromRangeStart": "move_range",
+    "moveFromRangeEnd": "move_range",
+    "moveToRangeStart": "move_range",
+    "moveToRangeEnd": "move_range",
+    "insRangeStart": "revision_range",
+    "insRangeEnd": "revision_range",
+    "delRangeStart": "revision_range",
+    "delRangeEnd": "revision_range",
     "rPrChange": "rPrChange",
     "pPrChange": "pPrChange",
     "sectPrChange": "sectPrChange",
@@ -177,18 +190,81 @@ def _xml_date(value: str | None) -> datetime | None:
         return None
 
 
-def _node_text(element: Any) -> str:
-    """按文档顺序拼接 OOXML 可见文本（含制表/换行与删除文本，不改写字面内容）。"""
+# 批注正文嵌套修订的稳定原因码（schema 允许任意字符串，这里集中定义，禁止临时拼装）。
+_COMMENT_REASONS: dict[str, str] = {
+    "insertion": "comment_insertion",
+    "deletion": "comment_deletion",
+    "move": "comment_move",
+    "move_range": "comment_move_range",
+    "revision_range": "comment_revision_range",
+    "rPrChange": "comment_rPrChange",
+    "pPrChange": "comment_pPrChange",
+    "sectPrChange": "comment_sectPrChange",
+    "tblPrChange": "comment_tblPrChange",
+    "trPrChange": "comment_trPrChange",
+    "tcPrChange": "comment_tcPrChange",
+    "numberingChange": "comment_numberingChange",
+    "cellIns": "comment_cellIns",
+    "cellDel": "comment_cellDel",
+    "merge": "comment_merge",
+    "customXml": "comment_customXml",
+    "nested_revision": "comment_nested_revision",
+}
+
+# 侧别感知的文本抽取：w:ins 的 after 不能混入嵌套 w:del 的 delText，
+# w:del 的 before 也不能混入嵌套 w:ins 的 w:t；否则「新增里删除」与
+# 「删除里新增」会被记成相反方向的单侧改动。
+_OPPOSITE_SIDE = {"insertion": "del", "deletion": "ins"}
+_TEXT_TAGS = frozenset({"t", "delText", "tab", "br", "cr"})
+
+
+def _node_text(
+    element: Any, *, side: str | None = None, skip_ids: AbstractSet[int] = frozenset()
+) -> str:
+    """按文档顺序拼接 OOXML 可见文本（含制表/换行与删除文本，不改写字面内容）。
+
+    ``side='insertion'`` 跳过嵌套 w:del 子树，``side='deletion'`` 跳过嵌套
+    w:ins 子树；本节点自身永不跳过。``skip_ids`` 供调用方排除已单独留档的
+    嵌套结构，防止同一段文本在父子两行里重复计数。
+    """
     parts: list[str] = []
-    for node in element.iter():
-        tag = node.tag
-        if _is(tag, "t") or _is(tag, "delText"):
-            parts.append(node.text or "")
-        elif _is(tag, "tab"):
-            parts.append("\t")
-        elif _is(tag, "br") or _is(tag, "cr"):
-            parts.append("\n")
+    opposite = _OPPOSITE_SIDE.get(side) if side else None
+    stack: list[tuple[Any, bool]] = [(element, True)]
+    while stack:
+        node, included = stack.pop()
+        if not included or id(node) in skip_ids:
+            continue
+        tag = _local_name(node.tag)
+        if tag in _TEXT_TAGS:
+            if _is(node.tag, "t") or _is(node.tag, "delText"):
+                parts.append(node.text or "")
+            elif _is(node.tag, "tab"):
+                parts.append("\t")
+            else:
+                parts.append("\n")
+        # 子节点逆序入栈以保持文档顺序；字段结果等例外由调用方用 skip_ids 排除。
+        child_included = included and not (opposite is not None and _is(node.tag, opposite))
+        for child in reversed(list(node)):
+            stack.append((child, child_included))
     return "".join(parts)
+
+
+def _nested_elements(element: Any, local: str) -> list[Any]:
+    """返回元素自身之外的所有后代 w:<local>，按文档顺序。"""
+    found: list[Any] = []
+    for node in element.iter():
+        if node is not element and _is(node.tag, local):
+            found.append(node)
+    return found
+
+
+def _revision_side(local: str) -> str | None:
+    return _SUPPORTED.get(local)
+
+
+def _bounded(value: Any, limit: int) -> Any:
+    """把解析出的字符串裁到 ORM 列宽，避免 MySQL 严格模式下整批入库失败。"""
+    return value[:limit] if isinstance(value, str) and len(value) > limit else value
 
 
 def _clause_hints(paragraphs: list[str]) -> tuple[list[str] | None, list[str] | None]:
@@ -301,8 +377,20 @@ def _comments_by_id(root: Any | None) -> dict[str, dict[str, Any]]:
         comment_id = (element.get(_w("id")) or "").strip()
         if not comment_id or comment_id in result:
             continue
+        # 批注正文里的嵌套修订由独立的 unparsed 行留档；从批注文本中剔除，
+        # 防止同一段文字在 comment 行与 comment_revision 行重复计数。
+        nested_ids = frozenset(
+            id(node)
+            for node in element.iter()
+            if node is not element
+            and (
+                _local_name(node.tag) in _SUPPORTED
+                or _local_name(node.tag) in _UNPARSED_REASONS
+                or _is(node.tag, "nestedRevision")
+            )
+        )
         result[comment_id] = {
-            "text": _node_text(element),
+            "text": _node_text(element, skip_ids=nested_ids),
             "author": (element.get(_w("author")) or "").strip() or None,
             "date": _xml_date(element.get(_w("date"))),
         }
@@ -368,6 +456,9 @@ def parse_redline_docx(data: bytes, filename: str = "") -> RedlineParseResult:
         warnings.append(f"xml_depth_cap_exceeded:nodes={len(deep_ids)};max={MAX_OOXML_XML_DEPTH}")
 
     seen_comments: set[str] = set()
+    # 已被外层修订留档的嵌套异侧修订：其文本已由 unparsed/overlap 行记录，
+    # 自己不再单独生成一条方向相反的事实行，避免重复计数。
+    nested_opposite_ids: set[int] = set()
     order = 0
     for element in document.iter():
         tag = element.tag
@@ -375,6 +466,9 @@ def parse_redline_docx(data: bytes, filename: str = "") -> RedlineParseResult:
         parents = ancestors.get(id(element), ())
         parent_locals = [_local_name(parent.tag) for parent in parents]
         order += 1
+
+        if id(element) in nested_opposite_ids:
+            continue
 
         if id(element) in deep_ids:
             warnings.append(f"xml_depth_cap_exceeded:element=w:{local}")
@@ -400,11 +494,30 @@ def parse_redline_docx(data: bytes, filename: str = "") -> RedlineParseResult:
 
         if local in _SUPPORTED:
             revision_type = _SUPPORTED[local]
-            text = _node_text(element)
+            # 同侧修订（如 w:del 内的 w:delText）合并进本行；异侧修订单独留档，
+            # 文本必须从本行剔除，否则方向被记反。
+            opposite = _OPPOSITE_SIDE[revision_type]
+            nested_opposite = _nested_elements(element, opposite)
+            nested_ids = {id(node) for node in nested_opposite}
+            nested_opposite_ids.update(nested_ids)
+            # 修订范围内的 w:fldSimple/w:instrText 字段结果属于展示层文本，
+            # 其 w:t 不是独立修订事实；显式留档，不并入 before/after。
+            field_nodes = [
+                node
+                for node in element.iter()
+                if node is not element
+                and (
+                    _is(node.tag, "fldSimple")
+                    or _is(node.tag, "instrText")
+                    or _is(node.tag, "fldChar")
+                )
+            ]
+            nested_ids.update(id(node) for node in field_nodes)
+            text = _node_text(element, side=revision_type, skip_ids=nested_ids)
             if revision_type == "insertion":
-                before, after = None, text
+                before, after = None, text or None
             else:
-                before, after = text, None
+                before, after = text or None, None
             clause_no, section_no = _paragraph_hints(element, parents)
             nested = [
                 parent_local
@@ -415,6 +528,50 @@ def parse_redline_docx(data: bytes, filename: str = "") -> RedlineParseResult:
             ]
             if nested:
                 warnings.append(f"overlap:{nested[-1]}:{local}")
+            if field_nodes:
+                # 字段结果里的 w:t 不是可判定的新增/删除事实，单独显式留档。
+                warnings.append(f"field_result_revision:outer={local};nodes={len(field_nodes)}")
+                events.append(
+                    {
+                        "kind": "unparsed",
+                        "text_before": _node_text(field_nodes[0]) or None,
+                        "text_after": None,
+                        "unparsed_reason": ["field_result_revision"],
+                        "element": local,
+                        "order": order,
+                        "location": {
+                            "source": _DOCUMENT_PART,
+                            "element": f"w:{local}",
+                            "order": order,
+                        },
+                        "clause_no": clause_no,
+                        "section_no": section_no,
+                    }
+                )
+            if nested_opposite:
+                # 嵌套异侧修订仍是一段真实文本：保留事实行，但显式标记为
+                # unparsed/overlap，不能把两个方向压缩成一个方向的事实。
+                warnings.append(f"nested_opposite_revision:outer={local};inner={opposite}")
+                events.append(
+                    {
+                        "kind": "unparsed",
+                        "text_before": _node_text(nested_opposite[0]) or None,
+                        "text_after": None,
+                        "author": (nested_opposite[0].get(_w("author")) or "").strip() or None,
+                        "authored_at": _xml_date(nested_opposite[0].get(_w("date"))),
+                        "unparsed_reason": ["nested_opposite_revision"],
+                        "element": opposite,
+                        "order": order,
+                        "location": {
+                            "source": _DOCUMENT_PART,
+                            "element": f"w:{opposite}",
+                            "outer": f"w:{local}",
+                            "order": order,
+                        },
+                        "clause_no": clause_no,
+                        "section_no": section_no,
+                    }
+                )
             events.append(
                 {
                     "kind": revision_type,
@@ -446,6 +603,10 @@ def parse_redline_docx(data: bytes, filename: str = "") -> RedlineParseResult:
             comment = comments.get(comment_id, {})
             if comment_id not in comments:
                 warnings.append("comments_part_missing_or_incomplete")
+            elif not (comment.get("text") or "").strip():
+                # 批注正文为空（含只有嵌套修订的批注）：必须显式告警，
+                # 不能让一条看似干净的 comment 行掩盖空正文。
+                warnings.append(f"empty_comment_body:comment_id={comment_id}")
             clause_no, section_no = _paragraph_hints(element, parents)
             events.append(
                 {
@@ -475,7 +636,20 @@ def parse_redline_docx(data: bytes, filename: str = "") -> RedlineParseResult:
             reason = _UNPARSED_REASONS[local]
             # 无法归类的结构一律留档（包括不含文本的结束标记），保证结构
             # 不会在解析中静默消失；重叠用 reason 码显式告警。
-            text = _node_text(element)
+            range_marker = local.endswith("RangeStart") or local.endswith("RangeEnd")
+            if range_marker:
+                # 范围标记常是文件中唯一的修订痕迹：即使没有可见文本也必须
+                # 留下行 + 告警，不能让只有范围标记的 DOCX 显示成 0/0。
+                warnings.append(f"unparsed_range:{reason}:w:{local}")
+            parent_side = next(
+                (
+                    _revision_side(parent_local)
+                    for parent_local in parent_locals
+                    if parent_local in _SUPPORTED
+                ),
+                None,
+            )
+            text = _node_text(element, side=parent_side) if parent_side else _node_text(element)
             overlapping = [
                 parent_local
                 for parent_local in parent_locals
@@ -533,22 +707,44 @@ def parse_redline_docx(data: bytes, filename: str = "") -> RedlineParseResult:
                 )
 
     # 批注正文里若还有修订结构，也显式留档，绝不静默丢掉。
+    # 每个嵌套修订单独一行（不合并成一个大行），批注正文里的文本已从
+    # comment 行剔除，避免父子两遍重复计数；原因码全部来自预定义常量。
     if comments_root is not None:
-        for element in comments_root.iter():
-            local = _local_name(element.tag)
-            if local in _SUPPORTED or local in _UNPARSED_REASONS:
-                reason = _SUPPORTED.get(local) or _UNPARSED_REASONS.get(local)
+        for comment_element in comments_root.iter():
+            if not _is(comment_element.tag, "comment"):
+                continue
+            comment_id = (comment_element.get(_w("id")) or "").strip()[:64]
+            seen_nested: set[int] = set()
+            for node in comment_element.iter():
+                local = _local_name(node.tag)
+                if node is comment_element or id(node) in seen_nested:
+                    continue
+                if (
+                    local not in _SUPPORTED
+                    and local not in _UNPARSED_REASONS
+                    and local != "nestedRevision"
+                ):
+                    continue
+                # 只处理最外层嵌套修订；其后代由同一行承载，避免重复计数。
+                seen_nested.update(id(child) for child in node.iter())
+                reason_key = _SUPPORTED.get(local) or _UNPARSED_REASONS.get(local) or local
+                reason = _COMMENT_REASONS.get(reason_key, f"comment_{reason_key}")
+                warnings.append(
+                    f"comment_nested_revision:comment_id={comment_id or 'missing'}:w:{local}"
+                )
                 events.append(
                     {
                         "kind": "comment_revision",
-                        "text_before": _node_text(element) or None,
+                        "text_before": _node_text(node) or None,
                         "text_after": None,
-                        "unparsed_reason": [f"comment_{reason}"],
+                        "comment_id": comment_id or None,
+                        "unparsed_reason": [reason],
                         "element": local,
                         "order": order + 1,
                         "location": {
                             "source": _COMMENTS_PART,
                             "element": f"w:{local}",
+                            "comment_id": comment_id or None,
                         },
                         "clause_no": None,
                         "section_no": None,
@@ -585,10 +781,10 @@ def parse_redline_docx(data: bytes, filename: str = "") -> RedlineParseResult:
             "after_text": after,
             "before_sha256": _sha256(before) if before is not None else None,
             "after_sha256": _sha256(after) if after is not None else None,
-            "author": event.get("author"),
+            "author": _bounded(event.get("author"), 200),
             "authored_at": event.get("authored_at"),
-            "comment_id": event.get("comment_id"),
-            "comment_author": event.get("comment_author"),
+            "comment_id": _bounded(event.get("comment_id"), 64),
+            "comment_author": _bounded(event.get("comment_author"), 200),
             "comment_date": event.get("comment_date"),
             "location": event.get("location") or {},
             "clause_no": event.get("clause_no"),
@@ -631,7 +827,13 @@ def _iso(value: datetime | None) -> str | None:
 
 
 def _assert_scope(case: ReviewCase, current_user: User) -> None:
-    """服务层复核租户边界：端点已鉴权，这里防内部调用绕过。"""
+    """服务层复核租户边界：端点已鉴权，这里防内部调用绕过。
+
+    超管与 ``review_case_service.get_case_for_user`` 保持一致：不受组织
+    相等性约束；普通用户仍只可操作本组织案件。
+    """
+    if getattr(current_user, "is_superuser", False):
+        return
     org_id = get_user_org_id(current_user)
     if org_id is not None and org_id != case.organization_id:
         raise NotFoundError("核验案件不存在", resource="review_case", resource_id=case.id)
@@ -730,7 +932,15 @@ async def upload_submission(
     data: bytes,
     storage_object_name: str | None = None,
 ) -> dict[str, Any]:
-    """上传并解析对方 DOCX：一次提交落头表+行表，原文对象写入 MinIO。"""
+    """上传并解析对方 DOCX：先提交 DB 快照与审计，再写 MinIO 对象。
+
+    无删除接口，因此绝不在 DB 提交前写对象：否则 409/IntegrityError 会留下
+    无引用对象。顺序固定为 ①锁定案件并预留批次/行 + 上传审计（
+    status=parsed|partial，对象名在提交前已确定）→ ②提交 DB → ③上传对象。
+    任何 409/写失败都发生在 ①之前或 ①之内，对象从未写入；步骤③失败时 DB
+    中保留完整引用行与审计（原文可重传修复），且对象上传之后不再有任何
+    DB 写入，彻底消除「提交失败留下孤儿对象」的路径。
+    """
     _assert_scope(case, current_user)
     if not isinstance(data, (bytes, bytearray, memoryview)):
         raise ValidationError("DOCX 内容必须是字节", field="file")
@@ -790,14 +1000,30 @@ async def upload_submission(
             )
         )
 
-    try:
-        await asyncio.to_thread(
-            minio_client.put_object,
-            object_name=object_name,
-            data=BytesIO(payload),
-            length=len(payload),
-            content_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    # M2：上传审计与批次/行在同一事务内提交；只含 id/哈希前缀，
+    # 不含条款正文、作者姓名或其他原文内容。
+    session.add(
+        UserActivityLog(
+            user_id=current_user.id,
+            action="review_redline_upload",
+            target_type="review_case",
+            target_id=case_id,
+            detail=_canonical_json(
+                {
+                    "organization_id": org_id,
+                    "user_id": current_user.id,
+                    "case_id": case_id,
+                    "submission_id": submission_id,
+                    "sequence_no": submission.sequence_no,
+                    "file_sha256_prefix": file_sha256[:16],
+                    "file_size": len(payload),
+                    "status": submission.status,
+                }
+            ),
         )
+    )
+    try:
+        # ① 先持久化 DB 快照（含确定的对象名）与审计并提交；此时对象尚未写入。
         await session.commit()
     except IntegrityError as exc:
         await session.rollback()
@@ -806,11 +1032,24 @@ async def upload_submission(
             error_code="REVIEW_REDLINE_CONFLICT",
             detail={"case_id": case_id},
         ) from exc
-    except Exception as exc:
-        # 存储失败不能留下 DB 半写入；对象已上传但提交失败时留待运维清理。
+    except Exception:
         await session.rollback()
-        if isinstance(exc, ConflictError):
-            raise
+        raise
+
+    try:
+        # ② DB 提交成功后才写对象：409/回滚路径永远到不了这里，无孤儿对象。
+        # 对象上传之后没有任何 DB 写入，故不存在「对象已写、提交失败」的窗口。
+        await asyncio.to_thread(
+            minio_client.put_object,
+            object_name=object_name,
+            data=BytesIO(payload),
+            length=len(payload),
+            content_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        )
+    except Exception as exc:
+        # 对象写入失败：DB 行已提交且引用该对象名，重传同一对象即可修复；
+        # 绝不删除对象（系统无删除策略），也不回滚已提交的引用行。
+        await session.rollback()
         raise ServiceUnavailableError(
             "红线原文存储失败，请稍后重试",
             error_code="REVIEW_REDLINE_STORAGE_UNAVAILABLE",
@@ -1004,47 +1243,68 @@ async def update_disposition(
                 "证据不存在", resource="review_evidence", resource_id=submitted_evidence_id
             )
 
-    # 结束只读视图后当前读锁定案件行与台账行；案件锁持有到最终 commit，
-    # 防止「载入时未归档、写入前被归档」的窄竞态；MySQL RR 下必须先提交旧视图。
+    # 结束只读视图后当前读锁定案件行（归档检查必须在锁内）；案件锁持有到
+    # 最终 commit，防止「载入时未归档、写入前被归档」的窄竞态；MySQL RR 下
+    # 必须先提交旧视图。行级乐观锁不依赖 ORM 实例状态：下面用条件 UPDATE
+    # 原子比较 lock_version 并据此更新，避免 SQLAlchemy 身份映射（
+    # expire_on_commit=False）把 SELECT FOR UPDATE 的旧实例重新返回，
+    # 导致过期实例覆盖他人的写入而不报 409。
     fresh_case = await _lock_case(session, case)
     _assert_not_archived(fresh_case)
     submission = await get_submission(session, case=fresh_case, submission_id=submission_id)
-    locked = (
-        (
-            await session.execute(
-                select(ReviewRedlineRow)
-                .where(
-                    ReviewRedlineRow.id == row_id,
-                    ReviewRedlineRow.submission_id == submission.id,
-                    ReviewRedlineRow.case_id == fresh_case.id,
-                    ReviewRedlineRow.organization_id == fresh_case.organization_id,
-                )
-                .with_for_update()
+    # 只校验行是否存在/归属；版本判定完全交给下面的条件 UPDATE。
+    exists = (
+        await session.execute(
+            select(ReviewRedlineRow.id).where(
+                ReviewRedlineRow.id == row_id,
+                ReviewRedlineRow.submission_id == submission.id,
+                ReviewRedlineRow.case_id == fresh_case.id,
+                ReviewRedlineRow.organization_id == fresh_case.organization_id,
             )
         )
-        .scalars()
-        .one_or_none()
-    )
-    if locked is None:
+    ).scalar_one_or_none()
+    if exists is None:
         raise NotFoundError("红线台账行不存在", resource="review_redline_row", resource_id=row_id)
-    if locked.lock_version != update.expected_lock_version:
+
+    expected_version = update.expected_lock_version
+    new_version = expected_version + 1
+    disposition_at = datetime.now(UTC)
+    result = await session.execute(
+        sa_update(ReviewRedlineRow)
+        .where(
+            ReviewRedlineRow.id == row_id,
+            ReviewRedlineRow.submission_id == submission.id,
+            ReviewRedlineRow.case_id == fresh_case.id,
+            ReviewRedlineRow.organization_id == fresh_case.organization_id,
+            ReviewRedlineRow.lock_version == expected_version,
+        )
+        .values(
+            disposition=update.disposition,
+            note=update.note,
+            # 无条件赋值：显式 null 表示解除关联，不能沿用旧值。
+            item_id=submitted_item_id,
+            evidence_id=submitted_evidence_id,
+            disposition_by=current_user.id,
+            disposition_at=disposition_at,
+            lock_version=new_version,
+        )
+    )
+    if result.rowcount != 1:
+        current = (
+            await session.execute(
+                select(ReviewRedlineRow.lock_version).where(ReviewRedlineRow.id == row_id)
+            )
+        ).scalar_one_or_none()
+        await session.rollback()
         raise ConflictError(
             "红线台账行已被其他人更新，请刷新后重试",
             error_code="REVIEW_REDLINE_CONFLICT",
             detail={
-                "expected_lock_version": update.expected_lock_version,
-                "current_lock_version": locked.lock_version,
+                "expected_lock_version": expected_version,
+                "current_lock_version": current,
             },
         )
 
-    locked.disposition = update.disposition
-    locked.note = update.note
-    # 无条件赋值：显式 null 表示解除关联，不能沿用旧值。
-    locked.item_id = submitted_item_id
-    locked.evidence_id = submitted_evidence_id
-    locked.disposition_by = current_user.id
-    locked.disposition_at = datetime.now(UTC)
-    locked.lock_version = (locked.lock_version or 1) + 1
     session.add(
         UserActivityLog(
             user_id=current_user.id,
@@ -1058,12 +1318,29 @@ async def update_disposition(
                     "case_id": case_id,
                     "submission_id": submission.id,
                     "row_id": row_id,
-                    "disposition": locked.disposition,
-                    "lock_version": locked.lock_version,
+                    "disposition": update.disposition,
+                    "lock_version": new_version,
                 }
             ),
         )
     )
     await session.commit()
-    await session.refresh(locked)
-    return _row_summary(locked)
+    # 条件 UPDATE 默认同步身份映射；再用 populate_existing 读取，确保返回
+    # 的一定是数据库真值。不能用 expire_all()：那会让调用方持有的 user/case
+    # 实例过期，后续属性读取在异步上下文里触发 MissingGreenlet。
+    return await _get_row_summary_by_id(session, row_id)
+
+
+async def _get_row_summary_by_id(session: AsyncSession, row_id: str) -> dict[str, Any]:
+    row = (
+        (
+            await session.execute(
+                select(ReviewRedlineRow)
+                .where(ReviewRedlineRow.id == row_id)
+                .execution_options(populate_existing=True)
+            )
+        )
+        .scalars()
+        .one()
+    )
+    return _row_summary(row)
