@@ -707,6 +707,29 @@ export default {
     rebuildSuccess: '重建索引任务已提交',
     rebuildFailed: '重建索引失败',
     unknownParseError: '未知解析错误',
+    // 结构化索引阶段/错误码（后端闭集 app/services/index_progress.py）
+    indexStage: {
+      parse: '解析',
+      chunk: '分块',
+      embed: '向量化',
+      index: '写入索引',
+      unknown: '未知阶段'
+    },
+    indexError: {
+      PARSE_PROFILE_INVALID: '解析档位不受支持，请改用自动档位重新解析。',
+      PARSE_UNSUPPORTED_FORMAT: '文件格式不受支持，请转换为 PDF/Word/TXT 等格式后重新上传。',
+      PARSE_FAILED: '文件解析失败，请检查源文件是否损坏后重新解析。',
+      CHUNK_EMPTY: '未提取到有效文本（可能是空文件或扫描件缺 OCR），请补充可识别文本后重新解析。',
+      CHUNK_FAILED: '分块处理失败，请重新解析；若持续失败请联系管理员。',
+      EMBED_COUNT_MISMATCH: '向量数量与分块数量不一致，请重新解析。',
+      EMBED_FAILED: '向量化服务不可用，请稍后重新解析。',
+      INDEX_WRITE_FAILED: '索引写入失败，请稍后重建索引。',
+      INDEX_VERIFICATION_FAILED: '索引写入后校验未通过，请重建索引后再检索。',
+      INDEX_FAILED: '索引处理失败，请稍后重建索引。',
+      DOCUMENT_NOT_FOUND: '文档已不存在，无法重试；请重新上传文件。',
+      JOB_SCHEDULE_FAILED: '处理任务启动失败，任务将在服务重启后自动重试。',
+      UNEXPECTED: '发生未知错误，请稍后重试；若持续失败请联系管理员。'
+    },
     pageScope: '本页',
     rebuildLatestFailed: '最近失败文档重建',
     actionView: '查看',

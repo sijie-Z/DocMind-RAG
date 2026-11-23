@@ -80,7 +80,24 @@ class Document(Base):
     status: Mapped[DocumentStatus] = mapped_column(
         Enum(DocumentStatus), default=DocumentStatus.PENDING, index=True, comment="处理状态"
     )
-    parse_error: Mapped[str | None] = mapped_column(Text, comment="解析错误信息")
+    parse_error: Mapped[str | None] = mapped_column(
+        Text, comment="解析错误信息（保留原始诊断文本）"
+    )
+
+    # 结构化索引进度/错误（竞品批次四）：与 parse_error/status 完全并行，
+    # 不改变任何既有状态语义。闭集码与阶段见 app.services.index_progress。
+    index_stage: Mapped[str | None] = mapped_column(
+        String(16), nullable=True, comment="处理阶段闭集：parse/chunk/embed/index"
+    )
+    index_progress: Mapped[int] = mapped_column(
+        Integer, default=0, server_default=sa.text("0"), comment="阶段边界进度 0-100"
+    )
+    index_error_code: Mapped[str | None] = mapped_column(
+        String(64), nullable=True, comment="稳定错误码闭集；成功/在途中为 NULL"
+    )
+    index_error_detail: Mapped[str | None] = mapped_column(
+        String(256), nullable=True, comment="脱敏且有界的运维提示；不含异常原文/正文/查询"
+    )
 
     # 文档级可见性（对标 Onyx 的文档 ACL 最小版）：
     #   organization = 组织内全员可见（默认，行为与旧版一致）

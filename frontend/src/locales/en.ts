@@ -699,6 +699,29 @@ export default {
     rebuildSuccess: 'Rebuild index job submitted',
     rebuildFailed: 'Failed to rebuild index',
     unknownParseError: 'Unknown parsing error',
+    // Structured index stage/error codes (closed set in backend/app/services/index_progress.py)
+    indexStage: {
+      parse: 'Parsing',
+      chunk: 'Chunking',
+      embed: 'Embedding',
+      index: 'Indexing',
+      unknown: 'Unknown stage'
+    },
+    indexError: {
+      PARSE_PROFILE_INVALID: 'The parse profile is unsupported. Reparse using the automatic profile.',
+      PARSE_UNSUPPORTED_FORMAT: 'Unsupported file format. Convert to PDF, Word or TXT and upload again.',
+      PARSE_FAILED: 'Parsing failed. Check that the source file is not damaged, then reparse.',
+      CHUNK_EMPTY: 'No usable text was extracted (empty file or scanned pages without OCR). Add readable text and reparse.',
+      CHUNK_FAILED: 'Chunking failed. Please reparse; contact an administrator if it keeps failing.',
+      EMBED_COUNT_MISMATCH: 'The embedding count does not match the chunk count. Please reparse.',
+      EMBED_FAILED: 'The embedding service is unavailable. Reparse later.',
+      INDEX_WRITE_FAILED: 'Index write failed. Rebuild the index later.',
+      INDEX_VERIFICATION_FAILED: 'The index failed its post-write check. Rebuild the index before searching.',
+      INDEX_FAILED: 'Indexing failed. Rebuild the index later.',
+      DOCUMENT_NOT_FOUND: 'The document no longer exists; retry is not possible. Upload the file again.',
+      JOB_SCHEDULE_FAILED: 'The job could not start. It will be retried automatically after a service restart.',
+      UNEXPECTED: 'An unexpected error occurred. Try again later; contact an administrator if it persists.'
+    },
     pageScope: 'this page',
     rebuildLatestFailed: 'Rebuild latest failed document',
     actionView: 'View',

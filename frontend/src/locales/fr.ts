@@ -709,6 +709,29 @@ export default {
     rebuildSuccess: 'Tâche de reconstruction de l’index envoyée',
     rebuildFailed: 'Échec de la reconstruction de l’index',
     unknownParseError: "Erreur d'analyse inconnue",
+    // Étapes et codes d'erreur d'indexation structurés (ensemble fermé côté backend)
+    indexStage: {
+      parse: 'Analyse',
+      chunk: 'Découpage',
+      embed: 'Vectorisation',
+      index: 'Écriture de l’index',
+      unknown: 'Étape inconnue'
+    },
+    indexError: {
+      PARSE_PROFILE_INVALID: "Profil d'analyse non pris en charge. Réanalysez avec le profil automatique.",
+      PARSE_UNSUPPORTED_FORMAT: "Format non pris en charge. Convertissez en PDF, Word ou TXT puis téléchargez à nouveau.",
+      PARSE_FAILED: "L'analyse a échoué. Vérifiez que le fichier source n'est pas endommagé, puis réanalysez.",
+      CHUNK_EMPTY: "Aucun texte exploitable n'a été extrait (fichier vide ou scan sans OCR). Ajoutez du texte lisible puis réanalysez.",
+      CHUNK_FAILED: "Le découpage a échoué. Réanalysez ; si le problème persiste, contactez un administrateur.",
+      EMBED_COUNT_MISMATCH: "Le nombre de vecteurs ne correspond pas au nombre de segments. Réanalysez.",
+      EMBED_FAILED: "Le service de vectorisation est indisponible. Réanalysez plus tard.",
+      INDEX_WRITE_FAILED: "L'écriture de l'index a échoué. Reconstruisez l'index plus tard.",
+      INDEX_VERIFICATION_FAILED: "La vérification après écriture a échoué. Reconstruisez l'index avant de rechercher.",
+      INDEX_FAILED: "L'indexation a échoué. Reconstruisez l'index plus tard.",
+      DOCUMENT_NOT_FOUND: "Le document n'existe plus ; nouvelle tentative impossible. Téléchargez à nouveau le fichier.",
+      JOB_SCHEDULE_FAILED: "La tâche n'a pas pu démarrer. Elle sera relancée automatiquement après redémarrage du service.",
+      UNEXPECTED: "Une erreur inattendue s'est produite. Réessayez plus tard ; si le problème persiste, contactez un administrateur."
+    },
     rebuildSubmitted: 'Reconstruction envoyée : {title}',
     rebuildSubmitFailed: 'Échec de l’envoi de la reconstruction',
     noFailedDocs: 'Aucun document en échec actuellement',

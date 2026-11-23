@@ -708,6 +708,29 @@ export default {
     rebuildSuccess: 'インデックス再構築タスクを送信しました',
     rebuildFailed: 'インデックス再構築に失敗しました',
     unknownParseError: '不明な解析エラー',
+    // 構造化インデックス段階／エラーコード（バックエンド閉集合）
+    indexStage: {
+      parse: '解析',
+      chunk: 'チャンク分割',
+      embed: '埋め込み生成',
+      index: 'インデックス書き込み',
+      unknown: '不明な段階'
+    },
+    indexError: {
+      PARSE_PROFILE_INVALID: '解析プロファイルが不正です。自動プロファイルで再解析してください。',
+      PARSE_UNSUPPORTED_FORMAT: '対応していない形式です。PDF/Word/TXT 等に変換して再アップロードしてください。',
+      PARSE_FAILED: '解析に失敗しました。元ファイルが破損していないか確認して再解析してください。',
+      CHUNK_EMPTY: '有効なテキストが抽出されませんでした（空ファイル、または OCR のないスキャン）。テキストを補って再解析してください。',
+      CHUNK_FAILED: 'チャンク分割に失敗しました。再解析し、繰り返す場合は管理者に連絡してください。',
+      EMBED_COUNT_MISMATCH: '埋め込み数とチャンク数が一致しません。再解析してください。',
+      EMBED_FAILED: '埋め込みサービスを利用できません。しばらくしてから再解析してください。',
+      INDEX_WRITE_FAILED: 'インデックスの書き込みに失敗しました。しばらくしてから再構築してください。',
+      INDEX_VERIFICATION_FAILED: '書き込み後の検証に失敗しました。検索前にインデックスを再構築してください。',
+      INDEX_FAILED: 'インデックス処理に失敗しました。しばらくしてから再構築してください。',
+      DOCUMENT_NOT_FOUND: 'ドキュメントは既に存在しません。再試行できません。再度アップロードしてください。',
+      JOB_SCHEDULE_FAILED: '処理タスクを開始できませんでした。サービス再起動後に自動再試行されます。',
+      UNEXPECTED: '予期しないエラーが発生しました。しばらくしてから再試行し、続く場合は管理者に連絡してください。'
+    },
     rebuildSubmitted: '再構築を送信しました：{title}',
     rebuildSubmitFailed: '再構築の送信に失敗しました',
     noFailedDocs: '現在失敗したドキュメントはありません',

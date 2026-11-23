@@ -2,6 +2,35 @@ import request from '@/utils/request'
 import type { AxiosResponse } from 'axios'
 import type { ApiResponse } from '@/types/common'
 
+/**
+ * 结构化索引阶段/错误（闭集，后端 app/services/index_progress.py）。
+ * 与 status / parse_error 的既有语义并行；不替换任何旧字段。
+ */
+export type IndexStage = 'parse' | 'chunk' | 'embed' | 'index'
+export type IndexErrorCode =
+  | 'PARSE_PROFILE_INVALID'
+  | 'PARSE_UNSUPPORTED_FORMAT'
+  | 'PARSE_FAILED'
+  | 'CHUNK_EMPTY'
+  | 'CHUNK_FAILED'
+  | 'EMBED_COUNT_MISMATCH'
+  | 'EMBED_FAILED'
+  | 'INDEX_WRITE_FAILED'
+  | 'INDEX_VERIFICATION_FAILED'
+  | 'INDEX_FAILED'
+  | 'DOCUMENT_NOT_FOUND'
+  | 'JOB_SCHEDULE_FAILED'
+  | 'UNEXPECTED'
+
+export interface IndexPipeline {
+  stage: IndexStage | null
+  /** 阶段边界粗粒度进度 0-100；完成与否仍以 status 为准 */
+  progress: number
+  error_code: IndexErrorCode | null
+  /** 脱敏运维提示；不含异常原文/正文/查询 */
+  error_detail: string | null
+}
+
 export interface KnowledgeBase {
   id: string
   title: string
@@ -22,6 +51,8 @@ export interface KnowledgeBase {
   preview_provenance?: DocumentContent['text_provenance']
   preview_truncated?: boolean
   parse_error?: string
+  /** 结构化索引阶段/错误；旧文档可能为 null */
+  index_pipeline?: IndexPipeline
   raw_status?: string
   created_at: string
   updated_at: string
@@ -50,6 +81,7 @@ export interface KnowledgeJob {
   status: 'queued' | 'processing' | 'success' | 'failed'
   retry_count: number
   error_message?: string
+  index_pipeline?: IndexPipeline
   started_at?: string
   finished_at?: string
   created_at?: string
@@ -63,6 +95,7 @@ export interface DocumentDetail {
   file_type: string
   status: string
   parse_error?: string
+  index_pipeline?: IndexPipeline
   created_at?: string
   description?: string
   keywords?: string[]

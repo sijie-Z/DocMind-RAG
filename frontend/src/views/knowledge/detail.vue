@@ -134,8 +134,18 @@
             </div>
           </header>
 
+          <div
+            v-if="detail?.index_pipeline && detail.status === 'failed' && detail.index_pipeline.error_code"
+            class="mt-4 rounded-lg border border-red-200 bg-red-50/60 px-3 py-2 text-sm text-red-700 dark:border-red-900/60 dark:bg-red-950/30 dark:text-red-300"
+            role="status"
+            data-testid="document-index-pipeline-error"
+          >
+            <span class="font-semibold">{{ indexStageLabel(detail.index_pipeline.stage) }}</span>
+            {{ indexErrorMessage(detail.index_pipeline.error_code) }}
+          </div>
+
           <n-alert
-            v-if="detail?.parse_error"
+            v-if="detail?.parse_error && !detail?.index_pipeline?.error_code"
             type="error"
             :bordered="false"
             class="mt-4 break-words"
@@ -395,6 +405,7 @@ import { useDedupedMessage } from '@/utils/message'
 import { parseTrustedDownloadUrl } from '@/views/chat/utils/downloadUrl'
 import { docIconColor, docStatusLabel, docStatusType } from './docDisplay'
 import ChunkBrowser from './components/ChunkBrowser.vue'
+import { indexErrorMessage, indexPipelineSummary, indexStageLabel } from './indexPipeline'
 
 type ErrorKind = 'notFound' | 'forbidden' | 'failed'
 

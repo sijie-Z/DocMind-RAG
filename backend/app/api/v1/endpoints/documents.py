@@ -60,6 +60,11 @@ from app.services.chunk_override_service import (
 from app.services.document_parser import normalize_parse_profile
 from app.services.document_preview import load_document_chunk, load_document_preview_text
 from app.services.file_service import file_service
+from app.services.index_progress import (
+    IndexErrorCode,
+    build_error_detail,
+    pipeline_payload,
+)
 from app.services.review_document_service import (
     ReviewMetaInput,
     compute_readiness,
@@ -382,6 +387,15 @@ async def upload_document(
                 job.finished_at = utcnow()
                 new_doc.status = DocumentStatus.FAILED
                 new_doc.parse_error = f"本地处理任务启动失败: {str(proc_err)}"
+                # 结构化字段：稳定码 + 脱敏详情；原异常文本只在 parse_error/error_message。
+                new_doc.index_stage = "parse"
+                new_doc.index_progress = 0
+                new_doc.index_error_code = IndexErrorCode.JOB_SCHEDULE_FAILED.value
+                new_doc.index_error_detail = build_error_detail("parse", proc_err)
+                job.index_stage = "parse"
+                job.index_progress = 0
+                job.index_error_code = IndexErrorCode.JOB_SCHEDULE_FAILED.value
+                job.index_error_detail = build_error_detail("parse", proc_err)
                 await db.commit()
                 return {
                     "success": False,
@@ -394,6 +408,7 @@ async def upload_document(
                         if hasattr(new_doc.status, "value")
                         else str(new_doc.status),
                         "parse_error": new_doc.parse_error,
+                        "index_pipeline": pipeline_payload(new_doc),
                     },
                 }
 
@@ -471,6 +486,8 @@ async def get_document_status(
                 "status": display_status,
                 "raw_status": raw_status,
                 "parse_error": doc.parse_error,
+                # 结构化索引进度/错误码：与 status/parse_error 并行，语义不变。
+                "index_pipeline": pipeline_payload(doc),
                 "created_at": doc.created_at.isoformat() if doc.created_at else None,
                 "updated_at": doc.updated_at.isoformat() if doc.updated_at else None,
                 "parsed_at": doc.parsed_at.isoformat() if doc.parsed_at else None,
