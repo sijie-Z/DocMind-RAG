@@ -1281,7 +1281,7 @@ export default {
     tags: 'Étiquettes',
     tagsHint: 'Filtrer par étiquettes de document',
     filteredEmpty: 'Aucun résultat dans le périmètre de filtres actuel',
-    filteredEmptyDesc: "Aucun résultat dans ce périmètre ; la recherche n'est pas élargie automatiquement. Ajustez la base de connaissances, les étiquettes ou les types de fichiers.",
+    filteredEmptyDesc: "Aucun résultat dans ce périmètre (base de connaissances, étiquettes ou types de fichiers) ; la recherche n'est pas élargie automatiquement. Ajustez les filtres et réessayez ; si des documents ont été sélectionnés, vérifiez aussi qu'ils sont indexés.",
     fileSize: 'Taille du fichier',
     clear: 'Réinitialiser',
     totalFiles: 'Total des fichiers',

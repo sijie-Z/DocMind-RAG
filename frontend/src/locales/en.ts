@@ -1274,7 +1274,7 @@ export default {
     tags: 'Tags',
     tagsHint: 'Filter by document tags',
     filteredEmpty: 'No matches in the current filter scope',
-    filteredEmptyDesc: 'Nothing matched within this scope; the search is not broadened automatically. Adjust the knowledge base, tags, or file types and try again.',
+    filteredEmptyDesc: 'Nothing matched within this scope (knowledge base, tags, or file types); the search is not broadened automatically. Adjust the filters and try again; if document scope was set, also check that those documents are indexed.',
     fileSize: 'File Size',
     clear: 'Reset',
     totalFiles: 'Total Files',

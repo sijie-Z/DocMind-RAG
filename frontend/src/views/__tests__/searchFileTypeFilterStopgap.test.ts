@@ -89,7 +89,13 @@ describe('搜索页 · 文件类型筛选恢复为真实过滤', () => {
     const wrapper = mountView()
 
     expect(wrapper.text()).toContain(zh.search.fileTypes)
-    expect(wrapper.find('[data-testid="search-file-types"]').exists()).toBe(true)
+    const typeSelect = wrapper.findAllComponents({ name: 'Select' })
+      .find((c) => c.attributes('data-testid') === 'search-file-types')
+    expect(typeSelect).toBeTruthy()
+
+    // 真实选中一个文件类型，断言不能因 selectedFileTypes 恒空而 vacuously 通过。
+    typeSelect!.vm.$emit('update:value', ['docx'])
+    await nextTick()
 
     await wrapper.find('input').setValue('架构')
     await wrapper.find('button').trigger('click')
@@ -98,6 +104,6 @@ describe('搜索页 · 文件类型筛选恢复为真实过滤', () => {
     expect(mockedSearch).toHaveBeenCalledTimes(1)
     const payload = mockedSearch.mock.calls[0][0]
     expect('file_types' in payload).toBe(false)
-    expect('metadata_filters' in payload).toBe(false)
+    expect(payload.metadata_filters).toEqual({ file_type: ['word'] })
   })
 })

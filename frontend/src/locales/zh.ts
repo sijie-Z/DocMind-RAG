@@ -1281,7 +1281,7 @@ export default {
     tags: '标签',
     tagsHint: '按文档标签筛选',
     filteredEmpty: '当前筛选范围内没有命中',
-    filteredEmptyDesc: '该范围内没有匹配结果；不会自动放宽到全组织。请调整知识库、标签或文件类型后重试。',
+    filteredEmptyDesc: '该范围（知识库、标签或文件类型）内没有匹配结果；不会自动放宽到全组织。请调整筛选后重试；若限定了文档范围，也请确认文档已索引。',
     fileSize: '文件大小',
     clear: '重置',
     totalFiles: '文件总数',

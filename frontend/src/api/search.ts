@@ -37,8 +37,21 @@ const FILE_TYPE_ALIASES: Record<string, string> = {
   pptx: 'ppt',
   text: 'txt',
   md: 'txt',
-  csv: 'excel',
+  // 上传路径把 .csv 归为 DocumentType.TXT（backend/app/services/file_service.py），
+  // 过滤值必须与索引里的 file_type 一致，否则按 excel 过滤恒为空。
+  csv: 'txt',
 }
+
+/**
+ * 后端 metadata_filters.tags 的取值约束（backend/app/rag/metadata_filter.py）：
+ * ^[\w.\-/一-鿿]+$、去空后 <=100 字符。上传端按逗号拆分标签且不校验，
+ * 这里必须挡掉含空格/#等非法字符或超长的值，避免 UI 勾选后 422。
+ */
+// Python re.UNICODE 的 \w 覆盖所有 Unicode 字母/数字（含 CJK）；JS \w 仅 ASCII，
+// 这里用 \p{L}\p{N}_ 对齐，避免合法的多语言标签被前端误删。
+export const SAFE_METADATA_TAG_RE = /^[\p{L}\p{N}_.\-/]+$/u
+export const MAX_METADATA_TAG_LENGTH = 100
+const MAX_METADATA_FILTER_VALUES = 20
 
 const normalizeValues = (values: string[] | undefined): string[] => {
   if (!values?.length) return []
@@ -47,10 +60,13 @@ const normalizeValues = (values: string[] | undefined): string[] => {
     const text = value.trim()
     if (text && !seen.has(text)) seen.add(text)
   }
-  return [...seen].slice(0, 20)
+  return [...seen].slice(0, MAX_METADATA_FILTER_VALUES)
 }
 
-export const normalizeSearchTags = (values: string[] | undefined): string[] => normalizeValues(values)
+export const normalizeSearchTags = (values: string[] | undefined): string[] =>
+  normalizeValues(values).filter(
+    (tag) => tag.length <= MAX_METADATA_TAG_LENGTH && SAFE_METADATA_TAG_RE.test(tag)
+  )
 
 export const normalizeSearchFileTypes = (values: string[] | undefined): string[] => {
   const mapped = (values ?? []).map((value) => {

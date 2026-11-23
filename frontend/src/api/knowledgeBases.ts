@@ -72,8 +72,8 @@ export const listKnowledgeBases = async (
   }
   return {
     data: payload?.data ?? [],
-    total: payload.total ?? 0,
-    page: payload.page ?? page,
-    page_size: payload.page_size ?? pageSize,
+    total: payload?.total ?? 0,
+    page: payload?.page ?? page,
+    page_size: payload?.page_size ?? pageSize,
   }
 }

@@ -77,6 +77,25 @@ describe('buildSearchPayload · 与后端 schema 对齐（P1 搜索 422 修复�
     expect(payload.metadata_filters?.tags).toHaveLength(20)
   })
 
+  it('tags 按后端取值域过滤：空格 / # / 超长一律不发，避免 422', () => {
+    const valid = ['合同', 'ok-2024.v1', '文档/归档', 'naïve']
+    const invalid = ['bad tag', '#topic', 'x'.repeat(101), '', '  ']
+    expect(normalizeSearchTags([...valid, ...invalid])).toEqual(valid)
+    const payload = buildSearchPayload({
+      query: 'q', organizationId: 7, tags: [...invalid, ...valid],
+    })
+    expect(payload.metadata_filters?.tags).toEqual(valid)
+    // 全部非法时整个 tags 字段省略，而不是发空数组
+    const allInvalid = buildSearchPayload({ query: 'q', organizationId: 7, tags: invalid })
+    expect(allInvalid).not.toHaveProperty('metadata_filters')
+  })
+
+  it('csv 映射到后端 DocumentType.TXT（上传路径同样归为 txt）', () => {
+    expect(normalizeSearchFileTypes(['csv', '.CSV', 'md'])).toEqual(['txt'])
+    const payload = buildSearchPayload({ query: 'q', organizationId: 7, fileTypes: ['csv'] })
+    expect(payload.metadata_filters).toEqual({ file_type: ['txt'] })
+  })
+
   it('检索自测：document_ids/debug 透传；空数组不发送', () => {
     const payload = buildSearchPayload({
       query: '付款条款',

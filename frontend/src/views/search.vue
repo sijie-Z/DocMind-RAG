@@ -529,7 +529,10 @@ import {
   SearchOutline, TimeOutline, ChatbubblesOutline, CopyOutline, SparklesOutline,
   DocumentTextOutline, DocumentOutline, GridOutline, NewspaperOutline, AlertCircleOutline, RefreshOutline, SaveOutline
 } from '@vicons/ionicons5'
-import { searchKnowledgeResponse, getSearchSuggestions, getSearchStats, buildSearchPayload } from '@/api/search'
+import {
+  searchKnowledgeResponse, getSearchSuggestions, getSearchStats, buildSearchPayload,
+  SAFE_METADATA_TAG_RE, MAX_METADATA_TAG_LENGTH,
+} from '@/api/search'
 import type { KnowledgeSearchResponse, SearchResult, SearchScopeItem, SearchStats } from '@/api/search'
 import { listKnowledgeBases } from '@/api/knowledgeBases'
 import { getKnowledgeBases } from '@/api/knowledge'
@@ -564,6 +567,7 @@ const sortBy = ref<'relevance' | 'name'>('relevance')
 const knowledgeBaseOptions = ref<Array<{ label: string; value: string }>>([])
 const knowledgeBaseLoading = ref(false)
 const knowledgeBaseLoadFailed = ref(false)
+let knowledgeBaseSeq = 0
 const documentTagValues = ref<string[]>([])
 const tagOptions = computed<Array<{ label: string; value: string }>>(() =>
   documentTagValues.value.map((tag) => ({ label: tag, value: tag }))
@@ -594,16 +598,17 @@ let documentSeq = 0
 
 const currentOrgId = computed(() => userStore.currentOrgId)
 
-/** 当前是否带范围筛选；决定零命中的专属空态（不自动放宽重试）。 */
+/** 当前是否带范围筛选；决定零命中的专属空态（不自动放宽重试）。
+ *  document_ids 不算：它有自己的逐文档诊断分支（含未索引/不存在清单）。 */
 const hasActiveFilters = computed(() =>
   !!selectedKnowledgeBaseId.value ||
   selectedTags.value.length > 0 ||
-  selectedFileTypes.value.length > 0 ||
-  selectedDocumentIds.value.length > 0
+  selectedFileTypes.value.length > 0
 )
 
 /** KB 列表失败时降级为空选项，不清空用户已选 id、也不阻断搜索。 */
 const loadKnowledgeBaseOptions = async () => {
+  const seq = ++knowledgeBaseSeq
   if (!currentOrgId.value) {
     knowledgeBaseOptions.value = []
     documentTagValues.value = []
@@ -613,6 +618,7 @@ const loadKnowledgeBaseOptions = async () => {
   knowledgeBaseLoading.value = true
   try {
     const list = await listKnowledgeBases({ silent: true })
+    if (seq !== knowledgeBaseSeq) return
     knowledgeBaseOptions.value = (list.data ?? []).map((kb) => ({
       value: kb.id,
       label: kb.name,
@@ -620,31 +626,37 @@ const loadKnowledgeBaseOptions = async () => {
     knowledgeBaseLoadFailed.value = false
   } catch {
     // KB 列表失败降级为空选项；已选 id 仍随搜索发送，由服务端验证归属。
+    if (seq !== knowledgeBaseSeq) return
     knowledgeBaseOptions.value = []
     knowledgeBaseLoadFailed.value = true
   } finally {
-    knowledgeBaseLoading.value = false
+    if (seq === knowledgeBaseSeq) knowledgeBaseLoading.value = false
   }
   // tags 候选取自当前组织可见文档（同一列表端点已做 ACL 与状态标注），
   // 不能按用户 id 预过滤——ACL 始终由服务端负责。失败时只剩自由输入。
   try {
     const docs = await getKnowledgeBases({ page: 1, page_size: 100 }, { silent: true })
+    if (seq !== knowledgeBaseSeq) return
     const payload = (docs.data as unknown as { data?: { data?: KnowledgeBase[] } })?.data
     const seen: string[] = []
     for (const doc of payload?.data ?? []) {
       for (const tag of doc.tags ?? []) {
         const value = tag.trim()
-        if (value && !seen.includes(value)) seen.push(value)
+        // 上传端可存任意逗号拆分标签；只把后端接受的取值放进候选，避免 422。
+        if (!SAFE_METADATA_TAG_RE.test(value) || value.length > MAX_METADATA_TAG_LENGTH) continue
+        if (!seen.includes(value)) seen.push(value)
       }
     }
     documentTagValues.value = seen.slice(0, 50)
   } catch {
-    documentTagValues.value = []
+    if (seq === knowledgeBaseSeq) documentTagValues.value = []
   }
 }
 
 // 切组织：旧 KB id 属于前一租户，必须清空，并重新加载当前组织的 KB 候选。
 watch(currentOrgId, async () => {
+  // 先作废在途请求：切组织后哪怕旧响应在 nextTick 前返回，也不得回写候选。
+  knowledgeBaseSeq += 1
   selectedKnowledgeBaseId.value = null
   await nextTick()
   await loadKnowledgeBaseOptions()
@@ -839,14 +851,16 @@ const isIndexedStatus = (status?: string | null): boolean =>
 const emptyState = computed<{ title: string; desc: string; scope?: SearchScopeItem[] }>(() => {
   const response = lastResponse.value
   if (!response) return { title: t('search.noResults'), desc: t('search.noResultsDesc') }
-  // 带筛选的零命中：明确告诉用户是范围太窄，绝不自动去掉筛选重试。
-  if (hasActiveFilters.value) {
-    return { title: t('search.filteredEmpty'), desc: t('search.filteredEmptyDesc') }
-  }
   const scope = response.document_scope ?? []
   const notReady = scope.filter((item) => !item.found || !isIndexedStatus(item.status))
+  // 文档级诊断优先：选中的文档未索引/不存在是可操作原因，不能被泛化的
+  // 「筛选范围内无命中」盖掉（哪怕同时选了 KB / 标签 / 文件类型）。
   if (notReady.length) {
     return { title: t('search.docScopeTitle'), desc: t('search.docNotIndexed'), scope }
+  }
+  // 带其他筛选的零命中：明确告诉用户是范围太窄，绝不自动去掉筛选重试。
+  if (hasActiveFilters.value) {
+    return { title: t('search.filteredEmpty'), desc: t('search.filteredEmptyDesc') }
   }
   switch (response.index_status) {
     case 'empty_index':
