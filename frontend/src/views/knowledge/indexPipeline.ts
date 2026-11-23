@@ -21,33 +21,32 @@ export const indexStageLabel = (stage: IndexStage | null | undefined): string =>
 }
 
 /**
- * 错误码 → { 提示键, 可重试 }。
- * 未登记码统一走 unknown，绝不把后端原始文本当提示展示。
+ * 错误码 → i18n 键。
+ * 未登记码统一走 UNEXPECTED 兜底提示，绝不把后端原始文本当提示展示。
+ *
+ * 重试语义：本模块不提供任何操作入口。失败文档的重试仍只走页面既有的
+ * rebuild 按钮；未知码与 UNEXPECTED 一样提示「稍后重试」，不新增破坏性动作。
  */
-const CODE_MESSAGES: Record<IndexErrorCode, { key: string; retryable: boolean }> = {
-  PARSE_PROFILE_INVALID: { key: 'knowledge.indexError.PARSE_PROFILE_INVALID', retryable: true },
-  PARSE_UNSUPPORTED_FORMAT: { key: 'knowledge.indexError.PARSE_UNSUPPORTED_FORMAT', retryable: true },
-  PARSE_FAILED: { key: 'knowledge.indexError.PARSE_FAILED', retryable: true },
-  CHUNK_EMPTY: { key: 'knowledge.indexError.CHUNK_EMPTY', retryable: true },
-  CHUNK_FAILED: { key: 'knowledge.indexError.CHUNK_FAILED', retryable: true },
-  EMBED_COUNT_MISMATCH: { key: 'knowledge.indexError.EMBED_COUNT_MISMATCH', retryable: true },
-  EMBED_FAILED: { key: 'knowledge.indexError.EMBED_FAILED', retryable: true },
-  INDEX_WRITE_FAILED: { key: 'knowledge.indexError.INDEX_WRITE_FAILED', retryable: true },
-  INDEX_VERIFICATION_FAILED: { key: 'knowledge.indexError.INDEX_VERIFICATION_FAILED', retryable: true },
-  INDEX_FAILED: { key: 'knowledge.indexError.INDEX_FAILED', retryable: true },
-  DOCUMENT_NOT_FOUND: { key: 'knowledge.indexError.DOCUMENT_NOT_FOUND', retryable: false },
-  JOB_SCHEDULE_FAILED: { key: 'knowledge.indexError.JOB_SCHEDULE_FAILED', retryable: true },
-  UNEXPECTED: { key: 'knowledge.indexError.UNEXPECTED', retryable: true },
+const CODE_MESSAGES: Record<IndexErrorCode, string> = {
+  PARSE_PROFILE_INVALID: 'knowledge.indexError.PARSE_PROFILE_INVALID',
+  PARSE_UNSUPPORTED_FORMAT: 'knowledge.indexError.PARSE_UNSUPPORTED_FORMAT',
+  PARSE_FAILED: 'knowledge.indexError.PARSE_FAILED',
+  CHUNK_EMPTY: 'knowledge.indexError.CHUNK_EMPTY',
+  CHUNK_FAILED: 'knowledge.indexError.CHUNK_FAILED',
+  EMBED_COUNT_MISMATCH: 'knowledge.indexError.EMBED_COUNT_MISMATCH',
+  EMBED_FAILED: 'knowledge.indexError.EMBED_FAILED',
+  INDEX_WRITE_FAILED: 'knowledge.indexError.INDEX_WRITE_FAILED',
+  INDEX_VERIFICATION_FAILED: 'knowledge.indexError.INDEX_VERIFICATION_FAILED',
+  INDEX_FAILED: 'knowledge.indexError.INDEX_FAILED',
+  DOCUMENT_NOT_FOUND: 'knowledge.indexError.DOCUMENT_NOT_FOUND',
+  JOB_SCHEDULE_FAILED: 'knowledge.indexError.JOB_SCHEDULE_FAILED',
+  UNEXPECTED: 'knowledge.indexError.UNEXPECTED',
 }
 
-const UNKNOWN = { key: 'knowledge.indexError.UNEXPECTED', retryable: true }
+const UNKNOWN_CODE_KEY = 'knowledge.indexError.UNEXPECTED'
 
 export const indexErrorMessage = (code: IndexErrorCode | null | undefined): string =>
-  i18n.global.t((code && CODE_MESSAGES[code]?.key) || UNKNOWN.key)
-
-/** 可重试语义：文档不存在是终局，其余码走既有 rebuild 入口（不新增破坏性动作）。 */
-export const canRetryIndexError = (code: IndexErrorCode | null | undefined): boolean =>
-  (code && CODE_MESSAGES[code]?.retryable) ?? UNKNOWN.retryable
+  i18n.global.t((code && CODE_MESSAGES[code]) || UNKNOWN_CODE_KEY)
 
 /** 失败时的一行展示文本：阶段 · 可操作提示；成功/无错误返回空串。 */
 export const indexPipelineSummary = (pipeline: IndexPipeline | null | undefined): string => {

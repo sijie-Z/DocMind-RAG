@@ -372,7 +372,7 @@ def test_031_migration_chain_and_backfill(monkeypatch) -> None:
     cfg = _alembic_config()
     script = ScriptDirectory.from_config(cfg)
     heads = set(script.get_heads())
-    assert heads == {"035_retrieval_eval_run"}
+    assert heads == {"036_index_error_codes"}
     chain = [rev.revision for rev in script.iterate_revisions(next(iter(heads)), "base")]
     assert chain[chain.index("031_review_severity") + 1] == "030_cost_attribution"
 

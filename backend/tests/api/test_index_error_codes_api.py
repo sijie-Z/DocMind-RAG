@@ -156,6 +156,95 @@ class TestIndexPipelineApi:
         assert IndexPipelineStatus(stage="index", progress=100).error_code is None
 
 
+class TestDocumentStatusPipeline:
+    def test_document_status_exposes_normalized_pipeline(self, client: TestClient, monkeypatch):
+        """GET /documents/{id}/status 必须暴露 index_pipeline（detail.vue 依赖）。
+
+        变异点：从 documents.py 的 get_document_status 响应删除 index_pipeline
+        → 本用例红；把未知码/超长 detail 原样透传 → 形状断言红。
+        """
+        from app.core.security import permission_service
+        from app.main import app
+        from app.models.rbac import PermissionType
+
+        async def _grant_read(db, user, organization_id=None):
+            return {PermissionType.DOCUMENT_READ.value}
+
+        monkeypatch.setattr(permission_service, "get_user_permissions", _grant_read)
+
+        doc = _make_mock_document(status_name="failed")
+        doc.parse_error = "原始异常文本仍须保留"
+        doc.index_stage = "embed"
+        doc.index_progress = 50
+        doc.index_error_code = "EMBED_FAILED"
+        doc.index_error_detail = "stage=embed exception=RuntimeError"
+
+        override, mock_db = _override_get_db()
+        mock_db.get = AsyncMock(return_value=doc)
+
+        async def _user():
+            return _make_mock_user(is_superuser=False)
+
+        app.dependency_overrides[get_db] = override
+        app.dependency_overrides[get_current_user] = _user
+        try:
+            response = client.get("/api/v1/documents/doc-1")
+        finally:
+            app.dependency_overrides.pop(get_db, None)
+            app.dependency_overrides.pop(get_current_user, None)
+
+        assert response.status_code == 200
+        data = response.json()["data"]
+        assert data["parse_error"] == "原始异常文本仍须保留"
+        assert data["index_pipeline"] == {
+            "stage": "embed",
+            "progress": 50,
+            "error_code": "EMBED_FAILED",
+            "error_detail": "stage=embed exception=RuntimeError",
+        }
+
+    def test_document_status_normalizes_unsafe_pipeline_values(
+        self, client: TestClient, monkeypatch
+    ):
+        """旧/脏数据不得把闭集外码或超长文本送到前端。"""
+        from app.core.security import permission_service
+        from app.main import app
+        from app.models.rbac import PermissionType
+
+        async def _grant_read(db, user, organization_id=None):
+            return {PermissionType.DOCUMENT_READ.value}
+
+        monkeypatch.setattr(permission_service, "get_user_permissions", _grant_read)
+
+        doc = _make_mock_document(status_name="failed")
+        doc.parse_error = "raw"
+        doc.index_stage = "garbage"
+        doc.index_progress = 999
+        doc.index_error_code = "RuntimeError: query = TOP SECRET"
+        doc.index_error_detail = "x" * 500
+
+        override, mock_db = _override_get_db()
+        mock_db.get = AsyncMock(return_value=doc)
+
+        async def _user():
+            return _make_mock_user(is_superuser=False)
+
+        app.dependency_overrides[get_db] = override
+        app.dependency_overrides[get_current_user] = _user
+        try:
+            pipeline = client.get("/api/v1/documents/doc-1").json()["data"]["index_pipeline"]
+        finally:
+            app.dependency_overrides.pop(get_db, None)
+            app.dependency_overrides.pop(get_current_user, None)
+
+        assert pipeline == {
+            "stage": None,
+            "progress": 100,
+            "error_code": None,
+            "error_detail": None,
+        }
+
+
 class TestOrgBoundaries:
     def test_events_org_mismatch_returns_empty(self, client: TestClient, monkeypatch):
         """非超管只能看到本组织 job；跨组织文档 id 不得借 events 探测。"""
@@ -215,7 +304,7 @@ class TestOrgBoundaries:
         app.dependency_overrides[get_db] = override
         app.dependency_overrides[get_current_user] = _user
         try:
-            response = client.get("/api/v1/documents/doc-1/status")
+            response = client.get("/api/v1/documents/doc-1")
         finally:
             app.dependency_overrides.pop(get_db, None)
             app.dependency_overrides.pop(get_current_user, None)

@@ -487,7 +487,7 @@ def test_035_migration_single_head_schema_and_downgrade(tmp_path, monkeypatch):
     assert script.get_revision("035_retrieval_eval_run").down_revision == (
         "034_retrieval_eval_case"
     )
-    assert set(script.get_heads()) == {"035_retrieval_eval_run"}
+    assert set(script.get_heads()) == {"036_index_error_codes"}
     command.upgrade(cfg, "head")
 
     with sqlite3.connect(str(db_path)) as conn:

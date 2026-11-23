@@ -3,16 +3,14 @@
  *
  * 变异点：
  * - 删掉任一错误码映射或改成非 i18n 硬编码 → 对应用例红；
- * - 把 DOCUMENT_NOT_FOUND 标为可重试（凭空造出 destructive affordance）→ 红；
- * - 前端词表与后端闭集不同步（新增/删码）→ 闭集对齐用例红；
- * - 未知码回退时泄漏原始文本 → 红。
+ * - 未知码回退时泄漏原始文本 → 红；
+ * - 只展示映射文案，不产出任何重试/破坏性操作入口（由本模块无该导出保证）。
  */
 import { describe, it, expect } from 'vitest'
 
 import type { IndexErrorCode, IndexPipeline } from '@/api/knowledge'
 import {
   INDEX_STAGES,
-  canRetryIndexError,
   indexErrorMessage,
   indexPipelineSummary,
   indexStageLabel
@@ -95,14 +93,6 @@ describe('indexPipeline · 展示映射与安全回退', () => {
     expect(indexStageLabel(null)).toBe(indexStageLabel(unknownStage))
     expect(indexStageLabel('garbage' as never)).toBe(indexStageLabel(unknownStage))
     expect(indexStageLabel('embed')).not.toBe(indexStageLabel(unknownStage))
-  })
-
-  it('DOCUMENT_NOT_FOUND 不可重试，其他闭集码可重试', () => {
-    expect(canRetryIndexError('DOCUMENT_NOT_FOUND')).toBe(false)
-    for (const code of BACKEND_CODES.filter(c => c !== 'DOCUMENT_NOT_FOUND')) {
-      expect(canRetryIndexError(code as IndexErrorCode), code).toBe(true)
-    }
-    expect(canRetryIndexError(undefined)).toBe(true)
   })
 
   it('摘要只在有稳定码时输出，且包含阶段与可操作提示', () => {

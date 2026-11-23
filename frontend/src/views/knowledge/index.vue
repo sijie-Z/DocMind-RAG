@@ -258,7 +258,7 @@
                         
                         <!-- 结构化阶段进度：文字+数字+进度条三重表达，不只靠颜色 -->
                         <div
-                          v-if="item.index_pipeline && isInProgressDoc(item.status)"
+                          v-if="item.index_pipeline?.stage && isInProgressDoc(item.status)"
                           class="mt-2 flex items-center gap-2 text-xs text-slate-600 dark:text-slate-300"
                           :aria-label="`${indexStageLabel(item.index_pipeline.stage)} ${item.index_pipeline.progress}%`"
                         >
@@ -399,7 +399,7 @@
                             </n-tag>
                             <!-- 结构化阶段/进度（列表视图，与卡片视图同源） -->
                             <div
-                              v-if="item.index_pipeline && isInProgressDoc(item.status)"
+                              v-if="item.index_pipeline?.stage && isInProgressDoc(item.status)"
                               class="text-xs tabular-nums text-slate-600 dark:text-slate-300"
                               :aria-label="`${indexStageLabel(item.index_pipeline.stage)} ${item.index_pipeline.progress}%`"
                             >
