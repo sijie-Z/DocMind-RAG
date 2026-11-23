@@ -84,6 +84,26 @@
             </n-radio-group>
           </div>
 
+          <!-- 知识库范围（空 KB = 空结果，不回退组织全量） -->
+          <div class="space-y-2">
+            <h3 class="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+              {{ t('search.knowledgeBase') }}
+            </h3>
+            <n-select
+              v-model:value="selectedKnowledgeBaseId"
+              clearable
+              filterable
+              :options="knowledgeBaseOptions"
+              :loading="knowledgeBaseLoading"
+              :placeholder="t('search.knowledgeBaseHint')"
+              :max-tag-count="1"
+              data-testid="search-knowledge-base"
+            />
+            <p v-if="knowledgeBaseLoadFailed" class="text-xs text-amber-700 dark:text-amber-400">
+              {{ t('search.knowledgeBaseLoadFailed') }}
+            </p>
+          </div>
+
           <!-- 文档范围（检索自测） -->
           <div class="space-y-2">
             <h3 class="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">
@@ -101,6 +121,40 @@
               :max-tag-count="2"
               data-testid="search-document-scope"
               @search="loadDocumentOptions"
+            />
+          </div>
+
+          <!-- 标签（文档 keywords 精确匹配，多选 OR） -->
+          <div class="space-y-2">
+            <h3 class="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+              {{ t('search.tags') }}
+            </h3>
+            <n-select
+              v-model:value="selectedTags"
+              multiple
+              filterable
+              clearable
+              tag
+              :options="tagOptions"
+              :placeholder="t('search.tagsHint')"
+              :max-tag-count="2"
+              data-testid="search-tags"
+            />
+          </div>
+
+          <!-- 文件类型（后端 DocumentType 枚举） -->
+          <div class="space-y-2">
+            <h3 class="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+              {{ t('search.fileTypes') }}
+            </h3>
+            <n-select
+              v-model:value="selectedFileTypes"
+              multiple
+              clearable
+              :options="fileTypeOptions"
+              :placeholder="t('search.fileTypeHint')"
+              :max-tag-count="2"
+              data-testid="search-file-types"
             />
           </div>
 
@@ -131,7 +185,7 @@
           </div>
 
           <!-- 重置按钮 -->
-          <n-button block quaternary @click="clearFilters">
+          <n-button block quaternary data-testid="search-clear-filters" @click="clearFilters">
             {{ t('search.clear') }}
           </n-button>
         </div>
@@ -467,7 +521,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, watch } from 'vue'
+import { ref, computed, onMounted, watch, nextTick } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useDedupedMessage } from '@/utils/message'
 import { NIcon, NSpin, NRadioGroup, NRadio, NSpace, NSelect, NTag, NButton, NModal, NSwitch, NInput, NCheckbox, NCheckboxGroup } from 'naive-ui'
@@ -477,6 +531,7 @@ import {
 } from '@vicons/ionicons5'
 import { searchKnowledgeResponse, getSearchSuggestions, getSearchStats, buildSearchPayload } from '@/api/search'
 import type { KnowledgeSearchResponse, SearchResult, SearchScopeItem, SearchStats } from '@/api/search'
+import { listKnowledgeBases } from '@/api/knowledgeBases'
 import { getKnowledgeBases } from '@/api/knowledge'
 import type { KnowledgeBase } from '@/api/knowledge'
 import { captureEvalCase } from '@/api/retrievalEval'
@@ -498,11 +553,29 @@ const message = useDedupedMessage()
 const searchQuery = ref('')
 const searchType = ref<'auto' | 'vector' | 'keyword' | 'hybrid'>('auto')
 const selectedFileTypes = ref<string[]>([])
+const selectedTags = ref<string[]>([])
+const selectedKnowledgeBaseId = ref<string | null>(null)
 const selectedDocumentIds = ref<string[]>([])
 const topK = ref<number | null>(null)
 const debugEnabled = ref(false)
 const sortBy = ref<'relevance' | 'name'>('relevance')
 
+// 知识库/标签候选（服务端按有效组织与 ACL 推导，客户端不传组织 id）
+const knowledgeBaseOptions = ref<Array<{ label: string; value: string }>>([])
+const knowledgeBaseLoading = ref(false)
+const knowledgeBaseLoadFailed = ref(false)
+const documentTagValues = ref<string[]>([])
+const tagOptions = computed<Array<{ label: string; value: string }>>(() =>
+  documentTagValues.value.map((tag) => ({ label: tag, value: tag }))
+)
+const fileTypeOptions = computed(() => [
+  { label: t('search.fileTypeOptions.pdf'), value: 'pdf' },
+  { label: t('search.fileTypeOptions.word'), value: 'word' },
+  { label: t('search.fileTypeOptions.excel'), value: 'excel' },
+  { label: t('search.fileTypeOptions.ppt'), value: 'ppt' },
+  { label: t('search.fileTypeOptions.txt'), value: 'txt' },
+  { label: t('search.fileTypeOptions.other'), value: 'other' },
+])
 // 结果状态
 const searchResults = ref<SearchResult[]>([])
 const lastResponse = ref<KnowledgeSearchResponse | null>(null)
@@ -520,6 +593,62 @@ const documentLoading = ref(false)
 let documentSeq = 0
 
 const currentOrgId = computed(() => userStore.currentOrgId)
+
+/** 当前是否带范围筛选；决定零命中的专属空态（不自动放宽重试）。 */
+const hasActiveFilters = computed(() =>
+  !!selectedKnowledgeBaseId.value ||
+  selectedTags.value.length > 0 ||
+  selectedFileTypes.value.length > 0 ||
+  selectedDocumentIds.value.length > 0
+)
+
+/** KB 列表失败时降级为空选项，不清空用户已选 id、也不阻断搜索。 */
+const loadKnowledgeBaseOptions = async () => {
+  if (!currentOrgId.value) {
+    knowledgeBaseOptions.value = []
+    documentTagValues.value = []
+    knowledgeBaseLoadFailed.value = false
+    return
+  }
+  knowledgeBaseLoading.value = true
+  try {
+    const list = await listKnowledgeBases({ silent: true })
+    knowledgeBaseOptions.value = (list.data ?? []).map((kb) => ({
+      value: kb.id,
+      label: kb.name,
+    }))
+    knowledgeBaseLoadFailed.value = false
+  } catch {
+    // KB 列表失败降级为空选项；已选 id 仍随搜索发送，由服务端验证归属。
+    knowledgeBaseOptions.value = []
+    knowledgeBaseLoadFailed.value = true
+  } finally {
+    knowledgeBaseLoading.value = false
+  }
+  // tags 候选取自当前组织可见文档（同一列表端点已做 ACL 与状态标注），
+  // 不能按用户 id 预过滤——ACL 始终由服务端负责。失败时只剩自由输入。
+  try {
+    const docs = await getKnowledgeBases({ page: 1, page_size: 100 }, { silent: true })
+    const payload = (docs.data as unknown as { data?: { data?: KnowledgeBase[] } })?.data
+    const seen: string[] = []
+    for (const doc of payload?.data ?? []) {
+      for (const tag of doc.tags ?? []) {
+        const value = tag.trim()
+        if (value && !seen.includes(value)) seen.push(value)
+      }
+    }
+    documentTagValues.value = seen.slice(0, 50)
+  } catch {
+    documentTagValues.value = []
+  }
+}
+
+// 切组织：旧 KB id 属于前一租户，必须清空，并重新加载当前组织的 KB 候选。
+watch(currentOrgId, async () => {
+  selectedKnowledgeBaseId.value = null
+  await nextTick()
+  await loadKnowledgeBaseOptions()
+})
 
 // ── 保存为评测用例（bad-case 捕获）────────────────────────────────────────
 // 设计口径：
@@ -710,6 +839,10 @@ const isIndexedStatus = (status?: string | null): boolean =>
 const emptyState = computed<{ title: string; desc: string; scope?: SearchScopeItem[] }>(() => {
   const response = lastResponse.value
   if (!response) return { title: t('search.noResults'), desc: t('search.noResultsDesc') }
+  // 带筛选的零命中：明确告诉用户是范围太窄，绝不自动去掉筛选重试。
+  if (hasActiveFilters.value) {
+    return { title: t('search.filteredEmpty'), desc: t('search.filteredEmptyDesc') }
+  }
   const scope = response.document_scope ?? []
   const notReady = scope.filter((item) => !item.found || !isIndexedStatus(item.status))
   if (notReady.length) {
@@ -765,6 +898,8 @@ const handleSearch = async () => {
       topK: topK.value ?? undefined,
       searchMode: searchType.value,
       fileTypes: selectedFileTypes.value,
+      tags: selectedTags.value,
+      knowledgeBaseId: selectedKnowledgeBaseId.value ?? undefined,
       documentIds: selectedDocumentIds.value,
       debug: debugEnabled.value
     }))
@@ -826,6 +961,8 @@ const loadDocumentOptions = async (query = '') => {
 const clearFilters = () => {
   searchType.value = 'auto'
   selectedFileTypes.value = []
+  selectedTags.value = []
+  selectedKnowledgeBaseId.value = null
   sortBy.value = 'relevance'
   selectedDocumentIds.value = []
   topK.value = null
@@ -884,6 +1021,7 @@ onMounted(async () => {
   if (currentOrgId.value) {
     searchStats.value = await getSearchStats(currentOrgId.value)
     void loadDocumentOptions()
+    void loadKnowledgeBaseOptions()
   }
   applyQueryFromRoute()
 })

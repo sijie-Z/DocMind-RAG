@@ -6,32 +6,40 @@
  * （被 pydantic 静默丢弃）。修复后 buildSearchPayload 与
  * backend/app/schemas/knowledge.py 的 KnowledgeSearchRequest 全字段对齐。
  *
- * 变异点：拿掉 organization_id / top_k 改回 limit / auto 时携带 search_mode
- * → 对应用例精确红。
- *
  * B4（D5）更新：top_k 不再由前端固化发送。缺省时由后端解析「组织设置 >
  * settings.TOP_K_RESULTS=10」——组织未设置时行为与旧版发送 10 一致；显式
  * topK 入参仍原样透传。
+ *
+ * 竞品批次六（feature A）：metadata_filters / knowledge_base_id 接线；
+ * tags 去空去重（上限 20），扩展名映射后端 DocumentType 枚举，
+ * 不再发送顶层 file_types。
  */
 import { describe, it, expect } from 'vitest'
-import { buildSearchPayload } from '../search'
+import { buildSearchPayload, normalizeSearchTags, normalizeSearchFileTypes } from '../search'
 
 describe('buildSearchPayload · 与后端 schema 对齐（P1 搜索 422 修复）', () => {
-  it('全字段：query + organization_id + 显式 top_k + 显式 search_mode + file_types', () => {
+  it('全字段：query + organization_id + 显式 top_k + 显式 search_mode + metadata_filters + KB', () => {
     const payload = buildSearchPayload({
       query: '架构',
       organizationId: 3,
       topK: 10,
       searchMode: 'keyword',
-      fileTypes: ['md'],
+      fileTypes: ['docx', 'PDF'],
+      tags: ['技术文档'],
+      knowledgeBaseId: 'kb-1',
     })
     expect(payload).toEqual({
       query: '架构',
       organization_id: 3,
       top_k: 10,
       search_mode: 'keyword',
-      file_types: ['md'],
+      metadata_filters: {
+        tags: ['技术文档'],
+        file_type: ['word', 'pdf'],
+      },
+      knowledge_base_id: 'kb-1',
     })
+    expect('file_types' in payload).toBe(false)
   })
 
   it('top_k 缺省不发送：交给组织设置 / 平台默认解析（B4/D5）', () => {
@@ -45,11 +53,28 @@ describe('buildSearchPayload · 与后端 schema 对齐（P1 搜索 422 修复�
     expect(payload).toEqual({ query: 'q', organization_id: 7 })
   })
 
-  it('过时字段 search_type / limit 一律不出现；空 file_types 不发', () => {
-    const payload = buildSearchPayload({ query: 'q', organizationId: 7, fileTypes: [] })
+  it('过时字段 search_type / limit / file_types 一律不出现；空筛选不发', () => {
+    const payload = buildSearchPayload({
+      query: 'q', organizationId: 7, fileTypes: [], tags: [],
+      knowledgeBaseId: '   ',
+    })
     expect(payload).not.toHaveProperty('search_type')
     expect(payload).not.toHaveProperty('limit')
-    expect('file_types' in payload).toBe(false)
+    expect(payload).not.toHaveProperty('file_types')
+    expect(payload).not.toHaveProperty('metadata_filters')
+    expect(payload).not.toHaveProperty('knowledge_base_id')
+    expect(payload).toEqual({ query: 'q', organization_id: 7 })
+  })
+
+  it('规范：trim / 去空 / 去重 / 上限 20；未知扩展名剔除', () => {
+    expect(normalizeSearchTags([' a ', '', 'a', '  ', 'b'])).toEqual(['a', 'b'])
+    expect(normalizeSearchFileTypes(['docx', 'DOCX', ' xlsx ', 'png', '', 'pdf']))
+      .toEqual(['word', 'excel', 'pdf'])
+    const payload = buildSearchPayload({
+      query: 'q', organizationId: 7,
+      tags: Array.from({ length: 25 }, (_, i) => ` tag-${i} `),
+    })
+    expect(payload.metadata_filters?.tags).toHaveLength(20)
   })
 
   it('检索自测：document_ids/debug 透传；空数组不发送', () => {

@@ -346,6 +346,7 @@ K8s manifests and deployment notes live in [`deploy/`](deploy/). When Kafka is u
 
 ## Known boundaries
 
+- Knowledge retrieval can be narrowed by an organization's knowledge base (`knowledge_base_id`) and `metadata_filters` (`tags` / `file_type`); conditions are intersected, and no match in the selected knowledge base returns no results instead of falling back to all documents in the organization.
 - Workflow code nodes are off by default and must run in the Docker sandbox with `ENABLE_WORKFLOW_CODE_NODES=true`.
 - GraphRAG is not part of the RAG retrieval path; context compression is rule-based, no LLM call; short-term/working memory is in-process while long-term/reflective memory uses Redis.
 - Contract review currently covers four fixed checklist items for Chinese contracts; evidence is chunk-level quotes with clause/page/character anchors, not PDF highlighting.

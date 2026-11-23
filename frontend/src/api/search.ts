@@ -14,12 +14,50 @@ export interface SearchRequest {
   // issue #225：后端字段为 search_mode（hybrid/vector/keyword；缺省=自动路由）。
   // 旧的 search_type 字段从未在请求 schema 里出现过（一直被后端静默丢弃），不再发送。
   search_mode?: 'hybrid' | 'vector' | 'keyword'
-  // 后端 KnowledgeSearchRequest 目前不消费 file_types（预存在漂移，已记录）；
-  // 保持既有发送行为，空数组时不发送。
-  file_types?: string[]
+  // metadata_filters 才是后端 KnowledgeSearchRequest 接受的字段（tags / file_type）；
+  // 顶层 file_types 从未被 schema 消费，已停止发送。
+  metadata_filters?: { tags?: string[]; file_type?: string[] }
+  /** 可选知识库范围（服务端校验组织归属；空白 id 一律省略） */
+  knowledge_base_id?: string
   // 检索自测：限定文档范围与返回诊断。
   document_ids?: string[]
   debug?: boolean
+}
+
+/** 后端 metadata_filters 的字段名与值域（backend/app/rag/metadata_filter.py）。 */
+export type SearchMetadataFilters = NonNullable<SearchRequest['metadata_filters']>
+
+/** 扩展名/展示值 → 后端 DocumentType 枚举（pdf|word|excel|ppt|txt|other）。 */
+const FILE_TYPE_ENUM = new Set(['pdf', 'word', 'excel', 'ppt', 'txt', 'other'])
+const FILE_TYPE_ALIASES: Record<string, string> = {
+  doc: 'word',
+  docx: 'word',
+  xls: 'excel',
+  xlsx: 'excel',
+  pptx: 'ppt',
+  text: 'txt',
+  md: 'txt',
+  csv: 'excel',
+}
+
+const normalizeValues = (values: string[] | undefined): string[] => {
+  if (!values?.length) return []
+  const seen = new Set<string>()
+  for (const value of values) {
+    const text = value.trim()
+    if (text && !seen.has(text)) seen.add(text)
+  }
+  return [...seen].slice(0, 20)
+}
+
+export const normalizeSearchTags = (values: string[] | undefined): string[] => normalizeValues(values)
+
+export const normalizeSearchFileTypes = (values: string[] | undefined): string[] => {
+  const mapped = (values ?? []).map((value) => {
+    const lower = value.trim().toLowerCase()
+    return FILE_TYPE_ALIASES[lower] ?? lower
+  })
+  return normalizeValues(mapped.filter((value) => FILE_TYPE_ENUM.has(value)))
 }
 
 export interface SearchPayloadInput {
@@ -30,8 +68,12 @@ export interface SearchPayloadInput {
   topK?: number
   /** 'auto'（或缺省）= 不发送 search_mode，走后端自动路由（issue #225 同语义） */
   searchMode?: 'auto' | 'hybrid' | 'vector' | 'keyword'
-  /** 已选文件类型；空数组 = 不发送 */
+  /** 已选文件类型（扩展名或枚举原词）；映射到 metadata_filters.file_type */
   fileTypes?: string[]
+  /** 文档 tags 多选；映射到 metadata_filters.tags（OR 语义） */
+  tags?: string[]
+  /** 知识库 id；空白省略，不传组织 id */
+  knowledgeBaseId?: string
   /** 限定文档范围；空数组 = 全组织 */
   documentIds?: string[]
   /** 返回检索诊断（每臂候选/RRF/rerank/MMR） */
@@ -47,6 +89,13 @@ export interface SearchPayloadInput {
  * 永久挡在门外（组织管理员改 top_k 对搜索页无效）。
  */
 export function buildSearchPayload(input: SearchPayloadInput): SearchRequest {
+  const tags = normalizeSearchTags(input.tags)
+  const fileTypes = normalizeSearchFileTypes(input.fileTypes)
+  const metadataFilters: SearchMetadataFilters = {
+    ...(tags.length ? { tags } : {}),
+    ...(fileTypes.length ? { file_type: fileTypes } : {}),
+  }
+  const knowledgeBaseId = input.knowledgeBaseId?.trim()
   return {
     query: input.query,
     organization_id: input.organizationId,
@@ -55,7 +104,8 @@ export function buildSearchPayload(input: SearchPayloadInput): SearchRequest {
     ...(input.searchMode && input.searchMode !== 'auto'
       ? { search_mode: input.searchMode }
       : {}),
-    ...(input.fileTypes && input.fileTypes.length ? { file_types: input.fileTypes } : {}),
+    ...(Object.keys(metadataFilters).length ? { metadata_filters: metadataFilters } : {}),
+    ...(knowledgeBaseId ? { knowledge_base_id: knowledgeBaseId } : {}),
     ...(input.documentIds && input.documentIds.length ? { document_ids: input.documentIds } : {}),
     ...(input.debug ? { debug: true } : {}),
   }

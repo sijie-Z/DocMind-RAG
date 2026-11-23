@@ -168,6 +168,14 @@ class TestKnowledgeBaseFilter:
 
 
 class TestPipelineKnowledgeBaseFilter:
+    @staticmethod
+    def _session():
+        """最小 async session 替身：只用来验证早退路径不触达检索器/缓存。"""
+        session = MagicMock()
+        session.__aenter__ = AsyncMock(return_value=session)
+        session.__aexit__ = AsyncMock(return_value=False)
+        return session
+
     @pytest.mark.asyncio
     async def test_no_kb_id_does_not_open_db_or_narrow_scope(self):
         """默认 NULL：不读 KB 表、不收窄 document_ids，查询结构与旧版一致。"""
@@ -282,6 +290,172 @@ class TestPipelineKnowledgeBaseFilter:
             )
         assert results == []
         pipeline.retriever.retrieve.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_empty_kb_skips_retriever_and_all_cache_paths(self):
+        """空 KB（零成员）早退：retriever 不跑，精确/语义缓存都不读写。
+
+        变异点：把 KB 零命中的 ``_NO_MATCH`` 早退改成空列表，或误开缓存读，
+        本条红。与 ``test_zero_match_kb_never_falls_back_to_org_wide`` 的差别：
+        这里用真实 KB 解析结果（[]）并同时禁止 semantic_cache.get。
+        """
+        pipeline = RAGPipeline()
+        pipeline.retriever.retrieve = AsyncMock(side_effect=AssertionError("must not retrieve"))
+        pipeline.cache.get = AsyncMock(side_effect=AssertionError("must not read cache"))
+        pipeline.cache.set = AsyncMock(side_effect=AssertionError("must not write cache"))
+        pipeline.semantic_cache.get = AsyncMock(side_effect=AssertionError("must not read cache"))
+        pipeline.semantic_cache.set = AsyncMock(side_effect=AssertionError("must not write cache"))
+
+        with (
+            patch("app.core.database.AsyncSessionLocal", return_value=self._session()),
+            patch(
+                "app.rag.knowledge_base_filter.resolve_knowledge_base_document_ids",
+                new=AsyncMock(return_value=[]),
+            ),
+        ):
+            results, debug = await pipeline.search_knowledge_base(
+                "q", 1, top_k=5, knowledge_base_id="kb-empty", debug=True
+            )
+
+        assert results == []
+        assert debug["knowledge_base_filter"]["matched_document_ids"] == []
+        pipeline.retriever.retrieve.assert_not_awaited()
+        pipeline.cache.get.assert_not_awaited()
+        pipeline.cache.set.assert_not_awaited()
+        pipeline.semantic_cache.get.assert_not_awaited()
+        pipeline.semantic_cache.set.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_kb_and_tags_and_explicit_document_ids_positive_intersection(self):
+        """KB ∩ tags ∩ document_ids 三者正交集：收窄后的 id 才进 retriever。
+
+        变异点：任一过滤条件的交集结果没传给 retriever（例如用回原始
+        document_ids）→ 本条红。
+        """
+        pipeline = RAGPipeline()
+        calls: dict = {}
+
+        async def _fake_retrieve(*args, **kwargs):
+            calls["document_ids"] = args[3] if len(args) > 3 else kwargs.get("document_ids")
+            return [], [], None, []
+
+        pipeline.retriever.retrieve = AsyncMock(side_effect=_fake_retrieve)
+        pipeline.cache.get = AsyncMock(side_effect=AssertionError("scoped query must not cache"))
+        pipeline.cache.set = AsyncMock(side_effect=AssertionError("scoped query must not cache"))
+
+        with (
+            patch("app.core.database.AsyncSessionLocal", return_value=self._session()),
+            patch(
+                "app.rag.metadata_filter.resolve_metadata_filter_document_ids",
+                new=AsyncMock(return_value=["doc-in-kb", "doc-tagged", "doc-null"]),
+            ) as mock_meta,
+            patch(
+                "app.rag.knowledge_base_filter.resolve_knowledge_base_document_ids",
+                new=AsyncMock(return_value=["doc-in-kb", "doc-tagged"]),
+            ) as mock_kb,
+            patch(
+                "app.services.document_acl.get_blocked_document_ids", new=AsyncMock(return_value=[])
+            ),
+        ):
+            await pipeline.search_knowledge_base(
+                "q",
+                1,
+                top_k=5,
+                document_ids=["doc-tagged", "doc-null", "doc-outside"],
+                metadata_filters={"tags": ["2024"]},
+                knowledge_base_id="kb-org1",
+            )
+
+        mock_meta.assert_awaited_once()
+        mock_kb.assert_awaited_once()
+        assert calls["document_ids"] == ["doc-tagged"]
+        pipeline.retriever.retrieve.assert_awaited_once()
+        pipeline.cache.get.assert_not_awaited()
+        pipeline.cache.set.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_filters_negative_intersection_returns_empty_without_retriever(self):
+        """显式 document_ids 与 KB 零交集按早退处理，绝不回退全组织检索。
+
+        变异点：把零交集 [] 直接交给 retriever（retriever 把 [] 当「不限定」）
+        → 本条红。
+        """
+        pipeline = RAGPipeline()
+        pipeline.retriever.retrieve = AsyncMock(side_effect=AssertionError("must not retrieve"))
+
+        with (
+            patch("app.core.database.AsyncSessionLocal", return_value=self._session()),
+            patch(
+                "app.rag.metadata_filter.resolve_metadata_filter_document_ids",
+                new=AsyncMock(return_value=["doc-in-kb", "doc-tagged"]),
+            ),
+            patch(
+                "app.rag.knowledge_base_filter.resolve_knowledge_base_document_ids",
+                new=AsyncMock(return_value=["doc-in-kb"]),
+            ),
+            patch(
+                "app.services.document_acl.get_blocked_document_ids", new=AsyncMock(return_value=[])
+            ),
+        ):
+            results, _ = await pipeline.search_knowledge_base(
+                "q",
+                1,
+                top_k=5,
+                document_ids=["doc-tagged", "doc-outside"],
+                metadata_filters={"tags": ["2024"]},
+                knowledge_base_id="kb-org1",
+            )
+
+        assert results == []
+        pipeline.retriever.retrieve.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_acl_blocked_ids_reach_retriever_with_filters(self):
+        """带 KB/标签过滤时，ACL 屏蔽 id 仍以 must_not 入参传给 retriever。
+
+        变异点：过滤收窄时顺手把 blocked_document_ids 丢掉（私有文档借 KB
+        可见）→ 本条红。注意屏蔽 id 不从 document_ids 里删，ACL 是独立 must_not。
+        """
+        pipeline = RAGPipeline()
+        calls: dict = {}
+
+        async def _fake_retrieve(*args, **kwargs):
+            calls["document_ids"] = args[3] if len(args) > 3 else kwargs.get("document_ids")
+            calls["blocked"] = kwargs.get("blocked_document_ids")
+            return [], [], None, []
+
+        pipeline.retriever.retrieve = AsyncMock(side_effect=_fake_retrieve)
+
+        with (
+            patch("app.core.database.AsyncSessionLocal", return_value=self._session()),
+            patch(
+                "app.rag.metadata_filter.resolve_metadata_filter_document_ids",
+                new=AsyncMock(return_value=["doc-in-kb", "doc-private"]),
+            ),
+            patch(
+                "app.rag.knowledge_base_filter.resolve_knowledge_base_document_ids",
+                new=AsyncMock(return_value=["doc-in-kb", "doc-private"]),
+            ),
+            patch(
+                "app.services.document_acl.get_blocked_document_ids",
+                new=AsyncMock(return_value=["doc-private"]),
+            ) as mock_blocked,
+        ):
+            await pipeline.search_knowledge_base(
+                "q",
+                1,
+                top_k=5,
+                document_ids=["doc-in-kb", "doc-private", "doc-outside"],
+                metadata_filters={"tags": ["2024"]},
+                knowledge_base_id="kb-org1",
+                viewer_user_id=42,
+            )
+
+        mock_blocked.assert_awaited_once()
+        assert mock_blocked.await_args.args[1:] == (1, 42)
+        assert calls["document_ids"] == ["doc-in-kb", "doc-private"]
+        assert calls["blocked"] == ["doc-private"]
+        pipeline.retriever.retrieve.assert_awaited_once()
 
 
 class TestSchemaAndMigrationRegistration:

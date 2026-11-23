@@ -346,6 +346,7 @@ K8s manifests 与部署说明见 [`deploy/`](deploy/)；Kafka 不可用时 `/doc
 
 ## 已知边界
 
+- 知识检索可按组织内知识库（`knowledge_base_id`）与 `metadata_filters`（`tags` / `file_type`）收窄范围；条件取交集，指定知识库无匹配时返回空结果，不回退组织内全量。
 - 工作流代码节点默认关闭，必须 `ENABLE_WORKFLOW_CODE_NODES=true` 且经 Docker 沙箱执行。
 - GraphRAG 图谱不参与 RAG 检索链路；上下文压缩为规则式，无 LLM 调用；Agent 的短期/工作记忆为进程内，长期/反思记忆走 Redis。
 - 合同核验当前覆盖 4 类固定核验项的中文合同；证据引用是 chunk 级 quote + 条款/页码/字符区间，不是 PDF 高亮。

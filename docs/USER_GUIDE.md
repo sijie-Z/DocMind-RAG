@@ -390,18 +390,16 @@ DocMind 的 Agent 不是「LLM 自由循环」，而是一个有明确阶段的�
 - **关键词臂失败会中止该次混合检索尝试**（向量臂成功也不够），流水线会按子查询重试（`RAG_RETRIEVAL_MAX_RETRIES` 默认 2，即最多 3 次）。
 - **GraphRAG 不在 RAG 检索链路里**：图谱抽取在索引成功后非阻塞执行，失败只告警；检索仍由 HybridRetriever 完成（`README.md`、`backend/app/worker/doc_processor.py`）。图谱可在知识库页面查看，或通过 `/api/v1/knowledge/graph*` 查询。
 
-### 3.3 组织与多租户：组织 = 知识库
+### 3.3 组织与多租户：组织是租户根，知识库是组织内实体
 
-ADR-001 已把这条语义冻结（`docs/decisions/ADR-001-路线冻结.md` D5）：
+ADR-001 曾把「组织 = 知识库」冻结为路线语义（`docs/decisions/ADR-001-路线冻结.md` D5）；后续多知识库迭代已引入独立的 `knowledge_bases` 表，`/api/v1/knowledge-bases` 提供组织隔离的 CRUD。原 D5 的「不建表」约束已不再反映现状：一个组织可以有多个具名知识库；文档通过 `knowledge_base_id` 归属某个知识库，该字段为 NULL 的文档仍保留「组织内全部文档」的旧语义。文档、chunk、索引、检索始终受 `organization_id` 租户边界约束，ACL 同样适用。
 
-- **不建 `knowledge_bases` 表**。一个组织就是一个知识库单例：文档、chunk、索引、检索都按 `organization_id` 隔离。
 - 用户属于某个组织（`users.organization_id`）；业务端点通过 `require_organization` 取组织，非超管缺失组织时 fail-closed（403）；超管无组织时会回源到库中真实存在的组织。客户端不能用请求体自选组织。
 - **切换组织**走 `POST /api/v1/users/me/organizations/{organization_id}/switch`：写入 `users.organization_id`，非成员 403，超管旁路，并写审计日志 `switch_organization`。后续列表/检索都以该字段解析组织上下文。
 - **管理员语义（D3）**：取消「`role=admin` 隐式等于全局管理员」；平台级操作只认显式 `is_superuser`，组织管理员由组织成员角色判定（`user_organization_role_association` 的 OrgAdmin），只能管理本组织。
-- 知识检索接口 `POST /api/v1/knowledge/search` 的 `organization_id` 是必填字段；非超管传入值会被服务端以有效组织覆盖，跨组织数据不可见。
+- 知识检索接口 `POST /api/v1/knowledge/search` 的 `organization_id` 是必填字段；非超管传入值会被服务端以有效组织覆盖，跨组织数据不可见。可选 `knowledge_base_id` 会把结果收窄到该组织内指定知识库；跨组织或不存在的知识库返回空结果，**不会回退到组织级全量检索**。`metadata_filters` 支持 `tags` 与 `file_type` 两个字段（`file_type` 取值 `pdf` / `word` / `excel` / `ppt` / `txt` / `other`）；字段内多值取并集、字段间取交集，并与知识库条件叠加。
 - Agent 任务的组织校验更严：`AgentTask.organization_id` 必须与当前有效组织完全一致（包括 NULL），否则 404。
 - 语义缓存、RAG 缓存、图谱分区都按组织隔离（`README.md`「已修复」与 `backend/app/services/graph_rag_service.py`）。
-- 边界：D5 的「清理误导性命名」尚未全部落地——`/knowledge` 列表与前端 `KnowledgeBase` 类型仍沿用旧命名，实际语义以「组织=知识库」为准，不要据此假设支持多知识库。
 
 > 组织切换与历史会话的可见性取决于会话记录的 `organization_id`；详见 7.4。
 
@@ -561,7 +559,7 @@ python scripts/reconcile_knowledge_index.py --reindex --limit 10
 - **历史会话**：`GET /api/v1/chat/conversations` 支持 `page` / `page_size` / `search`（标题模糊过滤），按更新时间倒序；会话按「本人 + 当前组织」可见（见 7.4）。
 - **深度分析会展示过程**：计划树、思考流、工具调用卡片、反思结果都由 20 种 Agent SSE 事件驱动；快速问答只产生 `chunk` / `message` / `error` / `debug` 等少量事件。
 - **需要中途拍板时**：深度分析继承了 HITL。`approval_mode` 默认 `risky`，但高危工具默认禁用，所以默认配置下不会触发审批；一旦启用 `execute_python` / `execute_sql` / `mcp_call` 等风险工具，遇到风险调用就会停在审批点。复杂任务建议去 Agent 工作台（4.3）处理，那里有完整的审批与回放视图。
-- **边界**：独立搜索页的文件类型筛选目前是**前端展示项**——`file_types` 不在后端 `KnowledgeSearchRequest` 里，过滤不会生效；请用查询词与 `search_mode` 控制检索。
+- **搜索范围筛选**：独立搜索页（`/search`）提供知识库选择、标签多选与文件类型多选，最终以 `knowledge_base_id` 与 `metadata_filters`（`tags` / `file_type`）传给 `POST /api/v1/knowledge/search`；各条件叠加生效（字段内多值取并集，字段间取交集），顶层 `file_types` 不是后端字段。指定知识库但库内没有匹配文档时返回空结果，不会回退到组织内全量检索。
 
 ### 4.3 Agent 工作台：审批、断点续跑、回放
 
@@ -631,7 +629,7 @@ API 前缀 `/api/v1/workflows`：工作流 CRUD、执行、调试、节点定义
 - 覆盖是「部分更新」：省略字段保持不变，显式 `null` 清除覆盖、回退平台默认。
 - **边界（诚实口径）**：`default_model`、`retrieval_top_k`、`allow_privacy_mode` 已接入运行时；`default_provider`、`monthly_token_quota`、`tool_whitelist` 目前只做存储与展示，**尚未强制执行**（`backend/app/services/organization_settings_service.py`）。
 
-**组织切换**：桌面端在顶栏 `OrgSwitcher` 切换（单组织时显示为静态文本），移动端在用户菜单里。切换后，知识库（组织 = 知识库）与会话列表都按新组织过滤，当前页面会重新挂载并刷新数据。切换看不到旧会话是预期行为，见 7.4；用同一个组织上下文检索、上传，才能看到对应数据。
+**组织切换**：桌面端在顶栏 `OrgSwitcher` 切换（单组织时显示为静态文本），移动端在用户菜单里。切换后，知识库列表、会话列表与检索范围都按新组织过滤，当前页面会重新挂载并刷新数据。切换看不到旧会话是预期行为，见 7.4；用同一个组织上下文检索、上传，才能看到对应数据。
 
 ### 4.6 监控
 
@@ -878,7 +876,7 @@ alembic revision --autogenerate -m "描述"   # 新增迁移（开发）
 按顺序排查：
 
 1. **看状态**：文档必须是 `INDEXED`。`PENDING` / `PARSING` 说明 Worker 没消费；`FAILED` 看 `parse_error`（格式不支持、扫描版 PDF 缺 OCR 依赖、嵌入维度不一致等）。
-2. **看组织**：组织 = 知识库。确认文档与检索请求属于同一组织；`/knowledge/search` 的 `organization_id` 必填，非超管传入值会被服务端以有效组织覆盖。
+2. **看组织与筛选**：确认文档与检索请求属于同一组织；`/knowledge/search` 的 `organization_id` 必填，非超管传入值会被服务端以有效组织覆盖。若传了 `knowledge_base_id` 或 `metadata_filters`，再核对文档是否属于所选知识库、标签/类型是否命中——这些过滤不会回退到组织内全量结果。
 3. **看索引对账**：`/readyz` 的 `knowledge_base` 项会对比「DB 声称 INDEXED 的文档/chunk」与「ES 实际 chunk」。chunk 覆盖率 **<95% 为 `unhealthy`**（摘流 503）；**95%–100% 为 `degraded`**（不摘流）；0 chunk 或文档缺失同样为 `unhealthy`。
 4. **跑对账脚本**（只读先看）：
    ```bash
@@ -1026,7 +1024,7 @@ python scripts/check_doc_facts.py                                  # 校验三�
 | 索引对账/重索引 | `backend/scripts/reconcile_knowledge_index.py` |
 | 迁移 | `backend/alembic/versions/`（head：`011_organization_settings`） |
 | Agent 架构与事件 | `AGENT_ARCHITECTURE.md`、`backend/app/agent/events.py` |
-| 组织=知识库、管理员语义 | `docs/decisions/ADR-001-路线冻结.md`（D3 / D5） |
+| 管理员语义与知识库边界 | `docs/decisions/ADR-001-路线冻结.md`（D3 / D5 历史语义）、`backend/app/models/knowledge_base.py`、`backend/app/rag/knowledge_base_filter.py`、`backend/app/rag/metadata_filter.py`（现状） |
 | 部署与生产检查 | `deploy/README.md`、`SETUP.md` |
 | CI 门禁 | `.github/workflows/ci-fast.yml`、`ci-hygiene.yml`、`docs/ci-charter.md` |
 | 文档数字校验 | `backend/scripts/check_doc_facts.py`、`docs/facts.json` |
