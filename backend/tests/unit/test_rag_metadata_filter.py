@@ -291,6 +291,7 @@ class TestQueryBodyCompatibility:
         assert body["query"]["bool"]["filter"] == [
             {"term": {"organization_id": "1"}},
             {"bool": {"must_not": [{"term": {"is_enabled": False}}]}},
+            {"bool": {"must_not": [{"term": {"is_chunk_enabled": False}}]}},
         ]
         assert "tags" not in str(body)
         assert "metadata_filters" not in str(body)

@@ -177,16 +177,22 @@ async def build_referenced_document_context(
             # 可信输入（见上方安全注记），长度帽照旧。
             try:
                 from app.core.elasticsearch import ElasticsearchTools
+                from app.services.document_acl import with_chunk_enabled_filter
 
                 es_res = await ElasticsearchTools.search_documents(
                     {
                         "size": 3,
                         "query": {
                             "bool": {
-                                "must": [
-                                    {"term": {"document_id": did}},
-                                    {"term": {"organization_id": str(organization_id)}},
-                                ]
+                                # 分块级禁用对这条直读腿同样生效：否则被用户
+                                # 显式禁用（不应参与检索）的块会经 @引用 绕过
+                                # hybrid 检索的 must_not 直接进入模型上下文。
+                                "must": with_chunk_enabled_filter(
+                                    [
+                                        {"term": {"document_id": did}},
+                                        {"term": {"organization_id": str(organization_id)}},
+                                    ]
+                                )
                             }
                         },
                         "sort": [{"chunk_index": {"order": "asc"}}],

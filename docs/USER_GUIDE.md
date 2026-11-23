@@ -4,7 +4,7 @@
 >
 > 本文只做**引述**，不做第二套真源：
 > - 端口、凭据、服务编排以 `backend/docker-compose.yml` 与 `backend/.env.docker.example` 为准；
-> - 关键数字（31 个内置工具 / 默认注入 10 个工具 / 29 个端点模块 / 38 条前端路由 / 24 种 SSE 事件）以 `docs/facts.json` 为单一事实源；README、架构页等既有锚点由 `backend/scripts/check_doc_facts.py` 在 CI 逐 PR 校验，本文数字与之一致（工具/端点/路由/SSE 锚点已纳入 CI 校验）；
+> - 关键数字（31 个内置工具 / 默认注入 10 个工具 / 29 个端点模块 / 39 条前端路由 / 24 种 SSE 事件）以 `docs/facts.json` 为单一事实源；README、架构页等既有锚点由 `backend/scripts/check_doc_facts.py` 在 CI 逐 PR 校验，本文数字与之一致（工具/端点/路由/SSE 锚点已纳入 CI 校验）；
 > - 架构与设计动机见 `README.md`、`AGENT_ARCHITECTURE.md`、`docs/decisions/`。
 >
 > 英文版：[USER_GUIDE_EN.md](USER_GUIDE_EN.md)
@@ -330,6 +330,7 @@ ADMIN_PASSWORD='<至少 8 位>' python reset_admin.py     # Windows PowerShell: 
 | `LOG_LEVEL` / `LOG_JSON` | `INFO` / `true`（代码；模板写 `false`） | 日志级别与 JSON 格式 |
 | `LOG_FILE` | `logs/docmind.log` | 日志文件 |
 | `LLM_CALL_LOG_ENABLED` / `LLM_CALL_LOG_FILE` / `LLM_CALL_LOG_PER_RUN` | `true` / `logs/llm_calls.jsonl` / `false` | LLM 调用级 JSONL（issue #510）：每次调用一行元数据（`task_id`/`request_id`/model/tokens/latency/prompt_hash），**不含 prompt/completion 正文**；`PER_RUN=true` 按 run 分文件 |
+| `OTEL_GEN_AI_EXPORT_ENABLED` | `false` | 可选 OTel GenAI 语义属性导出；默认关闭。仅投影元数据的 `gen_ai.*` 属性到既有 OTel provider，不落正文；`ENABLE_TRACING=true` + `OTLP_ENDPOINT` 才决定 exporter/传输 |
 | `ENABLE_TRACING` / `OTLP_ENDPOINT` | `false` / 空 | OpenTelemetry（`os.getenv` 直读） |
 | `LANGFUSE_ENABLED` / `LANGFUSE_PUBLIC_KEY` / `LANGFUSE_SECRET_KEY` / `LANGFUSE_HOST` | `true` / 空 / 空 / `https://cloud.langfuse.com` | LLM 全链路追踪（可选；未配 key 不启用。已标记为待删除候选，审批前保留） |
 | `ENABLE_SCHEDULER` | `true` | 进程内定时任务调度；**单实例语义**，多 worker 部署需外部调度 |
@@ -509,7 +510,26 @@ python scripts/reconcile_knowledge_index.py --reindex --limit 10
 
 **图谱**：索引成功后会非阻塞地抽取知识图谱，按组织存 Redis（30 天 TTL）。它不参与检索排序，失败也不会把文档标成 FAILED。历史文档可用 `backend/scripts/backfill_graph.py` 回填；图谱页按 `max_nodes`（后端 5–200，默认 50）截断展示。
 
-### 4.2 对话与深度分析
+### 4.2 检索评测运行历史与趋势
+
+知识库页的「检索评测运行历史」（`/knowledge/eval-runs`）把一次性评测变成可追溯质量资产：
+
+- `POST /api/v1/knowledge/eval/run` 默认**不写库**（保持原只读契约）；显式 `persist: true` 或 `POST /api/v1/knowledge/eval/runs` 才保存一次运行。
+- 运行记录含组织、发起人、`top_k`、用例 id/范围、用例集哈希、计数、指标、失败用例 id 与逐条结果；跨组织读取/导出一律 404。
+- `GET /eval/runs`（列表，可按 `case_set_hash` 过滤）、`GET /eval/runs/{id}`（详情）、`GET /eval/runs/trend`（最近 30 次趋势，失败运行不计入指标均值）、`GET /eval/runs/{id}/export?format=json|csv`（同源导出，用于回归比较）。
+- 审计只写组织、用户、条数、格式与字段名，`query`/用例名/逐条正文不进审计日志；逐条结果只在本组织授权详情页可见。
+
+### 4.2.1 分块浏览与人工纠正
+
+文档详情页的「浏览与纠正分块」（URL 参数 `chunkBrowser=1`，可分享）打开只读优先的分块工作台：
+
+- `GET /api/v1/documents/{id}/chunks` 分页返回分块索引、检索文本、parser 原文可用性、页码/字符区间/条款定位、启停与人工修正状态；组织、私有文档 ACL 与 viewer 全部由服务端推导，客户端不能声明组织上下文。
+- 文档所有者或组织管理员可把修正文本写入独立的 `document_chunk_overrides` 审计行（`PUT .../chunks/override`）。`apply_to_retrieval=false` 仅保存草稿；`true` 时检索文本立即切换为人工文本并标 `manual_override`。`parser_original` / `original_text` / `quote_sha256` 与合同证据快照**永不改写**；strict 原文回放仍只读 parser 原文。
+- `PATCH .../chunks/enabled` 立即把分块级 `is_chunk_enabled` 刷到 ES，停用块退出检索；`DELETE .../chunks/override` 撤销人工文本并恢复 parser 检索文本。写操作失败时 DB 不提交，避免 ES/DB 状态漂移；缓存按组织清理。
+- 审计记录只含文档/分块 id、操作、布尔值与修正文本哈希/字符数，绝不写私有正文或修正正文到审计日志。旧索引缺 `is_chunk_enabled` 字段时按启用处理，需执行 `scripts/add_rag_source_provenance_mapping.py` 补齐 additive mapping。
+- **取舍**：人工修正不重算向量、也不重建索引；它只改 ES 的检索文本与独立审计行。文档重建/重新解析会生成新的分块 id，旧修正不会自动迁移到新块，需要按新块重新确认；这也是 strict 原文回放始终可信的前提——人工文本永不进入 parser 原文证据链。
+
+### 4.3 对话与深度分析
 
 对话页（`/chat`）有两个模式，入口是输入区的「快速问答 / 深度分析」二选一开关（`frontend/src/views/chat/components/ChatInput.vue`）：
 
@@ -653,7 +673,7 @@ API 前缀 `/api/v1/workflows`：工作流 CRUD、执行、调试、节点定义
 
 ### 5.2 端点模块清单
 
-当前共 **29 个端点模块**（`docs/facts.json` 的 `endpoint_modules`，由 `backend/app/api/v1/router.py` 的 `ROUTER_SPECS` 路由表派生）：
+当前共 **30 个端点模块**（`docs/facts.json` 的 `endpoint_modules`，由 `backend/app/api/v1/router.py` 的 `ROUTER_SPECS` 路由表派生）：
 
 | 模块 | 前缀 | 说明 |
 |------|------|------|
@@ -664,6 +684,7 @@ API 前缀 `/api/v1/workflows`：工作流 CRUD、执行、调试、节点定义
 | documents | `/api/v1/documents` | 文档上传、解析、向量化、状态 |
 | chat | `/api/v1/chat` | 会话 CRUD、SSE 流式问答 |
 | knowledge | `/api/v1/knowledge` | 知识检索、统计、重建、图谱 |
+| knowledge_bases | `/api/v1/knowledge-bases` | 多知识库实体 CRUD（组织隔离） |
 | reviews | `/api/v1/reviews` | 合同核验：案件/核验项/证据快照（parser 原文 + 版本哈希；Batch 2） |
 | organizations | `/api/v1/organizations` | 组织 CRUD、成员与角色 |
 | organization_settings | `/api/v1/organizations` | 组织级设置（与组织管理共用前缀） |

@@ -218,6 +218,8 @@ def test_mapping_is_additive_and_retrieval_fields_are_unchanged():
     assert set(_source_provenance_mapping_properties()) == {
         "original_text",
         "text_provenance",
+        "is_chunk_enabled",
+        "retrieval_text_provenance",
     }
     assert props["content"] == {
         "type": "text",
@@ -293,7 +295,12 @@ async def test_existing_index_mapping_is_additive_idempotent_and_read_back():
 
     added = await script.add_source_provenance_mapping(client, "knowledge-test")
 
-    assert added == ["original_text", "text_provenance"]
+    assert added == [
+        "is_chunk_enabled",
+        "original_text",
+        "retrieval_text_provenance",
+        "text_provenance",
+    ]
     assert len(client.indices.put_calls) == 1
     assert client.indices.put_calls[0] == _source_provenance_mapping_properties()
     for field, definition in before.items():

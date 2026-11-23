@@ -44,7 +44,6 @@ from app.models.review import ReviewCase, ReviewEvidence, ReviewItem
 from app.rag.source_provenance import SourceProvenanceUnavailableError
 from app.services.clause_refs import extract_clause_fields
 from app.services.review_case_service import case_detail, ensure_candidate_evidence
-from app.services.review_checklist import load_checklist
 from app.services.review_document_service import (
     MAX_EVIDENCE_SCAN_CHUNKS,
     chunk_original_text,
@@ -52,6 +51,7 @@ from app.services.review_document_service import (
     iter_chunks,
 )
 from app.services.review_explanation_service import derive_explanation, derive_severity
+from app.services.review_rule_snapshot import resolve_case_rules
 
 EXTRACTOR_VERSION = 1
 ITEM_KEYS = ("payment_term", "start_condition", "acceptance_invoice", "exception")
@@ -2444,8 +2444,11 @@ async def analyze_case(session: AsyncSession, case: ReviewCase) -> dict[str, Any
         .all()
     )
     try:
-        # 配置项没有专用抽取器时，用它的关键词走通用抽取器（否则永远是 undetermined）
-        checklist_keywords = {entry.key: entry.keywords for entry in load_checklist()}
+        # 配置项没有专用抽取器时，用它的关键词走通用抽取器（否则永远是 undetermined）。
+        # 旧案件无快照时回落当前 checklist，行为与父版本一致。
+        checklist_keywords = {
+            entry.key: entry.keywords for entry in await resolve_case_rules(session, case)
+        }
         for item in items:
             extractor = resolve_extractor(
                 item.item_key, keywords=checklist_keywords.get(item.item_key)

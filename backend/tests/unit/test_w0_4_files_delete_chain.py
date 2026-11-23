@@ -192,6 +192,9 @@ async def test_unified_chain_cleans_children_es_and_caches_in_order(monkeypatch)
     assert deleted_tables == [
         "document_acl",
         "document_chunks",
+        # 批次四：chunk 人工修正/启停的 override 行同样引用 documents.id，
+        # 且 FK 无 ON DELETE CASCADE，必须在主表之前删除。
+        "document_chunk_overrides",
         "document_tags",
         "knowledge_processing_jobs",
         "review_document_meta",
@@ -199,7 +202,7 @@ async def test_unified_chain_cleans_children_es_and_caches_in_order(monkeypatch)
     ]
     # 3. 全部子表删完才 commit
     assert session.commit_count == 1
-    assert session.deletes_before_commit == 6
+    assert session.deletes_before_commit == 7
 
     # 4. ES 按 document_id 清索引
     assert fake_es.delete_calls == [

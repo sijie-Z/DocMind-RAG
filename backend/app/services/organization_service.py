@@ -20,12 +20,14 @@ from app.exceptions import (
 from app.models.agent_task import AgentTask
 from app.models.chat import ChatSession
 from app.models.document import Document
+from app.models.knowledge_base import KnowledgeBase
 from app.models.knowledge_job import KnowledgeProcessingJob
 from app.models.organization import Organization, user_organization
 from app.models.organization_settings import OrganizationSettings
 from app.models.prompt import PromptTemplate
 from app.models.rbac import ORG_ADMIN_ROLE_NAME, Role, user_organization_role_association
-from app.models.review import ReviewCase, ReviewExport
+from app.models.retrieval_eval import RetrievalEvalCase, RetrievalEvalRun
+from app.models.review import ReviewCase, ReviewExport, ReviewRuleSet
 from app.models.scheduled_task import ScheduledTask
 from app.models.token_usage import TokenUsageRecord
 from app.models.user import User
@@ -360,6 +362,14 @@ class OrganizationService:
         ("Agent 任务", AgentTask),
         ("定时任务", ScheduledTask),
         ("知识库处理任务", KnowledgeProcessingJob),
+        # P2 多知识库实体：knowledge_bases.organization_id 有 RESTRICT 外键，
+        # 未纳入清理会在 MySQL 上以 1451 失败；同样必须先转移。
+        ("知识库", KnowledgeBase),
+        # P2 检索评测用例：retrieval_eval_case.organization_id 有 RESTRICT 外键，
+        # 未纳入清理会在 MySQL 上以 1451 失败；评测资产同样先转移。
+        ("检索评测用例", RetrievalEvalCase),
+        # 评测运行历史同样是组织资产；未纳入清理会触发 MySQL 1451。
+        ("检索评测运行", RetrievalEvalRun),
         ("工作流", Workflow),
         ("提示词模板", PromptTemplate),
         ("用量记录", TokenUsageRecord),
@@ -367,6 +377,9 @@ class OrganizationService:
         # 转移/清理案件，否则 review_case.organization_id 外键会 1451。
         ("核验案件", ReviewCase),
         ("核验单导出", ReviewExport),
+        # 规则/playbook 快照：review_rule_set.organization_id 有外键，
+        # 未纳入清理会在 MySQL 上以 1451 失败。快照是审计资产，同样先转移。
+        ("规则快照", ReviewRuleSet),
     )
 
     async def _assert_org_has_no_attached_data(self, db: AsyncSession, org_ids: list[int]) -> None:

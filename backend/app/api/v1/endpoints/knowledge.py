@@ -3,13 +3,15 @@
 """
 
 import asyncio
+import json
 import logging
 import time
 from contextlib import suppress
 from datetime import datetime
 from typing import Any
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Request
+from fastapi.responses import Response
 from sqlalchemy import desc, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -51,12 +53,20 @@ from app.schemas.knowledge import (
     SearchSuggestionResponse,
     SimilarityResponse,
 )
+from app.schemas.retrieval_eval import (
+    RetrievalEvalCaseCreate,
+    RetrievalEvalCaseUpdate,
+    RetrievalEvalRunRequest,
+)
+from app.services import retrieval_eval_service
 from app.services.audit_service import audit_service
 from app.services.embedding_service import embedding_service
+from app.services.index_progress import IndexErrorCode, build_error_detail, pipeline_payload
 from app.services.knowledge_service import knowledge_service
 from app.services.organization_settings_service import (
     organization_settings_service,
 )
+from evals.harness import RetrievalObservation
 
 
 async def _diagnose_empty_results(organization_id: int) -> tuple[str, int | None]:
@@ -242,6 +252,8 @@ async def list_knowledge_bases(
                     "tags": doc.keywords if doc.keywords else [],
                     "description": doc.description,
                     "parse_error": doc.parse_error,
+                    # 结构化进度：与 parse_error/status 并行，不改变既有语义。
+                    "index_pipeline": pipeline_payload(doc),
                     "created_at": doc.created_at.isoformat() if doc.created_at else "",
                     "updated_at": doc.updated_at.isoformat() if doc.updated_at else "",
                     "status": status_map.get(doc_status, "failed"),
@@ -311,6 +323,7 @@ async def search_knowledge(
             search_mode=requested_mode,
             document_ids=request.document_ids or None,
             metadata_filters=request.metadata_filters,
+            knowledge_base_id=request.knowledge_base_id,
             debug=request.debug,
             viewer_user_id=current_user.id,
         )
@@ -333,6 +346,8 @@ async def search_knowledge(
                     # O 派生展示正文 + 逐条溯源；legacy 行不得被当作原文证据。
                     "content": r.get("content"),
                     "text_provenance": r.get("text_provenance"),
+                    # 人工修正文本标记独立透传；下游展示/严格模式不得把它当 parser 原文。
+                    "retrieval_text_provenance": r.get("retrieval_text_provenance"),
                     "score": r.get("score") or r.get("relevance_score") or 0,
                     # issue #185：重排绝对分单独透传（score 是相对排序分）；
                     # null 表示无重排分，前端不得按百分比相关度展示。
@@ -597,7 +612,14 @@ async def rebuild_document_knowledge(
                 Document.id == document_id,
                 Document.status != DocumentStatus.INDEXED,
             )
-            .values(status=DocumentStatus.PENDING, parse_error=None)
+            .values(
+                status=DocumentStatus.PENDING,
+                parse_error=None,
+                # 重建入口清除旧错误码/详情：只改状态 reporting，不改重试语义。
+                index_error_code=None,
+                index_error_detail=None,
+                index_progress=0,
+            )
             .execution_options(synchronize_session=False)
         )
         await db.commit()
@@ -678,7 +700,11 @@ async def rebuild_document_knowledge(
                             ),
                         )
                         .values(
-                            error_message=(f"本地处理任务启动失败（待启动对账重试）: {proc_err}")
+                            error_message=(f"本地处理任务启动失败（待启动对账重试）: {proc_err}"),
+                            index_stage="parse",
+                            index_progress=0,
+                            index_error_code=IndexErrorCode.JOB_SCHEDULE_FAILED.value,
+                            index_error_detail=build_error_detail("parse", proc_err, job_id=job.id),
                         )
                         .execution_options(synchronize_session=False)
                     )
@@ -793,6 +819,7 @@ async def list_knowledge_jobs(
                 "status": job.status.value if hasattr(job.status, "value") else str(job.status),
                 "retry_count": job.retry_count,
                 "error_message": job.error_message,
+                "index_pipeline": pipeline_payload(job),
                 "started_at": job.started_at.isoformat() if job.started_at else None,
                 "finished_at": job.finished_at.isoformat() if job.finished_at else None,
                 "created_at": job.created_at.isoformat() if job.created_at else None,
@@ -847,6 +874,7 @@ async def get_document_job_events(
                 "status": job.status.value if hasattr(job.status, "value") else str(job.status),
                 "retry_count": job.retry_count,
                 "error_message": job.error_message,
+                "index_pipeline": pipeline_payload(job),
                 "started_at": job.started_at.isoformat() if job.started_at else None,
                 "finished_at": job.finished_at.isoformat() if job.finished_at else None,
                 "created_at": job.created_at.isoformat() if job.created_at else None,
@@ -1248,3 +1276,472 @@ async def get_knowledge_graph(
         # 前端 graph.vue 的 catch 之外还会收到全局错误提示，不再静默空白。
         logger.error(f"Failed to get knowledge graph: {e}")
         raise ServiceUnavailableError("知识图谱数据暂时不可用，请稍后重试")
+
+
+# ── 检索评测测试集（竞品对标 P2）─────────────────────────────────────────
+# 产品化闭环：保存用例（query → 期望文档 id）→ 运行评测 → 看文档级 recall@k /
+# MRR。运行默认只读用例、不写库；判定纯函数在 retrieval_eval_service，检索
+# 通过现有知识库检索链路注入（与搜索端点同一组织边界与 ACL 口径）。
+
+
+async def _retrieval_eval_org_id(current_user: User, db: AsyncSession) -> int:
+    """评测用例的组织归属：一律取调用者有效组织（超管也不接受客户端指定）。"""
+    return await require_organization(current_user, db)
+
+
+def _eval_audit_detail(organization_id: int, user_id: int, **extra: Any) -> str:
+    """评测审计 detail：只含 org/user/条数与字段名，绝不记 query 或用例名。"""
+    return json.dumps(
+        {"organization_id": organization_id, "user_id": user_id, **extra},
+        ensure_ascii=False,
+        sort_keys=True,
+    )
+
+
+def _make_retrieve_fn(organization_id: int, viewer_user_id: int):
+    """把知识库检索封装成 evals.harness 的 ``RetrieveFn``（每条用例一次检索）。"""
+
+    async def _retrieve(query: str, top_k: int) -> RetrievalObservation:
+        results, _ = await knowledge_service.search_knowledge_with_meta(
+            query=query,
+            organization_id=organization_id,
+            top_k=top_k,
+            viewer_user_id=viewer_user_id,
+            # 评测必须区分「检索失败」与「零召回」；strict 仅此路径开启，
+            # 其它端点仍走原有 best-effort 降级语义。
+            strict=True,
+        )
+        return RetrievalObservation(results=list(results or []))
+
+    return _retrieve
+
+
+@router.post(
+    "/eval/cases",
+    response_model=dict,
+    dependencies=[
+        Depends(require_scope("knowledge:write")),
+        Depends(permission_required([PermissionType.SEARCH_KNOWLEDGE_BASE])),
+    ],
+)
+async def create_retrieval_eval_case(
+    body: RetrievalEvalCaseCreate,
+    request: Request,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """保存一条检索评测用例；期望文档必须全部属于调用者组织。"""
+    try:
+        org_id = await _retrieval_eval_org_id(current_user, db)
+        case = await retrieval_eval_service.create_case(
+            db,
+            organization_id=org_id,
+            created_by=current_user.id,
+            name=body.name,
+            query=body.query,
+            expected_document_ids=body.expected_document_ids,
+            tags=body.tags,
+            viewer_user_id=current_user.id,
+        )
+        await audit_service.log_activity(
+            user_id=current_user.id,
+            action="create_retrieval_eval_case",
+            target_type="retrieval_eval_case",
+            target_id=case.id,
+            detail=_eval_audit_detail(
+                org_id, current_user.id, expected_count=len(case.expected_document_ids)
+            ),
+            request=request,
+            db=db,
+        )
+        return {"success": True, "data": retrieval_eval_service.case_to_dict(case)}
+    except (AppError, NotFoundError, ValidationError, AuthorizationError):
+        raise
+    except Exception as e:
+        logger.error("Create retrieval eval case failed: %s", type(e).__name__)
+        raise AppError("创建检索评测用例失败") from e
+
+
+@router.get(
+    "/eval/cases",
+    response_model=dict,
+    dependencies=[
+        Depends(require_scope("knowledge:read")),
+        Depends(permission_required([PermissionType.SEARCH_KNOWLEDGE_BASE])),
+    ],
+)
+async def list_retrieval_eval_cases(
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, ge=1, le=200),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """列出本组织的评测用例（创建时间倒序）。"""
+    try:
+        org_id = await _retrieval_eval_org_id(current_user, db)
+        data = await retrieval_eval_service.list_cases(
+            db, organization_id=org_id, page=page, page_size=page_size
+        )
+        return {"success": True, "data": data}
+    except (AppError, NotFoundError, ValidationError, AuthorizationError):
+        raise
+    except Exception as e:
+        logger.error("List retrieval eval cases failed: %s", type(e).__name__)
+        raise AppError("获取检索评测用例失败") from e
+
+
+@router.get(
+    "/eval/cases/{case_id}",
+    response_model=dict,
+    dependencies=[
+        Depends(require_scope("knowledge:read")),
+        Depends(permission_required([PermissionType.SEARCH_KNOWLEDGE_BASE])),
+    ],
+)
+async def get_retrieval_eval_case(
+    case_id: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """读取本组织单条评测用例；跨组织一律 404。"""
+    try:
+        org_id = await _retrieval_eval_org_id(current_user, db)
+        case = await retrieval_eval_service.get_case(db, organization_id=org_id, case_id=case_id)
+        return {"success": True, "data": retrieval_eval_service.case_to_dict(case)}
+    except (AppError, NotFoundError, ValidationError, AuthorizationError):
+        raise
+    except Exception as e:
+        logger.error(f"Get retrieval eval case failed: {type(e).__name__}")
+        raise AppError("获取检索评测用例失败") from e
+
+
+@router.put(
+    "/eval/cases/{case_id}",
+    response_model=dict,
+    dependencies=[
+        Depends(require_scope("knowledge:write")),
+        Depends(permission_required([PermissionType.SEARCH_KNOWLEDGE_BASE])),
+    ],
+)
+async def update_retrieval_eval_case(
+    case_id: str,
+    body: RetrievalEvalCaseUpdate,
+    request: Request,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """更新本组织用例；金标变更同样校验组织归属与 viewer 的 ACL。"""
+    try:
+        org_id = await _retrieval_eval_org_id(current_user, db)
+        changes = body.model_dump(exclude_unset=True, exclude_none=False)
+        case = await retrieval_eval_service.update_case(
+            db,
+            organization_id=org_id,
+            case_id=case_id,
+            viewer_user_id=current_user.id,
+            changes=changes,
+        )
+        await audit_service.log_activity(
+            user_id=current_user.id,
+            action="update_retrieval_eval_case",
+            target_type="retrieval_eval_case",
+            target_id=case.id,
+            # 只记被改字段名，不记 query / 用例名 / 金标 id。
+            detail=_eval_audit_detail(org_id, current_user.id, fields=sorted(changes)),
+            request=request,
+            db=db,
+        )
+        return {"success": True, "data": retrieval_eval_service.case_to_dict(case)}
+    except (AppError, NotFoundError, ValidationError, AuthorizationError):
+        raise
+    except Exception as e:
+        logger.error(f"Update retrieval eval case failed: {type(e).__name__}")
+        raise AppError("更新检索评测用例失败") from e
+
+
+@router.delete(
+    "/eval/cases/{case_id}",
+    response_model=dict,
+    dependencies=[
+        Depends(require_scope("knowledge:write")),
+        Depends(permission_required([PermissionType.SEARCH_KNOWLEDGE_BASE])),
+    ],
+)
+async def delete_retrieval_eval_case(
+    case_id: str,
+    request: Request,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """删除本组织的一条评测用例；跨组织一律 404（不回显存在性）。"""
+    try:
+        org_id = await _retrieval_eval_org_id(current_user, db)
+        await retrieval_eval_service.delete_case(db, organization_id=org_id, case_id=case_id)
+        await audit_service.log_activity(
+            user_id=current_user.id,
+            action="delete_retrieval_eval_case",
+            target_type="retrieval_eval_case",
+            target_id=case_id,
+            detail=_eval_audit_detail(org_id, current_user.id),
+            request=request,
+            db=db,
+        )
+        return {"success": True, "data": {"id": case_id}}
+    except (AppError, NotFoundError, ValidationError, AuthorizationError):
+        raise
+    except Exception as e:
+        logger.error("Delete retrieval eval case failed: %s", type(e).__name__)
+        raise AppError("删除检索评测用例失败") from e
+
+
+async def _execute_retrieval_eval(
+    body: RetrievalEvalRunRequest,
+    request: Request,
+    current_user: User,
+    db: AsyncSession,
+    *,
+    force_persist: bool = False,
+):
+    """运行评测的共用实现；默认不写库，仅显式 persist/专用端点才固化运行。"""
+    org_id = await _retrieval_eval_org_id(current_user, db)
+    cases = await retrieval_eval_service.load_cases(
+        db, organization_id=org_id, case_ids=body.case_ids
+    )
+    # 运行开始时取一次可检索性快照（含 viewer ACL），与检索路径同一口径。
+    searchable = await retrieval_eval_service.load_searchable_docs(
+        db, organization_id=org_id, viewer_user_id=current_user.id
+    )
+    report = await retrieval_eval_service.run_eval(
+        cases,
+        _make_retrieve_fn(org_id, current_user.id),
+        body.top_k,
+        searchable=searchable,
+    )
+    persist = force_persist or body.persist
+    if persist:
+        run = await retrieval_eval_service.persist_run(
+            db,
+            report=report,
+            cases=cases,
+            organization_id=org_id,
+            created_by=current_user.id,
+            case_scope="subset" if body.case_ids is not None else "all",
+        )
+        report["run_id"] = run.id
+    report["persisted"] = persist
+    await audit_service.log_activity(
+        user_id=current_user.id,
+        action="run_retrieval_eval",
+        target_type="retrieval_eval_run",
+        target_id=report.get("run_id"),
+        # 只记条数/top_k/错误数与是否持久化，不记 query、用例名或金标 id。
+        detail=_eval_audit_detail(
+            org_id,
+            current_user.id,
+            cases=len(cases),
+            top_k=body.top_k,
+            errors=report["counts"]["errors"],
+            persisted=persist,
+        ),
+        request=request,
+        db=db,
+    )
+    return {"success": True, "data": report}
+
+
+@router.post(
+    "/eval/run",
+    response_model=dict,
+    dependencies=[
+        Depends(require_scope("knowledge:read")),
+        Depends(permission_required([PermissionType.SEARCH_KNOWLEDGE_BASE])),
+    ],
+)
+async def run_retrieval_eval(
+    body: RetrievalEvalRunRequest,
+    request: Request,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """运行本组织保存的评测集：返回逐条结果与文档级 recall@k / MRR（默认不写库）。
+
+    空测试集安全返回（全零计数 + 指标 null），不是错误；单条检索失败如实记为
+    ``status=error`` 并单独计数，不进任何比例的分母。金标在运行时失效（文档
+    被删/停用/未索引、或 viewer 私有权限被撤销）同样记 error + 机器码，
+    绝不报成 recall=0。
+
+    ``persist=true`` 为显式 opt-in：结果写入评测运行历史并返回 ``run_id``；
+    缺省严格保持原只读契约（``persisted=false``，不产生任何评测运行记录）。
+    """
+    try:
+        return await _execute_retrieval_eval(body, request, current_user, db)
+    except (AppError, NotFoundError, ValidationError, AuthorizationError):
+        raise
+    except Exception as e:
+        logger.error("Run retrieval eval failed: %s", type(e).__name__)
+        raise AppError("运行检索评测失败") from e
+
+
+@router.post(
+    "/eval/runs",
+    response_model=dict,
+    dependencies=[
+        Depends(require_scope("knowledge:read")),
+        Depends(permission_required([PermissionType.SEARCH_KNOWLEDGE_BASE])),
+    ],
+)
+async def run_and_persist_retrieval_eval(
+    body: RetrievalEvalRunRequest,
+    request: Request,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """专用持久化入口：语义等价于 ``/eval/run`` + ``persist=true``。"""
+    try:
+        return await _execute_retrieval_eval(body, request, current_user, db, force_persist=True)
+    except (AppError, NotFoundError, ValidationError, AuthorizationError):
+        raise
+    except Exception as e:
+        logger.error("Run and persist retrieval eval failed: %s", type(e).__name__)
+        raise AppError("保存检索评测运行失败") from e
+
+
+@router.get(
+    "/eval/runs",
+    response_model=dict,
+    dependencies=[
+        Depends(require_scope("knowledge:read")),
+        Depends(permission_required([PermissionType.SEARCH_KNOWLEDGE_BASE])),
+    ],
+)
+async def list_retrieval_eval_runs(
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, ge=1, le=200),
+    case_set_hash: str | None = Query(None, max_length=64),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """列出本组织评测运行（可按用例集哈希过滤），跨组织记录绝不返回。"""
+    try:
+        org_id = await _retrieval_eval_org_id(current_user, db)
+        data = await retrieval_eval_service.list_runs(
+            db,
+            organization_id=org_id,
+            page=page,
+            page_size=page_size,
+            case_set_hash=case_set_hash,
+        )
+        return {"success": True, "data": data}
+    except (AppError, NotFoundError, ValidationError, AuthorizationError):
+        raise
+    except Exception as e:
+        logger.error("List retrieval eval runs failed: %s", type(e).__name__)
+        raise AppError("获取检索评测运行历史失败") from e
+
+
+@router.get(
+    "/eval/runs/trend",
+    response_model=dict,
+    dependencies=[
+        Depends(require_scope("knowledge:read")),
+        Depends(permission_required([PermissionType.SEARCH_KNOWLEDGE_BASE])),
+    ],
+)
+async def get_retrieval_eval_trend(
+    case_set_hash: str | None = Query(None, max_length=64),
+    limit: int = Query(30, ge=1, le=200),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """最近 N 次运行的时间趋势与均值（组织隔离；失败运行不计入指标均值）。"""
+    try:
+        org_id = await _retrieval_eval_org_id(current_user, db)
+        data = await retrieval_eval_service.trend_summary(
+            db, organization_id=org_id, case_set_hash=case_set_hash, limit=limit
+        )
+        return {"success": True, "data": data}
+    except (AppError, NotFoundError, ValidationError, AuthorizationError):
+        raise
+    except Exception as e:
+        logger.error("Get retrieval eval trend failed: %s", type(e).__name__)
+        raise AppError("获取检索评测趋势失败") from e
+
+
+@router.get(
+    "/eval/runs/{run_id}",
+    response_model=dict,
+    dependencies=[
+        Depends(require_scope("knowledge:read")),
+        Depends(permission_required([PermissionType.SEARCH_KNOWLEDGE_BASE])),
+    ],
+)
+async def get_retrieval_eval_run(
+    run_id: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """读取本组织单次运行（含逐条结果）；跨组织一律 404。"""
+    try:
+        org_id = await _retrieval_eval_org_id(current_user, db)
+        run = await retrieval_eval_service.get_run(db, organization_id=org_id, run_id=run_id)
+        return {"success": True, "data": retrieval_eval_service.run_detail_dict(run)}
+    except (AppError, NotFoundError, ValidationError, AuthorizationError):
+        raise
+    except Exception as e:
+        logger.error("Get retrieval eval run failed: %s", type(e).__name__)
+        raise AppError("获取检索评测运行详情失败") from e
+
+
+@router.get(
+    "/eval/runs/{run_id}/export",
+    response_class=Response,
+    dependencies=[
+        Depends(require_scope("knowledge:read")),
+        Depends(permission_required([PermissionType.SEARCH_KNOWLEDGE_BASE])),
+    ],
+)
+async def export_retrieval_eval_run(
+    run_id: str,
+    request: Request,
+    format: str = Query("json", pattern="^(json|csv)$"),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """导出单次运行（JSON/CSV 同源同哈希）；跨组织一律 404。
+
+    审计只记导出的 run_id 与格式，不记 query、用例名或逐条结果正文。
+    """
+    try:
+        org_id = await _retrieval_eval_org_id(current_user, db)
+        run = await retrieval_eval_service.get_run(db, organization_id=org_id, run_id=run_id)
+        if format == "csv":
+            content = retrieval_eval_service.run_export_csv(run)
+            media_type = "text/csv; charset=utf-8"
+            suffix = "csv"
+        else:
+            content = json.dumps(
+                retrieval_eval_service.run_export_dict(run),
+                ensure_ascii=False,
+                sort_keys=True,
+            )
+            media_type = "application/json"
+            suffix = "json"
+        await audit_service.log_activity(
+            user_id=current_user.id,
+            action="export_retrieval_eval_run",
+            target_type="retrieval_eval_run",
+            target_id=run_id,
+            detail=_eval_audit_detail(org_id, current_user.id, format=format),
+            request=request,
+            db=db,
+        )
+        return Response(
+            content=content,
+            media_type=media_type,
+            headers={"Content-Disposition": f'attachment; filename="eval-run-{run_id}.{suffix}"'},
+        )
+    except (AppError, NotFoundError, ValidationError, AuthorizationError):
+        raise
+    except Exception as e:
+        logger.error("Export retrieval eval run failed: %s", type(e).__name__)
+        raise AppError("导出检索评测运行失败") from e

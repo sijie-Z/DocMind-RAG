@@ -351,6 +351,7 @@ _HIT_SOURCE_FIELDS = [
     "content",
     "original_text",
     "text_provenance",
+    "retrieval_text_provenance",
     "filename",
     "organization_id",
     "document_id",
@@ -437,6 +438,10 @@ def build_retrieval_filters(
         {"term": {"organization_id": str(organization_id)}},
         {"bool": {"must_not": [{"term": {"is_enabled": False}}]}},
     ]
+    # 分块级启停与 Agent 直读路径共用同一 helper，避免两套 must_not 漂移。
+    from app.services.document_acl import with_chunk_enabled_filter
+
+    filters = with_chunk_enabled_filter(filters)
     if document_ids:
         doc_ids = [str(d) for d in document_ids if d]
         if doc_ids:
@@ -1055,6 +1060,7 @@ class HybridRetriever:
                         "retrieval_text": text,
                         "original_text": original_text,
                         "text_provenance": text_provenance,
+                        "retrieval_text_provenance": source.get("retrieval_text_provenance"),
                         "filename": source.get("filename", "未知"),
                         "chunk_id": chunk_id,
                         # issue #185：rank_score 是批内 min-max 相对分（排序/序位用）；

@@ -18,6 +18,12 @@ from __future__ import annotations
 from typing import Any
 
 from app.agent.exec_context import ExecutionContext
+from app.agent.llm_call_log import PROMPT_METADATA_FIELDS
+from app.agent.observability_masking import (
+    mask_reasoning_preview,
+    mask_report_field,
+    mask_run_report_preview,
+)
 from app.core.error_mapping import public_decision_reasoning
 
 
@@ -32,7 +38,7 @@ def _decision_lines(ctx: ExecutionContext, phase: str) -> list[str]:
         if d.phase != phase or not d.reasoning:
             continue
         reasoning = public_decision_reasoning(d.action, d.reasoning)
-        out.append(f"[{d.action}] {str(reasoning)[:300]}")
+        out.append(f"[{d.action}] {mask_reasoning_preview(reasoning)[:300]}")
     return out
 
 
@@ -56,12 +62,12 @@ def build_run_report(ctx: ExecutionContext, final_output: str = "") -> dict[str,
         tool_calls.append(
             {
                 "step_id": step.step_id,
-                "description": step.description,
+                "description": mask_report_field(step.description),
                 "tool": step.tool_used,
                 "status": step.status,
                 "duration_ms": round(step.duration_ms, 1),
-                "error": step.error,
-                "result_preview": step.result_summary[:200] if step.result_summary else "",
+                "error": mask_report_field(step.error),
+                "result_preview": mask_report_field(step.result_summary),
             }
         )
 
@@ -97,9 +103,9 @@ def build_run_report(ctx: ExecutionContext, final_output: str = "") -> dict[str,
 
     evaluation = {
         "reflect_decisions": reflect_reasons or ["(no reflection recorded)"],
-        "failures": ctx.failures or [],
+        "failures": [mask_report_field(f) for f in ctx.failures] if ctx.failures else [],
         "grade_hint": _grade_hint(ctx),
-        "fatal_issues": fatal_issues,
+        "fatal_issues": [mask_report_field(issue) for issue in fatal_issues],
         "review_recommendation": review_recommendation,
         "clean_success": clean_success,
     }
@@ -110,15 +116,15 @@ def build_run_report(ctx: ExecutionContext, final_output: str = "") -> dict[str,
         # HTTP 请求（与 X-Request-ID 同源）；与 SSE、llm_calls.jsonl、结构化日志
         # 同一口径，不做假的"统一 trace_id"。request_id 缺失时如实为 None。
         "request_id": ctx.request_id,
-        "query": ctx.query,
-        "goal": ctx.goal,
-        "plan_summary": ctx.plan_summary,
+        "query": mask_run_report_preview(ctx.query),
+        "goal": mask_run_report_preview(ctx.goal),
+        "plan_summary": mask_run_report_preview(ctx.plan_summary),
         "plan_reasoning": plan_reasons or ["(planner recorded no structured reasoning)"],
         "execution_reasoning": exec_reasons or ["(executor recorded no per-step reasoning)"],
         "steps": [
             {
                 "step_id": s.step_id,
-                "description": s.description,
+                "description": mask_report_field(s.description),
                 "tool": s.tool_used,
                 "status": s.status,
                 "duration_ms": round(s.duration_ms, 1),
@@ -127,11 +133,17 @@ def build_run_report(ctx: ExecutionContext, final_output: str = "") -> dict[str,
         ],
         "tool_calls": tool_calls,
         "evaluation": evaluation,
-        "final_output_preview": (final_output or "")[:400],
+        "final_output_preview": mask_run_report_preview(final_output),
         "duration_ms": round(ctx.duration_ms, 1),
         # issue #202 评审 minor-8：人读报告此前答不出"花了多少 token"
         "total_tokens": ctx.total_tokens,
     }
+    # 提示词版本/实验标签：只在调用方显式设置时进入报告；旧 run 的键集不变。
+    # 只投影标量标识，绝不读模板 name/description/content（可能含提示词正文）。
+    for key in PROMPT_METADATA_FIELDS:
+        value = getattr(ctx, key, None)
+        if value is not None and value != "":
+            report[key] = str(value)
     final_artifact = ctx.artifacts.get("final_synthesis")
     if isinstance(final_artifact, dict):
         # Final tokens are already included in total_tokens by record_llm_usage.
@@ -139,7 +151,7 @@ def build_run_report(ctx: ExecutionContext, final_output: str = "") -> dict[str,
         # adding prompt/completion bodies or changing the ten-field JSONL schema.
         report["final_synthesis"] = {
             "status": final_artifact.get("status") or "unknown",
-            "error": final_artifact.get("error"),
+            "error": mask_report_field(final_artifact.get("error")),
             "tokens": final_artifact.get("tokens") or 0,
             "latency_ms": final_artifact.get("latency_ms") or 0,
             "included": final_artifact.get("included") or 0,
@@ -174,6 +186,10 @@ def render_run_report_text(report: dict[str, Any]) -> str:
     lines.append(f"Goal:  {report['goal'] or '(unset)'}")
     lines.append(f"Duration: {report['duration_ms']} ms")
     lines.append(f"Tokens:   {report.get('total_tokens', 0)}")
+    # 版本/实验标签只在存在时渲染；不输出提示词正文。
+    labels = [(key, report[key]) for key in PROMPT_METADATA_FIELDS if report.get(key)]
+    if labels:
+        lines.append("Prompt:   " + "; ".join(f"{key}={value}" for key, value in labels))
     lines.append("")
     lines.append("## Plan reasoning")
     lines.extend(f"  - {r}" for r in report["plan_reasoning"])

@@ -249,6 +249,15 @@ class ExecutionContext:
     # （replay/SSE 既有键集契约不许动），仅随 checkpoint 快照往返。
     organization_id: int | None = None
 
+    # 提示词版本/实验标签（run 级可选上下文）：由调用方在 run 初始化时设置，
+    # record_llm_call 自动合并进每一行 JSONL，build_run_report 同步投影。
+    # 与 request_id 同样**不进 to_dict()/checkpoint**：旧 replay/SSE 键集不变，
+    # resume 是另一条请求，不能继承上一段的标签。值为 str（空/None=未提供）。
+    prompt_id: str | None = None
+    prompt_version: str | None = None
+    prompt_label: str | None = None
+    experiment_id: str | None = None
+
     # ── Convenience methods ──
 
     def record_llm_call(
@@ -262,17 +271,30 @@ class ExecutionContext:
         prompt_hash: str | None = None,
         tool_calls: int = 0,
         error: str | None = None,
+        **prompt_metadata: str | None,
     ) -> bool:
         """追加一行 LLM 调用级 JSONL（issue #510 第一步）。
 
         - 只写元数据（ts/task_id/request_id/model/tokens/latency/prompt_hash/
           tool_calls/error），**绝不写 prompt/completion 正文**；
+        - 可选提示词版本/实验字段来自 ctx 的 run 级上下文，本次调用可用同名
+          关键字覆盖；未提供时键不出现，旧键集保持 10 个；
         - task_id / request_id 与 RunReport、SSE、结构化日志同源，可关联；
         - 观测写入不得影响 run：内部吞掉一切异常，返回是否落盘成功。
         """
         try:
-            from app.agent.llm_call_log import append_llm_call_record, build_llm_call_record
+            from app.agent.llm_call_log import (
+                PROMPT_METADATA_FIELDS,
+                append_llm_call_record,
+                build_llm_call_record,
+            )
 
+            merged = {
+                key: getattr(self, key, None)
+                if key not in prompt_metadata
+                else prompt_metadata[key]
+                for key in PROMPT_METADATA_FIELDS
+            }
             record = build_llm_call_record(
                 task_id=self.task_id,
                 request_id=self.request_id,
@@ -284,6 +306,7 @@ class ExecutionContext:
                 prompt_hash=prompt_hash,
                 tool_calls=tool_calls,
                 error=error,
+                **merged,
             )
             return append_llm_call_record(record)
         except Exception as exc:  # noqa: BLE001 — 观测绝不阻断主流程

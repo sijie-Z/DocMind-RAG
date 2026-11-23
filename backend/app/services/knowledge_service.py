@@ -16,7 +16,14 @@ from app.core.db_conflicts import is_retryable_mysql_conflict
 from app.core.elasticsearch import get_elasticsearch
 from app.core.log_safety import log_safe
 from app.exceptions import AppError, ConflictError, ServiceUnavailableError
-from app.models.document import Document, DocumentAcl, DocumentChunk, DocumentStatus, DocumentTag
+from app.models.document import (
+    Document,
+    DocumentAcl,
+    DocumentChunk,
+    DocumentChunkOverride,
+    DocumentStatus,
+    DocumentTag,
+)
 from app.models.knowledge_job import KnowledgeProcessingJob
 from app.models.review import ReviewCase, ReviewDocumentMeta
 from app.rag.errors import RetrievalUnavailableError
@@ -94,6 +101,9 @@ def _coerce_organization_id(organization_id: str | int | None) -> int:
 _DOCUMENT_CHILD_MODELS: tuple[type, ...] = (
     DocumentAcl,
     DocumentChunk,
+    # 036 新增的 override 行也引用 documents.id（且 FK 无 ON DELETE CASCADE），
+    # 漏掉会让「彻底删除文档」被 MySQL 1451 挡住。
+    DocumentChunkOverride,
     DocumentTag,
     KnowledgeProcessingJob,
     ReviewDocumentMeta,
@@ -145,8 +155,11 @@ class KnowledgeService:
         search_mode: str | None = None,
         document_ids: list[str] | None = None,
         metadata_filters: dict[str, list[str]] | None = None,
+        knowledge_base_id: str | None = None,
         debug: bool = False,
         viewer_user_id: int | None = None,
+        *,
+        strict: bool = False,
     ) -> tuple[list[dict[str, Any]], dict[str, Any] | None]:
         """
         搜索知识库 - 统一使用 RagService 以获得更强能力
@@ -161,6 +174,11 @@ class KnowledgeService:
         ``search_knowledge`` 不带诊断，避免调用方（建议词等）承担额外载荷。
 
         W0-6：organization_id 必填，且必须是正整数组织 ID（0/None 不再兜底）。
+
+        ``strict``（默认 False）：普通检索端点维持既有 best-effort 降级（一般异常
+        吞成空结果）；仅检索评测等需要区分「查不到」与「查询失败」的调用方
+        显式开启后，一般异常原样上抛。``RetrievalUnavailableError`` 与
+        ``SourceProvenanceUnavailableError`` 与 strict 无关，始终按既有语义上抛。
         """
         from app.services.rag_service import rag_service
 
@@ -179,6 +197,7 @@ class KnowledgeService:
                 top_k=top_k,
                 document_ids=document_ids,
                 metadata_filters=metadata_filters,
+                knowledge_base_id=knowledge_base_id,
                 search_mode=search_mode,
                 debug=debug,
                 viewer_user_id=viewer_user_id,
@@ -207,6 +226,9 @@ class KnowledgeService:
                         # 不得把 legacy 文本当原文证据（PR4 消费者）。
                         "content": res.get("snippet"),
                         "text_provenance": res.get("text_provenance"),
+                        # 分块人工修正标记必须逐层透传：端点再做一次投影，
+                        # 任一层漏搬都会让 UI 把人工文本当成 parser 原文展示。
+                        "retrieval_text_provenance": res.get("retrieval_text_provenance"),
                         "score": res.get("score"),
                         # issue #185：相对排序分（score）与重排绝对分分开透传；
                         # 无重排分时保持 None，绝不拿 score 回填。
@@ -244,7 +266,7 @@ class KnowledgeService:
             # issue #292：检索后端服务故障/超时不得回落成「没有相关内容」（假空数组）。
             # 原样上抛 —— /search 端点映射为 502（ExternalServiceError），
             # suggestions 等 best-effort 调用方自行降级为空并留痕；绝不在这里吞成 []。
-            logger.error("Knowledge search unavailable: retrieval backend failure", exc_info=True)
+            logger.error("Knowledge search unavailable: retrieval backend failure")
             raise
         except SourceProvenanceUnavailableError:
             # strict 模式下全部命中都缺 parser 原文：这是「需重建」的确定性拒绝，
@@ -252,7 +274,11 @@ class KnowledgeService:
             logger.warning("Knowledge search refused: source original unavailable")
             raise
         except Exception as e:
-            logger.error(f"Knowledge search failed: {e}")
+            # strict=true 专供评测：下游异常必须如实冒泡，不能伪装成「零召回」。
+            if strict:
+                raise
+            # 固定文案，禁止回显 {e}：异常消息可能携带 query / 文档正文。
+            logger.error("Knowledge search failed: %s", type(e).__name__)
             return [], None
 
     async def get_search_suggestions(
