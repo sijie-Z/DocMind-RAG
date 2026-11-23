@@ -320,6 +320,31 @@ async def test_template_payload_byte_budget_is_422(factory, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_duplicate_create_with_items_returns_409_not_500(factory, monkeypatch):
+    """带首版的重名创建必须 409：autoflush 早期撞唯一约束也不能漏成 500。
+
+    变异点：把端点/服务的外层 IntegrityError -> ConflictError 映射删掉 →
+    本用例红（500 或错误 error_code）。
+    """
+    monkeypatch.setattr(
+        "app.core.security.permission_service.get_user_permissions",
+        _grant(PermissionType.DOCUMENT_READ, PermissionType.DOCUMENT_UPDATE),
+    )
+    async with _Ctx(_user(superuser=True), factory) as ac:
+        first = await ac.post(
+            "/api/v1/reviews/templates",
+            json={"name": "重复模板", "items": template_items()},
+        )
+        assert first.status_code == 200, first.text
+        duplicate = await ac.post(
+            "/api/v1/reviews/templates",
+            json={"name": "重复模板", "items": template_items(extra="另一个")},
+        )
+        assert duplicate.status_code == 409, duplicate.text
+        assert duplicate.json()["error_code"] == "REVIEW_TEMPLATE_NAME_CONFLICT"
+
+
+@pytest.mark.asyncio
 async def test_template_update_and_duplicate_name(factory, monkeypatch):
     """改名生效；同组织重名 409；空更新 422（schema 层）。"""
     monkeypatch.setattr(

@@ -159,31 +159,36 @@ async def create_review_template(
     """
     try:
         org_id = await require_organization(current_user, db)
-        template = await template_service.create_template(
-            db,
-            organization_id=org_id,
-            created_by=current_user.id,
-            name=body.name,
-            description=body.description,
-            commit=False,
-        )
-        version = None
-        if body.items is not None:
-            version = await template_service.create_version(
+        try:
+            template = await template_service.create_template(
                 db,
-                template=template,
-                items=[item.model_dump() for item in body.items],
+                organization_id=org_id,
                 created_by=current_user.id,
-                change_note=body.change_note,
+                name=body.name,
+                description=body.description,
                 commit=False,
             )
-        try:
+            version = None
+            if body.items is not None:
+                version = await template_service.create_version(
+                    db,
+                    template=template,
+                    items=[item.model_dump() for item in body.items],
+                    created_by=current_user.id,
+                    change_note=body.change_note,
+                    commit=False,
+                )
             await db.commit()
         except IntegrityError as exc:
             await db.rollback()
+            # 延迟提交的 INSERT 可能在 create_version 的 SELECT 自动 flush
+            # 时就撞唯一约束；这里必须在最外层捕获，统一映射为 409。
             raise ConflictError(
                 "同名模板已存在", error_code="REVIEW_TEMPLATE_NAME_CONFLICT"
             ) from exc
+        except AppError:
+            await db.rollback()
+            raise
         except Exception:
             await db.rollback()
             raise
