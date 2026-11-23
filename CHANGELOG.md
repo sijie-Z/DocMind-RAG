@@ -17,6 +17,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `(organization_id, dedup_key)` 唯一索引兜底；更新成与另一条重复的内容返回 409
   `EVAL_CASE_DUPLICATE`。迁移 `038_eval_case_dedup` 只加可空 `dedup_key` 列与唯一索引，
   不回填/不删除历史行。前端四语词条、弹窗内期望文档勾选 + 组织文档补充。
+- **合同审查模板/Playbook 可编辑库 + 版本 diff（竞品批次五）**：新增组织级
+  `review_template` / `review_template_version`（迁移 `038_review_template`）。
+  模板头可改名/说明/归档；每次保存生成**不可变版本**（`items_json` +
+  `payload_sha256`，编辑=新增版本，旧版本永不改写）；版本支持列表、查看与
+  **只读 diff**（按 item key 对齐、关键词按集合语义）。四个内置核验项（付款
+  期限/起算/验收/例外）由确定性抽取器固定，模板只能追加自定义项 —— 模板编辑
+  不会改变判定算法。建案可选用模板版本（`template_id` / `template_version_no`），
+  规则仍固化为既有不可变 `ReviewRuleSet` 快照；模板后续编辑/归档不影响历史
+  案件。归档是唯一终态（**不提供物理删除**），组织删除守卫已纳入两表。
+  `/reviews/templates` 10 个端点，前端新增模板库列表页、版本历史与只读 diff
+  视图，并在建案弹窗中提供模板版本选择（zh/en/ja/fr）。
 - **会话 Fork / Seed / 谱系（#476）**：新增 `POST /api/v1/sessions/{id}/fork`
   与 `GET /api/v1/sessions/{id}/lineage`。fork 只能落在已结算轮次（前缀以
   assistant 结尾或为空；assistant 中间消息 / 开放轮次 409），复制前缀消息并

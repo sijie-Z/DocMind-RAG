@@ -169,6 +169,16 @@ class ReviewCase(Base):
     rule_snapshot_id: Mapped[str | None] = mapped_column(
         String(36), ForeignKey("review_rule_set.id"), index=True, comment="规则快照 ID"
     )
+    # 模板库（批量五）：建案时选用的模板与版本，仅作**溯源指针**。
+    # 规则内容已在 rule_snapshot_id 冻结；模板/版本后续归档或新增版本都不
+    # 影响本案件。指针可为 NULL（旧案件、进程级 checklist 建案）。
+    # 故意不建外键：模板是可选溯源信息，不得反过来阻止模板生命周期操作。
+    template_id: Mapped[str | None] = mapped_column(
+        String(36), index=True, comment="建案时选用的模板 id（溯源用，可空）"
+    )
+    template_version_no: Mapped[int | None] = mapped_column(
+        Integer, comment="建案时选用的模板版本号（溯源用，可空）"
+    )
     status: Mapped[str] = mapped_column(String(16), nullable=False, default="blocked")
     # 建案时为什么 blocked（side:reason 列表）；ready 时为空数组。
     blocking_reasons: Mapped[Any | None] = mapped_column(JSON, comment="阻断原因码列表")
@@ -316,7 +326,7 @@ class ReviewRuleSet(Base):
     """合同审查规则/playbook 版本快照：建案时固化，供旧案件审计复现。
 
     与 doc/证据快照同口径：快照行不可变，规则配置变更只新增行；案件通过
-    ``rule_snapshot_id`` 引用。组织列用于租户隔离，旧案件可为 NULL。
+    ``rule_snapshot_id`` 引用。组织列用于租户隔离，旧数据可为 NULL。
     """
 
     __tablename__ = "review_rule_set"
@@ -335,6 +345,110 @@ class ReviewRuleSet(Base):
     published_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), comment="发布时间"
     )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), comment="创建时间"
+    )
+
+
+REVIEW_TEMPLATE_STATUSES = ("active", "archived")
+"""模板生命周期：active 可建版本/可被建案选择；archived 只读、不可新建版本、
+不可再被新案件选择（历史案件已固化到规则快照，不受影响）。"""
+
+
+class ReviewTemplate(Base):
+    """组织级合同审查模板/playbook（用户可编辑库的头表）。
+
+    模板只是「可编辑规则的容器」：真正的规则内容冻结在
+    ``review_template_version`` 行里，版本行本身不可变（编辑 = 新增版本）。
+    建案时只能选择某个版本，并继续把该版本内容固化为不可变的
+    ``ReviewRuleSet`` 快照 —— 模板/版本的后续编辑不会改写任何历史案件。
+
+    删除策略：**不提供物理删除**，只有归档（``status='archived'``）。模板与
+    版本是审计资产，且案件快照派生自它们；归档后不再参与建案选择。
+    """
+
+    __tablename__ = "review_template"
+    __table_args__ = (
+        Index("ix_review_template_org_created", "organization_id", "created_at"),
+        Index("ix_review_template_org_status", "organization_id", "status"),
+        # 同一组织内模板名唯一：用户按名字选择模板，重名会让选择语义含糊。
+        UniqueConstraint("organization_id", "name", name="uq_review_template_org_name"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    organization_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("organizations.id"), nullable=False, comment="所属组织（租户隔离键）"
+    )
+    name: Mapped[str] = mapped_column(String(100), nullable=False, comment="模板名称")
+    description: Mapped[str | None] = mapped_column(
+        String(500), comment="模板说明（纯文本，不作为规则参与判定）"
+    )
+    status: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="active", comment="active/archived"
+    )
+    latest_version: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, comment="最新版本号（0=尚无版本）"
+    )
+    created_by: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"), nullable=False)
+    updated_by: Mapped[int | None] = mapped_column(Integer, ForeignKey("users.id"))
+    archived_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), comment="归档时间（只读终态）"
+    )
+    archived_by: Mapped[int | None] = mapped_column(Integer, ForeignKey("users.id"))
+    lock_version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), comment="创建时间"
+    )
+    updated_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), onupdate=func.now(), comment="更新时间"
+    )
+
+
+class ReviewTemplateVersion(Base):
+    """模板版本：每次编辑新增一行，行内容不可变（与 ReviewRuleSet 同口径）。
+
+    ``items_json`` 是校验/规范化后的规则项列表（key/keywords/label/configurable），
+    写入时同时固化 ``payload_sha256``；读取时重算哈希，哈希不符视为损坏，
+    不参与建案（绝不把被篡改的规则当作可执行内容）。
+    ``source`` 区分模板版本的内容来源：
+    - ``manual``：用户通过 API 保存；
+    - ``bootstrap``：从进程级 checklist（默认 4 项 + ``REVIEW_CHECKLIST_JSON``）
+      初始化的版本，供存量部署平滑迁移。
+    """
+
+    __tablename__ = "review_template_version"
+    __table_args__ = (
+        UniqueConstraint("template_id", "version_no", name="uq_review_template_version_no"),
+        Index("ix_review_template_version_template_created", "template_id", "created_at"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    template_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("review_template.id"), nullable=False, index=True
+    )
+    organization_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("organizations.id"),
+        nullable=False,
+        index=True,
+        comment="所属组织（与模板冗余保存，供组织删除保护与跨组织防护）",
+    )
+    version_no: Mapped[int] = mapped_column(
+        Integer, nullable=False, comment="版本号（每个模板自增）"
+    )
+    version_label: Mapped[str] = mapped_column(
+        String(64), nullable=False, comment="展示用版本标签（如 v1）"
+    )
+    items_json: Mapped[Any] = mapped_column(JSON, nullable=False, comment="规则项列表")
+    item_count: Mapped[int] = mapped_column(Integer, nullable=False, comment="规则项数（有界）")
+    payload_sha256: Mapped[str] = mapped_column(
+        String(64), nullable=False, comment="items_json 规范化后的内容哈希"
+    )
+    source: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="manual", comment="manual/bootstrap"
+    )
+    change_note: Mapped[str | None] = mapped_column(String(200), comment="变更说明")
+    created_by: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"), nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), comment="创建时间"
     )

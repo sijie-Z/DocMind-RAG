@@ -27,7 +27,13 @@ from app.models.organization_settings import OrganizationSettings
 from app.models.prompt import PromptTemplate
 from app.models.rbac import ORG_ADMIN_ROLE_NAME, Role, user_organization_role_association
 from app.models.retrieval_eval import RetrievalEvalCase, RetrievalEvalRun
-from app.models.review import ReviewCase, ReviewExport, ReviewRuleSet
+from app.models.review import (
+    ReviewCase,
+    ReviewExport,
+    ReviewRuleSet,
+    ReviewTemplate,
+    ReviewTemplateVersion,
+)
 from app.models.scheduled_task import ScheduledTask
 from app.models.token_usage import TokenUsageRecord
 from app.models.user import User
@@ -380,6 +386,10 @@ class OrganizationService:
         # 规则/playbook 快照：review_rule_set.organization_id 有外键，
         # 未纳入清理会在 MySQL 上以 1451 失败。快照是审计资产，同样先转移。
         ("规则快照", ReviewRuleSet),
+        # 批次五：模板版本是审计资产且冻结了规则内容（review_template_version
+        # 有组织外键），模板头亦然；未纳入清理会触发 MySQL 1451，必须先转移。
+        ("核验模板", ReviewTemplate),
+        ("核验模板版本", ReviewTemplateVersion),
     )
 
     async def _assert_org_has_no_attached_data(self, db: AsyncSession, org_ids: list[int]) -> None:
