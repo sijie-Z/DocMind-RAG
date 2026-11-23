@@ -54,6 +54,7 @@ from app.schemas.knowledge import (
     SimilarityResponse,
 )
 from app.schemas.retrieval_eval import (
+    RetrievalEvalCaseCapture,
     RetrievalEvalCaseCreate,
     RetrievalEvalCaseUpdate,
     RetrievalEvalRunRequest,
@@ -1316,6 +1317,65 @@ def _make_retrieve_fn(organization_id: int, viewer_user_id: int):
     return _retrieve
 
 
+async def _create_eval_case_shared(
+    *,
+    request: Request,
+    current_user: User,
+    db: AsyncSession,
+    name: str,
+    query: str,
+    expected_document_ids: list[str],
+    tags: list[str],
+    audit_action: str,
+    failure_label: str,
+    failure_message: str,
+) -> dict:
+    """创建/捕获共用实现：唯一的 create_case 调用点 + 同一套审计与响应形状。
+
+    两个入口（``POST /eval/cases`` 与 ``POST /eval/cases/capture``）只差在
+    ``name`` 缺省与审计 action，其余组织隔离、viewer ACL、去重与错误语义
+    全部走同一条路径——这里不复制任何校验逻辑。
+    """
+    try:
+        org_id = await _retrieval_eval_org_id(current_user, db)
+        result = await retrieval_eval_service.create_case(
+            db,
+            organization_id=org_id,
+            created_by=current_user.id,
+            name=name,
+            query=query,
+            expected_document_ids=expected_document_ids,
+            tags=tags,
+            viewer_user_id=current_user.id,
+        )
+        case = result.case
+        await audit_service.log_activity(
+            user_id=current_user.id,
+            action=audit_action,
+            target_type="retrieval_eval_case",
+            target_id=case.id,
+            # 审计只记组织/用户/条数与是否新建；query、用例名与金标 id 不落审计。
+            detail=_eval_audit_detail(
+                org_id,
+                current_user.id,
+                expected_count=len(case.expected_document_ids),
+                created=result.created,
+            ),
+            request=request,
+            db=db,
+        )
+        return {
+            "success": True,
+            "created": result.created,
+            "data": retrieval_eval_service.case_to_dict(case),
+        }
+    except (AppError, NotFoundError, ValidationError, AuthorizationError):
+        raise
+    except Exception as e:
+        logger.error("%s failed: %s", failure_label, type(e).__name__)
+        raise AppError(failure_message) from e
+
+
 @router.post(
     "/eval/cases",
     response_model=dict,
@@ -1330,36 +1390,59 @@ async def create_retrieval_eval_case(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """保存一条检索评测用例；期望文档必须全部属于调用者组织。"""
-    try:
-        org_id = await _retrieval_eval_org_id(current_user, db)
-        case = await retrieval_eval_service.create_case(
-            db,
-            organization_id=org_id,
-            created_by=current_user.id,
-            name=body.name,
-            query=body.query,
-            expected_document_ids=body.expected_document_ids,
-            tags=body.tags,
-            viewer_user_id=current_user.id,
-        )
-        await audit_service.log_activity(
-            user_id=current_user.id,
-            action="create_retrieval_eval_case",
-            target_type="retrieval_eval_case",
-            target_id=case.id,
-            detail=_eval_audit_detail(
-                org_id, current_user.id, expected_count=len(case.expected_document_ids)
-            ),
-            request=request,
-            db=db,
-        )
-        return {"success": True, "data": retrieval_eval_service.case_to_dict(case)}
-    except (AppError, NotFoundError, ValidationError, AuthorizationError):
-        raise
-    except Exception as e:
-        logger.error("Create retrieval eval case failed: %s", type(e).__name__)
-        raise AppError("创建检索评测用例失败") from e
+    """保存一条检索评测用例；期望文档必须全部属于调用者组织。
+
+    ``created=false``（同组织已存在相同 query + 金标集合）是幂等命中：返回既有
+    用例而不是重复建行——「保存为评测用例」按钮被连点/多人同时保存时不产生
+    重复样本。前端据 ``created`` 给出「已保存」与「该用例已存在」两种反馈。
+    """
+    return await _create_eval_case_shared(
+        request=request,
+        current_user=current_user,
+        db=db,
+        name=body.name,
+        query=body.query,
+        expected_document_ids=body.expected_document_ids,
+        tags=body.tags,
+        audit_action="create_retrieval_eval_case",
+        failure_label="Create retrieval eval case",
+        failure_message="创建检索评测用例失败",
+    )
+
+
+@router.post(
+    "/eval/cases/capture",
+    response_model=dict,
+    dependencies=[
+        Depends(require_scope("knowledge:write")),
+        Depends(permission_required([PermissionType.SEARCH_KNOWLEDGE_BASE])),
+    ],
+)
+async def capture_retrieval_eval_case(
+    body: RetrievalEvalCaseCapture,
+    request: Request,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """bad-case 捕获：把一次不理想的检索（query + 期望文档）存为评测用例。
+
+    窄入口，不另起创建逻辑：``name`` 可缺省（取 query 前 100 字符），其余字段
+    与 ``POST /eval/cases`` 同约束；组织隔离、viewer ACL 金标校验、去重与审计
+    全部由 ``retrieval_eval_service.create_case`` 单点承担。同组织重复内容
+    返回既有用例（``created=false``），绝不重复建行。
+    """
+    return await _create_eval_case_shared(
+        request=request,
+        current_user=current_user,
+        db=db,
+        name=body.name or body.query[:100],
+        query=body.query,
+        expected_document_ids=body.expected_document_ids,
+        tags=body.tags,
+        audit_action="capture_retrieval_eval_case",
+        failure_label="Capture retrieval eval case",
+        failure_message="保存检索评测用例失败",
+    )
 
 
 @router.get(

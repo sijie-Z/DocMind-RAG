@@ -510,7 +510,20 @@ python scripts/reconcile_knowledge_index.py --reindex --limit 10
 
 **图谱**：索引成功后会非阻塞地抽取知识图谱，按组织存 Redis（30 天 TTL）。它不参与检索排序，失败也不会把文档标成 FAILED。历史文档可用 `backend/scripts/backfill_graph.py` 回填；图谱页按 `max_nodes`（后端 5–200，默认 50）截断展示。
 
-### 4.2 检索评测运行历史与趋势
+### 4.2 检索评测用例：从 bad case 直接保存
+
+搜索页（`/search`）在有一次检索结果后，结果状态栏右侧提供「保存为评测用例」：把本次 query 与「本该命中的文档」存成 `RetrievalEvalCase`，不必手工复制到评测页再重建。
+
+- 入口是 `POST /api/v1/knowledge/eval/cases/capture`，与 `POST /eval/cases` 共用同一个 `retrieval_eval_service.create_case`；没有第二套创建逻辑。
+- 弹窗预填本次 query；期望文档默认从本次结果涉及的文档勾选，结果里没有时可按组织文档远程补充；一个期望文档都没选时不能提交（空金标的用例没有意义）。
+- 只接受本组织、已索引启用、且对调用者可见（viewer ACL）的文档；跨组织或私有不可见金标返回 400，且不回显具体 id。
+- 去重：同组织内「同 query（仅去首尾空白）+ 同金标集合（与勾选顺序无关）」视为同一条用例。再次保存返回既有用例（响应 `created=false`，前端提示「已存在」，不产生重复行）；`(organization_id, dedup_key)` 唯一索引是并发兜底。用例名/标签不参与去重，幂等命中不覆盖既有行的名称。
+- 更新用例时把 query/金标改成与另一条完全相同的内容 → 409 `EVAL_CASE_DUPLICATE`（`detail.existing_case_id` 指向冲突用例），不会让评测集出现两条重复样本。
+- 审计只写组织、用户、金标条数与是否新建；query、用例名与金标 id 不进审计日志。
+- 规模上限（schema 层强制）：query ≤ 2000 字符、金标 1–50 个、名称 ≤ 255（缺省取 query 前 100 字符）、标签 ≤ 20 个。
+- 迁移 `038_eval_case_dedup` 只加可空列 `dedup_key` 与组织内唯一索引，不回填/不删除历史行（历史重复行保持 `dedup_key=NULL`，不受唯一约束）；去重从保存动作起生效。
+
+### 4.2.1 检索评测运行历史与趋势
 
 知识库页的「检索评测运行历史」（`/knowledge/eval-runs`）把一次性评测变成可追溯质量资产：
 
@@ -519,7 +532,7 @@ python scripts/reconcile_knowledge_index.py --reindex --limit 10
 - `GET /eval/runs`（列表，可按 `case_set_hash` 过滤）、`GET /eval/runs/{id}`（详情）、`GET /eval/runs/trend`（最近 30 次趋势，失败运行不计入指标均值）、`GET /eval/runs/{id}/export?format=json|csv`（同源导出，用于回归比较）。
 - 审计只写组织、用户、条数、格式与字段名，`query`/用例名/逐条正文不进审计日志；逐条结果只在本组织授权详情页可见。
 
-### 4.2.1 分块浏览与人工纠正
+### 4.2.2 分块浏览与人工纠正
 
 文档详情页的「浏览与纠正分块」（URL 参数 `chunkBrowser=1`，可分享）打开只读优先的分块工作台：
 

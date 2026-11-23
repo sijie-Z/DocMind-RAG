@@ -523,13 +523,14 @@ def test_035_migration_single_head_schema_and_downgrade(tmp_path, monkeypatch):
     assert "op.drop_index(INDEX" not in downgrade
 
 
-def test_migration_chain_has_single_head_including_037_index_error_codes(tmp_path, monkeypatch):
-    """迁移链必须单头，且 037 是当前 head、接在 036 之后。
+def test_migration_chain_has_single_head_including_038_eval_case_dedup(tmp_path, monkeypatch):
+    """迁移链必须单头，且 038 是当前 head、接在 037 之后。
 
     本断言原先挂在 035 的 schema 用例里——那个用例守的是「035 表结构」，
     与「最新 head 是谁」无关；每次新增迁移都会迫使其连带改名/改断言。
     单独成例后，新增迁移只需改这里的一处（或本断言随 head 一同前移）。
-    批次四集成：036_chunk_override 保留，索引错误码迁移线性化为 037。
+    批次四集成：036_chunk_override 保留，索引错误码迁移线性化为 037；
+    批次五：评测用例去重索引线性化为 038。
     """
     from alembic.config import Config
     from alembic.script import ScriptDirectory
@@ -539,5 +540,5 @@ def test_migration_chain_has_single_head_including_037_index_error_codes(tmp_pat
     cfg.set_main_option("script_location", str(backend / "alembic"))
     script = ScriptDirectory.from_config(cfg)
     heads = set(script.get_heads())
-    assert heads == {"037_index_error_codes"}
-    assert script.get_revision("037_index_error_codes").down_revision == ("036_chunk_override")
+    assert heads == {"038_eval_case_dedup"}
+    assert script.get_revision("038_eval_case_dedup").down_revision == ("037_index_error_codes")

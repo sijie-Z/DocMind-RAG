@@ -7,7 +7,7 @@
     "frontend_routes": 39,
     "registered_tools": 31,
     "default_tools": 10,
-    "http_route_decorators": 252,
+    "http_route_decorators": 253,
     "websocket_route_decorators": 3
   },
   "sources": {

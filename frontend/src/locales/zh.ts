@@ -1310,6 +1310,23 @@ export default {
     legacyTextWarning: '该结果的部分或全部来源缺少解析器原文，展示文本可能包含系统生成的背景摘要，不能作为原文证据。',
     manualOverrideWarning: '该检索文本经人工修正；原文证据仍以解析器原文为准。',
     searchFailed: '搜索失败',
+    // bad-case → 评测用例（检索结果不理想时保存 query + 期望文档）
+    captureAsEvalCase: '保存为评测用例',
+    captureTitle: '保存为评测用例',
+    captureHint: '把本次检索的查询与「本该命中的文档」存成评测用例，之后可在评测运行历史里回归验证检索质量。',
+    captureQueryLabel: '检索 query',
+    captureNameLabel: '用例名称（可选）',
+    captureNamePlaceholder: '缺省取 query 前 100 个字符',
+    captureExpectedLabel: '期望命中的文档',
+    captureExpectedHint: '勾选本次结果中本该命中的文档；结果里没有时可从组织文档中补充。',
+    captureAddDocument: '从组织文档中补充期望文档',
+    captureExpectedRequired: '请至少选择一个期望文档',
+    captureTooMany: '期望文档最多选择 {max} 个',
+    captureQueryMissing: '检索 query 不能为空',
+    captureSubmit: '保存',
+    captureSuccess: '已保存为评测用例',
+    captureDuplicate: '相同 query 与期望文档的评测用例已存在（{name}），未重复创建',
+    captureFailed: '保存评测用例失败',
     // E11-①：问问 AI 跨页问题组句（文件名 + 当前搜索词 / 无搜索词时的兜底）
     askAIQuestion: '关于文件「{filename}」：{query}',
     askAIQuestionGeneric: '关于文件「{filename}」，请帮我总结主要内容'
