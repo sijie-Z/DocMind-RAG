@@ -311,6 +311,89 @@ export interface DecisionPayload {
   note?: string | null
 }
 
+/** 合同改稿留痕：只记录文本变化事实，不做法律判断。 */
+export type RedlineRevisionType = 'insertion' | 'deletion' | 'comment' | 'unparsed'
+export type RedlineDisposition = 'pending' | 'reviewed' | 'needs_clarification' | 'not_relevant'
+
+export interface RedlineSubmissionSummary {
+  id: string
+  case_id: string
+  sequence_no: number
+  filename: string
+  file_sha256: string
+  file_size: number
+  parser_version: string
+  status: string
+  revision_count: number
+  comment_count: number
+  unparsed_count: number
+  parse_warnings: string[]
+  uploaded_by: number
+  created_at?: string | null
+}
+
+export interface RedlineSubmissionList {
+  items: RedlineSubmissionSummary[]
+  total: number
+}
+
+export interface RedlineRowResponse {
+  id: string
+  submission_id: string
+  case_id: string
+  ordinal: number
+  revision_type: RedlineRevisionType
+  pair_key: string
+  before_text: string | null
+  after_text: string | null
+  before_sha256: string | null
+  after_sha256: string | null
+  author: string | null
+  authored_at?: string | null
+  comment_id?: string | null
+  comment_author?: string | null
+  comment_date?: string | null
+  location: Record<string, unknown>
+  clause_no: string[] | null
+  section_no: string[] | null
+  unparsed_reason: string[] | null
+  text_provenance: string
+  item_id?: string | null
+  evidence_id?: string | null
+  disposition: RedlineDisposition
+  note?: string | null
+  disposition_by?: number | null
+  disposition_at?: string | null
+  lock_version: number
+  created_at?: string | null
+  updated_at?: string | null
+}
+
+export interface RedlineLedgerQuery {
+  revision_type?: RedlineRevisionType | ''
+  disposition?: RedlineDisposition | ''
+  page?: number
+  page_size?: number
+}
+
+export interface RedlineLedgerResponse {
+  items: RedlineRowResponse[]
+  total: number
+  page: number
+  page_size: number
+  counts: { revision: number; comment: number; unparsed: number }
+  disclaimer: string
+  has_unparsed: boolean
+}
+
+export interface RedlineDispositionUpdate {
+  disposition: RedlineDisposition
+  note?: string | null
+  expected_lock_version: number
+  item_id?: string | null
+  evidence_id?: string | null
+}
+
 /**
  * 合同核验 API：证据只读事件里返回的原文快照，绝不调用 /documents/{id}/content。
  *
@@ -470,6 +553,39 @@ export const reviewsApi = {
       return request.get(`/reviews/templates/${encodeURIComponent(templateId)}/diff`, {
         params: { base_version: baseVersion, target_version: targetVersion }
       })
+    }
+  },
+  // ── 合同改稿留痕（批次六）──────────────────────────────────────────
+  redlines: {
+    upload(caseId: string, file: File) {
+      const formData = new FormData()
+      formData.append('file', file)
+      return request.post(
+        `/reviews/${encodeURIComponent(caseId)}/redlines`,
+        formData,
+        { headers: { 'Content-Type': undefined, 'X-Silent-Error': '1' } }
+      )
+    },
+    list(caseId: string) {
+      return request.get(`/reviews/${encodeURIComponent(caseId)}/redlines`)
+    },
+    get(caseId: string, submissionId: string, params?: RedlineLedgerQuery) {
+      return request.get(
+        `/reviews/${encodeURIComponent(caseId)}/redlines/${encodeURIComponent(submissionId)}`,
+        { params }
+      )
+    },
+    updateDisposition(
+      caseId: string,
+      submissionId: string,
+      rowId: string,
+      body: RedlineDispositionUpdate
+    ) {
+      return request.put(
+        `/reviews/${encodeURIComponent(caseId)}/redlines/${encodeURIComponent(submissionId)}/rows/${encodeURIComponent(rowId)}/disposition`,
+        body,
+        SILENT_HEADERS
+      )
     }
   }
 }

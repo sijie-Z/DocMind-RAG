@@ -2341,6 +2341,38 @@ export default {
     reasonUndecided: '存在未决核验项',
     reasonNotAnalyzed: '尚未执行分析',
     reasonSideSeparator: '：',
+    redlines: {
+      title: '改稿留痕台账',
+      uploadLabel: '上传带修订或批注的合同',
+      uploadButton: '上传并留痕',
+      uploadSuccess: '改稿留痕已提交',
+      uploadFailed: '上传改稿留痕失败',
+      loadFailed: '加载留痕记录失败',
+      ledgerLoadFailed: '加载留痕明细失败',
+      noSubmissions: '尚未上传改稿留痕',
+      selectSubmission: '选择留痕记录',
+      filters: { revisionType: '变化类型', disposition: '处理状态', all: '全部' },
+      revisionTypes: { insertion: '新增', deletion: '删除', comment: '批注', unparsed: '未解析' },
+      dispositions: {
+        label: '处理状态', pending: '待处理', reviewed: '已核对',
+        needsClarification: '待澄清', notRelevant: '不相关'
+      },
+      columns: {
+        ordinal: '序号', revisionType: '类型', before: '修改前', after: '修改后',
+        author: '修订人', time: '时间', location: '定位', reason: '原因',
+        disposition: '处理状态', actions: '关联与处理'
+      },
+      author: '修订人', time: '时间', location: '定位', reason: '未解析原因',
+      note: '处理备注', save: '保存处理', saveSuccess: '处理已保存', saveFailed: '保存处理失败',
+      itemLink: '关联核验项', evidenceLink: '关联证据', none: '无',
+      disclaimer: '只记录文本变化事实，不构成法律意见',
+      disclaimerZh: '只记录文本变化事实，不构成法律意见',
+      disclaimerEn: 'Only textual changes are recorded; this is not legal advice.',
+      disclaimerJa: '記録されるのはテキストの変更事実のみであり、法的助言ではありません。',
+      disclaimerFr: 'Seules les modifications de texte sont enregistrées ; ceci ne constitue pas un avis juridique.',
+      hasUnparsed: '存在未解析的改动，请人工核对',
+      counts: { revision: '文本变化 {count} 条', comment: '批注 {count} 条', unparsed: '未解析 {count} 条' }
+    }
   },
   reviewTemplates: {
     subtitle: '组织级合同核验模板（playbook）：内置四项固定，自定义项可追加；每次编辑生成不可变版本',

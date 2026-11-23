@@ -22,6 +22,7 @@ from app.core.config import settings
 from app.core.database import Base
 
 BACKEND_ROOT = Path(__file__).resolve().parents[2]
+HEAD = "040_inbound_redline_ledger"
 REVISION = "039_review_template"
 PREVIOUS = "038_eval_case_dedup"
 
@@ -37,7 +38,37 @@ def test_039_revision_chain_and_id_length():
     revision = script.get_revision(REVISION)
     assert revision.down_revision == PREVIOUS
     assert len(REVISION) <= 32, "MySQL alembic_version.version_num 是 VARCHAR(32)"
-    assert REVISION in script.get_heads(), "039 必须是当前 head（新增迁移时随之前移）"
+    assert script.get_revision(HEAD).down_revision == REVISION, "040 必须接在 039 之后"
+    assert set(script.get_heads()) == {HEAD}, "040 必须是当前唯一 head"
+
+
+def test_040_revision_chain(tmp_path, monkeypatch):
+    """040 必须是单头且接在 039 之后；升级后 039 的对象仍在（不可变历史）。"""
+    script = ScriptDirectory.from_config(_cfg())
+    rev = script.get_revision(HEAD)
+    assert rev.down_revision == REVISION
+    assert len(HEAD) <= 32, "MySQL alembic_version.version_num 是 VARCHAR(32)"
+
+    db_path = tmp_path / "review-redline-040-chain.db"
+    monkeypatch.setattr(settings, "DATABASE_URL", f"sqlite+aiosqlite:///{db_path.as_posix()}")
+    command.upgrade(_cfg(), HEAD)
+    with sqlite3.connect(str(db_path)) as conn:
+        tables = {
+            row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
+        }
+        # 039 的表不能被 040 的 upgrade 误删。
+        assert {"review_template", "review_template_version"} <= tables
+        assert {"review_redline_submission", "review_redline_row"} <= tables
+        assert (await_revision(db_path)) == {HEAD}
+
+    command.downgrade(_cfg(), REVISION)
+    with sqlite3.connect(str(db_path)) as conn:
+        tables = {
+            row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
+        }
+        assert "review_redline_submission" not in tables
+        assert "review_redline_row" not in tables
+        assert (await_revision(db_path)) == {REVISION}
 
 
 def test_039_schema_and_downgrade_roundtrip(tmp_path, monkeypatch):
