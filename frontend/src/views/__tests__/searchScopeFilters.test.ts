@@ -144,6 +144,31 @@ describe('搜索页 KB / 标签 / 文件类型筛选', () => {
     expect(mocks.search).toHaveBeenCalledTimes(1)
   })
 
+  it('KB 加载失败不清空已选 KB：仍显示降级提示且搜索继续发送该 id', async () => {
+    let rejectKb!: (reason: Error) => void
+    mocks.listKBs.mockReturnValueOnce(new Promise((_, reject) => { rejectKb = reject }))
+
+    const wrapper = mountView()
+    await nextTick()
+
+    // 列表仍在加载时选中 KB；失败只应清空可选项，不能清掉用户选择。
+    const kb = wrapper.findAllComponents({ name: 'Select' })
+      .find((c) => c.attributes('data-testid') === 'search-knowledge-base')
+    kb!.vm.$emit('update:value', 'kb-1')
+    await nextTick()
+
+    rejectKb(new Error('KB down'))
+    await flushPromises()
+    await nextTick()
+    expect(wrapper.text()).toContain(zh.search.knowledgeBaseLoadFailed)
+
+    await wrapper.find('input').setValue('架构')
+    await wrapper.find('button').trigger('click')
+    await flushPromises()
+    expect(mocks.search).toHaveBeenCalledTimes(1)
+    expect(mocks.search.mock.calls[0][0].knowledge_base_id).toBe('kb-1')
+  })
+
   it('切组织清空 KB 选择并重载 KB 候选', async () => {
     const wrapper = mountView()
     await flushPromises()
