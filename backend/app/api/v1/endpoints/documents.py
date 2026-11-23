@@ -51,6 +51,12 @@ from app.rag.source_provenance import SourceProvenanceUnavailableError
 from app.schemas.knowledge import DocumentDownloadUrl, DocumentDownloadUrlResponse
 from app.schemas.review import ReviewMetaUpsert
 from app.services.audit_service import audit_service
+from app.services.chunk_override_service import (
+    browse_chunks,
+    reset_chunk_override,
+    set_chunk_enabled,
+    upsert_chunk_override,
+)
 from app.services.document_parser import normalize_parse_profile
 from app.services.document_preview import load_document_chunk, load_document_preview_text
 from app.services.file_service import file_service
@@ -582,6 +588,140 @@ async def get_document_chunk(
     except Exception as e:
         logger.error(f"Get document chunk failed: {type(e).__name__}: {e}")
         raise AppError("获取文档分块失败") from e
+
+
+class ChunkOverrideUpdate(BaseModel):
+    """人工修正请求体；viewer / org / document 均从服务端上下文派生。"""
+
+    chunk_id: str = Field(..., min_length=1, max_length=36)
+    text: str | None = Field(None, max_length=100_000)
+    apply_to_retrieval: bool = False
+
+
+class ChunkEnabledUpdate(BaseModel):
+    chunk_id: str = Field(..., min_length=1, max_length=36)
+    enabled: bool
+
+
+@router.get(
+    "/{document_id}/chunks",
+    response_model=dict,
+    dependencies=[
+        Depends(require_scope("knowledge:read")),
+        Depends(permission_required([PermissionType.DOCUMENT_READ])),
+    ],
+)
+async def list_document_chunks(
+    document_id: str,
+    page: int = Query(1, ge=1, le=1_000_000),
+    page_size: int = Query(20, ge=1, le=100),
+    enabled: bool | None = Query(None),
+    override_state: str | None = Query(None, pattern="^(active|draft|disabled)$"),
+    q: str | None = Query(None, max_length=200),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """分页浏览单篇文档的 chunk；组织/ACL 与 viewer 上下文一律服务端派生。"""
+    try:
+        return await browse_chunks(
+            db,
+            current_user,
+            document_id,
+            page=page,
+            page_size=page_size,
+            enabled=enabled,
+            override_state=override_state,
+            query=q,
+        )
+    except (NotFoundError, AuthorizationError, ValidationError):
+        raise
+    except Exception as e:
+        logger.error(f"List document chunks failed: {type(e).__name__}: {e}")
+        raise AppError("获取文档分块列表失败") from e
+
+
+@router.put(
+    "/{document_id}/chunks/override",
+    response_model=dict,
+    dependencies=[
+        Depends(require_scope("knowledge:write")),
+        Depends(permission_required([PermissionType.DOCUMENT_UPDATE])),
+    ],
+)
+async def put_chunk_override(
+    document_id: str,
+    body: ChunkOverrideUpdate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """人工修正检索文本（独立 override 记录，不覆盖 parser 原文/证据哈希）。"""
+    try:
+        item = await upsert_chunk_override(
+            db,
+            current_user,
+            document_id,
+            body.chunk_id,
+            text=body.text,
+            apply_to_retrieval=body.apply_to_retrieval,
+        )
+        return {"success": True, "data": item}
+    except (NotFoundError, AuthorizationError, ValidationError):
+        raise
+    except Exception as e:
+        logger.error(f"Upsert chunk override failed: {type(e).__name__}: {e}")
+        raise AppError("保存分块人工修正失败") from e
+
+
+@router.patch(
+    "/{document_id}/chunks/enabled",
+    response_model=dict,
+    dependencies=[
+        Depends(require_scope("knowledge:write")),
+        Depends(permission_required([PermissionType.DOCUMENT_UPDATE])),
+    ],
+)
+async def patch_chunk_enabled(
+    document_id: str,
+    body: ChunkEnabledUpdate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """分块级启停：同步刷 ES 字段，立即影响检索。"""
+    try:
+        item = await set_chunk_enabled(
+            db, current_user, document_id, body.chunk_id, enabled=body.enabled
+        )
+        return {"success": True, "data": item}
+    except (NotFoundError, AuthorizationError, ValidationError):
+        raise
+    except Exception as e:
+        logger.error(f"Set chunk enabled failed: {type(e).__name__}: {e}")
+        raise AppError("更新分块启停状态失败") from e
+
+
+@router.delete(
+    "/{document_id}/chunks/override",
+    response_model=dict,
+    dependencies=[
+        Depends(require_scope("knowledge:write")),
+        Depends(permission_required([PermissionType.DOCUMENT_UPDATE])),
+    ],
+)
+async def delete_chunk_override(
+    document_id: str,
+    chunk_id: str = Query(..., min_length=1, max_length=36),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """撤销人工修正，恢复 parser 检索文本与 provenance 标记。"""
+    try:
+        item = await reset_chunk_override(db, current_user, document_id, chunk_id)
+        return {"success": True, "data": item}
+    except (NotFoundError, AuthorizationError, ValidationError):
+        raise
+    except Exception as e:
+        logger.error(f"Reset chunk override failed: {type(e).__name__}: {e}")
+        raise AppError("撤销分块人工修正失败") from e
 
 
 class DocumentEnableUpdate(BaseModel):

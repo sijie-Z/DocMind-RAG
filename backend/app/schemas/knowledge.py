@@ -98,7 +98,12 @@ class SearchResult(BaseModel):
         None, description="展示正文（parser_original 为原文片段；legacy 为检索片段）"
     )
     text_provenance: str | None = Field(
-        None, description="parser_original / legacy_unverified；缺失按 legacy 处理"
+        None, description="parser_original / legacy_unverified；仅证明 parser 原文，不证明展示正文"
+    )
+    # 分块人工修正标记：展示正文来自检索文本时可能为 manual_override。
+    # 它与 text_provenance 严格分离——strict 原文证据只认后者。
+    retrieval_text_provenance: str | None = Field(
+        None, description="检索文本来源：manual_override / 缺省为 parser/legacy 原口径"
     )
     score: float = Field(..., description="相对排序分（融合阶段，仅用于排序/序位，不是相关度）")
     # issue #185：重排绝对分（local CE logit / zhipu relevance_score）；无重排分时为 null。

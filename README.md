@@ -77,7 +77,7 @@ DocMind 不是一个「聊天框套壳」：它把企业知识库当成一套**�
 
 | 方向 | 能力 | 关键事实 |
 |------|------|----------|
-| 知识库 / RAG | 多格式解析（含 OCR）、语义分块、混合检索、重排、查询改写/HyDE、语义缓存、严格模式 | 检索评分按增强文本、**证据出口只放 parser 原文**；不可用文档显式 `SOURCE_ORIGINAL_UNAVAILABLE` |
+| 知识库 / RAG | 多格式解析（含 OCR）、语义分块、混合检索、重排、查询改写/HyDE、语义缓存、严格模式、分块浏览与人工纠正 | 检索评分按增强文本、**证据出口只放 parser 原文**；不可用文档显式 `SOURCE_ORIGINAL_UNAVAILABLE`；人工修正只写独立审计行并标 `manual_override`，永不覆盖原文/证据哈希 |
 | Agent | PER 三阶段循环、DAG 并行调度、超时/重试/回退、对抗式 Reviewer、RunReport、执行回放、经验记忆 | **31 个内置工具**（默认注入 10 个工具，终端/飞书/委派按门控开放） |
 | 合同核验 | 文档角色/版本族/版本序/内容哈希、readiness、核验案件、原文证据快照、确定性抽取与对齐 | 只输出文本事实与差异类型（modified/renumbered/…），不输出任何法律结论；未识别不猜值 |
 | 平台化 | 多租户组织隔离、RBAC + API Key scope、审计日志、Prometheus/Grafana、OpenTelemetry、24 种 SSE 事件 | 组织隔离贯穿检索/会话/文档/缓存/WS；失败语义可判定（4xx + error_code） |
@@ -244,7 +244,7 @@ DocMind/
 | 用户管理 | `/users` | 用户 CRUD、个人资料、头像、会话管理、审计日志（个人 API Key 端点已弃用） |
 | API Key | `/api-keys` | `dm_` API Key 创建/列表/吊销（bcrypt 哈希、scope；issue #480） |
 | 文件管理 | `/files` | 上传/下载/删除，MinIO 存储，分块上传 |
-| 文档管理 | `/documents` | 文档解析、向量化、知识库索引、状态追踪 |
+| 文档管理 | `/documents` | 文档解析、向量化、知识库索引、状态追踪、分块分页浏览、人工修正与分块级启停 |
 | 聊天 | `/chat` | 会话 CRUD、SSE 流式问答、严格模式、调试端点 |
 | 知识库 | `/knowledge` | 知识库文档检索、统计、设置 |
 | 知识库管理 | `/knowledge-bases` | 多知识库实体 CRUD（组织隔离） |

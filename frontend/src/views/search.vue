@@ -207,6 +207,13 @@
               >
                 {{ t('search.legacyTextWarning') }}
               </div>
+              <div
+                v-if="isManualOverride(result)"
+                data-testid="search-manual-override-badge"
+                class="mt-1 text-xs text-slate-600 dark:text-slate-300"
+              >
+                {{ t('search.manualOverrideWarning') }}
+              </div>
 
               <div class="mt-3 flex flex-wrap items-center justify-between gap-y-2 border-t border-slate-100 pt-3 dark:border-slate-800">
                 <div class="flex min-w-0 flex-wrap items-center gap-2">
@@ -441,6 +448,8 @@ const filenameOf = (r: SearchResult): string => r.source?.filename ?? r.metadata
 const contentOf = (r: SearchResult): string => r.content || r.metadata?.snippet || r.text || ''
 const isUnverifiedText = (r: SearchResult): boolean =>
   !!contentOf(r) && !(!!r.content && r.text_provenance === 'parser_original')
+const isManualOverride = (r: SearchResult): boolean =>
+  r.retrieval_text_provenance === 'manual_override'
 const rerankScoreOf = (r: SearchResult): string | null =>
   typeof r.relevance_score === 'number' ? r.relevance_score.toFixed(2) : null
 const fileTypeOf = (r: SearchResult): string => {

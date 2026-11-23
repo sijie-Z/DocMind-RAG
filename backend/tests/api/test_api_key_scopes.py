@@ -188,6 +188,61 @@ async def test_every_scoped_get_endpoint_rejects_rpc_only_key(env, path):
     _assert_scope_denied(await env.client.get(path, headers=_auth(raw)))
 
 
+CHUNK_LIST = f"/api/v1/documents/{DOC_ID}/chunks"
+CHUNK_OVERRIDE = f"/api/v1/documents/{DOC_ID}/chunks/override"
+CHUNK_ENABLED = f"/api/v1/documents/{DOC_ID}/chunks/enabled"
+# 每个写端点单独参数化：移除任一端点上的 require_scope("knowledge:write")
+# 时，对应那条用例必须独立变红（而不是被其它端点掩盖）。
+CHUNK_WRITE_CALLS = (
+    (
+        "override",
+        "put",
+        CHUNK_OVERRIDE,
+        {"chunk_id": "chunk-scope", "text": "x", "apply_to_retrieval": False},
+    ),
+    ("enabled", "patch", CHUNK_ENABLED, {"chunk_id": "chunk-scope", "enabled": False}),
+    ("reset", "delete", CHUNK_OVERRIDE, None),
+)
+
+
+@pytest.mark.asyncio
+async def test_chunk_browser_endpoints_require_knowledge_read_scope(env):
+    """GET chunk 列表要求 knowledge:read；rpc-only / write-only key 均不得读。"""
+    for scopes in (["rpc"], ["knowledge:write"]):
+        raw = await _make_key(env, scopes)
+        _assert_scope_denied(await env.client.get(CHUNK_LIST, headers=_auth(raw)))
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("name,method,path,body", CHUNK_WRITE_CALLS)
+async def test_chunk_write_endpoints_require_knowledge_write_scope(env, name, method, path, body):
+    """三条 chunk 写端点逐条验证 scope；rpc-only / read-only key 一律 403。"""
+    for scopes in (["rpc"], ["knowledge:read"]):
+        raw = await _make_key(env, scopes)
+        client = env.client
+        if method == "delete":
+            response = await client.delete(
+                path, params={"chunk_id": "chunk-scope"}, headers=_auth(raw)
+            )
+        else:
+            response = await getattr(client, method)(path, json=body, headers=_auth(raw))
+        _assert_scope_denied(response)
+
+
+@pytest.mark.asyncio
+async def test_chunk_browser_scopes_accept_matching_keys(env):
+    """正向对照：读 key 能列、写 key 能写（错误只来自 scope，不是 RBAC 缺失）。"""
+    reader = await _make_key(env, ["knowledge:read"])
+    writer = await _make_key(env, ["knowledge:write"])
+    assert (await env.client.get(CHUNK_LIST, headers=_auth(reader))).status_code == 200
+    write_response = await env.client.patch(
+        CHUNK_ENABLED,
+        json={"chunk_id": "chunk-scope", "enabled": False},
+        headers=_auth(writer),
+    )
+    assert write_response.status_code in (200, 404), write_response.text
+
+
 # ── chat:read：可读会话，不可写 ─────────────────────────────────────────────
 
 

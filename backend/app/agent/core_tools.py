@@ -530,15 +530,18 @@ async def _summarize_document_impl(
     """
     from app.core.elasticsearch import ElasticsearchTools
     from app.dependencies import get_rag_pipeline
+    from app.services.document_acl import with_chunk_enabled_filter
 
     es_query = {
         "size": 50,
         "query": {
             "bool": {
-                "must": [
-                    {"term": {"document_id": document_id}},
-                    {"term": {"organization_id": str(organization_id)}},
-                ]
+                "must": with_chunk_enabled_filter(
+                    [
+                        {"term": {"document_id": document_id}},
+                        {"term": {"organization_id": str(organization_id)}},
+                    ]
+                )
             }
         },
         "sort": [{"chunk_index": {"order": "asc"}}],
@@ -781,15 +784,18 @@ async def extract_insights(
     from app.core.config import settings
     from app.core.elasticsearch import ElasticsearchTools
     from app.dependencies import get_rag_pipeline
+    from app.services.document_acl import with_chunk_enabled_filter
 
     es_query = {
         "size": 50,
         "query": {
             "bool": {
-                "must": [
-                    {"term": {"document_id": document_id}},
-                    {"term": {"organization_id": str(organization_id)}},
-                ]
+                "must": with_chunk_enabled_filter(
+                    [
+                        {"term": {"document_id": document_id}},
+                        {"term": {"organization_id": str(organization_id)}},
+                    ]
+                )
             }
         },
         "sort": [{"chunk_index": {"order": "asc"}}],
@@ -988,7 +994,7 @@ async def cross_document_analysis(
     from app.core.config import settings
     from app.core.elasticsearch import ElasticsearchTools
     from app.dependencies import get_rag_pipeline
-    from app.services.document_acl import with_acl_filter
+    from app.services.document_acl import with_acl_filter, with_chunk_enabled_filter
 
     # issue #511: the filename fallback must carry the same ACL filter as the
     # primary document_id lookup. Without it, a B-user could read A-user's
@@ -1007,12 +1013,14 @@ async def cross_document_analysis(
             "size": 20,
             "query": {
                 "bool": {
-                    "must": with_acl_filter(
-                        [
-                            {"term": {"document_id": doc_id}},
-                            {"term": {"organization_id": str(organization_id)}},
-                        ],
-                        blocked_ids,
+                    "must": with_chunk_enabled_filter(
+                        with_acl_filter(
+                            [
+                                {"term": {"document_id": doc_id}},
+                                {"term": {"organization_id": str(organization_id)}},
+                            ],
+                            blocked_ids,
+                        )
                     ),
                 }
             },
@@ -1034,12 +1042,14 @@ async def cross_document_analysis(
                     "size": 20,
                     "query": {
                         "bool": {
-                            "must": with_acl_filter(
-                                [
-                                    {"term": {"filename": doc_id}},
-                                    {"term": {"organization_id": str(organization_id)}},
-                                ],
-                                blocked_ids,
+                            "must": with_chunk_enabled_filter(
+                                with_acl_filter(
+                                    [
+                                        {"term": {"filename": doc_id}},
+                                        {"term": {"organization_id": str(organization_id)}},
+                                    ],
+                                    blocked_ids,
+                                )
                             ),
                         }
                     },

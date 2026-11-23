@@ -171,6 +171,7 @@ async def compare_documents(
         )
 
     from app.agent.core_tools import _ensure_document_readable
+    from app.services.document_acl import with_chunk_enabled_filter
 
     for did in document_ids:
         denied = await _ensure_document_readable(did, organization_id, user_id)
@@ -188,10 +189,12 @@ async def compare_documents(
             "size": 30,
             "query": {
                 "bool": {
-                    "must": [
-                        {"term": {"document_id": doc_id}},
-                        {"term": {"organization_id": str(organization_id)}},
-                    ]
+                    "must": with_chunk_enabled_filter(
+                        [
+                            {"term": {"document_id": doc_id}},
+                            {"term": {"organization_id": str(organization_id)}},
+                        ]
+                    )
                 }
             },
             "_source": ["chunk_text", "original_text", "text_provenance", "filename"],
