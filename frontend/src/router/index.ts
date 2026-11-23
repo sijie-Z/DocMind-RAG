@@ -194,6 +194,28 @@ export const routes: RouteRecordRaw[] = [
         }
       },
       {
+        // 批次五：组织级核验模板/playbook 库（版本历史 + 只读 diff）。
+        // 从核验列表页进入，菜单面无独立项 → activeMenu 归属 Reviews。
+        path: 'reviews/templates',
+        name: 'ReviewTemplates',
+        component: () => import('@/views/reviews/templateLibrary.vue'),
+        meta: {
+          title: 'router.reviewTemplates',
+          activeMenu: 'Reviews',
+          icon: 'document-text'
+        }
+      },
+      {
+        path: 'reviews/templates/:id',
+        name: 'ReviewTemplateDetail',
+        component: () => import('@/views/reviews/templateVersionDetail.vue'),
+        meta: {
+          title: 'router.reviewTemplates',
+          activeMenu: 'Reviews',
+          icon: 'document-text'
+        }
+      },
+      {
         path: 'reviews/:id',
         name: 'ReviewDetail',
         component: () => import('@/views/reviews/detail.vue'),

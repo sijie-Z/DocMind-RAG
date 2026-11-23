@@ -144,6 +144,17 @@
           <span>{{ t('search.results') }}: <span class="font-semibold tabular-nums text-blue-700 dark:text-blue-400">{{ searchResults.length }}</span></span>
           <span v-if="lastResponse?.search_mode" data-testid="search-effective-mode">{{ searchModeLabel }}</span>
           <span v-if="lastResponse?.search_time != null">· {{ lastResponse.search_time }}s</span>
+          <n-button
+            size="small"
+            secondary
+            round
+            class="ml-auto"
+            data-testid="search-capture-eval-case"
+            @click="openCaptureModal"
+          >
+            <template #icon><n-icon><SaveOutline /></n-icon></template>
+            {{ t('search.captureAsEvalCase') }}
+          </n-button>
         </div>
 
         <div class="search-results-scroll flex-1 space-y-4 overflow-y-auto pr-2 custom-scrollbar">
@@ -364,6 +375,94 @@
         </div>
       </div>
     </n-modal>
+
+    <!-- 保存为评测用例（bad-case → eval case）：把本次 query 与期望文档存成评测用例 -->
+    <n-modal
+      v-model:show="showCaptureModal"
+      preset="card"
+      class="search-capture-modal"
+      style="width: min(640px, 92vw)"
+      :title="t('search.captureTitle')"
+    >
+      <div class="space-y-4 p-1">
+        <p class="text-sm text-slate-600 dark:text-slate-300">{{ t('search.captureHint') }}</p>
+
+        <div class="space-y-1">
+          <h4 class="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">{{ t('search.captureQueryLabel') }}</h4>
+          <div class="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm break-words text-slate-800 dark:border-slate-700 dark:bg-slate-800/50 dark:text-slate-100" data-testid="search-capture-query">
+            {{ captureExecutedQuery }}
+          </div>
+        </div>
+
+        <div class="space-y-1">
+          <label class="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400" for="search-capture-name">{{ t('search.captureNameLabel') }}</label>
+          <n-input
+            id="search-capture-name"
+            v-model:value="captureName"
+            :maxlength="255"
+            :placeholder="t('search.captureNamePlaceholder')"
+            data-testid="search-capture-name"
+          />
+        </div>
+
+        <div class="space-y-2">
+          <h4 class="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+            {{ t('search.captureExpectedLabel') }}
+          </h4>
+          <p class="text-xs text-slate-500 dark:text-slate-400">{{ t('search.captureExpectedHint') }}</p>
+          <!-- 本次结果中的文档：直接勾选（相当于「本该命中这里」）。 -->
+          <n-checkbox-group v-model:value="captureSelectedIds" data-testid="search-capture-results">
+            <n-space vertical>
+              <n-checkbox
+                v-for="doc in captureResultDocs"
+                :key="doc.id"
+                :value="doc.id"
+                :label="doc.label"
+              />
+            </n-space>
+          </n-checkbox-group>
+          <!-- 结果里没有期望文档时（bad case 的常见形态）：按组织文档远程搜索补充。 -->
+          <n-select
+            v-model:value="captureExtraIds"
+            multiple
+            filterable
+            remote
+            clearable
+            :options="captureDocumentOptions"
+            :loading="captureDocumentLoading"
+            :placeholder="t('search.captureAddDocument')"
+            :max-tag-count="3"
+            data-testid="search-capture-extra-docs"
+            @search="loadCaptureDocumentOptions"
+          />
+          <p v-if="captureSelectedIds.length === 0 && captureExtraIds.length === 0" class="text-xs text-amber-700 dark:text-amber-400" data-testid="search-capture-empty-warning">
+            {{ t('search.captureExpectedRequired') }}
+          </p>
+          <p v-else-if="captureTooMany" class="text-xs text-amber-700 dark:text-amber-400" data-testid="search-capture-too-many">
+            {{ t('search.captureTooMany', { max: CAPTURE_MAX_EXPECTED }) }}
+          </p>
+        </div>
+
+        <p v-if="captureError" class="text-sm text-red-600 dark:text-red-400" role="alert" data-testid="search-capture-error">{{ captureError }}</p>
+
+        <div class="flex justify-end gap-3 border-t border-slate-100 pt-4 dark:border-slate-800">
+          <n-button round secondary :disabled="captureSaving" @click="showCaptureModal = false">
+            {{ t('common.cancel') }}
+          </n-button>
+          <n-button
+            type="primary"
+            round
+            :loading="captureSaving"
+            :disabled="captureSaving || captureExpectedIds.length === 0 || captureTooMany"
+            data-testid="search-capture-submit"
+            @click="submitCapture"
+          >
+            <template #icon><n-icon><SaveOutline /></n-icon></template>
+            {{ t('search.captureSubmit') }}
+          </n-button>
+        </div>
+      </div>
+    </n-modal>
   </div>
 </template>
 
@@ -371,15 +470,16 @@
 import { ref, computed, onMounted, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useDedupedMessage } from '@/utils/message'
-import { NIcon, NSpin, NRadioGroup, NRadio, NSpace, NSelect, NTag, NButton, NModal, NSwitch } from 'naive-ui'
+import { NIcon, NSpin, NRadioGroup, NRadio, NSpace, NSelect, NTag, NButton, NModal, NSwitch, NInput, NCheckbox, NCheckboxGroup } from 'naive-ui'
 import {
   SearchOutline, TimeOutline, ChatbubblesOutline, CopyOutline, SparklesOutline,
-  DocumentTextOutline, DocumentOutline, GridOutline, NewspaperOutline, AlertCircleOutline, RefreshOutline
+  DocumentTextOutline, DocumentOutline, GridOutline, NewspaperOutline, AlertCircleOutline, RefreshOutline, SaveOutline
 } from '@vicons/ionicons5'
 import { searchKnowledgeResponse, getSearchSuggestions, getSearchStats, buildSearchPayload } from '@/api/search'
 import type { KnowledgeSearchResponse, SearchResult, SearchScopeItem, SearchStats } from '@/api/search'
 import { getKnowledgeBases } from '@/api/knowledge'
 import type { KnowledgeBase } from '@/api/knowledge'
+import { captureEvalCase } from '@/api/retrievalEval'
 import { getErrorMessage } from '@/utils/apiError'
 import { debounce } from 'lodash-es'
 import { useI18n } from 'vue-i18n'
@@ -420,6 +520,128 @@ const documentLoading = ref(false)
 let documentSeq = 0
 
 const currentOrgId = computed(() => userStore.currentOrgId)
+
+// ── 保存为评测用例（bad-case 捕获）────────────────────────────────────────
+// 设计口径：
+// - 入口只在有检索结果时出现：这是「结果不理想」时的动作，空页给出只会误导；
+// - 期望文档默认 = 本次结果涉及的文档（勾选式），另可按组织文档远程补充；
+//   一个都没选时不提交（评测金标为空的用例没有任何意义）；
+// - 提交后按后端 `created` 区分「已保存」与「同内容用例已存在」，后者不是
+//   失败：后端幂等返回既有行，不产生重复样本。
+const showCaptureModal = ref(false)
+const captureName = ref('')
+const captureSelectedIds = ref<string[]>([])
+const captureExtraIds = ref<string[]>([])
+const captureDocumentOptions = ref<Array<{ label: string; value: string }>>([])
+const captureDocumentLoading = ref(false)
+const captureSaving = ref(false)
+const captureError = ref<string | null>(null)
+let captureDocumentSeq = 0
+
+interface CaptureDocOption { id: string; label: string }
+
+/** 本次结果里可作期望金标的文档（按 document_id 去重，保持结果顺序）。 */
+const captureResultDocs = computed<CaptureDocOption[]>(() => {
+  const seen = new Set<string>()
+  const docs: CaptureDocOption[] = []
+  for (const result of searchResults.value) {
+    const id = result.source?.document_id || result.id
+    if (!id || seen.has(id)) continue
+    seen.add(id)
+    docs.push({ id, label: filenameOf(result) || t('search.unknownFile') })
+  }
+  return docs
+})
+
+/** 最终提交的金标集合（结果勾选 + 远程补充，去重保序）。 */
+const captureExpectedIds = computed<string[]>(() => {
+  const ids: string[] = []
+  for (const id of [...captureSelectedIds.value, ...captureExtraIds.value]) {
+    if (id && !ids.includes(id)) ids.push(id)
+  }
+  return ids
+})
+
+/** 后端 schema 上限（1–50）：超限时明确拦截，不静默截断用户的勾选。 */
+const CAPTURE_MAX_EXPECTED = 50
+
+const captureTooMany = computed(() => captureExpectedIds.value.length > CAPTURE_MAX_EXPECTED)
+
+// 捕获的是「产生当前结果的那次检索」的 query，而不是输入框里尚未提交的新文本。
+// 用户在出结果后改输入框、或清空输入框，都不能改变本次评测用例的语义。
+const captureExecutedQuery = computed(() => (lastResponse.value?.query ?? '').trim())
+
+const openCaptureModal = () => {
+  captureName.value = ''
+  captureSelectedIds.value = []
+  captureExtraIds.value = []
+  captureDocumentOptions.value = []
+  captureError.value = null
+  showCaptureModal.value = true
+  void loadCaptureDocumentOptions()
+}
+
+const loadCaptureDocumentOptions = async (query = '') => {
+  if (!currentOrgId.value) return
+  const seq = ++captureDocumentSeq
+  captureDocumentLoading.value = true
+  try {
+    // 与左侧文档范围选择同源（组织知识库列表；服务端已做 ACL 与状态标注）。
+    const response = await getKnowledgeBases(
+      { page: 1, page_size: 30, search: query || undefined },
+      { silent: true }
+    )
+    if (seq !== captureDocumentSeq) return
+    const payload = (response.data as unknown as { data?: { data?: KnowledgeBase[] } })?.data
+    captureDocumentOptions.value = (payload?.data ?? []).map((doc) => ({
+      value: doc.id,
+      label: `${doc.title || doc.file_name}${isIndexedStatus(doc.status) ? '' : ` · ${scopeStatusLabel({ document_id: doc.id, found: true, status: doc.status })}`}`
+    }))
+  } catch {
+    // 文档补充选择是增强能力：失败不阻塞「从本次结果勾选」的主路径。
+  } finally {
+    if (seq === captureDocumentSeq) captureDocumentLoading.value = false
+  }
+}
+
+const submitCapture = async () => {
+  const query = captureExecutedQuery.value
+  const ids = captureExpectedIds.value
+  if (!query) {
+    captureError.value = t('search.captureQueryMissing')
+    return
+  }
+  if (ids.length === 0) {
+    captureError.value = t('search.captureExpectedRequired')
+    return
+  }
+  if (ids.length > CAPTURE_MAX_EXPECTED) {
+    captureError.value = t('search.captureTooMany', { max: CAPTURE_MAX_EXPECTED })
+    return
+  }
+  captureSaving.value = true
+  captureError.value = null
+  try {
+    const result = await captureEvalCase({
+      query,
+      expected_document_ids: ids,
+      ...(captureName.value.trim() ? { name: captureName.value.trim() } : {})
+    })
+    showCaptureModal.value = false
+    if (result.created) {
+      message.success(t('search.captureSuccess'))
+    } else {
+      // 幂等命中既有用例：不是失败，明确告诉用户没有新建重复行。
+      message.info(t('search.captureDuplicate', { name: result.case?.name ?? '' }))
+    }
+  } catch (err) {
+    // 校验/权限错误展示后端语义原文；端点无 X-Silent-Error，全局拦截器已
+    // 输出过通用提示，这里只在弹窗内给出可读原因（不重复弹第二个 toast）。
+    captureError.value = getErrorMessage(err, t('search.captureFailed'))
+  } finally {
+    captureSaving.value = false
+  }
+}
 
 const sortOptions = computed(() => [
   { label: t('search.relevance'), value: 'relevance' },

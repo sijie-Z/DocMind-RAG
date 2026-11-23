@@ -41,6 +41,7 @@ vi.mock('@/api/reviews', () => ({
   reviewsApi: {
     list: vi.fn(),
     candidates: vi.fn(),
+    templates: { list: vi.fn(), versions: vi.fn() },
     createCase: vi.fn(),
     readiness: vi.fn(),
     putDocumentMeta: vi.fn()
@@ -48,6 +49,12 @@ vi.mock('@/api/reviews', () => ({
 }))
 
 const api = vi.mocked(reviewsApi)
+vi.mocked(reviewsApi.templates.list).mockResolvedValue({
+  data: { success: true, data: { items: [], total: 0 } }
+} as never)
+vi.mocked(reviewsApi.templates.versions).mockResolvedValue({
+  data: { success: true, data: { items: [], total: 0, page: 1, page_size: 100, latest_version: 0 } }
+} as never)
 
 const POLICY = {
   document_id: 'p1',

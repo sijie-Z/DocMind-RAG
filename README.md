@@ -77,7 +77,7 @@ DocMind 不是一个「聊天框套壳」：它把企业知识库当成一套**�
 
 | 方向 | 能力 | 关键事实 |
 |------|------|----------|
-| 知识库 / RAG | 多格式解析（含 OCR）、语义分块、混合检索、重排、查询改写/HyDE、语义缓存、严格模式、分块浏览与人工纠正 | 检索评分按增强文本、**证据出口只放 parser 原文**；不可用文档显式 `SOURCE_ORIGINAL_UNAVAILABLE`；人工修正只写独立审计行并标 `manual_override`，永不覆盖原文/证据哈希 |
+| 知识库 / RAG | 多格式解析（含 OCR）、语义分块、混合检索、重排、查询改写/HyDE、语义缓存、严格模式、分块浏览与人工纠正、bad case 一键存为评测用例 | 检索评分按增强文本、**证据出口只放 parser 原文**；不可用文档显式 `SOURCE_ORIGINAL_UNAVAILABLE`；人工修正只写独立审计行并标 `manual_override`，永不覆盖原文/证据哈希；评测用例按组织内 query+金标集合去重，重复保存幂等返回既有用例 |
 | Agent | PER 三阶段循环、DAG 并行调度、超时/重试/回退、对抗式 Reviewer、RunReport、执行回放、经验记忆 | **31 个内置工具**（默认注入 10 个工具，终端/飞书/委派按门控开放） |
 | 合同核验 | 文档角色/版本族/版本序/内容哈希、readiness、核验案件、原文证据快照、确定性抽取与对齐 | 只输出文本事实与差异类型（modified/renumbered/…），不输出任何法律结论；未识别不猜值 |
 | 平台化 | 多租户组织隔离、RBAC + API Key scope、审计日志、Prometheus/Grafana、OpenTelemetry、24 种 SSE 事件 | 组织隔离贯穿检索/会话/文档/缓存/WS；失败语义可判定（4xx + error_code） |
@@ -112,7 +112,7 @@ DocMind 不是一个「聊天框套壳」：它把企业知识库当成一套**�
 1. **评测门禁进 CI（Eval Gate）** — 检索质量由零容差门禁逐 PR 守护：Eval v1.5 共 **80 条 golden set（60 正例 + 20 负例）**，ClauseHit@1/@3/@5、MRR、EmptyAcc、NearMiss@5、errors 七项指标容差为 0，任何下跌即红、fail-closed。`make eval-ci`（`mode=fake`，2026-10-24，语料 commit `d867a2b3`）实测 ClauseHit@1 **70.0%** / @3 **76.7%** / @5 **80.0%**、NearMiss@5 **25.0%**、MRR **0.74**、EmptyAcc **100%**、errors **0**（来源 PR #525，已合并，squash 552efaad；与 v1 的 28 条基线不可混比）。基线更新是显式 PR 行为（规则见 `backend/docs/eval-gate-phase1.md`，数字口径见 `docs/METRICS.md`）。
 2. **静默假成功清零（#301）** — 全仓 ~551 处异常捕获全量审计，32 条静默假成功全部闭环（登出 fail-closed、检索三态、文档状态机诚实化、统计端点降级身份……），每条修复都带回归测试。
 3. **先红后绿 + 变异验证** — 每笔修复先写失败测试；修复后注入缺陷必须「精确变红」，证明测试真的有判别力，而不是顺手写个能过的断言。
-4. **文档数字不变量** — SSE 事件数、端点模块数、前端路由数、工具数由源码派生，期望值统一放在 `docs/facts.json`，对外口径（值/口径/命令/日期/备注）登记在 `docs/METRICS.md`；`backend/scripts/check_doc_facts.py` 在 CI 逐 PR 校验「代码 ↔ facts JSON ↔ METRICS ↔ 文档」一致。前端路由按两种口径记录：39 条路由记录（34 条具名路由，含顶层与 redirect 记录）。
+4. **文档数字不变量** — SSE 事件数、端点模块数、前端路由数、工具数由源码派生，期望值统一放在 `docs/facts.json`，对外口径（值/口径/命令/日期/备注）登记在 `docs/METRICS.md`；`backend/scripts/check_doc_facts.py` 在 CI 逐 PR 校验「代码 ↔ facts JSON ↔ METRICS ↔ 文档」一致。前端路由按两种口径记录：41 条路由记录（36 条具名路由，含顶层与 redirect 记录）。
 5. **棘轮只缩不涨** — 后端覆盖率下限 `--cov-fail-under=42` + 前端四道基线棘轮（硬编码中文 / i18n 完备性 / 命名一致 / 用键定义）：只拦下滑、不追高分，新增长即红。
 
 加固收口（已完成）：Agent 记忆接口按用户隔离、`/files` 代理鉴权（非公开对象需登录 + 组织归属校验）、纯 ASGI 监控与限流中间件、移除 legacy `ci.yml`；另有工作流归属隔离、API Key 掩码、Web 抓取 SSRF 防护、上传路径穿越与 MinIO 删除、Agent 沙箱逃逸封堵、`execute_sql` 租户过滤、MCP 子进程环境变量白名单、登录失败锁定 + 用户枚举时序防护、PII 全链路掩码等安全修复。
@@ -134,6 +134,7 @@ DocMind 不是一个「聊天框套壳」：它把企业知识库当成一套**�
 - `POST /reviews`：三份文档同组织、角色正确、版本序递增才能 `ready`；否则 `blocked` 落库并带 `side:reason`；
 - 证据快照：建案/选择时把 parser 原文的 quote、哈希、条款/页码/字符区间固化成行——文档 later 被重建或删除，快照仍可读，并用 chunk 指纹 + 文档处理指纹标注 `live_source_stale`；
 - `POST /reviews/{id}/analyze`：纯规则抽取（期限值/单位、起算事件、条件、例外/交叉引用）+ V1↔V2 对齐（unchanged/modified/added/removed/renumbered/unidentified）；日期片段与保修/质保期不会被误认为账期，单位存疑标 `ambiguous` 不猜值；
+- 模板/playbook 库：组织可编辑的核验模板，每次保存生成不可变版本（内置四项固定，只能追加自定义项）；建案可选模板版本，规则仍固化为不可变快照，历史案件不受后续编辑影响；版本间提供只读 diff。
 - 后续批次：逐项人工决策、导出带版本/哈希/覆盖范围的核验单（进行中）。
 
 **明确不做**：不输出「合法/违法/合规/无风险/可签」等法律结论；`needs_human`/`insufficient` 不算完成；没有证据就不给结论。设计动机与已知缺口以模块注释与批次 PR 描述为准。
@@ -219,7 +220,7 @@ DocMind/
 │   │   ├── api/v1/
 │   │   │   ├── router.py            # 主路由（注册 30 个模块）
 │   │   │   └── endpoints/           # 端点实现（30 个文件）
-│   │   ├── services/                # 业务服务层（40 个服务）
+│   │   ├── services/                # 业务服务层（41 个服务）
 │   │   ├── models/                  # ORM 模型（23 个模型文件）
 │   │   ├── core/                    # 配置 / DB / Redis / ES / MinIO / Kafka / JWT
 │   │   └── worker/                  # Kafka 消费者（解析 → 分块 → 嵌入 → 索引）
@@ -229,7 +230,7 @@ DocMind/
 │   └── docker-compose.yml           # 基础设施与全量编排
 ├── frontend/
 │   └── src/
-│       ├── views/                   # 页面（25 个页面模块，39 条路由记录 / 34 条具名路由）
+│       ├── views/                   # 页面（25 个页面模块，41 条路由记录 / 36 条具名路由）
 │       ├── components/ · api/ · stores/ · router/ · composables/ · locales/
 └── docs/                            # 架构页 / 使用手册 / 决策记录 / 指标口径
 ```
@@ -246,9 +247,9 @@ DocMind/
 | 文件管理 | `/files` | 上传/下载/删除，MinIO 存储，分块上传 |
 | 文档管理 | `/documents` | 文档解析、向量化、知识库索引、状态追踪、分块分页浏览、人工修正与分块级启停 |
 | 聊天 | `/chat` | 会话 CRUD、SSE 流式问答、严格模式、调试端点 |
-| 知识库 | `/knowledge` | 知识库文档检索、统计、设置 |
+| 知识库 | `/knowledge` | 知识库文档检索、统计、设置、检索评测用例/运行历史（bad case 捕获） |
 | 知识库管理 | `/knowledge-bases` | 多知识库实体 CRUD（组织隔离） |
-| 合同核验 | `/reviews` | 核验案件/核验项/证据快照 + 确定性抽取与 V1/V2 对齐 + 逐项决策与核验单导出（原文证据 + 版本哈希） |
+| 合同核验 | `/reviews` | 核验案件/核验项/证据快照 + 确定性抽取与 V1/V2 对齐 + 逐项决策与核验单导出（原文证据 + 版本哈希）；组织级模板库（不可变版本 + 只读 diff） |
 | 组织管理 | `/organizations` | 组织 CRUD、成员管理、角色分配 |
 | 组织设置 | `/organizations` | 组织级设置读写与审计（与组织管理共用前缀） |
 | 系统监控 | `/monitoring` | 性能指标、健康检查、告警、RAG 质量评估 |

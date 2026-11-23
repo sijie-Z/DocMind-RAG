@@ -900,6 +900,9 @@ def test_022_migration_roundtrip(tmp_path, monkeypatch):
         "lock_version",
         "created_at",
         "updated_at",
+        # 批次五：模板溯源指针（可空；规则内容仍以 rule_snapshot_id 为真源）。
+        "template_id",
+        "template_version_no",
     }
     assert set(item_columns) == {
         "id",

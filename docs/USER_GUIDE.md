@@ -4,7 +4,7 @@
 >
 > 本文只做**引述**，不做第二套真源：
 > - 端口、凭据、服务编排以 `backend/docker-compose.yml` 与 `backend/.env.docker.example` 为准；
-> - 关键数字（31 个内置工具 / 默认注入 10 个工具 / 29 个端点模块 / 39 条前端路由 / 24 种 SSE 事件）以 `docs/facts.json` 为单一事实源；README、架构页等既有锚点由 `backend/scripts/check_doc_facts.py` 在 CI 逐 PR 校验，本文数字与之一致（工具/端点/路由/SSE 锚点已纳入 CI 校验）；
+> - 关键数字（31 个内置工具 / 默认注入 10 个工具 / 30 个端点模块 / 41 条前端路由 / 24 种 SSE 事件）以 `docs/facts.json` 为单一事实源；README、架构页等既有锚点由 `backend/scripts/check_doc_facts.py` 在 CI 逐 PR 校验，本文数字与之一致（工具/端点/路由/SSE 锚点已纳入 CI 校验）；
 > - 架构与设计动机见 `README.md`、`AGENT_ARCHITECTURE.md`、`docs/decisions/`。
 >
 > 英文版：[USER_GUIDE_EN.md](USER_GUIDE_EN.md)
@@ -510,7 +510,20 @@ python scripts/reconcile_knowledge_index.py --reindex --limit 10
 
 **图谱**：索引成功后会非阻塞地抽取知识图谱，按组织存 Redis（30 天 TTL）。它不参与检索排序，失败也不会把文档标成 FAILED。历史文档可用 `backend/scripts/backfill_graph.py` 回填；图谱页按 `max_nodes`（后端 5–200，默认 50）截断展示。
 
-### 4.2 检索评测运行历史与趋势
+### 4.2 检索评测用例：从 bad case 直接保存
+
+搜索页（`/search`）在有一次检索结果后，结果状态栏右侧提供「保存为评测用例」：把本次 query 与「本该命中的文档」存成 `RetrievalEvalCase`，不必手工复制到评测页再重建。
+
+- 入口是 `POST /api/v1/knowledge/eval/cases/capture`，与 `POST /eval/cases` 共用同一个 `retrieval_eval_service.create_case`；没有第二套创建逻辑。
+- 弹窗预填本次 query；期望文档默认从本次结果涉及的文档勾选，结果里没有时可按组织文档远程补充；一个期望文档都没选时不能提交（空金标的用例没有意义）。
+- 只接受本组织、已索引启用、且对调用者可见（viewer ACL）的文档；跨组织或私有不可见金标返回 400，且不回显具体 id。
+- 去重：同组织内「同 query（仅去首尾空白）+ 同金标集合（与勾选顺序无关）」视为同一条用例。再次保存返回既有用例（响应 `created=false`，前端提示「已存在」，不产生重复行）；`(organization_id, dedup_key)` 唯一索引是并发兜底。用例名/标签不参与去重，幂等命中不覆盖既有行的名称。
+- 更新用例时把 query/金标改成与另一条完全相同的内容 → 409 `EVAL_CASE_DUPLICATE`（`detail.existing_case_id` 指向冲突用例），不会让评测集出现两条重复样本。
+- 审计只写组织、用户、金标条数与是否新建；query、用例名与金标 id 不进审计日志。
+- 规模上限（schema 层强制）：query ≤ 2000 字符、金标 1–50 个、名称 ≤ 255（缺省取 query 前 100 字符）、标签 ≤ 20 个。
+- 迁移 `038_eval_case_dedup` 只加可空列 `dedup_key` 与组织内唯一索引，不回填/不删除历史行（历史重复行保持 `dedup_key=NULL`，不受唯一约束）；去重从保存动作起生效。
+
+### 4.2.1 检索评测运行历史与趋势
 
 知识库页的「检索评测运行历史」（`/knowledge/eval-runs`）把一次性评测变成可追溯质量资产：
 
@@ -519,7 +532,7 @@ python scripts/reconcile_knowledge_index.py --reindex --limit 10
 - `GET /eval/runs`（列表，可按 `case_set_hash` 过滤）、`GET /eval/runs/{id}`（详情）、`GET /eval/runs/trend`（最近 30 次趋势，失败运行不计入指标均值）、`GET /eval/runs/{id}/export?format=json|csv`（同源导出，用于回归比较）。
 - 审计只写组织、用户、条数、格式与字段名，`query`/用例名/逐条正文不进审计日志；逐条结果只在本组织授权详情页可见。
 
-### 4.2.1 分块浏览与人工纠正
+### 4.2.2 分块浏览与人工纠正
 
 文档详情页的「浏览与纠正分块」（URL 参数 `chunkBrowser=1`，可分享）打开只读优先的分块工作台：
 
@@ -685,7 +698,7 @@ API 前缀 `/api/v1/workflows`：工作流 CRUD、执行、调试、节点定义
 | chat | `/api/v1/chat` | 会话 CRUD、SSE 流式问答 |
 | knowledge | `/api/v1/knowledge` | 知识检索、统计、重建、图谱 |
 | knowledge_bases | `/api/v1/knowledge-bases` | 多知识库实体 CRUD（组织隔离） |
-| reviews | `/api/v1/reviews` | 合同核验：案件/核验项/证据快照（parser 原文 + 版本哈希；Batch 2） |
+| reviews | `/api/v1/reviews` | 合同核验：案件/核验项/证据快照（parser 原文 + 版本哈希）；组织级模板库 `/reviews/templates`（不可变版本 + 只读 diff） |
 | organizations | `/api/v1/organizations` | 组织 CRUD、成员与角色 |
 | organization_settings | `/api/v1/organizations` | 组织级设置（与组织管理共用前缀） |
 | monitoring | `/api/v1/monitoring` | 性能指标、健康、告警、RAG 质量 |

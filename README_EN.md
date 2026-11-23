@@ -78,7 +78,7 @@ register document identity → readiness gate → create case (blocked/ready + r
 
 | Area | What it does | Key facts |
 |------|--------------|-----------|
-| Knowledge base / RAG | multi-format parsing (OCR included), semantic chunking, hybrid retrieval, reranking, query rewriting/HyDE, semantic cache, strict mode, chunk browsing and manual correction | scoring happens on enhanced text; **the evidence exit only exposes parser-original text**; unusable documents return `SOURCE_ORIGINAL_UNAVAILABLE`; manual corrections are stored in a separate audited row labeled `manual_override` and never overwrite originals or evidence hashes |
+| Knowledge base / RAG | multi-format parsing (OCR included), semantic chunking, hybrid retrieval, reranking, query rewriting/HyDE, semantic cache, strict mode, chunk browsing and manual correction, one-click bad case → eval case | scoring happens on enhanced text; **the evidence exit only exposes parser-original text**; unusable documents return `SOURCE_ORIGINAL_UNAVAILABLE`; manual corrections are stored in a separate audited row labeled `manual_override` and never overwrite originals or evidence hashes; eval cases deduplicate by organization-scoped query + golden set, so repeated saves return the existing case |
 | Agent | PER loop, DAG-based parallel scheduling, timeout/retry/fallback, adversarial reviewer, RunReport, replay, experience memory | **31 Built-In Tools** (10 tools are injected by default; terminal/Feishu/delegation are gated) |
 | Contract review | document role/family/version/content hash, readiness, review cases, evidence snapshots, deterministic extraction and alignment | text facts and change types only (modified/renumbered/…); no legal conclusions; ambiguous facts are never guessed |
 | Platform | multi-tenant org isolation, RBAC + API-Key scopes, audit logs, Prometheus/Grafana, OpenTelemetry, 24 SSE event types | org isolation spans retrieval/chat/documents/cache/WS; failure semantics are decidable (4xx + error_code) |
@@ -113,7 +113,7 @@ register document identity → readiness gate → create case (blocked/ready + r
 1. **Evaluation gate in CI** — retrieval quality is guarded per PR with zero tolerance: Eval v1.5 ships **80 golden cases (60 positive + 20 negative)**; ClauseHit@1/@3/@5, MRR, EmptyAcc, NearMiss@5 and errors are all zero-tolerance, fail-closed. `make eval-ci` (`mode=fake`, 2026-10-24, corpus commit `d867a2b3`) measured ClauseHit@1 **70.0%** / @3 **76.7%** / @5 **80.0%**, NearMiss@5 **25.0%**, MRR **0.74**, EmptyAcc **100%**, errors **0** (PR #525, squash 552efaad; not comparable with the 28-case v1 baseline). Baseline updates are explicit PRs (`backend/docs/eval-gate-phase1.md`; method in `docs/METRICS.md`).
 2. **Silent false-success cleanup (#301)** — ~551 exception handlers audited, 32 silent false-success paths closed (logout fail-closed, three-state retrieval, honest document state machine, degraded stats identity…), each with a regression test.
 3. **Red first, then green + mutation checks** — every fix starts with a failing test; after the fix, injecting the defect back must fail *that* test — proof the test has discriminating power.
-4. **Documented-number invariants** — SSE event count, endpoint-module count, frontend-route count and tool count are derived from source; expected values live in `docs/facts.json`, the public method for every metric (value / method / command / date / note) lives in `docs/METRICS.md`, and `backend/scripts/check_doc_facts.py` verifies code ↔ facts JSON ↔ METRICS.md ↔ docs on every PR. Frontend routes are recorded in two ways: 39 route records (34 named routes, including top-level and redirect records).
+4. **Documented-number invariants** — SSE event count, endpoint-module count, frontend-route count and tool count are derived from source; expected values live in `docs/facts.json`, the public method for every metric (value / method / command / date / note) lives in `docs/METRICS.md`, and `backend/scripts/check_doc_facts.py` verifies code ↔ facts JSON ↔ METRICS.md ↔ docs on every PR. Frontend routes are recorded in two ways: 41 route records (36 named routes, including top-level and redirect records).
 5. **Ratchet only tightens** — backend coverage floor `--cov-fail-under=42` plus four frontend baseline ratchets (hardcoded Chinese / i18n completeness / naming consistency / key usage): they block drops, never chase scores.
 
 Hardening closed (completed): user-scoped agent memory, `/files` proxy authorization (auth + org ownership for non-public objects), pure-ASGI metrics and rate-limit middleware, legacy `ci.yml` removed; plus workflow ownership isolation, API-key masking, SSRF protection for web fetch, upload path traversal and MinIO delete fixes, agent sandbox escape closure, `execute_sql` tenant filtering, MCP subprocess env allow-list, login-failure lockout + enumeration timing defense, and end-to-end PII masking.
@@ -220,7 +220,7 @@ DocMind/
 │   │   ├── api/v1/
 │   │   │   ├── router.py            # main router (30 modules registered)
 │   │   │   └── endpoints/           # Endpoint implementations (30 files)
-│   │   ├── services/                # business services (40 services)
+│   │   ├── services/                # business services (41 services)
 │   │   ├── models/                  # ORM models (23 model files)
 │   │   ├── core/                    # config / DB / Redis / ES / MinIO / Kafka / JWT
 │   │   └── worker/                  # Kafka consumer (parse → chunk → embed → index)
@@ -230,7 +230,7 @@ DocMind/
 │   └── docker-compose.yml
 ├── frontend/
 │   └── src/
-│       ├── views/                   # pages (25 page modules, 39 route records / 34 named routes)
+│       ├── views/                   # pages (25 page modules, 41 route records / 36 named routes)
 │       ├── components/ · api/ · stores/ · router/ · composables/ · locales/
 └── docs/                            # architecture page / user guide / ADRs / metrics
 ```
@@ -247,9 +247,9 @@ DocMind/
 | Files | `/files` | Upload/download/delete, MinIO storage, chunked upload |
 | Documents | `/documents` | Document parsing, vectorization, knowledge base indexing, status tracking, paginated chunk browsing, manual correction and chunk-level enable/disable |
 | Chat | `/chat` | Session CRUD, SSE streaming Q&A, strict mode, debug endpoints |
-| Knowledge | `/knowledge` | Knowledge retrieval, statistics, settings |
+| Knowledge | `/knowledge` | Knowledge retrieval, statistics, settings, retrieval eval cases and run history (bad case capture) |
 | Knowledge Bases | `/knowledge-bases` | Multi-knowledge-base entity CRUD (organization-scoped) |
-| Contract Review | `/reviews` | Review cases / items / evidence snapshots + deterministic extraction and V1/V2 alignment + per-item decisions and report export (parser-original quotes + version hashes) |
+| Contract Review | `/reviews` | Review cases / items / evidence snapshots + deterministic extraction and V1/V2 alignment + per-item decisions and report export (parser-original quotes + version hashes); org template library (immutable versions + read-only diff) |
 | Organizations | `/organizations` | Org CRUD, member management, role assignment |
 | Organization Settings | `/organizations` | Org-level settings and audit (shared prefix with Organizations) |
 | Monitoring | `/monitoring` | Performance metrics, health checks, alerts, RAG quality scoring |

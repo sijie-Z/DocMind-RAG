@@ -63,6 +63,99 @@ export interface ReviewCaseCreatePayload {
   revised_document_id: string
   checklist_version?: string
   assignee_id?: number | null
+  /** 可选：从组织模板版本建案（服务端仍会固化为不可变规则快照）。 */
+  template_id?: string | null
+  template_version_no?: number | null
+}
+
+/** 组织级核验模板（playbook）头；规则内容在不可变版本行里。 */
+export interface ReviewTemplateSummary {
+  id: string
+  organization_id: number
+  name: string
+  description?: string | null
+  status: 'active' | 'archived'
+  latest_version: number
+  created_by: number
+  updated_by?: number | null
+  archived_at?: string | null
+  archived_by?: number | null
+  lock_version?: number
+  created_at?: string | null
+  updated_at?: string | null
+}
+
+export interface ReviewTemplateItem {
+  key: string
+  keywords: string[]
+  label?: string
+  configurable?: boolean
+}
+
+export interface ReviewTemplateVersionSummary {
+  id: string
+  template_id: string
+  version_no: number
+  version_label: string
+  item_count: number
+  payload_sha256: string
+  source: 'manual' | 'bootstrap' | string
+  change_note?: string | null
+  created_by: number
+  created_at?: string | null
+}
+
+export interface ReviewTemplateVersion extends ReviewTemplateVersionSummary {
+  items: ReviewTemplateItem[]
+  intact: boolean
+}
+
+export interface ReviewTemplateDetail extends ReviewTemplateSummary {
+  version?: ReviewTemplateVersion | null
+}
+
+export interface ReviewTemplateList {
+  items: ReviewTemplateSummary[]
+  total: number
+  page: number
+  page_size: number
+}
+
+export interface ReviewTemplateVersionList {
+  items: ReviewTemplateVersionSummary[]
+  total: number
+  page: number
+  page_size: number
+  latest_version: number
+}
+
+export interface ReviewTemplateDiffField {
+  base: unknown
+  target: unknown
+}
+
+export interface ReviewTemplateDiffEntry {
+  key: string
+  fields: Record<string, ReviewTemplateDiffField & { added?: string[]; removed?: string[] }>
+}
+
+export interface ReviewTemplateDiff {
+  template_id?: string
+  base: { id: string; version_no: number; version_label: string; payload_sha256: string; item_count: number }
+  target: { id: string; version_no: number; version_label: string; payload_sha256: string; item_count: number }
+  identical: boolean
+  added: ReviewTemplateItem[]
+  removed: ReviewTemplateItem[]
+  changed: ReviewTemplateDiffEntry[]
+  unchanged_keys: string[]
+  summary: { added: number; removed: number; changed: number; unchanged: number }
+}
+
+export interface ReviewTemplateCreatePayload {
+  name: string
+  description?: string | null
+  items?: Array<{ key: string; keywords: string[]; label?: string | null }> | null
+  change_note?: string | null
 }
 
 export interface ReviewMetaPayload {
@@ -161,6 +254,9 @@ export interface ReviewCaseDetail {
   archived_at?: string | null
   archived_by?: number | null
   lock_version: number
+  /** 建案时选用的模板/版本（溯源；规则真源是 rule_snapshot_sha256）。 */
+  template_id?: string | null
+  template_version_no?: number | null
   documents: Record<ReviewSide, ReviewDocumentState>
   items: ReviewItem[]
   /** 后端汇总；配置项没有可用抽取器时 undetermined_count > 0，界面据此提示"需人工复核"。 */
@@ -193,6 +289,9 @@ export interface ReviewCaseSummary {
   completed_at?: string | null
   archived_at?: string | null
   archived_by?: number | null
+  /** 模板溯源（可空）：列表页只展示，不参与判定。 */
+  template_id?: string | null
+  template_version_no?: number | null
 }
 
 export interface ReviewExportSummary {
@@ -319,5 +418,58 @@ export const reviewsApi = {
       responseType: 'blob'
     })
     return response
+  },
+  // ── 模板/playbook 库（批次五）──────────────────────────────────────────
+  templates: {
+    list(params?: {
+      status?: 'active' | 'archived' | 'all'
+      q?: string
+      page?: number
+      page_size?: number
+    }) {
+      return request.get('/reviews/templates', { params })
+    },
+    create(payload: ReviewTemplateCreatePayload) {
+      return request.post('/reviews/templates', payload, SILENT_HEADERS)
+    },
+    bootstrap(payload: { name: string }) {
+      return request.post('/reviews/templates/bootstrap', payload, SILENT_HEADERS)
+    },
+    get(templateId: string) {
+      return request.get(`/reviews/templates/${encodeURIComponent(templateId)}`)
+    },
+    update(templateId: string, payload: { name?: string; description?: string | null; clear_description?: boolean }) {
+      return request.put(`/reviews/templates/${encodeURIComponent(templateId)}`, payload, SILENT_HEADERS)
+    },
+    archive(templateId: string) {
+      return request.post(
+        `/reviews/templates/${encodeURIComponent(templateId)}/archive`,
+        undefined,
+        SILENT_HEADERS
+      )
+    },
+    versions(templateId: string, params?: { page?: number; page_size?: number }) {
+      return request.get(`/reviews/templates/${encodeURIComponent(templateId)}/versions`, { params })
+    },
+    createVersion(
+      templateId: string,
+      payload: { items: Array<{ key: string; keywords: string[]; label?: string | null }>; change_note?: string | null }
+    ) {
+      return request.post(
+        `/reviews/templates/${encodeURIComponent(templateId)}/versions`,
+        payload,
+        SILENT_HEADERS
+      )
+    },
+    getVersion(templateId: string, versionNo: number) {
+      return request.get(
+        `/reviews/templates/${encodeURIComponent(templateId)}/versions/${versionNo}`
+      )
+    },
+    diff(templateId: string, baseVersion: number, targetVersion: number) {
+      return request.get(`/reviews/templates/${encodeURIComponent(templateId)}/diff`, {
+        params: { base_version: baseVersion, target_version: targetVersion }
+      })
+    }
   }
 }

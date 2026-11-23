@@ -4,7 +4,7 @@
 >
 > This guide only *references* the sources of truth:
 > - ports, credentials, and service orchestration: `backend/docker-compose.yml` and `backend/.env.docker.example`;
-> - headline numbers (31 built-in tools / 10 tools injected by default / 29 endpoint modules / 39 frontend routes / 24 SSE event types): `docs/facts.json`; existing anchors in README/architecture pages are checked on every PR by `backend/scripts/check_doc_facts.py`, and this guide mirrors them (its tool/endpoint/route/SSE anchors are now also checked);
+> - headline numbers (31 built-in tools / 10 tools injected by default / 30 endpoint modules / 41 frontend routes / 24 SSE event types): `docs/facts.json`; existing anchors in README/architecture pages are checked on every PR by `backend/scripts/check_doc_facts.py`, and this guide mirrors them (its tool/endpoint/route/SSE anchors are now also checked);
 > - architecture and design rationale: `README.md`, `AGENT_ARCHITECTURE.md`, `docs/decisions/`.
 >
 > 中文版：[USER_GUIDE.md](USER_GUIDE.md)
@@ -503,7 +503,20 @@ Reconciliation compares `documents.status=INDEXED` + `chunk_count` against ES ch
 
 **Graph**: after successful indexing, a knowledge graph is extracted non-blocking and stored per organization in Redis (30-day TTL). It does not participate in retrieval ranking, and failures do not mark the document FAILED. Backfill historical documents with `backend/scripts/backfill_graph.py`; the graph page truncates to `max_nodes` (backend 5-200, default 50).
 
-### 4.2 Retrieval eval run history and trends
+### 4.2 Retrieval eval cases: save a bad case directly
+
+Once the search page (`/search`) has results, the result status bar offers **Save as eval case** on the right: it stores the current query and the documents that should have matched as a `RetrievalEvalCase`, with no manual copy-and-rebuild on the eval page.
+
+- The entry point is `POST /api/v1/knowledge/eval/cases/capture`, which shares the single `retrieval_eval_service.create_case` path with `POST /eval/cases`; there is no second creation path.
+- The dialog pre-fills the current query. Expected documents are checked from the documents in the current results by default; when they are missing you can add documents from the organization by remote search. Submitting with no expected document is blocked (an eval case with an empty golden set is meaningless).
+- Only documents in your own organization that are indexed, enabled and visible to the caller (viewer ACL) are accepted; cross-organization or private-invisible golden documents return 400 without echoing their ids.
+- Deduplication: within an organization, "same query (leading/trailing whitespace trimmed) + same golden set (order-independent)" is the same case. Saving again returns the existing case (`created=false`; the UI says it already exists) and never creates a duplicate row; a `(organization_id, dedup_key)` unique index backs concurrent requests. The case name and tags do not take part in deduplication, and an idempotent hit never overwrites the existing row's name.
+- Updating a case so that its query/golden set are identical to another case returns 409 `EVAL_CASE_DUPLICATE` (`detail.existing_case_id` points at the conflicting case), so the eval set never holds two identical samples.
+- Audit records contain only organization, user, golden-document count and whether a row was created; query, case name and golden ids never enter the audit log.
+- Size limits (enforced at the schema layer): query ≤ 2000 characters, 1–50 golden documents, name ≤ 255 (defaults to the first 100 characters of the query), ≤ 20 tags.
+- Migration `038_eval_case_dedup` only adds a nullable `dedup_key` column and an organization-scoped unique index; it backfills nothing and deletes no rows (historical duplicates keep `dedup_key=NULL` and are not constrained). Deduplication applies from the next save onward.
+
+### 4.2.1 Retrieval eval run history and trends
 
 The knowledge page’s “Retrieval eval run history” (`/knowledge/eval-runs`) turns one-off evaluation into a traceable quality asset:
 
@@ -512,7 +525,7 @@ The knowledge page’s “Retrieval eval run history” (`/knowledge/eval-runs`)
 - `GET /eval/runs` (list, optional `case_set_hash` filter), `GET /eval/runs/{id}` (detail), `GET /eval/runs/trend` (last 30 runs; failed runs excluded from metric averages), and `GET /eval/runs/{id}/export?format=json|csv` (same-source export for regression comparison).
 - Audit records contain only organization, user, counts, format and field names — `query`, case names and result bodies never enter the audit log; per-case results appear only in the org-scoped detail page.
 
-### 4.2.1 Chunk browsing and manual correction
+### 4.2.2 Chunk browsing and manual correction
 
 The document detail page’s “Browse & correct chunks” panel (URL parameter `chunkBrowser=1`, shareable) opens a read-first chunk workbench:
 
@@ -678,7 +691,7 @@ There are **30 endpoint modules** (`docs/facts.json` → `endpoint_modules`, der
 | chat | `/api/v1/chat` | session CRUD, SSE Q&A |
 | knowledge | `/api/v1/knowledge` | retrieval, stats, rebuild, graph |
 | knowledge_bases | `/api/v1/knowledge-bases` | multi-knowledge-base entity CRUD (organization-scoped) |
-| reviews | `/api/v1/reviews` | contract review: cases, items, evidence snapshots (parser original + version hashes; Batch 2) |
+| reviews | `/api/v1/reviews` | contract review: cases, items, evidence snapshots (parser original + version hashes); org template library at `/reviews/templates` (immutable versions + read-only diff) |
 | organizations | `/api/v1/organizations` | org CRUD, members, roles |
 | organization_settings | `/api/v1/organizations` | org-level settings (shared prefix) |
 | monitoring | `/api/v1/monitoring` | metrics, health, alerts, RAG quality |

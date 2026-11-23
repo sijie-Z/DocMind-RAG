@@ -21,6 +21,14 @@
                 {{ statusLabel[detail.status] }}
               </n-tag>
               <span v-if="detail">{{ detail.checklist_version }}</span>
+              <span
+                v-if="detail?.template_id"
+                class="text-xs text-slate-500 dark:text-slate-400"
+                data-testid="detail-template-origin"
+              >
+                {{ t('reviewTemplates.templateLabel') }}
+                <template v-if="detail.template_version_no">· v{{ detail.template_version_no }}</template>
+              </span>
             </div>
           </div>
         </div>

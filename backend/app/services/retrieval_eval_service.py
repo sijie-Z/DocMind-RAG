@@ -27,6 +27,12 @@ viewer 可见的文档；运行前再校验一次，失效金标记为 ``status=
 
 日志/错误纪律：query 与文档正文只以「条数/长度」参与日志；错误响应只回显
 异常类型名或固定机器码，不回显可能包含 query 内容的异常字符串。
+
+bad-case 捕获去重：组织内「同 query（去首尾空白）+ 同金标集合（与顺序无关）」
+视为同一条用例。``create_case`` 先按 ``dedup_key`` 查既有行，命中直接返回
+（``created=False``）；并发下由 ``(organization_id, dedup_key)`` 唯一索引兜底，
+撞索引后回读既有行，绝不静默产生重复行。更新 query/金标时重算该键，与其它
+用例撞键则 409（``EVAL_CASE_DUPLICATE``），而不是把两行改成同一内容。
 """
 
 from __future__ import annotations
@@ -40,9 +46,10 @@ from dataclasses import dataclass
 from typing import Any
 
 from sqlalchemy import delete, func, select, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.exceptions import NotFoundError, ValidationError
+from app.exceptions import ConflictError, NotFoundError, ValidationError
 from app.models.document import Document, DocumentStatus
 from app.models.retrieval_eval import RetrievalEvalCase, RetrievalEvalRun
 from app.services.document_acl import get_blocked_document_ids
@@ -148,6 +155,47 @@ async def _validate_expected_docs(
     return unique
 
 
+def case_dedup_key(query: str, expected_document_ids: list[str]) -> str:
+    """组织内去重键：query（去首尾空白）+ 金标集合（排序、去重）的稳定哈希。
+
+    金标按**集合**而不是列表顺序参与哈希：用户从不同检索结果顺序勾选同一批
+    文档时，语义上是同一条用例，不应产生两行。query 只去首尾空白、不改内部
+    空白与大小写——它决定检索行为，不能替用户做「等价」判断。
+    """
+    payload = {
+        "query": (query or "").strip(),
+        "document_ids": sorted({str(doc_id) for doc_id in expected_document_ids if doc_id}),
+    }
+    encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+
+async def _find_case_by_dedup_key(
+    session: AsyncSession, *, organization_id: int, dedup_key: str
+) -> RetrievalEvalCase | None:
+    return (
+        await session.execute(
+            select(RetrievalEvalCase)
+            .where(
+                RetrievalEvalCase.organization_id == organization_id,
+                RetrievalEvalCase.dedup_key == dedup_key,
+            )
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+
+
+DUPLICATE_CASE_ERROR_CODE = "EVAL_CASE_DUPLICATE"
+
+
+@dataclass(frozen=True)
+class CreateCaseResult:
+    """创建结果：``created=False`` 表示命中同组织既有同内容用例（幂等返回）。"""
+
+    case: RetrievalEvalCase
+    created: bool
+
+
 async def create_case(
     session: AsyncSession,
     *,
@@ -158,11 +206,17 @@ async def create_case(
     expected_document_ids: list[str],
     tags: list[str] | None = None,
     viewer_user_id: int | None = None,
-) -> RetrievalEvalCase:
+) -> CreateCaseResult:
     """创建用例；期望文档必须属于调用者组织、可检索且对调用者可见。
 
     跨组织、停用/未索引、私有不可见的金标永远不可能被该用户的检索合法命中，
     留着只会把评测变成结构性 miss，甚至把私有文档 id 固化成可读元数据——必须拒绝。
+
+    幂等去重：同组织内「同 query + 同金标集合」已存在时**不新建行**，直接返回
+    既有用例（``created=False``；调用方据此决定 200 还是 201）。并发请求由
+    ``(organization_id, dedup_key)`` 唯一索引兜底：撞索引后回读既有行返回。
+    ``name``/``tags`` 不参与去重——它们不改变检索行为；幂等返回时不改写既有行
+    的名称/标签，避免一个「保存为用例」动作静默覆盖别人整理的元数据。
     """
     ids = await _validate_expected_docs(
         session,
@@ -170,6 +224,13 @@ async def create_case(
         ids=expected_document_ids,
         viewer_user_id=viewer_user_id,
     )
+    dedup_key = case_dedup_key(query, ids)
+    existing = await _find_case_by_dedup_key(
+        session, organization_id=organization_id, dedup_key=dedup_key
+    )
+    if existing is not None:
+        return CreateCaseResult(case=existing, created=False)
+
     case = RetrievalEvalCase(
         id=str(uuid.uuid4()),
         organization_id=organization_id,
@@ -177,12 +238,24 @@ async def create_case(
         query=query,
         expected_document_ids=ids,
         tags=list(tags or []),
+        dedup_key=dedup_key,
         created_by=created_by,
     )
     session.add(case)
-    await session.commit()
+    try:
+        await session.commit()
+    except IntegrityError:
+        # 并发窗口：两个请求同时通过上面的 SELECT。唯一索引只放行一行，
+        # 落败方回滚后回读赢家（幂等），绝不把 500 抛给用户。
+        await session.rollback()
+        winner = await _find_case_by_dedup_key(
+            session, organization_id=organization_id, dedup_key=dedup_key
+        )
+        if winner is None:  # 不是去重键冲突（其它约束问题）——原样交给上层
+            raise
+        return CreateCaseResult(case=winner, created=False)
     await session.refresh(case)
-    return case
+    return CreateCaseResult(case=case, created=True)
 
 
 async def list_cases(
@@ -234,7 +307,12 @@ async def update_case(
     viewer_user_id: int | None,
     changes: dict[str, Any],
 ) -> RetrievalEvalCase:
-    """更新本组织用例；跨组织 404，金标变更复用创建时的组织/ACL/可检索校验。"""
+    """更新本组织用例；跨组织 404，金标变更复用创建时的组织/ACL/可检索校验。
+
+    query/金标变更会重算 ``dedup_key``；若撞上同组织另一条既有用例的内容，
+    返回 409 ``EVAL_CASE_DUPLICATE``（点名冲突用例 id 是同一组织内可见信息），
+    而不是把两行改成同一内容、让评测出现两条重复样本。
+    """
     case = await get_case(session, organization_id=organization_id, case_id=case_id)
     if "expected_document_ids" in changes:
         changes = dict(changes)
@@ -244,16 +322,40 @@ async def update_case(
             ids=changes["expected_document_ids"],
             viewer_user_id=viewer_user_id,
         )
-    if changes:
-        await session.execute(
-            update(RetrievalEvalCase)
-            .where(
-                RetrievalEvalCase.id == case_id,
-                RetrievalEvalCase.organization_id == organization_id,
-            )
-            .values(**changes)
+    if "query" in changes or "expected_document_ids" in changes:
+        changes = dict(changes)
+        # 变更后的最终内容（未覆盖字段沿用既有行），与其它用例比较内容等价性。
+        changes["dedup_key"] = case_dedup_key(
+            changes.get("query", case.query),
+            changes.get("expected_document_ids", list(case.expected_document_ids or [])),
         )
-        await session.commit()
+        conflicting = await _find_case_by_dedup_key(
+            session, organization_id=organization_id, dedup_key=changes["dedup_key"]
+        )
+        if conflicting is not None and conflicting.id != case_id:
+            raise ConflictError(
+                "同组织已存在相同 query 与期望文档的评测用例",
+                error_code=DUPLICATE_CASE_ERROR_CODE,
+                detail={"existing_case_id": conflicting.id},
+            )
+    if changes:
+        try:
+            await session.execute(
+                update(RetrievalEvalCase)
+                .where(
+                    RetrievalEvalCase.id == case_id,
+                    RetrievalEvalCase.organization_id == organization_id,
+                )
+                .values(**changes)
+            )
+            await session.commit()
+        except IntegrityError:
+            # 并发窗口：另一条用例刚好被改成同一内容；唯一索引兜底，转化为 409。
+            await session.rollback()
+            raise ConflictError(
+                "同组织已存在相同 query 与期望文档的评测用例",
+                error_code=DUPLICATE_CASE_ERROR_CODE,
+            ) from None
         await session.refresh(case)
     return case
 

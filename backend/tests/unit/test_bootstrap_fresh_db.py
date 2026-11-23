@@ -229,7 +229,7 @@ async def test_guarded_legacy_database_still_requires_explicit_adoption(
     async with engine.begin() as conn:
         await conn.run_sync(database_module.Base.metadata.create_all)
     tables_before = _table_names(db_path)
-    assert len(tables_before) == 45
+    assert len(tables_before) == 47
     assert _revision_rows(db_path) is None
 
     create_all = _spy_create_all(monkeypatch)

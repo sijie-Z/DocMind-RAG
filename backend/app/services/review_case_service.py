@@ -155,11 +155,20 @@ async def create_case(
     checklist_version: str,
     created_by: int,
     assignee_id: int | None = None,
+    template_id: str | None = None,
+    template_version_no: int | None = None,
 ) -> ReviewCase:
-    """建案：校验三份文档身份/readiness，生成 4 个固定核验项并快照候选证据。
+    """建案：校验三份文档身份/readiness，生成核验项并快照候选证据。
 
     校验失败不让请求失败，而是把案件以 ``blocked`` 落库并记录原因码——
     用户需要看到「为什么不能核验」，而不是一个报错后什么都没有。
+
+    规则来源二选一：
+    - 指定 ``template_id``（可选 ``template_version_no``，缺省取最新版）：
+      规则项来自该不可变版本，并**继续**固化为 ``ReviewRuleSet`` 快照；
+      案件同时记录模板/版本溯源指针。后续模板编辑不影响本案件。
+    - 未指定模板：沿用进程级 checklist（默认 4 项 + ``REVIEW_CHECKLIST_JSON``），
+      行为与父版本完全一致。
     """
     if not title or not title.strip():
         raise ValidationError("案件标题不能为空", field="title")
@@ -185,6 +194,22 @@ async def create_case(
         ):
             # 统一文案：不区分「不存在 / 外组织 / 停用」，避免跨租户用户 id 探测。
             raise ValidationError("assignee_id 指向的用户不存在或不属于本组织", field="assignee_id")
+
+    # 模板版本规则在建案前解析（组织隔离、归档与内容哈希校验都在服务层完成）；
+    # 未指定模板时走进程级 checklist，行为与父版本一致。
+    selected_template = None
+    selected_version = None
+    if template_id is not None:
+        from app.services.review_template_service import resolve_template_items
+
+        selected_template, selected_version, checklist = await resolve_template_items(
+            session,
+            organization_id=org_id,
+            template_id=template_id,
+            version_no=template_version_no,
+        )
+    else:
+        checklist = load_checklist()
 
     metas = {side: await get_review_meta(session, docs[side].id) for side in REVIEW_SIDES}
     readiness = {side: await compute_readiness(session, docs[side]) for side in REVIEW_SIDES}
@@ -231,6 +256,12 @@ async def create_case(
             base_document_id=docs["base"].id,
             revised_document_id=docs["revised"].id,
             checklist_version=checklist_version,
+            # 模板溯源指针：规则内容已在下方的不可变快照中冻结，这两列只用于
+            # 回溯「这个案件来自哪个模板版本」，不参与读取/分析/导出决策。
+            template_id=selected_template.id if selected_template is not None else None,
+            template_version_no=(
+                int(selected_version.version_no) if selected_version is not None else None
+            ),
             status="blocked" if blocking_reasons else "ready",
             blocking_reasons=blocking_reasons,
             readiness_snapshot=snapshot,
@@ -239,9 +270,8 @@ async def create_case(
             lock_version=1,
         )
         session.add(case)
-        # 清单可配置：默认 4 项 + `REVIEW_CHECKLIST_JSON` 追加项（见 review_checklist）
-        checklist = load_checklist()
         # 规则快照与建案在同一事务落库：旧规则配置变更不影响此案件的复现/审计。
+        # 模板建案同样走 attach_snapshot：模板只提供规则内容，冻结方式不变。
         await attach_snapshot(session, case, checklist)
         items = {}
         for ordinal, entry in enumerate(checklist, start=1):
@@ -887,6 +917,9 @@ def _case_summary(case: ReviewCase, item_stats: dict[str, Any] | None = None) ->
         "policy_document_id": case.policy_document_id,
         "base_document_id": case.base_document_id,
         "revised_document_id": case.revised_document_id,
+        # 模板溯源（可空）：规则内容真源仍是 rule_snapshot_sha256，不是模板。
+        "template_id": case.template_id,
+        "template_version_no": case.template_version_no,
         "base_version_label": (snapshot.get("base") or {}).get("version_label"),
         "revised_version_label": (snapshot.get("revised") or {}).get("version_label"),
         "blocking_reasons": case.blocking_reasons or [],
@@ -1023,6 +1056,9 @@ async def case_detail(session: AsyncSession, case: ReviewCase) -> dict[str, Any]
         "status": case.status,
         "checklist_version": case.checklist_version,
         "organization_id": case.organization_id,
+        # 模板溯源（可空）：仅描述建案时选用的模板版本，不替代规则快照哈希。
+        "template_id": case.template_id,
+        "template_version_no": case.template_version_no,
         **await case_rule_metadata(session, case, item_dicts),
         "blocking_reasons": case.blocking_reasons or [],
         "created_by": case.created_by,

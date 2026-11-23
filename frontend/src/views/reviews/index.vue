@@ -44,6 +44,15 @@
             data-testid="archived-filter"
             @update:value="applyFilter"
           />
+          <n-button
+            secondary
+            round
+            class="template-lib-btn"
+            data-testid="reviews-templates-open"
+            @click="router.push('/reviews/templates')"
+          >
+            {{ t('reviewTemplates.templateOpenManager') }}
+          </n-button>
           <n-button type="primary" round class="create-case-btn" data-testid="create-case-open" @click="createVisible = true">
             {{ t('reviews.createCase') }}
           </n-button>
@@ -609,7 +618,8 @@ onUnmounted(() => {
   .reviews-filter :deep(.n-base-selection) {
     --n-height: 44px !important;
   }
-  .create-case-btn.n-button {
+  .create-case-btn.n-button,
+  .template-lib-btn.n-button {
     height: 44px !important;
   }
 }

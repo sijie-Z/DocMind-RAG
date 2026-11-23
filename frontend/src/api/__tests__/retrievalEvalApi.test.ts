@@ -9,6 +9,7 @@ vi.mock('@/utils/request', () => ({
 }))
 
 import {
+  captureEvalCase,
   exportEvalRun,
   getEvalRun,
   getEvalTrend,
@@ -59,5 +60,27 @@ describe('retrievalEval API', () => {
       params: { format: 'csv' },
       responseType: 'blob'
     })
+  })
+
+  it('capture：固定 URL、透传 query+金标、显式读取 created 标志', async () => {
+    post.mockResolvedValueOnce({
+      data: {
+        success: true,
+        created: false,
+        data: {
+          id: 'case-1', organization_id: 1, name: 'q', query: 'q',
+          expected_document_ids: ['doc-1'], tags: [], created_by: 1,
+          created_at: null, updated_at: null
+        }
+      }
+    })
+    const result = await captureEvalCase({ query: 'q', expected_document_ids: ['doc-1'] })
+    expect(post).toHaveBeenCalledWith('/knowledge/eval/cases/capture', {
+      query: 'q',
+      expected_document_ids: ['doc-1']
+    })
+    // created 与 data 并列：丢掉它会退化成「永远按新建成功提示」。
+    expect(result.created).toBe(false)
+    expect(result.case.id).toBe('case-1')
   })
 })

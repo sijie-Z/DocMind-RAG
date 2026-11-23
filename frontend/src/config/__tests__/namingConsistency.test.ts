@@ -126,6 +126,9 @@ const T5_EXTRA_KEYS = ['profile.overview']
 const HIDDEN_PAGES: Record<string, string> = {
   KnowledgeGraph: 'Knowledge',
   KnowledgeEvalRuns: 'Knowledge',
+  // 批次五：模板库从核验列表页进入，菜单面无独立项 → 高亮归属合同核验。
+  ReviewTemplates: 'Reviews',
+  ReviewTemplateDetail: 'Reviews',
   WorkflowEditor: 'Workflow',
   AgentMemory: 'Workflow',
   Notifications: 'Notifications',
@@ -151,6 +154,9 @@ const DEEP_PAGE_HEADINGS: Record<string, string> = {
   KnowledgeGraph: '../../views/knowledge/graph.vue',
   KnowledgeEvalRuns: '../../views/knowledge/evalRunHistory.vue',
   AgentMemory: '../../views/workflow/memory.vue',
+  // 批次五：模板库页头与顶栏/面包屑同源（router.reviewTemplates）。
+  ReviewTemplates: '../../views/reviews/templateLibrary.vue',
+  ReviewTemplateDetail: '../../views/reviews/templateVersionDetail.vue',
 }
 
 /** 从视图源码提取页面主标题（首个 h1/h2）里的第一个 t('…') 键 */

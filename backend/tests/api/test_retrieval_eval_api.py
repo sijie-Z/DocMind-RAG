@@ -1195,6 +1195,14 @@ def test_retrieval_eval_migration_creates_fks_and_index(tmp_path, monkeypatch):
     assert {row[2] for row in fks} >= {"organizations", "users"}
     assert {row[3] for row in fks} >= {"organization_id", "created_by"}
     assert ("organization_id", "created_at") in index_cols.values(), index_cols
+    # 批次五（038）新增的列与唯一去重索引也必须真实建出（含唯一性）。
+    assert "dedup_key" in {row[1] for row in cols}
+    unique_indexes = {
+        row[1]: tuple(col[2] for col in conn.execute(f"PRAGMA index_info({row[1]})"))
+        for row in indexes
+        if row[2] == 1  # PRAGMA index_list: unique 标记在第 3 列
+    }
+    assert ("organization_id", "dedup_key") in unique_indexes.values(), unique_indexes
     # MySQL 下 organization_id 外键依赖上述索引的左前缀；downgrade 不能先显式
     # DROP INDEX（会触发 1553），必须随 drop_table 删除。
     migration = (backend_root / "alembic" / "versions" / "034_retrieval_eval_case.py").read_text(
@@ -1203,3 +1211,71 @@ def test_retrieval_eval_migration_creates_fks_and_index(tmp_path, monkeypatch):
     downgrade = migration.split("def downgrade() -> None:", 1)[1]
     assert "op.drop_table(TABLE)" in downgrade
     assert "op.drop_index(INDEX, table_name=TABLE)" not in downgrade
+
+
+def test_038_migration_adds_nullable_dedup_key_and_unique_index(tmp_path, monkeypatch):
+    """038 接 037：dedup_key 可空、组织内唯一索引存在、历史行不被回填/删除。
+
+    判别设计：升级前先手工造一行「历史用例」（dedup_key=NULL），再升级到 head——
+    若迁移尝试按新口径回填或用非空约束，历史行会撞索引/违反约束而失败；若迁移
+    删除/合并历史行，行数与内容断言红。
+
+    变异点：dedup_key 设成 nullable=False → 造历史行的 INSERT 在 037 阶段就失败；
+    唯一索引写成非唯一 → PRAGMA unique 断言红；downgrade 不删列/索引 →
+    downgrade 后的 schema 断言红。
+    """
+    import sqlite3
+
+    from alembic.config import Config
+    from alembic.script import ScriptDirectory
+
+    from alembic import command
+    from app.core.config import settings
+
+    db_path = Path(str(tmp_path)) / "eval_dedup_038.db"
+    backend_root = Path(__file__).resolve().parents[2]
+    monkeypatch.setattr(settings, "DATABASE_URL", f"sqlite+aiosqlite:///{db_path.as_posix()}")
+    cfg = Config(str(backend_root / "alembic.ini"))
+    cfg.set_main_option("script_location", str(backend_root / "alembic"))
+
+    script = ScriptDirectory.from_config(cfg)
+    assert script.get_revision("038_eval_case_dedup").down_revision == "037_index_error_codes"
+
+    command.upgrade(cfg, "037_index_error_codes")
+    with sqlite3.connect(str(db_path)) as conn:
+        # 历史行：038 之前不存在 dedup_key 列，按当时 schema 插入两行相同内容。
+        for case_id in ("legacy-1", "legacy-2"):
+            conn.execute(
+                "INSERT INTO retrieval_eval_case "
+                "(id, organization_id, name, query, expected_document_ids, tags, created_by) "
+                "VALUES (?, 1, 'legacy', 'same query', '[\"doc-1\"]', '[]', 1)",
+                (case_id,),
+            )
+        conn.commit()
+
+    command.upgrade(cfg, "head")
+    with sqlite3.connect(str(db_path)) as conn:
+        cols = {row[1]: row for row in conn.execute("PRAGMA table_info(retrieval_eval_case)")}
+        indexes = conn.execute("PRAGMA index_list(retrieval_eval_case)").fetchall()
+        unique_index_cols = {
+            tuple(col[2] for col in conn.execute(f"PRAGMA index_info({row[1]})"))
+            for row in indexes
+            if row[2] == 1
+        }
+        rows = conn.execute("SELECT id, dedup_key FROM retrieval_eval_case ORDER BY id").fetchall()
+    assert "dedup_key" in cols
+    # NOT NULL 标记为 0（可空）：历史行保持 NULL，不因迁移失败。
+    assert cols["dedup_key"][3] == 0
+    assert ("organization_id", "dedup_key") in unique_index_cols, unique_index_cols
+    # 历史两行都还在，且均未被回填（多行 NULL 不违反唯一索引）。
+    assert [row[0] for row in rows] == ["legacy-1", "legacy-2"]
+    assert all(row[1] is None for row in rows), rows
+
+    command.downgrade(cfg, "037_index_error_codes")
+    with sqlite3.connect(str(db_path)) as conn:
+        after_cols = {row[1] for row in conn.execute("PRAGMA table_info(retrieval_eval_case)")}
+        after_indexes = conn.execute("PRAGMA index_list(retrieval_eval_case)").fetchall()
+        remaining = conn.execute("SELECT COUNT(*) FROM retrieval_eval_case").fetchone()[0]
+    assert "dedup_key" not in after_cols
+    assert all(row[1] != "uq_retrieval_eval_case_org_dedup" for row in after_indexes)
+    assert remaining == 2  # downgrade 只回退 schema，不删用户数据
