@@ -242,6 +242,10 @@ def _node_text(
                 parts.append("\t")
             else:
                 parts.append("\n")
+        elif tag in {"ins", "del", "comment"} and node.text:
+            # 合成 DOCX 与部分生成器会把可见文本直接放在修订/批注容器里；
+            # 这段文本与 w:t/w:delText 同样是原文事实，不能丢。
+            parts.append(node.text)
         # 子节点逆序入栈以保持文档顺序；字段结果等例外由调用方用 skip_ids 排除。
         child_included = included and not (opposite is not None and _is(node.tag, opposite))
         for child in reversed(list(node)):
@@ -256,6 +260,77 @@ def _nested_elements(element: Any, local: str) -> list[Any]:
         if node is not element and _is(node.tag, local):
             found.append(node)
     return found
+
+
+def _descendant_revisions(element: Any) -> set[int]:
+    """父修订行必须跳过的后代 w:ins/w:del id（同侧与异侧都包括）。
+
+    每个嵌套修订自己单独生成一行；父行不能把它包含的文字再计一遍。
+    """
+    return {
+        id(node)
+        for node in element.iter()
+        if node is not element and _local_name(node.tag) in _SUPPORTED
+    }
+
+
+def _field_elements(root: Any) -> tuple[set[int], list[tuple[Any, str]]]:
+    """收集 Word 字段结构及其结果文本；字段结果不是可判定的修订事实。
+
+    同时支持 ``w:fldSimple`` 与标准 complex field：
+    ``fldChar(begin) → instrText → fldChar(separate) → w:r/w:t → fldChar(end)``。
+    返回 ``(skip_ids, [(anchor, result_text)])``；skip_ids 让所有事实行共用，
+    保证字段结果只出现在显式 unparsed 行里，绝不混入插入/删除事实。
+    """
+    skip_ids: set[int] = set()
+    results: list[tuple[Any, str]] = []
+
+    for node in root.iter():
+        if not _is(node.tag, "fldSimple"):
+            continue
+        anchor: Any | None = None
+        parts: list[str] = []
+        for child in node.iter():
+            skip_ids.add(id(child))
+            if child is not node and anchor is None:
+                anchor = child
+            if _is(child.tag, "t") or _is(child.tag, "delText"):
+                parts.append(child.text or "")
+        if anchor is not None and parts:
+            results.append((anchor, "".join(parts)))
+
+    state = 0
+    anchor = None
+    parts = []
+    for node in root.iter():
+        if _is(node.tag, "fldChar"):
+            skip_ids.add(id(node))
+            kind = (node.get(_w("fldCharType")) or "").strip()
+            if kind == "begin":
+                state, anchor, parts = 1, node, []
+            elif kind == "separate" and state == 1:
+                state = 2
+            elif kind == "end":
+                if state == 2 and parts:
+                    results.append((anchor or node, "".join(parts)))
+                state, anchor, parts = 0, None, []
+            continue
+        if _is(node.tag, "instrText"):
+            skip_ids.add(id(node))
+            continue
+        if state != 2:
+            continue
+        local = _local_name(node.tag)
+        if local in {"t", "delText"}:
+            skip_ids.add(id(node))
+            parts.append(node.text or "")
+        elif local == "tab":
+            skip_ids.add(id(node))
+            parts.append("\t")
+        elif local in {"br", "cr"}:
+            skip_ids.add(id(node))
+            parts.append("\n")
+    return skip_ids, results
 
 
 def _revision_side(local: str) -> str | None:
@@ -393,6 +468,9 @@ def _comments_by_id(root: Any | None) -> dict[str, dict[str, Any]]:
             "text": _node_text(element, skip_ids=nested_ids),
             "author": (element.get(_w("author")) or "").strip() or None,
             "date": _xml_date(element.get(_w("date"))),
+            # 正文只由嵌套修订组成时 text 为空，但批注本身非空；用于避免
+            # 把「只有修订的批注」误报为空批注。
+            "has_nested": bool(nested_ids),
         }
     return result
 
@@ -456,18 +534,20 @@ def parse_redline_docx(data: bytes, filename: str = "") -> RedlineParseResult:
         warnings.append(f"xml_depth_cap_exceeded:nodes={len(deep_ids)};max={MAX_OOXML_XML_DEPTH}")
 
     seen_comments: set[str] = set()
-    # 已被外层修订留档的嵌套异侧修订：其文本已由 unparsed/overlap 行记录，
-    # 自己不再单独生成一条方向相反的事实行，避免重复计数。
-    nested_opposite_ids: set[int] = set()
+    document_order = {id(node): index for index, node in enumerate(document.iter())}
+    field_skip_ids, field_results = _field_elements(document)
+    # 嵌套修订由父行单独留档；这里记录其 id，避免子修订再生成一行造成双计。
+    attributed_nested_ids: set[int] = set()
     order = 0
     for element in document.iter():
         tag = element.tag
         local = _local_name(tag)
         parents = ancestors.get(id(element), ())
         parent_locals = [_local_name(parent.tag) for parent in parents]
-        order += 1
+        order = document_order[id(element)]
 
-        if id(element) in nested_opposite_ids:
+        if id(element) in attributed_nested_ids:
+            # 嵌套修订由父修订行统一留档，文本只在那里出现一次。
             continue
 
         if id(element) in deep_ids:
@@ -494,26 +574,21 @@ def parse_redline_docx(data: bytes, filename: str = "") -> RedlineParseResult:
 
         if local in _SUPPORTED:
             revision_type = _SUPPORTED[local]
-            # 同侧修订（如 w:del 内的 w:delText）合并进本行；异侧修订单独留档，
-            # 文本必须从本行剔除，否则方向被记反。
+            # 父修订行必须跳过所有后代修订（同侧与异侧都由各自逻辑归因），
+            # 否则同一段文字会在父行与子行里各计一次。
+            descendants = _descendant_revisions(element)
+            attributed_nested_ids.update(descendants)
+            sibling_descendants = descendants - {id(element)}
+            # 同侧嵌套的文字并入父事实行（只算一次）；异侧嵌套由下面的
+            # unparsed 行单独承载，必须从父行剔除，否则方向被记反。
             opposite = _OPPOSITE_SIDE[revision_type]
-            nested_opposite = _nested_elements(element, opposite)
-            nested_ids = {id(node) for node in nested_opposite}
-            nested_opposite_ids.update(nested_ids)
-            # 修订范围内的 w:fldSimple/w:instrText 字段结果属于展示层文本，
-            # 其 w:t 不是独立修订事实；显式留档，不并入 before/after。
-            field_nodes = [
-                node
+            skip_ids = set(field_skip_ids)
+            skip_ids.update(
+                id(node)
                 for node in element.iter()
-                if node is not element
-                and (
-                    _is(node.tag, "fldSimple")
-                    or _is(node.tag, "instrText")
-                    or _is(node.tag, "fldChar")
-                )
-            ]
-            nested_ids.update(id(node) for node in field_nodes)
-            text = _node_text(element, side=revision_type, skip_ids=nested_ids)
+                if id(node) in sibling_descendants and _local_name(node.tag) == opposite
+            )
+            text = _node_text(element, side=revision_type, skip_ids=skip_ids)
             if revision_type == "insertion":
                 before, after = None, text or None
             else:
@@ -528,48 +603,45 @@ def parse_redline_docx(data: bytes, filename: str = "") -> RedlineParseResult:
             ]
             if nested:
                 warnings.append(f"overlap:{nested[-1]}:{local}")
-            if field_nodes:
-                # 字段结果里的 w:t 不是可判定的新增/删除事实，单独显式留档。
-                warnings.append(f"field_result_revision:outer={local};nodes={len(field_nodes)}")
-                events.append(
-                    {
-                        "kind": "unparsed",
-                        "text_before": _node_text(field_nodes[0]) or None,
-                        "text_after": None,
-                        "unparsed_reason": ["field_result_revision"],
-                        "element": local,
-                        "order": order,
-                        "location": {
-                            "source": _DOCUMENT_PART,
-                            "element": f"w:{local}",
-                            "order": order,
-                        },
-                        "clause_no": clause_no,
-                        "section_no": section_no,
-                    }
+            # 异侧嵌套修订单独留档；同侧嵌套的文字已合并进父事实行，
+            # 只记 overlap 告警，不再生成第二行。
+            for nested_node in element.iter():
+                if id(nested_node) not in sibling_descendants:
+                    continue
+                nested_local = _local_name(nested_node.tag)
+                nested_type = _SUPPORTED.get(nested_local)
+                if nested_type is None or nested_type == revision_type:
+                    continue
+                nested_skip = set()
+                nested_skip.update(
+                    id(child)
+                    for child in nested_node.iter()
+                    if child is not nested_node and _local_name(child.tag) in _SUPPORTED
                 )
-            if nested_opposite:
-                # 嵌套异侧修订仍是一段真实文本：保留事实行，但显式标记为
-                # unparsed/overlap，不能把两个方向压缩成一个方向的事实。
-                warnings.append(f"nested_opposite_revision:outer={local};inner={opposite}")
+                # 字段结果只在 dedicated field_result_revision 行里承载；
+                # 这里按局部字段结构跳过，避免把字段文本混进嵌套修订方向行。
+                nested_field_skip, _ = _field_elements(nested_node)
+                nested_skip.update(nested_field_skip)
+                nested_text = _node_text(nested_node, side=nested_type, skip_ids=nested_skip)
+                warnings.append(f"nested_opposite_revision:outer={local};inner={nested_local}")
+                nested_clause, nested_section = _paragraph_hints(nested_node, parents)
                 events.append(
                     {
                         "kind": "unparsed",
-                        "text_before": _node_text(nested_opposite[0]) or None,
+                        "text_before": nested_text or None,
                         "text_after": None,
-                        "author": (nested_opposite[0].get(_w("author")) or "").strip() or None,
-                        "authored_at": _xml_date(nested_opposite[0].get(_w("date"))),
+                        "author": (nested_node.get(_w("author")) or "").strip() or None,
+                        "authored_at": _xml_date(nested_node.get(_w("date"))),
                         "unparsed_reason": ["nested_opposite_revision"],
-                        "element": opposite,
-                        "order": order,
+                        "element": nested_local,
+                        "order": document_order[id(nested_node)],
                         "location": {
                             "source": _DOCUMENT_PART,
-                            "element": f"w:{opposite}",
+                            "element": f"w:{nested_local}",
                             "outer": f"w:{local}",
-                            "order": order,
                         },
-                        "clause_no": clause_no,
-                        "section_no": section_no,
+                        "clause_no": nested_clause,
+                        "section_no": nested_section,
                     }
                 )
             events.append(
@@ -603,8 +675,8 @@ def parse_redline_docx(data: bytes, filename: str = "") -> RedlineParseResult:
             comment = comments.get(comment_id, {})
             if comment_id not in comments:
                 warnings.append("comments_part_missing_or_incomplete")
-            elif not (comment.get("text") or "").strip():
-                # 批注正文为空（含只有嵌套修订的批注）：必须显式告警，
+            elif not (comment.get("text") or "").strip() and not comment.get("has_nested"):
+                # 批注正文为空（且没有仅由嵌套修订承载的正文）时必须显式告警，
                 # 不能让一条看似干净的 comment 行掩盖空正文。
                 warnings.append(f"empty_comment_body:comment_id={comment_id}")
             clause_no, section_no = _paragraph_hints(element, parents)
@@ -706,37 +778,57 @@ def parse_redline_docx(data: bytes, filename: str = "") -> RedlineParseResult:
                     }
                 )
 
+    # 字段结果（fldSimple 与标准 fldChar 复杂字段）显式留档，文本只在这里出现一次。
+    if field_results:
+        warnings.append(f"field_result_revision:fields={len(field_results)}")
+        for anchor, result_text in field_results:
+            events.append(
+                {
+                    "kind": "unparsed",
+                    "text_before": result_text or None,
+                    "text_after": None,
+                    "unparsed_reason": ["field_result_revision"],
+                    "element": _local_name(anchor.tag),
+                    "order": document_order.get(id(anchor), 0),
+                    "location": {
+                        "source": _DOCUMENT_PART,
+                        "element": f"w:{_local_name(anchor.tag)}",
+                        "field_result": True,
+                    },
+                }
+            )
+
     # 批注正文里若还有修订结构，也显式留档，绝不静默丢掉。
-    # 每个嵌套修订单独一行（不合并成一个大行），批注正文里的文本已从
-    # comment 行剔除，避免父子两遍重复计数；原因码全部来自预定义常量。
+    # 嵌套修订各自保留自己的方向（插入/删除/未解析），同时保留 comment_id，
+    # 批注正文只承载不属于修订结构的可见文本，父子两遍不重复计数。
     if comments_root is not None:
         for comment_element in comments_root.iter():
             if not _is(comment_element.tag, "comment"):
                 continue
             comment_id = (comment_element.get(_w("id")) or "").strip()[:64]
-            seen_nested: set[int] = set()
+            comment_skip_ids = _descendant_revisions(comment_element)
+            comment_field_skip_ids, _ = _field_elements(comment_element)
+            comment_skip_ids.update(comment_field_skip_ids)
             for node in comment_element.iter():
                 local = _local_name(node.tag)
-                if node is comment_element or id(node) in seen_nested:
+                if node is comment_element or local not in _SUPPORTED:
                     continue
-                if (
-                    local not in _SUPPORTED
-                    and local not in _UNPARSED_REASONS
-                    and local != "nestedRevision"
-                ):
-                    continue
-                # 只处理最外层嵌套修订；其后代由同一行承载，避免重复计数。
-                seen_nested.update(id(child) for child in node.iter())
-                reason_key = _SUPPORTED.get(local) or _UNPARSED_REASONS.get(local) or local
+                reason_key = _SUPPORTED[local]
                 reason = _COMMENT_REASONS.get(reason_key, f"comment_{reason_key}")
                 warnings.append(
                     f"comment_nested_revision:comment_id={comment_id or 'missing'}:w:{local}"
                 )
+                node_skip = set(comment_skip_ids)
+                node_skip.discard(id(node))
+                node_skip.update(_descendant_revisions(node))
+                node_text = _node_text(node, side=reason_key, skip_ids=node_skip)
                 events.append(
                     {
-                        "kind": "comment_revision",
-                        "text_before": _node_text(node) or None,
-                        "text_after": None,
+                        "kind": reason_key,  # insertion/deletion 保持事实行方向
+                        "text_before": node_text or None if reason_key == "deletion" else None,
+                        "text_after": node_text or None if reason_key == "insertion" else None,
+                        "author": (node.get(_w("author")) or "").strip() or None,
+                        "authored_at": _xml_date(node.get(_w("date"))),
                         "comment_id": comment_id or None,
                         "unparsed_reason": [reason],
                         "element": local,
@@ -1186,7 +1278,8 @@ async def get_ledger(
         "has_unparsed": counts["unparsed"] > 0,
         "parse_warnings": warnings,
         "has_truncation": any(
-            warning.startswith(("row_cap_exceeded", "text_cap_exceeded")) for warning in warnings
+            warning.startswith(("row_cap_exceeded", "text_cap_exceeded", "xml_depth_cap_exceeded"))
+            for warning in warnings
         ),
     }
 

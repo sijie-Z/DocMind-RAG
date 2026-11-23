@@ -1047,6 +1047,27 @@ async def test_disposition_uses_case_row_lock(factory, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_depth_cap_warning_sets_has_truncation(factory, monkeypatch):
+    """xml_depth_cap 也是截断告警，has_truncation 不得漏报。"""
+    from app.models.review import ReviewCase
+    from app.models.user import User
+
+    await _seed(factory)
+    monkeypatch.setattr(svc, "MAX_OOXML_XML_DEPTH", 2)
+    deep = "<w:p>" + "<w:p>" * 5 + "<w:ins><w:r><w:t>深</w:t></w:r></w:ins>" + "</w:p>" * 6
+    async with factory() as session:
+        case = await session.get(ReviewCase, CASE_ID)
+        user = await session.get(User, USER_ID)
+        summary = await svc.upload_submission(
+            session, case=case, current_user=user, filename="deep.docx", data=_docx(text=deep)
+        )
+        assert any(w.startswith("xml_depth_cap_exceeded") for w in summary["parse_warnings"])
+        ledger = await svc.get_ledger(session, case=case, submission_id=summary["id"])
+        assert ledger["has_truncation"] is True
+        assert ledger["parse_warnings"] == summary["parse_warnings"]
+
+
+@pytest.mark.asyncio
 async def test_ledger_exposes_parse_warnings_truncation_and_filtered_counts(factory, monkeypatch):
     await _seed(factory)
     # 把行数上限降到 1 触发 row_cap → partial + truncation 标记。

@@ -347,7 +347,7 @@ def test_nested_opposite_revisions_keep_text_on_correct_side():
     _assert_only_facts(result)
 
 
-def test_comment_body_nested_revisions_are_one_row_with_stable_reasons():
+def test_comment_body_nested_revisions_keep_direction_and_stable_reasons():
     document = '<w:p><w:r><w:t>正文</w:t></w:r><w:commentRangeStart w:id="1"/></w:p>'
     comments = (
         '<w:comment w:id="1" w:author="李四">'
@@ -359,12 +359,16 @@ def test_comment_body_nested_revisions_are_one_row_with_stable_reasons():
     result = parse_redline_docx(_docx(document, comments_xml=comments))
     comment = next(row for row in result.rows if row["revision_type"] == "comment")
     assert comment["after_text"] == "批注可见文本"
-    nested_rows = [row for row in result.rows if row["revision_type"] == "unparsed"]
-    assert len(nested_rows) == 2  # 每处嵌套修订一行，父/子不双计
-    assert [row["unparsed_reason"] for row in nested_rows] == [
-        ["comment_insertion"],
-        ["comment_deletion"],
+    nested_rows = [
+        row for row in result.rows if row["comment_id"] == "1" and row["unparsed_reason"]
     ]
+    assert len(nested_rows) == 2  # 每处嵌套修订一行，父/子不双计
+    assert [(row["revision_type"], row["unparsed_reason"]) for row in nested_rows] == [
+        ("insertion", ["comment_insertion"]),
+        ("deletion", ["comment_deletion"]),
+    ]
+    assert nested_rows[0]["after_text"] == "批注内插入"
+    assert nested_rows[1]["before_text"] == "批注内删除"
     assert all(row["comment_id"] == "1" for row in nested_rows)
     assert all(row["location"]["source"] == "word/comments.xml" for row in nested_rows)
     assert sum("comment_nested_revision" in w for w in result.parse_warnings) == 2
@@ -405,6 +409,96 @@ def test_author_and_comment_id_are_bounded_to_orm_column_widths():
         assert row["author"] is None or len(row["author"]) <= 200
         assert row["comment_author"] is None or len(row["comment_author"]) <= 200
         assert row["comment_id"] is None or len(row["comment_id"]) <= 64
+    _assert_only_facts(result)
+
+
+def test_complex_field_form_excludes_field_result_from_insertion():
+    """标准 fldChar 复杂字段的 w:t 结果只进 unparsed 行，不进 insertion。"""
+    document = (
+        "<w:p><w:ins w:id='1' w:author='X'>"
+        "<w:r><w:fldChar w:fldCharType='begin'/></w:r>"
+        "<w:r><w:instrText> SEQ 表 </w:instrText></w:r>"
+        "<w:r><w:fldChar w:fldCharType='separate'/></w:r>"
+        "<w:r><w:t>7</w:t></w:r>"
+        "<w:r><w:fldChar w:fldCharType='end'/></w:r>"
+        "</w:ins></w:p>"
+    )
+    result = parse_redline_docx(_docx(document))
+    insertion = next(row for row in result.rows if row["revision_type"] == "insertion")
+    assert insertion["after_text"] is None
+    field_rows = [
+        row
+        for row in result.rows
+        if row["unparsed_reason"] and "field_result_revision" in row["unparsed_reason"]
+    ]
+    assert len(field_rows) == 1
+    assert field_rows[0]["before_text"] == "7"
+    assert field_rows[0]["location"]["field_result"] is True
+    _assert_only_facts(result)
+
+
+def test_field_text_inside_nested_opposite_revision_is_attributed_once():
+    document = (
+        "<w:p><w:ins w:id='1' w:author='X'>A"
+        "<w:del w:id='2' w:author='Y'>B"
+        "<w:r><w:fldSimple w:instr='PAGE'><w:r><w:t>9</w:t></w:r></w:fldSimple></w:r>"
+        "</w:del></w:ins></w:p>"
+    )
+    result = parse_redline_docx(_docx(document))
+    insertion = next(row for row in result.rows if row["revision_type"] == "insertion")
+    assert insertion["after_text"] == "A"
+    nested = [
+        row
+        for row in result.rows
+        if row["unparsed_reason"] and "nested_opposite_revision" in row["unparsed_reason"]
+    ]
+    fields = [
+        row
+        for row in result.rows
+        if row["unparsed_reason"] and "field_result_revision" in row["unparsed_reason"]
+    ]
+    assert len(nested) == len(fields) == 1
+    assert nested[0]["before_text"] == "B"
+    assert fields[0]["before_text"] == "9"
+    assert "9" not in (nested[0]["before_text"] or "")
+    _assert_only_facts(result)
+
+
+def test_nested_revisions_inside_comment_keep_direction_and_text():
+    document = '<w:p><w:commentRangeStart w:id="1"/><w:r><w:t>x</w:t></w:r></w:p>'
+    comments = (
+        '<w:comment w:id="1" w:author="X">'
+        "<w:p><w:ins w:id='2' w:author='X'>outer-ins"
+        "<w:del w:id='3' w:author='Y'>inner-del</w:del>"
+        "</w:ins></w:p></w:comment>"
+    )
+    result = parse_redline_docx(_docx(document, comments_xml=comments))
+    assert not any(w.startswith("empty_comment_body:") for w in result.parse_warnings)
+    nested = [row for row in result.rows if row["comment_id"] == "1" and row["unparsed_reason"]]
+    assert len(nested) == 2
+    reasons = {(row["revision_type"], tuple(row["unparsed_reason"] or [])) for row in nested}
+    assert reasons == {
+        ("insertion", ("comment_insertion",)),
+        ("deletion", ("comment_deletion",)),
+    }
+    inserted = next(row for row in nested if row["revision_type"] == "insertion")
+    deleted = next(row for row in nested if row["revision_type"] == "deletion")
+    assert inserted["after_text"] == "outer-ins"
+    assert deleted["before_text"] == "inner-del"
+    assert all(row["location"]["source"] == "word/comments.xml" for row in nested)
+    _assert_only_facts(result)
+
+
+def test_nested_same_side_insertion_is_not_double_counted():
+    document = (
+        "<w:p><w:ins w:id='1' w:author='X'><w:r><w:t>A</w:t></w:r>"
+        "<w:ins w:id='2' w:author='X'><w:r><w:t>B</w:t></w:r></w:ins></w:ins></w:p>"
+    )
+    result = parse_redline_docx(_docx(document))
+    assert result.revision_count == 1
+    insertions = [row for row in result.rows if row["revision_type"] == "insertion"]
+    assert len(insertions) == 1
+    assert insertions[0]["after_text"] == "AB"
     _assert_only_facts(result)
 
 
