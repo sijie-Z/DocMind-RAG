@@ -235,3 +235,97 @@ class ReviewDecisionUpsert(BaseModel):
         ..., description="决策状态"
     )
     note: str | None = Field(None, max_length=2000, description="决策说明（可选）")
+
+
+# ── 入向红线台账（批次六 feature B）────────────────────────────────────────
+# 台账只承载「原文里真实存在的修订/批注」与人工处置状态；不产生风险判定、
+# 结论或法律意见。响应字段全部是 JSON 安全的原生类型（str/int/dict/list）。
+
+
+class RedlineDispositionUpdate(BaseModel):
+    """人工处置单条台账行；evidence_id 只在绑定 item 时才有意义。"""
+
+    disposition: Literal["pending", "reviewed", "needs_clarification", "not_relevant"] = Field(
+        ..., description="处置状态"
+    )
+    note: str | None = Field(None, max_length=2000, description="处置说明（可选）")
+    expected_lock_version: int = Field(..., ge=1, description="乐观锁版本号（防止并发覆盖）")
+    item_id: str | None = Field(None, max_length=36, description="关联核验项 id（可选）")
+    evidence_id: str | None = Field(None, max_length=36, description="关联证据 id（可选）")
+
+    @model_validator(mode="after")
+    def _evidence_requires_item(self) -> "RedlineDispositionUpdate":
+        if self.evidence_id is not None and self.item_id is None:
+            raise ValueError("指定 evidence_id 时必须同时提供 item_id")
+        return self
+
+
+class RedlineRowResponse(BaseModel):
+    """台账行：before/after 均为 parser 原文快照，未解析行给出原因码。"""
+
+    id: str
+    submission_id: str
+    case_id: str
+    ordinal: int
+    revision_type: str
+    pair_key: str | None = None
+    before_text: str | None = None
+    after_text: str | None = None
+    before_sha256: str | None = None
+    after_sha256: str | None = None
+    author: str | None = None
+    authored_at: datetime | None = None
+    comment_id: str | None = None
+    comment_author: str | None = None
+    comment_date: datetime | None = None
+    location: dict = Field(default_factory=dict)
+    clause_no: list[str] | None = None
+    section_no: list[str] | None = None
+    unparsed_reason: list[str] | None = None
+    text_provenance: str
+    item_id: str | None = None
+    evidence_id: str | None = None
+    disposition: str
+    note: str | None = None
+    disposition_by: int | None = None
+    disposition_at: datetime | None = None
+    lock_version: int
+    created_at: datetime
+    updated_at: datetime | None = None
+
+
+class RedlineSubmissionSummary(BaseModel):
+    """单次上传摘要：文件哈希 + 计数，文件正文不回传。"""
+
+    id: str
+    case_id: str
+    sequence_no: int
+    filename: str
+    file_sha256: str
+    file_size: int
+    parser_version: str
+    status: str
+    revision_count: int
+    comment_count: int
+    unparsed_count: int
+    parse_warnings: list[str] = Field(default_factory=list)
+    uploaded_by: int
+    created_at: datetime
+
+
+class RedlineLedgerResponse(BaseModel):
+    """分页台账：counts 为处置计数，disclaimer 明确不构成法律意见。
+
+    ``parse_warnings`` / ``has_truncation`` 描述整批原文的解析完整性（达到
+    行数/文本上限等），不随当前页筛选变化；与服务层 ``get_ledger`` 输出同形。
+    """
+
+    items: list[RedlineRowResponse] = Field(default_factory=list)
+    counts: dict[str, int] = Field(default_factory=dict)
+    disclaimer: str = ""
+    has_unparsed: bool = False
+    parse_warnings: list[str] = Field(default_factory=list)
+    has_truncation: bool = False
+    total: int = 0
+    page: int = 1
+    page_size: int = 20

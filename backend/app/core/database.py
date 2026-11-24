@@ -38,6 +38,8 @@ engine = create_async_engine(
         }
     ),
     echo=settings.SQL_ECHO,
+    # DB 异常默认会带 [parameters: ...]；合同/红线条款正文不得进入日志。
+    hide_parameters=True,
 )
 
 # 会话工厂
@@ -224,6 +226,8 @@ sync_engine = create_engine(
             "pool_recycle": 3600,
         }
     ),
+    # 与 async engine 一致：禁止 SQLAlchemy 把绑定参数写进异常/回显日志。
+    hide_parameters=True,
 )
 
 SyncSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=sync_engine)

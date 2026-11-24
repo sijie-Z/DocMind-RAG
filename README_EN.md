@@ -135,7 +135,9 @@ Generic “chat + knowledge base” is hard to accept. Contract review is narrow
 - `POST /reviews`: the three documents must share an org, have correct roles and increasing version sequence to become `ready`; otherwise the case is stored as `blocked` with `side:reason` codes;
 - evidence snapshots: at case creation / selection, parser-original quotes are frozen with hashes, clause/page/character anchors — snapshots survive document rebuilds or deletion, while chunk and document fingerprints flag `live_source_stale`;
 - `POST /reviews/{id}/analyze`: rule-based extraction (term value/unit, start events, conditions, exceptions/cross-refs) and V1↔V2 alignment (unchanged/modified/added/removed/renumbered/unidentified); date fragments and warranty periods are never mistaken for payment terms, unclear units stay `ambiguous` instead of guessing;
-- next batches: per-item human decisions and export with versions/hashes/coverage (in progress).
+- Template/playbook library: organization-editable review templates; every save creates an immutable version (the four built-in items are fixed, only custom additions are allowed). A case can select a template version, while rules remain frozen in an immutable snapshot so later template edits cannot affect historic cases. Versions have a read-only diff.
+- Inbound counterparty redline ledger (competitor batch six): upload a counterparty DOCX with tracked changes; a deterministic parser turns `w:ins`/`w:del`/comments into fact-only rows (clause, before/after text, author, time, location, source hash). Structures that cannot be represented losslessly (moves, formatting revisions, etc.) are explicitly recorded as `unparsed`. The ledger is append-only and uses optimistic locking for human disposition. It records only textual changes, not legal advice.
+- Next batches: per-item human decisions and export with versions/hashes/coverage (in progress).
 
 **Explicitly out of scope**: no legal conclusions (lawful/unlawful, compliant/non-compliant, risk-free, safe-to-sign), `needs_human`/`insufficient` never count as done, and no conclusion without evidence.
 
@@ -220,7 +222,7 @@ DocMind/
 │   │   ├── api/v1/
 │   │   │   ├── router.py            # main router (30 modules registered)
 │   │   │   └── endpoints/           # Endpoint implementations (30 files)
-│   │   ├── services/                # business services (41 services)
+│   │   ├── services/                # business services (42 services)
 │   │   ├── models/                  # ORM models (23 model files)
 │   │   ├── core/                    # config / DB / Redis / ES / MinIO / Kafka / JWT
 │   │   └── worker/                  # Kafka consumer (parse → chunk → embed → index)
@@ -249,7 +251,7 @@ DocMind/
 | Chat | `/chat` | Session CRUD, SSE streaming Q&A, strict mode, debug endpoints |
 | Knowledge | `/knowledge` | Knowledge retrieval, statistics, settings, retrieval eval cases and run history (bad case capture) |
 | Knowledge Bases | `/knowledge-bases` | Multi-knowledge-base entity CRUD (organization-scoped) |
-| Contract Review | `/reviews` | Review cases / items / evidence snapshots + deterministic extraction and V1/V2 alignment + per-item decisions and report export (parser-original quotes + version hashes); org template library (immutable versions + read-only diff) |
+| Contract Review | `/reviews` | Review cases / items / evidence snapshots + deterministic extraction and V1/V2 alignment + per-item decisions and report export (parser-original quotes + version hashes); org template library (immutable versions + read-only diff); inbound counterparty redline fact ledger (DOCX revisions/comments parsed, explicit unparsed rows, append-only, optimistic-locking disposition) |
 | Organizations | `/organizations` | Org CRUD, member management, role assignment |
 | Organization Settings | `/organizations` | Org-level settings and audit (shared prefix with Organizations) |
 | Monitoring | `/monitoring` | Performance metrics, health checks, alerts, RAG quality scoring |
@@ -346,6 +348,7 @@ K8s manifests and deployment notes live in [`deploy/`](deploy/). When Kafka is u
 
 ## Known boundaries
 
+- Knowledge retrieval can be narrowed by an organization's knowledge base (`knowledge_base_id`) and `metadata_filters` (`tags` / `file_type`); conditions are intersected, and no match in the selected knowledge base returns no results instead of falling back to all documents in the organization.
 - Workflow code nodes are off by default and must run in the Docker sandbox with `ENABLE_WORKFLOW_CODE_NODES=true`.
 - GraphRAG is not part of the RAG retrieval path; context compression is rule-based, no LLM call; short-term/working memory is in-process while long-term/reflective memory uses Redis.
 - Contract review currently covers four fixed checklist items for Chinese contracts; evidence is chunk-level quotes with clause/page/character anchors, not PDF highlighting.

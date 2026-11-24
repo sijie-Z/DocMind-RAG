@@ -122,6 +122,11 @@ async function stubShell(page: import('@playwright/test').Page) {
   )
   // 宽泛在前、精确在后（后注册者优先）
   await page.route('**/api/v1/reviews**', (route) => route.fulfill(fulfillJson(LIST_PAYLOAD)))
+  // 批次六：详情页新增改稿留痕台账。CI 不启动真实后端，若让新增 GET 落到
+  // 通配空响应，组件会把整页带进 ErrorBoundary；必须给稳定的空列表桩。
+  await page.route(`**/api/v1/reviews/${CASE_ID}/redlines`, (route) =>
+    route.fulfill(fulfillJson(ok({ items: [], total: 0 }))),
+  )
   await page.route(`**/api/v1/reviews/${CASE_ID}/exports`, (route) =>
     route.fulfill(fulfillJson(ok({ items: [], total: 0 }))),
   )

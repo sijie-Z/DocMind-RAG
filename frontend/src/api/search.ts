@@ -14,12 +14,66 @@ export interface SearchRequest {
   // issue #225：后端字段为 search_mode（hybrid/vector/keyword；缺省=自动路由）。
   // 旧的 search_type 字段从未在请求 schema 里出现过（一直被后端静默丢弃），不再发送。
   search_mode?: 'hybrid' | 'vector' | 'keyword'
-  // 后端 KnowledgeSearchRequest 目前不消费 file_types（预存在漂移，已记录）；
-  // 保持既有发送行为，空数组时不发送。
-  file_types?: string[]
+  // metadata_filters 才是后端 KnowledgeSearchRequest 接受的字段（tags / file_type）；
+  // 顶层 file_types 从未被 schema 消费，已停止发送。
+  metadata_filters?: { tags?: string[]; file_type?: string[] }
+  /** 可选知识库范围（服务端校验组织归属；空白 id 一律省略） */
+  knowledge_base_id?: string
   // 检索自测：限定文档范围与返回诊断。
   document_ids?: string[]
   debug?: boolean
+}
+
+/** 后端 metadata_filters 的字段名与值域（backend/app/rag/metadata_filter.py）。 */
+export type SearchMetadataFilters = NonNullable<SearchRequest['metadata_filters']>
+
+/** 扩展名/展示值 → 后端 DocumentType 枚举（pdf|word|excel|ppt|txt|other）。 */
+const FILE_TYPE_ENUM = new Set(['pdf', 'word', 'excel', 'ppt', 'txt', 'other'])
+const FILE_TYPE_ALIASES: Record<string, string> = {
+  doc: 'word',
+  docx: 'word',
+  xls: 'excel',
+  xlsx: 'excel',
+  pptx: 'ppt',
+  text: 'txt',
+  md: 'txt',
+  // 上传路径把 .csv 归为 DocumentType.TXT（backend/app/services/file_service.py），
+  // 过滤值必须与索引里的 file_type 一致，否则按 excel 过滤恒为空。
+  csv: 'txt',
+}
+
+/**
+ * 后端 metadata_filters.tags 的取值约束（backend/app/rag/metadata_filter.py）：
+ * ^[\w.\-/一-鿿]+$、去空后 <=100 字符。上传端按逗号拆分标签且不校验，
+ * 这里必须挡掉含空格/#等非法字符或超长的值，避免 UI 勾选后 422。
+ */
+// Python re.UNICODE 的 \w 覆盖所有 Unicode 字母/数字（含 CJK）；JS \w 仅 ASCII，
+// 这里用 \p{L}\p{N}_ 对齐，避免合法的多语言标签被前端误删。
+export const SAFE_METADATA_TAG_RE = /^[\p{L}\p{N}_.\-/]+$/u
+export const MAX_METADATA_TAG_LENGTH = 100
+const MAX_METADATA_FILTER_VALUES = 20
+
+const normalizeValues = (values: string[] | undefined): string[] => {
+  if (!values?.length) return []
+  const seen = new Set<string>()
+  for (const value of values) {
+    const text = value.trim()
+    if (text && !seen.has(text)) seen.add(text)
+  }
+  return [...seen].slice(0, MAX_METADATA_FILTER_VALUES)
+}
+
+export const normalizeSearchTags = (values: string[] | undefined): string[] =>
+  normalizeValues(values).filter(
+    (tag) => tag.length <= MAX_METADATA_TAG_LENGTH && SAFE_METADATA_TAG_RE.test(tag)
+  )
+
+export const normalizeSearchFileTypes = (values: string[] | undefined): string[] => {
+  const mapped = (values ?? []).map((value) => {
+    const lower = value.trim().toLowerCase()
+    return FILE_TYPE_ALIASES[lower] ?? lower
+  })
+  return normalizeValues(mapped.filter((value) => FILE_TYPE_ENUM.has(value)))
 }
 
 export interface SearchPayloadInput {
@@ -30,8 +84,12 @@ export interface SearchPayloadInput {
   topK?: number
   /** 'auto'（或缺省）= 不发送 search_mode，走后端自动路由（issue #225 同语义） */
   searchMode?: 'auto' | 'hybrid' | 'vector' | 'keyword'
-  /** 已选文件类型；空数组 = 不发送 */
+  /** 已选文件类型（扩展名或枚举原词）；映射到 metadata_filters.file_type */
   fileTypes?: string[]
+  /** 文档 tags 多选；映射到 metadata_filters.tags（OR 语义） */
+  tags?: string[]
+  /** 知识库 id；空白省略，不传组织 id */
+  knowledgeBaseId?: string
   /** 限定文档范围；空数组 = 全组织 */
   documentIds?: string[]
   /** 返回检索诊断（每臂候选/RRF/rerank/MMR） */
@@ -47,6 +105,13 @@ export interface SearchPayloadInput {
  * 永久挡在门外（组织管理员改 top_k 对搜索页无效）。
  */
 export function buildSearchPayload(input: SearchPayloadInput): SearchRequest {
+  const tags = normalizeSearchTags(input.tags)
+  const fileTypes = normalizeSearchFileTypes(input.fileTypes)
+  const metadataFilters: SearchMetadataFilters = {
+    ...(tags.length ? { tags } : {}),
+    ...(fileTypes.length ? { file_type: fileTypes } : {}),
+  }
+  const knowledgeBaseId = input.knowledgeBaseId?.trim()
   return {
     query: input.query,
     organization_id: input.organizationId,
@@ -55,7 +120,8 @@ export function buildSearchPayload(input: SearchPayloadInput): SearchRequest {
     ...(input.searchMode && input.searchMode !== 'auto'
       ? { search_mode: input.searchMode }
       : {}),
-    ...(input.fileTypes && input.fileTypes.length ? { file_types: input.fileTypes } : {}),
+    ...(Object.keys(metadataFilters).length ? { metadata_filters: metadataFilters } : {}),
+    ...(knowledgeBaseId ? { knowledge_base_id: knowledgeBaseId } : {}),
     ...(input.documentIds && input.documentIds.length ? { document_ids: input.documentIds } : {}),
     ...(input.debug ? { debug: true } : {}),
   }

@@ -383,18 +383,16 @@ Query
 - **A keyword-arm failure aborts that hybrid attempt** (even if the vector arm succeeded); the pipeline retries per sub-query (`RAG_RETRIEVAL_MAX_RETRIES` default 2, i.e. up to 3 attempts).
 - **GraphRAG is not in the RAG retrieval path**: graph extraction runs non-blocking after indexing and failures only warn. Retrieval is still HybridRetriever (`README.md`, `backend/app/worker/doc_processor.py`). Graphs are visible in the knowledge page or via `/api/v1/knowledge/graph*`.
 
-### 3.3 Organizations and multi-tenancy: organization = knowledge base
+### 3.3 Organizations and multi-tenancy: org is the tenant root, knowledge bases are org entities
 
-ADR-001 froze this semantic (`docs/decisions/ADR-001-路线冻结.md`, D5):
+ADR-001 once froze "organization = knowledge base" as the product semantic (`docs/decisions/ADR-001-路线冻结.md`, D5). Later multi-knowledge-base work added a `knowledge_bases` table and organization-scoped CRUD at `/api/v1/knowledge-bases`, so D5's "no table" rule no longer reflects the code: an organization can hold several named knowledge bases. Documents belong to a knowledge base through `knowledge_base_id`; a NULL value preserves the older "all documents in the organization" behavior. Documents, chunks, indices, and retrieval always stay within the `organization_id` tenant boundary, and ACLs still apply.
 
-- **There is no `knowledge_bases` table.** An organization is the knowledge-base singleton: documents, chunks, indices, and retrieval are all scoped by `organization_id`.
 - A user belongs to an organization (`users.organization_id`); endpoints resolve it through `require_organization` and non-superusers with no organization fail closed (403). A superuser without an organization falls back to a real organization from the database. Clients cannot choose an organization in the request body.
 - **Switching organizations** uses `POST /api/v1/users/me/organizations/{organization_id}/switch`: it writes `users.organization_id`, returns 403 for non-members, bypasses for superusers, and audits `switch_organization`. Later list/search calls resolve context from this field.
 - **Admin semantics (D3)**: the implicit "`role=admin` means global admin" mapping is gone. Platform operations require explicit `is_superuser`; organization admins are determined by the org membership role (`OrgAdmin` in `user_organization_role_association`) and can only manage their own organization.
-- `POST /api/v1/knowledge/search` requires `organization_id`; for non-superusers the server overrides the supplied value with the effective organization. Cross-organization data is invisible.
+- `POST /api/v1/knowledge/search` requires `organization_id`; for non-superusers the server overrides the supplied value with the effective organization. Cross-organization data is invisible. The optional `knowledge_base_id` narrows results to that knowledge base within the organization; a cross-organization or unknown ID returns zero results and **never falls back** to organization-wide results. `metadata_filters` supports `tags` and `file_type` (`file_type` values: `pdf`, `word`, `excel`, `ppt`, `txt`, `other`); values within a field are ORed, different fields are ANDed, and both compose with the knowledge-base filter.
 - Agent tasks are stricter: `AgentTask.organization_id` must exactly match the effective organization (including NULL), otherwise 404.
 - Semantic caches, RAG caches, and graph partitions are all org-scoped (`README.md`, `backend/app/services/graph_rag_service.py`).
-- Boundary: D5's naming cleanup is not fully complete — `/knowledge` list endpoints and the frontend `KnowledgeBase` type still use the old names. Treat "organization = knowledge base" as the real semantic and do not assume multiple knowledge bases per organization.
 
 > Organization switching and conversation visibility depend on the conversation's `organization_id`; see 7.4.
 
@@ -535,6 +533,18 @@ The document detail page’s “Browse & correct chunks” panel (URL parameter 
 - Audit records contain only document/chunk ids, action, booleans and a hash/character count of correction text — never private body text or correction text in the audit log. Older indices without `is_chunk_enabled` treat chunks as enabled; run `scripts/add_rag_source_provenance_mapping.py` to add the additive mapping.
 - **Tradeoff**: manual correction does not recompute embeddings or rebuild the index; it changes only the ES retrieval text and the auditable override row. Rebuild/re-parse creates new chunk ids, so existing corrections are not migrated automatically and must be reconfirmed on the new chunks. This preserves strict evidence replay: manual text never enters the parser-original evidence chain.
 
+### 4.2.3 Inbound counterparty redline ledger (contract review)
+
+The “Redline ledger” panel on a case detail page records **what textual changes occurred** in a counterparty-returned DOCX; it is not a legal review conclusion:
+
+1. Create a contract-review case first; then upload the counterparty's tracked-changes DOCX below the export history on the detail page (20 MB per upload).
+2. Each upload is appended as a `review_redline_submission` with a monotonically increasing per-case sequence number. The original DOCX is stored in MinIO at `redlines/{org}/{case}/{submission}.docx`; **there is no download endpoint**. The parser uses in-memory bytes, `zipfile` and `defusedxml` only — no model, retrieval or network calls.
+3. Ledger rows are typed `insertion` / `deletion` / `comment` / `unparsed`; adjacent deletion→insertion pairs share a `pair_key` while both rows are preserved. Moves, formatting revisions (rPrChange etc.) and nested revisions that cannot be represented losslessly become explicit `unparsed` rows with reason codes; overlapping revisions produce warnings; caps (2000 rows / 4000 characters per text) mark the submission `partial` instead of silently dropping content. The panel surfaces per-submission parse warnings (`parse_warnings`) and a truncation flag (`has_truncation`): if shown, parsing hit a limit and the ledger may be incomplete — check the source DOCX before drawing conclusions.
+4. Every row carries `text_provenance='counterparty_docx_ooxml'`. The raw DOCX bytes and the exact parsed before/after text are hashed with SHA-256. Audit logs contain only ids and dispositions — never clause text or author names.
+5. Humans may link a review item/evidence and set a disposition (pending/reviewed/needs_clarification/not_relevant) with `expected_lock_version` optimistic locking; a stale version returns 409 `REVIEW_REDLINE_CONFLICT` with `current_lock_version` in the detail. **Caveat**: on a 409, reload the ledger and retry with the current version — do not resubmit a stale version or overwrite someone else's disposition. The ledger is read-only once the case is archived. Ledger rows cannot be edited or deleted, and the case, items, evidence, exports and rule snapshots are never rewritten.
+
+**Permanent disclaimer**: Records only factual textual changes; it is not legal advice.
+
 ### 4.3 Chat and deep analysis
 
 The chat page (`/chat`) has two modes, selected by the "Quick Q&A / Deep analysis" radio in the input area (`frontend/src/views/chat/components/ChatInput.vue`):
@@ -554,7 +564,7 @@ Practical notes:
 - **History**: `GET /api/v1/chat/conversations` supports `page` / `page_size` / `search` (title LIKE), newest first; conversations are visible by "owner + current organization" (see 7.4).
 - **Deep analysis shows its work**: plan tree, thinking stream, tool-call cards, and reflection are driven by the 24 agent SSE event types; quick Q&A only emits `chunk` / `message` / `error` / `debug`.
 - **When approval is needed**: deep analysis inherits HITL. `approval_mode` defaults to `risky`, but risky tools are disabled by default, so the default configuration triggers no approvals. Once you enable `execute_python` / `execute_sql` / `mcp_call`, risky calls pause for approval. For complex tasks prefer the Agent workbench (4.3), which has the full approval and replay UI.
-- **Boundary**: the standalone search page's file-type filter is **display-only** — `file_types` is not part of the backend `KnowledgeSearchRequest`, so the filter has no effect. Control retrieval with the query and `search_mode`.
+- **Search scope filters**: the standalone search page (`/search`) offers knowledge-base selection, multi-select tags, and multi-select file types, sent to `POST /api/v1/knowledge/search` as `knowledge_base_id` and `metadata_filters` (`tags` / `file_type`). Conditions compose (values within a field are ORed, fields are ANDed); top-level `file_types` is not a backend field. Selecting a knowledge base with no matching documents returns no results rather than falling back to all documents in the organization.
 
 ### 4.3 Agent workbench: approvals, resume, replay
 
@@ -624,7 +634,7 @@ API prefix `/api/v1/workflows`: workflow CRUD, execution, debugging, node defini
 - Updates are partial: omitted fields stay unchanged, explicit `null` clears the override and falls back to the platform default.
 - **Honest boundary**: `default_model`, `retrieval_top_k`, and `allow_privacy_mode` are wired into runtime; `default_provider`, `monthly_token_quota`, and `tool_whitelist` are stored and displayed but **not enforced yet** (`backend/app/services/organization_settings_service.py`).
 
-**Switching organizations**: desktop uses the header `OrgSwitcher` (static text when the user has a single organization); mobile uses the user menu. Knowledge base (org = KB) and conversation lists follow the new organization, and the current page remounts and refetches. Not seeing old conversations is expected — see 7.4. Upload and search under the organization that owns the data.
+**Switching organizations**: desktop uses the header `OrgSwitcher` (static text when the user has a single organization); mobile uses the user menu. Knowledge-base and conversation lists, along with the search scope, follow the new organization, and the current page remounts and refetches. Not seeing old conversations is expected — see 7.4. Upload and search under the organization that owns the data.
 
 ### 4.6 Monitoring
 
@@ -691,7 +701,7 @@ There are **30 endpoint modules** (`docs/facts.json` → `endpoint_modules`, der
 | chat | `/api/v1/chat` | session CRUD, SSE Q&A |
 | knowledge | `/api/v1/knowledge` | retrieval, stats, rebuild, graph |
 | knowledge_bases | `/api/v1/knowledge-bases` | multi-knowledge-base entity CRUD (organization-scoped) |
-| reviews | `/api/v1/reviews` | contract review: cases, items, evidence snapshots (parser original + version hashes); org template library at `/reviews/templates` (immutable versions + read-only diff) |
+| reviews | `/api/v1/reviews` | contract review: cases, items, evidence snapshots (parser original + version hashes); org template library at `/reviews/templates` (immutable versions + read-only diff); inbound redline ledger at `/reviews/{id}/redlines` (upload/list/ledger/optimistic-locking disposition) |
 | organizations | `/api/v1/organizations` | org CRUD, members, roles |
 | organization_settings | `/api/v1/organizations` | org-level settings (shared prefix) |
 | monitoring | `/api/v1/monitoring` | metrics, health, alerts, RAG quality |
@@ -820,7 +830,7 @@ alembic revision --autogenerate -m "desc"   # create a migration (dev)
 ```
 
 - Config: `backend/alembic.ini`; the runtime URL is overridden from `settings.DATABASE_URL` in `backend/alembic/env.py`.
-- Current head: `011_organization_settings` (`backend/alembic/versions/011_organization_settings.py`).
+- Current head: `040_inbound_redline_ledger` (`backend/alembic/versions/040_inbound_redline_ledger.py`).
 - `init_db()` runs `create_all` **only on an empty database**; existing databases are not auto-upgraded. `USE_ALEMBIC=true` skips `create_all` entirely (`backend/app/core/database.py`).
 - **Release order**: new code may read new tables/columns (e.g. `organization_settings` and `prompt_templates.scope` from 011). Upgrade existing deployments by running migrations **before** routing traffic to new instances; do not create personal prompt templates during the rolling window (old instances treat them as organization-visible).
 - 011's `downgrade` is **lossy**: dropping `organization_settings` loses overrides; dropping `scope` makes personal templates organization-visible. Export/disable related data first (migration header).
@@ -874,7 +884,7 @@ Rollback notes:
 Check in order:
 
 1. **Status**: the document must be `INDEXED`. `PENDING` / `PARSING` means the worker did not consume it; `FAILED` — read `parse_error` (unsupported format, scanned PDF without OCR dependencies, embedding dimension mismatch, etc.).
-2. **Organization**: organization = knowledge base. Confirm the document and the search request use the same organization; `/knowledge/search` requires `organization_id`, and for non-superusers the server overrides it with the effective organization.
+2. **Organization and filters**: confirm the document and the search request use the same organization; `/knowledge/search` requires `organization_id`, and for non-superusers the server overrides it with the effective organization. If `knowledge_base_id` or `metadata_filters` are set, check that the document belongs to the selected knowledge base and matches the tag/file-type filters — these filters never fall back to organization-wide results.
 3. **Index reconciliation**: the `/readyz` `knowledge_base` item compares "documents/chunks claimed INDEXED in DB" with "chunks actually in ES". Chunk coverage **<95% is `unhealthy`** (drained with 503); **95%-100% is `degraded`** (not drained); zero chunks or missing documents are also `unhealthy`.
 4. **Run the reconcile script** (read-only first):
    ```bash
@@ -1020,9 +1030,9 @@ python scripts/check_doc_facts.py                                  # three-way c
 | Endpoint modules | `backend/app/api/v1/router.py`; numbers in `docs/facts.json` |
 | Supported formats and parsing | `backend/app/services/document_parser.py` |
 | Index reconciliation / reindex | `backend/scripts/reconcile_knowledge_index.py` |
-| Migrations | `backend/alembic/versions/` (head: `011_organization_settings`) |
+| Migrations | `backend/alembic/versions/` (head: `040_inbound_redline_ledger`) |
 | Agent architecture and events | `AGENT_ARCHITECTURE.md`, `backend/app/agent/events.py` |
-| Org = knowledge base, admin semantics | `docs/decisions/ADR-001-路线冻结.md` (D3 / D5) |
+| Admin semantics and knowledge-base boundaries | `docs/decisions/ADR-001-路线冻结.md` (D3 / D5 historical semantics), `backend/app/models/knowledge_base.py`, `backend/app/rag/knowledge_base_filter.py`, `backend/app/rag/metadata_filter.py` (current behavior) |
 | Deployment and production checklist | `deploy/README.md`, `SETUP.md` |
 | CI gates | `.github/workflows/ci-fast.yml`, `ci-hygiene.yml`, `docs/ci-charter.md` |
 | Documented-number checks | `backend/scripts/check_doc_facts.py`, `docs/facts.json` |

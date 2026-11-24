@@ -11,9 +11,10 @@
 
 import json
 import logging
-from typing import Literal
+from typing import Annotated, Literal
 
-from fastapi import APIRouter, Depends, Query, Response
+from fastapi import APIRouter, Depends, File, Query, Request, Response, UploadFile
+from pydantic import BaseModel, BeforeValidator, Field
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -25,11 +26,18 @@ from app.core.security import (
     require_organization,
     require_scope,
 )
-from app.exceptions import AppError, AuthorizationError, ConflictError, NotFoundError
+from app.exceptions import (
+    AppError,
+    AuthorizationError,
+    ConflictError,
+    NotFoundError,
+    PayloadTooLargeError,
+)
 from app.models.rbac import PermissionType
 from app.models.user import User
 from app.rag.source_provenance import SourceProvenanceUnavailableError
 from app.schemas.review import (
+    RedlineDispositionUpdate,
     ReviewCaseCreate,
     ReviewDecisionUpsert,
     ReviewEvidenceSelect,
@@ -42,6 +50,7 @@ from app.services import review_analysis_service as analysis_service
 from app.services import review_case_service as case_service
 from app.services import review_document_service as document_service
 from app.services import review_export_service as export_service
+from app.services import review_redline_service as redline_service
 from app.services import review_template_service as template_service
 from app.services.audit_service import audit_service
 from app.services.review_rule_snapshot import case_rule_metadata
@@ -631,6 +640,191 @@ async def get_review_evidence(
     except Exception as e:
         logger.error(f"Get review evidence failed: {type(e).__name__}: {e}")
         raise AppError("获取证据快照失败") from e
+
+
+# ── 入向红线台账（批次六 feature B）────────────────────────────────────────
+# 固定子路径 /{review_id}/redlines 必须声明在 /{review_id} 之前；台账只记录
+# 对方 DOCX 原文中的修订/批注与人工处置，不产出风险/结论/法律意见。
+
+
+def _blank_query_to_none(value: object) -> object:
+    """空字符串过滤参数按未提供处理（前端清空筛选框时会发送 ``?x=``）。"""
+    return None if isinstance(value, str) and not value.strip() else value
+
+
+_REDLINE_REVISION_FILTER = Annotated[
+    Literal["insertion", "deletion", "comment", "unparsed"] | None,
+    BeforeValidator(_blank_query_to_none),
+]
+_REDLINE_DISPOSITION_FILTER = Annotated[
+    Literal["pending", "reviewed", "needs_clarification", "not_relevant"] | None,
+    BeforeValidator(_blank_query_to_none),
+]
+
+
+class _RedlineLedgerFilters(BaseModel):
+    """台账筛选参数：空字符串按未筛选处理（前端清空筛选框会发送 ``?x=``）。"""
+
+    revision_type: _REDLINE_REVISION_FILTER = None
+    disposition: _REDLINE_DISPOSITION_FILTER = None
+    page: int = Field(1, ge=1)
+    page_size: int = Field(20, ge=1, le=100)
+
+
+# Content-Length 是整包声明值：除文件正文外还含 multipart 边界、字段名、
+# 文件名和请求头。预检放行这些开销，实际文件大小仍由下面的第二道闸门
+# 严格限制为 MAX_REDLINE_UPLOAD_BYTES（1 MiB 足够覆盖正常文件名/边界开销）。
+_REDLINE_MULTIPART_OVERHEAD_BYTES = 1024 * 1024
+
+
+def _redline_body_budget_bytes() -> int:
+    """整包预算 = 文件大小上限 + multipart 封装开销（含测试对上限的替换）。"""
+    return redline_service.MAX_REDLINE_UPLOAD_BYTES + _REDLINE_MULTIPART_OVERHEAD_BYTES
+
+
+@router.post("/{review_id}/redlines", response_model=dict, dependencies=_WRITE_DEPS)
+async def upload_review_redlines(
+    review_id: str,
+    request: Request,
+    file: UploadFile = File(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """上传对方回传 DOCX，解析 OOXML 修订/批注为不可变台账行。"""
+    try:
+        # 第一道闸门：Content-Length 是客户端声明的 multipart 整包大小，
+        # 在读取文件正文之前就能拒绝明显超限的请求（缺头/非法值不拦截，
+        # 交给下面的实测大小守卫）。detail.max_body_bytes 是整包预算，
+        # 包含 _REDLINE_MULTIPART_OVERHEAD_BYTES 的封装开销。
+        declared_length = request.headers.get("content-length")
+        if declared_length is not None:
+            try:
+                content_length = int(declared_length)
+            except ValueError:
+                content_length = 0
+            body_budget = _redline_body_budget_bytes()
+            if content_length > body_budget:
+                raise PayloadTooLargeError(
+                    "文件过大，超过红线台账上传上限",
+                    detail={
+                        "max_body_bytes": body_budget,
+                        "received_bytes": content_length,
+                    },
+                )
+        # 第二道闸门：实测上传文件大小，避免伪造 Content-Length 绕过上限。
+        # detail.max_body_bytes 指严格的文件大小上限。
+        file.file.seek(0, 2)
+        declared_size = file.file.tell()
+        await file.seek(0)
+        if declared_size > redline_service.MAX_REDLINE_UPLOAD_BYTES:
+            raise PayloadTooLargeError(
+                "文件过大，超过红线台账上传上限",
+                detail={
+                    "max_body_bytes": redline_service.MAX_REDLINE_UPLOAD_BYTES,
+                    "received_bytes": declared_size,
+                },
+            )
+        data = await file.read()
+        case = await case_service.get_case_for_user(db, current_user, review_id)
+        result = await redline_service.upload_submission(
+            db,
+            case=case,
+            current_user=current_user,
+            filename=file.filename or "redlines.docx",
+            data=data,
+        )
+        return {"success": True, "data": result}
+    except (NotFoundError, AuthorizationError):
+        raise
+    except AppError:
+        raise
+    except Exception as e:
+        logger.error("Upload review redlines failed: %s", type(e).__name__)
+        raise AppError("上传红线台账失败") from e
+
+
+@router.get("/{review_id}/redlines", response_model=dict, dependencies=_READ_DEPS)
+async def list_review_redlines(
+    review_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """列出案件下所有上传批次（摘要，不含条款正文）。"""
+    try:
+        case = await case_service.get_case_for_user(db, current_user, review_id)
+        result = await redline_service.list_submissions(db, case=case)
+        return {"success": True, "data": result}
+    except (NotFoundError, AuthorizationError):
+        raise
+    except AppError:
+        raise
+    except Exception as e:
+        logger.error("List review redlines failed: %s", type(e).__name__)
+        raise AppError("获取红线台账批次失败") from e
+
+
+@router.get("/{review_id}/redlines/{submission_id}", response_model=dict, dependencies=_READ_DEPS)
+async def get_review_redline_ledger(
+    review_id: str,
+    submission_id: str,
+    filters: Annotated[_RedlineLedgerFilters, Query()],
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """分页读取单批次台账（原文快照 + 处置状态 + 免责声明）。"""
+    try:
+        case = await case_service.get_case_for_user(db, current_user, review_id)
+        result = await redline_service.get_ledger(
+            db,
+            case=case,
+            submission_id=submission_id,
+            revision_type=filters.revision_type,
+            disposition=filters.disposition,
+            page=filters.page,
+            page_size=filters.page_size,
+        )
+        return {"success": True, "data": result}
+    except (NotFoundError, AuthorizationError):
+        raise
+    except AppError:
+        raise
+    except Exception as e:
+        logger.error("Get review redline ledger failed: %s", type(e).__name__)
+        raise AppError("获取红线台账失败") from e
+
+
+@router.put(
+    "/{review_id}/redlines/{submission_id}/rows/{row_id}/disposition",
+    response_model=dict,
+    dependencies=_WRITE_DEPS,
+)
+async def update_review_redline_disposition(
+    review_id: str,
+    submission_id: str,
+    row_id: str,
+    body: RedlineDispositionUpdate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """人工处置台账行（乐观锁；只写处置列，不改写原文/哈希）。"""
+    try:
+        case = await case_service.get_case_for_user(db, current_user, review_id)
+        result = await redline_service.update_disposition(
+            db,
+            case=case,
+            current_user=current_user,
+            submission_id=submission_id,
+            row_id=row_id,
+            update=body,
+        )
+        return {"success": True, "data": result}
+    except (NotFoundError, AuthorizationError):
+        raise
+    except AppError:
+        raise
+    except Exception as e:
+        logger.error("Update review redline disposition failed: %s", type(e).__name__)
+        raise AppError("更新红线台账处置失败") from e
 
 
 @router.get("/{review_id}", response_model=dict, dependencies=_READ_DEPS)
