@@ -85,11 +85,11 @@ const dispositionLabelKeys: Record<RedlineDisposition, string> = {
 }
 
 function dispositionKey(value: RedlineDisposition): string {
-  return dispositionLabelKeys[value]
+  return dispositionLabelKeys[value] ?? 'reviews.redlines.dispositions.pending'
 }
 
 function revisionKey(value: RedlineRevisionType): string {
-  return revisionLabelKeys[value]
+  return revisionLabelKeys[value] ?? 'reviews.redlines.revisionTypes.unparsed'
 }
 
 const revisionOptions = computed(() => [

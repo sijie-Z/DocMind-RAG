@@ -739,7 +739,7 @@ async def upload_review_redlines(
     except AppError:
         raise
     except Exception as e:
-        logger.error(f"Upload review redlines failed: {type(e).__name__}: {e}")
+        logger.error("Upload review redlines failed: %s", type(e).__name__)
         raise AppError("上传红线台账失败") from e
 
 
@@ -759,7 +759,7 @@ async def list_review_redlines(
     except AppError:
         raise
     except Exception as e:
-        logger.error(f"List review redlines failed: {type(e).__name__}: {e}")
+        logger.error("List review redlines failed: %s", type(e).__name__)
         raise AppError("获取红线台账批次失败") from e
 
 
@@ -789,7 +789,7 @@ async def get_review_redline_ledger(
     except AppError:
         raise
     except Exception as e:
-        logger.error(f"Get review redline ledger failed: {type(e).__name__}: {e}")
+        logger.error("Get review redline ledger failed: %s", type(e).__name__)
         raise AppError("获取红线台账失败") from e
 
 
@@ -823,7 +823,7 @@ async def update_review_redline_disposition(
     except AppError:
         raise
     except Exception as e:
-        logger.error(f"Update review redline disposition failed: {type(e).__name__}: {e}")
+        logger.error("Update review redline disposition failed: %s", type(e).__name__)
         raise AppError("更新红线台账处置失败") from e
 
 

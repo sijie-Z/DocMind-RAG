@@ -353,6 +353,49 @@ async def test_storage_failure_keeps_referenced_row_and_never_orphans(factory, m
 
 
 @pytest.mark.asyncio
+async def test_db_failure_translated_without_bound_clause_text(factory, monkeypatch, caplog):
+    """DB 异常里的绑定参数（条款正文/作者）不得进入日志或异常链上下文。"""
+    await _seed(factory)
+    secret = "数据库参数里的绝对保密条款"
+
+    async def fail_on_second_commit():
+        nonlocal commit_count
+        commit_count += 1
+        if commit_count == 1:
+            await real_commit()
+            return
+        raise RuntimeError(f"INSERT failed [parameters: {secret!r}]")
+
+    monkeypatch.setattr(svc, "_submission_summary", lambda submission: {"id": submission.id})
+    async with factory() as session:
+        real_commit = session.commit
+        commit_count = 0
+        session.commit = fail_on_second_commit
+        case = await session.get(ReviewCase, CASE_ID)
+        user = await session.get(User, USER_ID)
+        with caplog.at_level("ERROR"):
+            with pytest.raises(ServiceUnavailableError) as caught:
+                await svc.upload_submission(
+                    session,
+                    case=case,
+                    current_user=user,
+                    filename="x.docx",
+                    data=_docx(),
+                )
+        assert caught.value.error_code == "REVIEW_REDLINE_DB_UNAVAILABLE"
+        assert caught.value.detail == {
+            "case_id": CASE_ID,
+            "submission_id": caught.value.detail["submission_id"],
+        }
+        assert secret not in str(caught.value)
+        assert SECRET_CLAUSE not in str(caught.value)
+        assert secret not in caplog.text
+        assert SECRET_CLAUSE not in caplog.text
+        assert caught.value.__cause__ is None
+        assert caught.value.__suppress_context__ is True
+
+
+@pytest.mark.asyncio
 async def test_integrity_error_does_not_upload_object(factory, monkeypatch, no_network):
     """M1：强制 DB 提交失败（唯一约束冲突）时，绝不产生 MinIO put_object。"""
     await _seed(factory)

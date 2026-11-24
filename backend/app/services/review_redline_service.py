@@ -367,7 +367,7 @@ def _parse_xml(payload: bytes, part: str) -> Any:
         raise ValidationError(
             f"DOCX XML 无法安全解析: {part}",
             field="file",
-            detail={"part": part, "reason": str(exc)},
+            detail={"part": part, "reason": "unsafe_xml_or_dtd"},
         ) from exc
 
 
@@ -1181,7 +1181,13 @@ async def upload_submission(
         ) from exc
     except Exception:
         await session.rollback()
-        raise
+        # SQLAlchemy 异常可能含绑定参数（条款正文/作者/文件名），不得原样抛到
+        # 端点日志或响应链。转成只含 id 的稳定 503，并切断异常上下文。
+        raise ServiceUnavailableError(
+            "红线台账暂时无法保存，请稍后重试",
+            error_code="REVIEW_REDLINE_DB_UNAVAILABLE",
+            detail={"case_id": case_id, "submission_id": submission_id},
+        ) from None
 
     try:
         # ② DB 提交成功后才写对象：409/回滚路径永远到不了这里，无孤儿对象。

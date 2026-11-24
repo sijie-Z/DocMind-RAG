@@ -5,6 +5,7 @@ from __future__ import annotations
 import copy
 import hashlib
 import io
+import json
 import zipfile
 
 import pytest
@@ -593,3 +594,14 @@ def test_plain_document_without_revisions_is_parsed_and_empty():
     assert result.parse_warnings == []
     assert result.revision_count == result.comment_count == result.unparsed_count == 0
     _assert_only_facts(result)
+
+
+def test_xml_parser_error_detail_never_echoes_attacker_identifier():
+    """DTD/实体标识符属于上传内容，400 detail 只能给稳定原因码。"""
+    marker = "attacker-controlled-DOCTYPE-name"
+    xml = f"<!DOCTYPE {marker} [{NS}]><w:document {NS}/>"
+    with pytest.raises(ValidationError) as caught:
+        parse_redline_docx(_docx(xml))
+    assert marker not in str(caught.value)
+    assert marker not in json.dumps(caught.value.detail, ensure_ascii=False)
+    assert caught.value.detail["reason"] == "unsafe_xml_or_dtd"
