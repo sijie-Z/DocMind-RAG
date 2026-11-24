@@ -525,6 +525,45 @@ def test_three_level_nested_revisions_are_never_silently_lost():
         _assert_only_facts(result)
 
 
+def test_three_level_same_side_under_opposite_is_never_silently_lost():
+    """异侧链下方的同侧第三层也必须单独留账，不能被 parent 的 opposite skip 吞掉。"""
+    cases = (
+        (
+            "<w:p><w:ins w:id='1' w:author='X'>A"
+            "<w:del w:id='2' w:author='Y'>B"
+            "<w:del w:id='3' w:author='Z'>C</w:del></w:del></w:ins></w:p>",
+            ("A", "B", "C"),
+        ),
+        (
+            "<w:p><w:del w:id='1' w:author='X'>D"
+            "<w:ins w:id='2' w:author='Y'>E"
+            "<w:ins w:id='3' w:author='Z'>F</w:ins></w:ins></w:del></w:p>",
+            ("D", "E", "F"),
+        ),
+    )
+    for document, expected_texts in cases:
+        result = parse_redline_docx(_docx(document))
+        assert result.submission_status == "partial"
+        facts = [
+            row["after_text"] or row["before_text"]
+            for row in result.rows
+            if row["revision_type"] in {"insertion", "deletion"}
+        ]
+        nested = [
+            row["before_text"]
+            for row in result.rows
+            if row["unparsed_reason"]
+            and (
+                "nested_opposite_revision" in row["unparsed_reason"]
+                or "nested_same_side_revision" in row["unparsed_reason"]
+            )
+        ]
+        assert facts == [expected_texts[0]]
+        assert nested == list(expected_texts[1:])
+        assert sorted(facts + nested) == sorted(expected_texts)
+        _assert_only_facts(result)
+
+
 def test_nested_same_side_insertion_is_not_double_counted():
     document = (
         "<w:p><w:ins w:id='1' w:author='X'><w:r><w:t>A</w:t></w:r>"

@@ -629,7 +629,40 @@ def parse_redline_docx(data: bytes, filename: str = "") -> RedlineParseResult:
                     nested_local = _local_name(nested_node.tag)
                     nested_type = _SUPPORTED[nested_local]
                     if nested_type == parent_type:
+                        # 同侧直接后代若处在异侧链的第二层以下，父事实行会按
+                        # opposite 子树剔除它；这里必须单独留一行，否则最深层
+                        # 文本会静默消失。只记本节点直属文本，后代由队列继续承载。
                         warnings.append(f"overlap:{parent_type}:{nested_local}")
+                        if parent_node is not element:
+                            same_side_field_skip, _ = _field_elements(nested_node)
+                            deeper_ids = {
+                                id(child) for child in direct_revision_children(nested_node)
+                            }
+                            same_side_text = _node_text(
+                                nested_node,
+                                side=nested_type,
+                                skip_ids=set(same_side_field_skip) | deeper_ids,
+                            )
+                            same_clause, same_section = _paragraph_hints(nested_node, parents)
+                            events.append(
+                                {
+                                    "kind": "unparsed",
+                                    "text_before": same_side_text or None,
+                                    "text_after": None,
+                                    "author": (nested_node.get(_w("author")) or "").strip() or None,
+                                    "authored_at": _xml_date(nested_node.get(_w("date"))),
+                                    "unparsed_reason": ["nested_same_side_revision"],
+                                    "element": nested_local,
+                                    "order": document_order[id(nested_node)],
+                                    "location": {
+                                        "source": _DOCUMENT_PART,
+                                        "element": f"w:{nested_local}",
+                                        "outer": f"w:{outer_name}",
+                                    },
+                                    "clause_no": same_clause,
+                                    "section_no": same_section,
+                                }
+                            )
                         pending.append((nested_node, nested_type, outer_name))
                         continue
                     if id(nested_node) in emitted_nested:
