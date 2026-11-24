@@ -52,7 +52,7 @@ const ModalStub = defineComponent({
   setup(_, { slots }) { return () => h('div', { class: 'n-modal-stub' }, slots.default?.()) },
 })
 const ButtonStub = defineComponent({
-  name: 'Button',
+  name: 'SearchActionButtonStub',
   setup(_, { attrs, slots }) { return () => h('button', attrs, slots.default?.()) },
 })
 const stubs = {
