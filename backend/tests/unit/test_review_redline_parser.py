@@ -489,6 +489,42 @@ def test_nested_revisions_inside_comment_keep_direction_and_text():
     _assert_only_facts(result)
 
 
+def test_three_level_nested_revisions_are_never_silently_lost():
+    """第三层 ins/del 必须各有自己的 unparsed 行，且不重复计入父行。"""
+    cases = (
+        (
+            "<w:p><w:ins w:id='1' w:author='X'>A"
+            "<w:del w:id='2' w:author='Y'>B"
+            "<w:ins w:id='3' w:author='Z'>C</w:ins></w:del></w:ins></w:p>",
+            ("A", "B", "C"),
+        ),
+        (
+            "<w:p><w:del w:id='1' w:author='X'>D"
+            "<w:ins w:id='2' w:author='Y'>E"
+            "<w:del w:id='3' w:author='Z'>F</w:del></w:ins></w:del></w:p>",
+            ("D", "E", "F"),
+        ),
+    )
+    for document, expected_texts in cases:
+        result = parse_redline_docx(_docx(document))
+        assert result.submission_status == "partial"
+        assert any("nested_opposite_revision:" in w for w in result.parse_warnings)
+        facts = [
+            row["after_text"] or row["before_text"]
+            for row in result.rows
+            if row["revision_type"] in {"insertion", "deletion"}
+        ]
+        nested = [
+            row["before_text"]
+            for row in result.rows
+            if "nested_opposite_revision" in (row["unparsed_reason"] or [])
+        ]
+        assert facts == [expected_texts[0]]
+        assert nested == list(expected_texts[1:])
+        assert sorted(facts + nested) == sorted(expected_texts)
+        _assert_only_facts(result)
+
+
 def test_nested_same_side_insertion_is_not_double_counted():
     document = (
         "<w:p><w:ins w:id='1' w:author='X'><w:r><w:t>A</w:t></w:r>"

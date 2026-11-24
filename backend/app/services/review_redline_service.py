@@ -604,46 +604,68 @@ def parse_redline_docx(data: bytes, filename: str = "") -> RedlineParseResult:
             if nested:
                 warnings.append(f"overlap:{nested[-1]}:{local}")
             # 异侧嵌套修订单独留档；同侧嵌套的文字已合并进父事实行，
-            # 只记 overlap 告警，不再生成第二行。
-            for nested_node in element.iter():
-                if id(nested_node) not in sibling_descendants:
-                    continue
-                nested_local = _local_name(nested_node.tag)
-                nested_type = _SUPPORTED.get(nested_local)
-                if nested_type is None or nested_type == revision_type:
-                    continue
-                nested_skip = set()
-                nested_skip.update(
-                    id(child)
-                    for child in nested_node.iter()
-                    if child is not nested_node and _local_name(child.tag) in _SUPPORTED
-                )
-                # 字段结果只在 dedicated field_result_revision 行里承载；
-                # 这里按局部字段结构跳过，避免把字段文本混进嵌套修订方向行。
-                nested_field_skip, _ = _field_elements(nested_node)
-                nested_skip.update(nested_field_skip)
-                nested_text = _node_text(nested_node, side=nested_type, skip_ids=nested_skip)
-                warnings.append(f"nested_opposite_revision:outer={local};inner={nested_local}")
-                nested_clause, nested_section = _paragraph_hints(nested_node, parents)
-                events.append(
-                    {
-                        "kind": "unparsed",
-                        "text_before": nested_text or None,
-                        "text_after": None,
-                        "author": (nested_node.get(_w("author")) or "").strip() or None,
-                        "authored_at": _xml_date(nested_node.get(_w("date"))),
-                        "unparsed_reason": ["nested_opposite_revision"],
-                        "element": nested_local,
-                        "order": document_order[id(nested_node)],
-                        "location": {
-                            "source": _DOCUMENT_PART,
-                            "element": f"w:{nested_local}",
-                            "outer": f"w:{local}",
-                        },
-                        "clause_no": nested_clause,
-                        "section_no": nested_section,
-                    }
-                )
+            # 只记 overlap 告警，不再生成第二行。按“最近的修订祖先”逐层
+            # 遍历，保证第三层及更深的修订也有自己的行，不会被父行静默吞掉。
+            emitted_nested: set[int] = set()
+
+            def direct_revision_children(parent: Any) -> list[Any]:
+                children: list[Any] = []
+                for node in parent.iter():
+                    if node is parent or _local_name(node.tag) not in _SUPPORTED:
+                        continue
+                    nearest_revision = None
+                    for candidate in reversed(ancestors.get(id(node), ())):
+                        if _local_name(candidate.tag) in _SUPPORTED:
+                            nearest_revision = candidate
+                            break
+                    if nearest_revision is parent:
+                        children.append(node)
+                return children
+
+            pending: list[tuple[Any, str, str]] = [(element, revision_type, local)]
+            while pending:
+                parent_node, parent_type, outer_name = pending.pop(0)
+                for nested_node in direct_revision_children(parent_node):
+                    nested_local = _local_name(nested_node.tag)
+                    nested_type = _SUPPORTED[nested_local]
+                    if nested_type == parent_type:
+                        warnings.append(f"overlap:{parent_type}:{nested_local}")
+                        pending.append((nested_node, nested_type, outer_name))
+                        continue
+                    if id(nested_node) in emitted_nested:
+                        continue
+                    emitted_nested.add(id(nested_node))
+                    # 字段结果只在 dedicated field_result_revision 行里承载；
+                    # side 过滤负责剔除异侧子树，本行保留同侧嵌套文本。
+                    nested_field_skip, _ = _field_elements(nested_node)
+                    # 直接嵌套的更深层修订由各自的 row 承载，本行不能重复计入。
+                    deeper_ids = {id(child) for child in direct_revision_children(nested_node)}
+                    nested_skip = set(nested_field_skip) | deeper_ids
+                    nested_text = _node_text(nested_node, side=nested_type, skip_ids=nested_skip)
+                    warnings.append(
+                        f"nested_opposite_revision:outer={outer_name};inner={nested_local}"
+                    )
+                    nested_clause, nested_section = _paragraph_hints(nested_node, parents)
+                    events.append(
+                        {
+                            "kind": "unparsed",
+                            "text_before": nested_text or None,
+                            "text_after": None,
+                            "author": (nested_node.get(_w("author")) or "").strip() or None,
+                            "authored_at": _xml_date(nested_node.get(_w("date"))),
+                            "unparsed_reason": ["nested_opposite_revision"],
+                            "element": nested_local,
+                            "order": document_order[id(nested_node)],
+                            "location": {
+                                "source": _DOCUMENT_PART,
+                                "element": f"w:{nested_local}",
+                                "outer": f"w:{outer_name}",
+                            },
+                            "clause_no": nested_clause,
+                            "section_no": nested_section,
+                        }
+                    )
+                    pending.append((nested_node, nested_type, nested_local))
             events.append(
                 {
                     "kind": revision_type,
