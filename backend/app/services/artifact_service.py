@@ -457,7 +457,9 @@ async def version_history(
         organization_id=organization_id,
         user_id=user_id,
         conversation_id=artifact.conversation_id,
-        task_id=artifact.task_id,
+        # 与写入侧同口径：有会话时链的身份是「同会话同标题」，不按单次运行的
+        # task_id 切分；否则第二次运行后读不到上一版本，版本历史退化成 1 条。
+        task_id=None if artifact.conversation_id is not None else artifact.task_id,
     )
     rows = list(
         (

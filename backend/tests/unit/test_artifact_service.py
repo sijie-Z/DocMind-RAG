@@ -151,6 +151,12 @@ async def test_version_chain_survives_across_runs_in_same_conversation(factory):
     assert created is True
     assert v2.version_no == 2, "跨 run 的同一会话标题必须追加版本"
     assert v2.replaces_artifact_id == v1.id
+    # 读侧同口径：从新版本回溯必须能看到上一版本，否则版本历史退化成 1 条。
+    async with factory() as db:
+        chain = await artifact_service.version_history(
+            db, artifact=v2, organization_id=ORG, user_id=USER
+        )
+    assert [row.version_no for row in chain] == [1, 2]
 
 
 async def test_different_title_or_scope_is_a_separate_chain(factory):

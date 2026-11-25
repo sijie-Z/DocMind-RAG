@@ -181,7 +181,7 @@ Reflector.reflect(plan, results)
 
 > 旧名 `vector_search` / `summarize_document` / `get_current_time` 已合并（hidden 保留注册，经 `TOOL_ALIASES` 路由到规范名，不再进 schema）。
 
-### 工具包工具 (20) — `tools/` 包
+### 工具包工具 (21) — `tools/` 包
 
 > 下表为功能示意，非完整清单（完整注册列表见 `GET /api/v1/agent/tools`）。
 
@@ -436,7 +436,7 @@ backend/app/agent/
   ├── subagent.py        # 子代理委托
   ├── service.py         # AgentService 入口
   ├── core_tools.py      # 核心工具（11 个）
-  └── tools/             # 工具包（20 个）
+  └── tools/             # 工具包（21 个）
       ├── web_search.py
       ├── code_execution.py
       ├── data_analysis.py

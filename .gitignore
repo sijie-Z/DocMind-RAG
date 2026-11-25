@@ -77,3 +77,6 @@ frontend/src/views/chat/上下文.txt
 /data/
 /.benchmarks/
 /backend/temp_uploads/
+# 工作树内 pytest basetemp 等临时产物（绝不提交）
+backend/.scratch/
+_scratch/

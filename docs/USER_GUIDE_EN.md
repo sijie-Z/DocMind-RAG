@@ -830,7 +830,7 @@ alembic revision --autogenerate -m "desc"   # create a migration (dev)
 ```
 
 - Config: `backend/alembic.ini`; the runtime URL is overridden from `settings.DATABASE_URL` in `backend/alembic/env.py`.
-- Current head: `040_inbound_redline_ledger` (`backend/alembic/versions/040_inbound_redline_ledger.py`).
+- Current head: `041_agent_artifact` (`backend/alembic/versions/041_agent_artifact.py`).
 - `init_db()` runs `create_all` **only on an empty database**; existing databases are not auto-upgraded. `USE_ALEMBIC=true` skips `create_all` entirely (`backend/app/core/database.py`).
 - **Release order**: new code may read new tables/columns (e.g. `organization_settings` and `prompt_templates.scope` from 011). Upgrade existing deployments by running migrations **before** routing traffic to new instances; do not create personal prompt templates during the rolling window (old instances treat them as organization-visible).
 - 011's `downgrade` is **lossy**: dropping `organization_settings` loses overrides; dropping `scope` makes personal templates organization-visible. Export/disable related data first (migration header).
@@ -1030,7 +1030,7 @@ python scripts/check_doc_facts.py                                  # three-way c
 | Endpoint modules | `backend/app/api/v1/router.py`; numbers in `docs/facts.json` |
 | Supported formats and parsing | `backend/app/services/document_parser.py` |
 | Index reconciliation / reindex | `backend/scripts/reconcile_knowledge_index.py` |
-| Migrations | `backend/alembic/versions/` (head: `040_inbound_redline_ledger`) |
+| Migrations | `backend/alembic/versions/` (head: `041_agent_artifact`) |
 | Agent architecture and events | `AGENT_ARCHITECTURE.md`, `backend/app/agent/events.py` |
 | Admin semantics and knowledge-base boundaries | `docs/decisions/ADR-001-路线冻结.md` (D3 / D5 historical semantics), `backend/app/models/knowledge_base.py`, `backend/app/rag/knowledge_base_filter.py`, `backend/app/rag/metadata_filter.py` (current behavior) |
 | Deployment and production checklist | `deploy/README.md`, `SETUP.md` |
