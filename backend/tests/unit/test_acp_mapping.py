@@ -61,6 +61,8 @@ KNOWN_EVENT_TYPES = (
     "command_error",
     # #474（随 develop 合入）：hook 失败事件。
     "hook_error",
+    # 批次七：工件持久化事件（ACP v1 无对应 update 语义 → 仅日志/由前端右栏消费）。
+    "artifact",
 )
 
 

@@ -1925,7 +1925,19 @@ export default {
     },
     download: 'Télécharger',
     runReport: "Rapport d'exécution",
-    exportMarkdown: 'Exporter en Markdown'
+    exportMarkdown: 'Exporter en Markdown',
+    panel: {
+      open: 'Artefacts',
+      title: 'Artefacts',
+      empty: "Aucun artefact pour l'instant. Les fichiers produits par les outils apparaîtront ici.",
+      loadFailed: 'Échec du chargement des artefacts.',
+      contentFailed: "Échec du chargement du contenu de l'artefact.",
+      preview: 'Aperçu',
+      source: 'Source',
+      versions: 'Versions',
+      badge: 'Artefact',
+      view: 'Voir'
+    }
   },
   help: {
     tasks: {
@@ -2061,6 +2073,8 @@ export default {
     register: 'S\'inscrire',
     knowledgeGraph: 'Graphe de connaissances',
     knowledgeEvalRuns: 'Historique des évaluations',
+    evalRubrics: 'Rubriques de réponse',
+    evalRubricRun: "Exécution d'évaluation de rubrique",
     knowledgeDocument: 'Détails du document',
     workflowEditor: 'Éditeur de workflow',
     agentMemory: 'Mémoire de l\'Agent'
@@ -2463,6 +2477,201 @@ export default {
     templateVersionLatest: 'Dernière (v{n})',
     templateLoadFailed: 'Échec du chargement des modèles de revue',
     templateOpenManager: 'Gérer les modèles',
+  },
+  rubricEval: {
+    common: {
+      retry: 'Réessayer',
+      refresh: 'Actualiser',
+      cancel: 'Annuler',
+      statusActive: 'Actif',
+      statusArchived: 'Archivé',
+      statusAll: 'Tous les statuts',
+      runId: "ID d'exécution"
+    },
+    strictness: {
+      neutral: 'Neutre (incertain = demi-point)',
+      strict: 'Strict (incertain = échec)',
+      lenient: 'Indulgent (incertain = réussite)'
+    },
+    verdict: {
+      yes: 'Oui',
+      no: 'Non',
+      unsure: 'Incertain'
+    },
+    mode: {
+      judge: 'Juge modèle',
+      fake: 'Rejeu déterministe'
+    },
+    library: {
+      subtitle:
+        "Rubriques au niveau de la réponse : questions oui/non pondérées avec versions immuables ; les verdicts du juge peuvent être calibrés contre l'or humain.",
+      scopeBanner:
+        "Cette page évalue si une RÉPONSE satisfait la rubrique — ce n'est pas le rappel de recherche (l'évaluation de recherche se trouve dans l'historique de la page connaissance). Le mode juge est basé sur un modèle, pas une vérité déterministe ; l'accord n'est affiché que si les cas portent des étiquettes humaines.",
+      navEntry: 'Rubriques de réponse',
+      create: 'Nouvelle rubrique',
+      createSubmit: 'Créer',
+      createDone: 'Rubrique créée',
+      createFailed: 'Échec de création de la rubrique',
+      name: 'Nom de la rubrique',
+      namePlaceholder: 'ex. Qualité des réponses contrat Q&R',
+      nameRequired: 'Veuillez saisir un nom de rubrique',
+      description: 'Description',
+      descriptionPlaceholder:
+        "Ce que couvre cette rubrique et à quelles questions elle s'applique (facultatif)",
+      items: 'Éléments (questions oui/non pondérées)',
+      itemsEmpty: "Aucun élément ; ajoutez-en au moins un avant d'exécuter.",
+      itemsRequired: 'Au moins un élément est requis',
+      addItem: 'Ajouter un élément',
+      removeItem: 'Supprimer',
+      question: 'Question',
+      questionPlaceholder: "ex. La réponse cite-t-elle le numéro d'article du règlement ?",
+      questionRequired: 'Chaque élément doit avoir un texte de question',
+      itemKey: 'Clé',
+      itemKeyPlaceholder: 'Clé (minuscules et souligné)',
+      itemKeyInvalid: 'Les clés doivent commencer par une minuscule et faire 2 à 32 caractères',
+      itemKeyDuplicate: 'Les clés doivent être uniques',
+      weight: 'Poids',
+      strictness: 'Sévérité',
+      strictnessHint:
+        "La sévérité ne change que le score d'un verdict « incertain » : neutre=0,5, strict=0, indulgent=1 ; oui/non valent toujours 1/0.",
+      changeNote: 'Note de version',
+      changeNotePlaceholder:
+        'Note de changement pour cette version (facultatif, 200 caractères max)',
+      bootstrap: 'Partir des valeurs par défaut',
+      bootstrapName: 'Rubrique de qualité par défaut',
+      bootstrapDone: 'Rubrique par défaut initialisée',
+      bootstrapFailed: "Échec d'initialisation de la rubrique",
+      loadFailed: 'Échec du chargement des rubriques',
+      empty: 'Aucune rubrique',
+      emptyHint:
+        'Les rubriques transforment « cette réponse est-elle bonne ? » en actif éditable, versionné et calibrable : chaque édition crée une version immuable, et les exécutions figent la version et l\'empreinte du jeu de cas utilisés.',
+      statusColumn: 'Statut',
+      versionTag: '{n} versions',
+      open: 'Ouvrir',
+      runs: 'Exécutions',
+      updatedAt: 'Mis à jour'
+    },
+    detail: {
+      loadFailed: 'Échec du chargement du détail de la rubrique',
+      judgeDisclaimer:
+        "Notation : le juge renvoie oui/non/incertain ; « incertain » est converti selon la sévérité de chaque élément. Le mode juge est basé sur un modèle (pas une vérité déterministe) ; le mode fake rejoue les verdicts fournis par l'appelant.",
+      archivedBanner:
+        'Cette rubrique est archivée (lecture seule) : aucune nouvelle version ni exécution ; les exécutions existantes sont inchangées.',
+      archive: 'Archiver la rubrique',
+      archiveConfirm:
+        "L'archivage rend la rubrique en lecture seule : aucune nouvelle version ni exécution ; les exécutions existantes sont inchangées. L'archivage est irréversible. Continuer ?",
+      archiveDone: 'Rubrique archivée',
+      archiveFailed: "Échec de l'archivage",
+      versionHistory: 'Historique des versions',
+      versionCount: '{n} versions',
+      versionsEmpty: "Cette rubrique n'a pas encore de version",
+      sourceBootstrap: 'Initialisation',
+      itemsUnit: 'éléments',
+      runAction: "Lancer l'évaluation",
+      newVersionAction: 'Modifier en nouvelle version',
+      newVersionSubmit: 'Enregistrer la nouvelle version',
+      newVersionDone: 'Nouvelle version enregistrée',
+      newVersionFailed: "Échec de l'enregistrement de la nouvelle version",
+      diffAction: 'Comparer les versions',
+      diffHint:
+        'Diff en lecture seule ; ne crée aucune version et ne modifie aucune exécution',
+      diffTitle: 'Diff des versions (lecture seule)',
+      diffBase: 'Version de base',
+      diffTarget: 'Version cible',
+      diffRun: 'Comparer',
+      diffFailed: 'Échec de la comparaison',
+      diffIdentical: 'Les deux versions sont identiques',
+      diffAdded: 'Éléments ajoutés',
+      diffRemoved: 'Éléments supprimés',
+      diffChanged: 'Éléments modifiés',
+      diffSummary: 'Ajoutés {added} · Supprimés {removed} · Modifiés {changed} · Inchangés {unchanged}',
+      diffField: {
+        question: 'Question',
+        weight: 'Poids',
+        strictness: 'Sévérité'
+      },
+      versionContent: 'Contenu de la version',
+      versionSelectHint: 'Sélectionnez une version pour voir ses éléments',
+      versionCorrupt: 'Échec de la vérification du hachage',
+      changeNoteLabel: 'Note de version',
+      itemKey: 'Clé',
+      itemQuestion: 'Question',
+      itemWeight: 'Poids',
+      itemStrictness: 'Sévérité',
+      runsTitle: 'Exécutions',
+      runsEmpty: 'Aucune exécution',
+      runTime: 'Heure',
+      runMode: 'Mode',
+      runVersion: 'Version',
+      runScore: 'Score',
+      runStatus: 'Statut',
+      runOpen: 'Voir'
+    },
+    run: {
+      createTitle: "Lancer l'évaluation de la rubrique",
+      version: 'Version de la rubrique',
+      mode: 'Mode',
+      judgeNote:
+        "Le mode juge appelle un juge modèle par cas (un appel par cas) ; les verdicts incertains sont convertis selon la sévérité. Les résultats sont basés sur un modèle, pas une vérité déterministe ; l'accord avec les étiquettes humaines n'est affiché que si des verdicts or sont fournis.",
+      fakeNote:
+        "Le mode fake rejoue les verdicts que vous fournissez (fake_verdicts) pour les tests et démos ; ce n'est ni un jugement de modèle ni une vérité humaine.",
+      casesJson: 'Cas (tableau JSON)',
+      casesPlaceholder:
+        'Un tableau JSON ; chaque cas a case_id, answer, et éventuellement name / gold_verdicts / fake_verdicts',
+      casesHint:
+        'Chaque cas : case_id (unique), answer (requis), name / gold_verdicts (or humain) / fake_verdicts (requis en mode fake, couvrant tous les éléments) facultatifs. 50 cas max.',
+      casesInvalidJson: 'Les cas ne sont pas un JSON valide',
+      casesInvalidShape:
+        'Les cas doivent être un tableau JSON ; chaque entrée a besoin de case_id et answer',
+      casesTooMany: 'Au plus 50 cas par exécution',
+      submit: 'Exécuter',
+      done: 'Exécution terminée',
+      failed: "Échec de l'exécution de l'évaluation",
+      loadFailed: "Échec du chargement de l'exécution",
+      failedTitle: 'Cette exécution a échoué : aucun score produit',
+      failedUnavailable:
+        "Le juge était indisponible (échec de l'appel au modèle). L'exécution échouée est conservée ; réessayez plus tard.",
+      failedContract:
+        'La sortie du juge viole le contrat JSON (clés manquantes/en trop ou verdicts invalides). Aucun score produit ; vérifiez la rubrique ou la configuration du modèle.',
+      errorCode: "Code d'erreur",
+      score: 'Score (taux de réussite pondéré)',
+      judgeModelNote: 'Modèle juge : {model}',
+      fakeModelNote: 'Rejeu déterministe, sans appel de modèle',
+      versionLabel: 'Version / cas',
+      casesUnit: 'cas',
+      datasetHash: 'Empreinte du jeu de cas',
+      questionsTitle: 'Taux de réussite par question',
+      questionsHint:
+        'Taux = cas avec crédit 1,0 / cas jugés ; le crédit « incertain » dépend de la sévérité.',
+      passRate: 'Taux de réussite',
+      verdictCounts: 'Verdicts',
+      verdictCountsValue: 'oui {yes} · non {no} · incertain {unsure}',
+      resultsTitle: 'Résultats par cas',
+      resultsNote:
+        "Les réponses et verdicts ne sont visibles que par les utilisateurs autorisés de l'organisation ; les instantanés sont immuables.",
+      caseId: 'Cas',
+      caseName: 'Nom',
+      caseScore: 'Score',
+      caseVerdicts: 'Verdicts',
+      statusCompleted: 'Terminé',
+      statusFailed: 'Échec',
+      backToRubric: 'Retour à la rubrique'
+    },
+    calibration: {
+      title: 'Calibration du juge (vs or humain)',
+      subtitle:
+        'Compare les verdicts du juge aux étiquettes humaines par question ; seules les paires ayant les deux sont comptées.',
+      agreement: 'Accord',
+      pairs: 'Accords / comparés',
+      casesWithGold: 'Cas avec or / total',
+      confusionHint: 'Matrice de confusion : lignes = verdict du juge, colonnes = or humain.',
+      judgeRow: 'Juge \\ Or',
+      note: "L'accord est une calibration sur ce lot, pas la précision réelle du juge ; interprétez prudemment les petits échantillons.",
+      missingTitle: 'Aucune étiquette humaine dans ce lot — calibration indisponible',
+      missingHint:
+        "Ajoutez gold_verdicts (clé vers yes/no/unsure) aux cas puis relancez pour obtenir l'accord et la matrice.",
+      unavailableOnFailure: "L'exécution a échoué : aucun verdict à calibrer."
+    }
   },
   memory: {
     loadFailed: 'Échec du chargement de la mémoire',

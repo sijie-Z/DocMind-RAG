@@ -53,6 +53,15 @@
           >
             {{ t('reviewTemplates.templateOpenManager') }}
           </n-button>
+          <n-button
+            secondary
+            round
+            class="template-lib-btn"
+            data-testid="reviews-rubrics-open"
+            @click="router.push('/eval/rubrics')"
+          >
+            {{ t('rubricEval.library.navEntry') }}
+          </n-button>
           <n-button type="primary" round class="create-case-btn" data-testid="create-case-open" @click="createVisible = true">
             {{ t('reviews.createCase') }}
           </n-button>

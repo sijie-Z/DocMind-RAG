@@ -1563,6 +1563,25 @@ async def chat_stream_endpoint(
                         )
                         if agent_event.tool_name in ("search_knowledge_base", "vector_search"):
                             _extract_agent_sources(agent_event.content, agent_sources)
+                    elif agent_event.type == "artifact":
+                        # 批次七：显式工件载荷已持久化——投影为独立事件（结构与
+                        # /agent 出口同形），前端右栏据此刷新工件列表；普通工具
+                        # 结果仍按上面的 500 字符截断，不受影响。
+                        yield await emitter.emit(
+                            "artifact",
+                            {
+                                "artifactId": agent_event.artifact_id,
+                                "title": agent_event.artifact_title,
+                                "kind": agent_event.artifact_kind,
+                                "version": agent_event.artifact_version,
+                                "sourceTool": agent_event.artifact_source_tool,
+                                "origin": agent_event.artifact_origin,
+                                "created": agent_event.artifact_created,
+                                "contentUrl": f"/api/v1/artifacts/{agent_event.artifact_id}/content",
+                                "toolCallId": agent_event.tool_call_id,
+                                "planStepId": agent_event.plan_step_id,
+                            },
+                        )
                     elif agent_event.type == "tool_error":
                         # W0-5：工具失败文本按白名单/映射外发（原始异常与内部
                         # 类名只进日志；工具名属于可对外上下文）。

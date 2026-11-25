@@ -33,7 +33,7 @@ DocMind 不是一个「聊天框套壳」：它把企业知识库当成一套**�
 三个典型用法：
 
 - **带出处的知识问答** — 上传 PDF/Word/Excel/TXT/Markdown、扫描件（OCR），系统解析、分块、混合检索（BM25 + 向量 + RRF）、重排后流式回答；每个引用都来自**未加工的解析原文**，可溯源到条款/页码/字符区间，而不是检索用的增强文本。
-- **能规划、能执行、能自检的 Agent** — PER（Plan → Execute → Reflect）循环，可调用 31 个工具完成多步任务；每轮运行产出 RunReport（做了什么、为何这么做、结果如何），支持执行回放与经验记忆。
+- **能规划、能执行、能自检的 Agent** — PER（Plan → Execute → Reflect）循环，可调用 32 个工具完成多步任务；每轮运行产出 RunReport（做了什么、为何这么做、结果如何），支持执行回放与经验记忆。
 - **合同核验（垂直场景）** — 把「制度/模板 + 合同 V1 + V2」绑成核验案件：文档版本身份与内容哈希、readiness 门禁、原文证据快照、确定性条款抽取与差异对齐，最后交付带覆盖范围与免责声明的核验单。这是本仓库最「产品化」的一块，见下文。
 
 > **项目状态**：公开项目，功能完整度高于稳定度，适合学习、二次开发与本地演示；生产部署前请按自己的合规要求加固。工程纪律先于功能数量：**数字带口径、修复带证据、退化拦在合并前**（见「工程质量」）。
@@ -49,7 +49,7 @@ DocMind 不是一个「聊天框套壳」：它把企业知识库当成一套**�
 │  FastAPI · JWT + RBAC · SSE · WebSocket · 请求 ID    │
 ├── AI Agent 核心 ────────────────────────────────────┤
 │  PER Loop (Planner → Executor → Reflector)          │
-│  Tool Registry (31) · RunReport · Hooks · 回放        │
+│  Tool Registry (32) · RunReport · Hooks · 回放        │
 ├── RAG 管线 ─────────────────────────────────────────┤
 │  HybridRetriever (BM25 + 向量 + RRF) · Reranker      │
 │  二级缓存 · PII 掩码 · 原文/检索文本分离(O/E)          │
@@ -78,14 +78,14 @@ DocMind 不是一个「聊天框套壳」：它把企业知识库当成一套**�
 | 方向 | 能力 | 关键事实 |
 |------|------|----------|
 | 知识库 / RAG | 多格式解析（含 OCR）、语义分块、混合检索、重排、查询改写/HyDE、语义缓存、严格模式、分块浏览与人工纠正、bad case 一键存为评测用例 | 检索评分按增强文本、**证据出口只放 parser 原文**；不可用文档显式 `SOURCE_ORIGINAL_UNAVAILABLE`；人工修正只写独立审计行并标 `manual_override`，永不覆盖原文/证据哈希；评测用例按组织内 query+金标集合去重，重复保存幂等返回既有用例 |
-| Agent | PER 三阶段循环、DAG 并行调度、超时/重试/回退、对抗式 Reviewer、RunReport、执行回放、经验记忆 | **31 个内置工具**（默认注入 10 个工具，终端/飞书/委派按门控开放） |
+| Agent | PER 三阶段循环、DAG 并行调度、超时/重试/回退、对抗式 Reviewer、RunReport、执行回放、经验记忆 | **32 个内置工具**（默认注入 10 个工具，终端/飞书/委派按门控开放） |
 | 合同核验 | 文档角色/版本族/版本序/内容哈希、readiness、核验案件、原文证据快照、确定性抽取与对齐 | 只输出文本事实与差异类型（modified/renumbered/…），不输出任何法律结论；未识别不猜值 |
-| 平台化 | 多租户组织隔离、RBAC + API Key scope、审计日志、Prometheus/Grafana、OpenTelemetry、24 种 SSE 事件 | 组织隔离贯穿检索/会话/文档/缓存/WS；失败语义可判定（4xx + error_code） |
+| 平台化 | 多租户组织隔离、RBAC + API Key scope、审计日志、Prometheus/Grafana、OpenTelemetry、25 种 SSE 事件 | 组织隔离贯穿检索/会话/文档/缓存/WS；失败语义可判定（4xx + error_code） |
 
 <details>
-<summary><b>31 个内置工具一览</b>（点击展开）</summary>
+<summary><b>32 个内置工具一览</b>（点击展开）</summary>
 
-`core_tools.py` 11 个 + `tools/` 20 个，默认注入 10 个；口径见 `docs/METRICS.md`。兼容口径：`disabled_tools` 中的旧工具名按**能力粒度**生效（如 `calculate` 只禁用 `utility` 的 calculate operation），写规范名则禁用整个工具。
+`core_tools.py` 11 个 + `tools/` 21 个，默认注入 10 个；口径见 `docs/METRICS.md`。兼容口径：`disabled_tools` 中的旧工具名按**能力粒度**生效（如 `calculate` 只禁用 `utility` 的 calculate operation），写规范名则禁用整个工具。
 
 | 类别 | 工具 | 说明 |
 |------|------|------|
@@ -112,7 +112,7 @@ DocMind 不是一个「聊天框套壳」：它把企业知识库当成一套**�
 1. **评测门禁进 CI（Eval Gate）** — 检索质量由零容差门禁逐 PR 守护：Eval v1.5 共 **80 条 golden set（60 正例 + 20 负例）**，ClauseHit@1/@3/@5、MRR、EmptyAcc、NearMiss@5、errors 七项指标容差为 0，任何下跌即红、fail-closed。`make eval-ci`（`mode=fake`，2026-10-24，语料 commit `d867a2b3`）实测 ClauseHit@1 **70.0%** / @3 **76.7%** / @5 **80.0%**、NearMiss@5 **25.0%**、MRR **0.74**、EmptyAcc **100%**、errors **0**（来源 PR #525，已合并，squash 552efaad；与 v1 的 28 条基线不可混比）。基线更新是显式 PR 行为（规则见 `backend/docs/eval-gate-phase1.md`，数字口径见 `docs/METRICS.md`）。
 2. **静默假成功清零（#301）** — 全仓 ~551 处异常捕获全量审计，32 条静默假成功全部闭环（登出 fail-closed、检索三态、文档状态机诚实化、统计端点降级身份……），每条修复都带回归测试。
 3. **先红后绿 + 变异验证** — 每笔修复先写失败测试；修复后注入缺陷必须「精确变红」，证明测试真的有判别力，而不是顺手写个能过的断言。
-4. **文档数字不变量** — SSE 事件数、端点模块数、前端路由数、工具数由源码派生，期望值统一放在 `docs/facts.json`，对外口径（值/口径/命令/日期/备注）登记在 `docs/METRICS.md`；`backend/scripts/check_doc_facts.py` 在 CI 逐 PR 校验「代码 ↔ facts JSON ↔ METRICS ↔ 文档」一致。前端路由按两种口径记录：41 条路由记录（36 条具名路由，含顶层与 redirect 记录）。
+4. **文档数字不变量** — SSE 事件数、端点模块数、前端路由数、工具数由源码派生，期望值统一放在 `docs/facts.json`，对外口径（值/口径/命令/日期/备注）登记在 `docs/METRICS.md`；`backend/scripts/check_doc_facts.py` 在 CI 逐 PR 校验「代码 ↔ facts JSON ↔ METRICS ↔ 文档」一致。前端路由按两种口径记录：44 条路由记录（39 条具名路由，含顶层与 redirect 记录）。
 5. **棘轮只缩不涨** — 后端覆盖率下限 `--cov-fail-under=42` + 前端四道基线棘轮（硬编码中文 / i18n 完备性 / 命名一致 / 用键定义）：只拦下滑、不追高分，新增长即红。
 
 加固收口（已完成）：Agent 记忆接口按用户隔离、`/files` 代理鉴权（非公开对象需登录 + 组织归属校验）、纯 ASGI 监控与限流中间件、移除 legacy `ci.yml`；另有工作流归属隔离、API Key 掩码、Web 抓取 SSRF 防护、上传路径穿越与 MinIO 删除、Agent 沙箱逃逸封堵、`execute_sql` 租户过滤、MCP 子进程环境变量白名单、登录失败锁定 + 用户枚举时序防护、PII 全链路掩码等安全修复。
@@ -214,15 +214,15 @@ DocMind/
 │   ├── app/
 │   │   ├── main.py                  # FastAPI 兼容入口（组装在 bootstrap.py）
 │   │   ├── agent/                   # PER Agent：loop / planner / executor / reflector
-│   │   │   ├── events.py            #   SSE 事件类型（24 种）
+│   │   │   ├── events.py            #   SSE 事件类型（25 种）
 │   │   │   ├── core_tools.py        #   基础工具（11 个）
-│   │   │   └── tools/               #   扩展工具（20 个；合计 31 个内置工具）
+│   │   │   └── tools/               #   扩展工具（21 个；合计 32 个内置工具）
 │   │   ├── rag/                     # 检索管线：retriever / reranker / pipeline / cache
 │   │   ├── api/v1/
-│   │   │   ├── router.py            # 主路由（注册 30 个模块）
-│   │   │   └── endpoints/           # 端点实现（30 个文件）
-│   │   ├── services/                # 业务服务层（42 个服务）
-│   │   ├── models/                  # ORM 模型（23 个模型文件）
+│   │   │   ├── router.py            # 主路由（注册 32 个模块）
+│   │   │   └── endpoints/           # 端点实现（32 个文件）
+│   │   ├── services/                # 业务服务层（43 个服务）
+│   │   ├── models/                  # ORM 模型（24 个模型文件）
 │   │   ├── core/                    # 配置 / DB / Redis / ES / MinIO / Kafka / JWT
 │   │   └── worker/                  # Kafka 消费者（解析 → 分块 → 嵌入 → 索引）
 │   ├── tests/                       # 后端测试（单测 + API + 集成）
@@ -231,14 +231,14 @@ DocMind/
 │   └── docker-compose.yml           # 基础设施与全量编排
 ├── frontend/
 │   └── src/
-│       ├── views/                   # 页面（25 个页面模块，41 条路由记录 / 36 条具名路由）
+│       ├── views/                   # 页面（26 个页面模块，44 条路由记录 / 39 条具名路由）
 │       ├── components/ · api/ · stores/ · router/ · composables/ · locales/
 └── docs/                            # 架构页 / 使用手册 / 决策记录 / 指标口径
 ```
 
 ### 🌐 API 层 (`backend/app/api/v1/`)
 
-30 个端点模块，统一 `/api/v1` 前缀：
+32 个端点模块，统一 `/api/v1` 前缀：
 
 | 模块 | 路由前缀 | 说明 |
 |------|----------|------|
@@ -250,7 +250,9 @@ DocMind/
 | 聊天 | `/chat` | 会话 CRUD、SSE 流式问答、严格模式、调试端点 |
 | 知识库 | `/knowledge` | 知识库文档检索、统计、设置、检索评测用例/运行历史（bad case 捕获） |
 | 知识库管理 | `/knowledge-bases` | 多知识库实体 CRUD（组织隔离） |
+| Rubric 评测 | `/eval` | 回答级 rubric 评分表（加权 yes/no + NEUTRAL/STRICT/LENIENT 重映射）、不可变版本与只读 diff、judge/fake 运行与 judge 人工金标校准（一致率 + 混淆矩阵）；评的是**答案**，与 `/knowledge/eval` 的检索 recall@k 不同口径 |
 | 合同核验 | `/reviews` | 核验案件/核验项/证据快照 + 确定性抽取与 V1/V2 对齐 + 逐项决策与核验单导出（原文证据 + 版本哈希）；组织级模板库（不可变版本 + 只读 diff）；对方红线事实台账（DOCX 修订/批注解析、显式 unparsed、append-only、乐观锁 disposition） |
+| Agent 工件 | `/artifacts` | 工件列举/详情/内容流（内容寻址 sha256、版本链、组织+用户隔离）；HTML/SVG 内容响应带 CSP sandbox，仅允许在无同源沙箱中渲染 |
 | 组织管理 | `/organizations` | 组织 CRUD、成员管理、角色分配 |
 | 组织设置 | `/organizations` | 组织级设置读写与审计（与组织管理共用前缀） |
 | 系统监控 | `/monitoring` | 性能指标、健康检查、告警、RAG 质量评估 |

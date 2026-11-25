@@ -33,7 +33,7 @@ DocMind is not a chat box wrapped around an LLM. It treats an enterprise knowled
 Three typical uses:
 
 - **Knowledge Q&A with provenance** — upload PDF/Word/Excel/TXT/Markdown or scanned images (OCR); the system parses, chunks, retrieves with hybrid search (BM25 + vector + RRF) and reranking, then streams an answer. Every citation comes from **parser-original text** with clause/page/character anchors, not from retrieval-augmented text.
-- **An agent that plans, executes and self-checks** — a PER (Plan → Execute → Reflect) loop with 31 tools for complex multi-step tasks; every run produces a RunReport (what was done, why, with what result), with replay and experience memory.
+- **An agent that plans, executes and self-checks** — a PER (Plan → Execute → Reflect) loop with 32 tools for complex multi-step tasks; every run produces a RunReport (what was done, why, with what result), with replay and experience memory.
 - **Contract review (vertical slice)** — bind “policy/template + contract V1 + V2” into a review case: document identity and content hashes, readiness gates, evidence snapshots, deterministic clause extraction and V1↔V2 alignment, and finally a review report with coverage and disclaimers. This is the most product-oriented part of the repo.
 
 > **Project status**: public project, completeness ahead of stability — suitable for learning, secondary development and local demos; harden security and operations before any production use. Engineering discipline comes before feature count: **numbers have a stated method, fixes come with evidence, regressions are blocked before merge** (see “Engineering quality”).
@@ -49,7 +49,7 @@ Three typical uses:
 │  FastAPI · JWT + RBAC · SSE · WebSocket · Request ID│
 ├── AI Agent Core ────────────────────────────────────┤
 │  PER Loop (Planner → Executor → Reflector)          │
-│  Tool Registry (31) · RunReport · Hooks · Replay    │
+│  Tool Registry (32) · RunReport · Hooks · Replay    │
 ├── RAG Pipeline ─────────────────────────────────────┤
 │  HybridRetriever (BM25 + vector + RRF) · Reranker   │
 │  two-level cache · PII masking · original O/E split │
@@ -79,14 +79,14 @@ register document identity → readiness gate → create case (blocked/ready + r
 | Area | What it does | Key facts |
 |------|--------------|-----------|
 | Knowledge base / RAG | multi-format parsing (OCR included), semantic chunking, hybrid retrieval, reranking, query rewriting/HyDE, semantic cache, strict mode, chunk browsing and manual correction, one-click bad case → eval case | scoring happens on enhanced text; **the evidence exit only exposes parser-original text**; unusable documents return `SOURCE_ORIGINAL_UNAVAILABLE`; manual corrections are stored in a separate audited row labeled `manual_override` and never overwrite originals or evidence hashes; eval cases deduplicate by organization-scoped query + golden set, so repeated saves return the existing case |
-| Agent | PER loop, DAG-based parallel scheduling, timeout/retry/fallback, adversarial reviewer, RunReport, replay, experience memory | **31 Built-In Tools** (10 tools are injected by default; terminal/Feishu/delegation are gated) |
+| Agent | PER loop, DAG-based parallel scheduling, timeout/retry/fallback, adversarial reviewer, RunReport, replay, experience memory | **32 Built-In Tools** (10 tools are injected by default; terminal/Feishu/delegation are gated) |
 | Contract review | document role/family/version/content hash, readiness, review cases, evidence snapshots, deterministic extraction and alignment | text facts and change types only (modified/renumbered/…); no legal conclusions; ambiguous facts are never guessed |
-| Platform | multi-tenant org isolation, RBAC + API-Key scopes, audit logs, Prometheus/Grafana, OpenTelemetry, 24 SSE event types | org isolation spans retrieval/chat/documents/cache/WS; failure semantics are decidable (4xx + error_code) |
+| Platform | multi-tenant org isolation, RBAC + API-Key scopes, audit logs, Prometheus/Grafana, OpenTelemetry, 25 SSE event types | org isolation spans retrieval/chat/documents/cache/WS; failure semantics are decidable (4xx + error_code) |
 
 <details>
-<summary><b>31 Built-In Tools</b> (click to expand)</summary>
+<summary><b>32 Built-In Tools</b> (click to expand)</summary>
 
-11 in `core_tools.py` + 20 under `tools/` (31 built-in tools total), with 10 tools are injected by default; see `docs/METRICS.md` for the derivation. Legacy names in `disabled_tools` act at capability granularity (e.g. `calculate` disables only the calculate operation of `utility`); canonical names disable the whole tool.
+11 in `core_tools.py` + 21 under `tools/` (32 built-in tools total), with 10 tools are injected by default; see `docs/METRICS.md` for the derivation. Legacy names in `disabled_tools` act at capability granularity (e.g. `calculate` disables only the calculate operation of `utility`); canonical names disable the whole tool.
 
 | Category | Tools | Notes |
 |----------|-------|-------|
@@ -113,7 +113,7 @@ register document identity → readiness gate → create case (blocked/ready + r
 1. **Evaluation gate in CI** — retrieval quality is guarded per PR with zero tolerance: Eval v1.5 ships **80 golden cases (60 positive + 20 negative)**; ClauseHit@1/@3/@5, MRR, EmptyAcc, NearMiss@5 and errors are all zero-tolerance, fail-closed. `make eval-ci` (`mode=fake`, 2026-10-24, corpus commit `d867a2b3`) measured ClauseHit@1 **70.0%** / @3 **76.7%** / @5 **80.0%**, NearMiss@5 **25.0%**, MRR **0.74**, EmptyAcc **100%**, errors **0** (PR #525, squash 552efaad; not comparable with the 28-case v1 baseline). Baseline updates are explicit PRs (`backend/docs/eval-gate-phase1.md`; method in `docs/METRICS.md`).
 2. **Silent false-success cleanup (#301)** — ~551 exception handlers audited, 32 silent false-success paths closed (logout fail-closed, three-state retrieval, honest document state machine, degraded stats identity…), each with a regression test.
 3. **Red first, then green + mutation checks** — every fix starts with a failing test; after the fix, injecting the defect back must fail *that* test — proof the test has discriminating power.
-4. **Documented-number invariants** — SSE event count, endpoint-module count, frontend-route count and tool count are derived from source; expected values live in `docs/facts.json`, the public method for every metric (value / method / command / date / note) lives in `docs/METRICS.md`, and `backend/scripts/check_doc_facts.py` verifies code ↔ facts JSON ↔ METRICS.md ↔ docs on every PR. Frontend routes are recorded in two ways: 41 route records (36 named routes, including top-level and redirect records).
+4. **Documented-number invariants** — SSE event count, endpoint-module count, frontend-route count and tool count are derived from source; expected values live in `docs/facts.json`, the public method for every metric (value / method / command / date / note) lives in `docs/METRICS.md`, and `backend/scripts/check_doc_facts.py` verifies code ↔ facts JSON ↔ METRICS.md ↔ docs on every PR. Frontend routes are recorded in two ways: 44 route records (39 named routes, including top-level and redirect records).
 5. **Ratchet only tightens** — backend coverage floor `--cov-fail-under=42` plus four frontend baseline ratchets (hardcoded Chinese / i18n completeness / naming consistency / key usage): they block drops, never chase scores.
 
 Hardening closed (completed): user-scoped agent memory, `/files` proxy authorization (auth + org ownership for non-public objects), pure-ASGI metrics and rate-limit middleware, legacy `ci.yml` removed; plus workflow ownership isolation, API-key masking, SSRF protection for web fetch, upload path traversal and MinIO delete fixes, agent sandbox escape closure, `execute_sql` tenant filtering, MCP subprocess env allow-list, login-failure lockout + enumeration timing defense, and end-to-end PII masking.
@@ -215,15 +215,15 @@ DocMind/
 │   ├── app/
 │   │   ├── main.py                  # FastAPI compatibility entry (assembly lives in bootstrap.py)
 │   │   ├── agent/                   # PER agent: loop / planner / executor / reflector
-│   │   │   ├── events.py            #   SSE event types (24 types)
+│   │   │   ├── events.py            #   SSE event types (25 types)
 │   │   │   ├── core_tools.py        #   base tools (11)
-│   │   │   └── tools/               #   extended tools (20; 31 built-in tools total)
+│   │   │   └── tools/               #   extended tools (21; 32 built-in tools total)
 │   │   ├── rag/                     # retriever / reranker / pipeline / cache
 │   │   ├── api/v1/
-│   │   │   ├── router.py            # main router (30 modules registered)
-│   │   │   └── endpoints/           # Endpoint implementations (30 files)
-│   │   ├── services/                # business services (42 services)
-│   │   ├── models/                  # ORM models (23 model files)
+│   │   │   ├── router.py            # main router (32 modules registered)
+│   │   │   └── endpoints/           # Endpoint implementations (32 files)
+│   │   ├── services/                # business services (43 services)
+│   │   ├── models/                  # ORM models (24 model files)
 │   │   ├── core/                    # config / DB / Redis / ES / MinIO / Kafka / JWT
 │   │   └── worker/                  # Kafka consumer (parse → chunk → embed → index)
 │   ├── tests/                       # backend tests (unit + API + integration)
@@ -232,14 +232,14 @@ DocMind/
 │   └── docker-compose.yml
 ├── frontend/
 │   └── src/
-│       ├── views/                   # pages (25 page modules, 41 route records / 36 named routes)
+│       ├── views/                   # pages (26 page modules, 44 route records / 39 named routes)
 │       ├── components/ · api/ · stores/ · router/ · composables/ · locales/
 └── docs/                            # architecture page / user guide / ADRs / metrics
 ```
 
 ### 🌐 API Layer (`backend/app/api/v1/`)
 
-30 endpoint modules under `/api/v1`:
+32 endpoint modules under `/api/v1`:
 
 | Module | Prefix | Description |
 |--------|--------|-------------|
@@ -251,7 +251,9 @@ DocMind/
 | Chat | `/chat` | Session CRUD, SSE streaming Q&A, strict mode, debug endpoints |
 | Knowledge | `/knowledge` | Knowledge retrieval, statistics, settings, retrieval eval cases and run history (bad case capture) |
 | Knowledge Bases | `/knowledge-bases` | Multi-knowledge-base entity CRUD (organization-scoped) |
+| Rubric Eval | `/eval` | Answer-level rubric specs (weighted yes/no with NEUTRAL/STRICT/LENIENT remapping), immutable versions and read-only diff, judge/fake runs with judge-vs-human-gold calibration (agreement + confusion matrix); scores **answers**, distinct from retrieval recall@k under `/knowledge/eval` |
 | Contract Review | `/reviews` | Review cases / items / evidence snapshots + deterministic extraction and V1/V2 alignment + per-item decisions and report export (parser-original quotes + version hashes); org template library (immutable versions + read-only diff); inbound counterparty redline fact ledger (DOCX revisions/comments parsed, explicit unparsed rows, append-only, optimistic-locking disposition) |
+| Agent Artifacts | `/artifacts` | Artifact list / detail / content (content-addressed sha256, version chain, org+user isolation); HTML/SVG responses carry a CSP sandbox |
 | Organizations | `/organizations` | Org CRUD, member management, role assignment |
 | Organization Settings | `/organizations` | Org-level settings and audit (shared prefix with Organizations) |
 | Monitoring | `/monitoring` | Performance metrics, health checks, alerts, RAG quality scoring |

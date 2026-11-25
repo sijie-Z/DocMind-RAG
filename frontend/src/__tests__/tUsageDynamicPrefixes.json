@@ -8,12 +8,16 @@
     "chat.rerankStatus.",
     "common.weekdays.",
     "evalRuns.trend.metrics.",
+    "rubricEval.detail.diffField.",
+    "rubricEval.mode.",
+    "rubricEval.strictness.",
+    "rubricEval.verdict.",
     "scheduler.cron.months.",
     "scheduler.cron.weekdays.",
     "scheduler.lastStatus.",
-    "workflow.history.status.",
-    "slashCmd.desc.",
     "slashCmd.cmdDesc.",
-    "slashCmd.tpl."
+    "slashCmd.desc.",
+    "slashCmd.tpl.",
+    "workflow.history.status."
   ]
 }

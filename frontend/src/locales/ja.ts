@@ -1924,7 +1924,19 @@ export default {
     },
     download: 'ダウンロード',
     runReport: '実行レポート',
-    exportMarkdown: 'Markdown をエクスポート'
+    exportMarkdown: 'Markdown をエクスポート',
+    panel: {
+      open: '成果物',
+      title: '成果物',
+      empty: '成果物はまだありません。ツールが生成したファイルがここに表示されます。',
+      loadFailed: '成果物一覧の読み込みに失敗しました。',
+      contentFailed: '成果物の内容を読み込めませんでした。',
+      preview: 'プレビュー',
+      source: 'ソース',
+      versions: 'バージョン',
+      badge: '成果物',
+      view: '表示'
+    }
   },
   help: {
     tasks: {
@@ -2060,6 +2072,8 @@ export default {
     register: '登録',
     knowledgeGraph: 'ナレッジグラフ',
     knowledgeEvalRuns: '評価実行履歴',
+    evalRubrics: '回答品質ルーブリック',
+    evalRubricRun: 'ルーブリック評価実行',
     knowledgeDocument: 'ドキュメント詳細',
     workflowEditor: 'ワークフローエディタ',
     agentMemory: 'Agent メモリ'
@@ -2462,6 +2476,196 @@ export default {
     templateVersionLatest: '最新（v{n}）',
     templateLoadFailed: 'レビューテンプレートの読み込みに失敗しました',
     templateOpenManager: 'テンプレート管理',
+  },
+  rubricEval: {
+    common: {
+      retry: '再試行',
+      refresh: '更新',
+      cancel: 'キャンセル',
+      statusActive: '有効',
+      statusArchived: 'アーカイブ済み',
+      statusAll: 'すべての状態',
+      runId: '実行 ID'
+    },
+    strictness: {
+      neutral: '中立（不明は半分）',
+      strict: '厳格（不明は不通過）',
+      lenient: '寛容（不明は通過）'
+    },
+    verdict: {
+      yes: 'はい',
+      no: 'いいえ',
+      unsure: '不明'
+    },
+    mode: {
+      judge: 'モデル判定（judge）',
+      fake: '決定論的リプレイ（fake）'
+    },
+    library: {
+      subtitle:
+        '回答レベルのルーブリック：重み付き yes/no 質問＋不変バージョン。判定は人手ゴールドで較正できます',
+      scopeBanner:
+        'この画面は「回答」がルーブリックを満たすかを評価します（検索の再現率ではありません。検索評価はナレッジ画面の実行履歴）。judge はモデル判定であり決定論的な正解ではありません。人手ゴールドとの一致率は、ケースにゴールドがある場合のみ表示されます。',
+      navEntry: '回答品質ルーブリック',
+      create: 'ルーブリックを作成',
+      createSubmit: '作成',
+      createDone: 'ルーブリックを作成しました',
+      createFailed: 'ルーブリックの作成に失敗しました',
+      name: 'ルーブリック名',
+      namePlaceholder: '例：契約 Q&A 回答品質',
+      nameRequired: 'ルーブリック名を入力してください',
+      description: '説明',
+      descriptionPlaceholder: 'このルーブリックが対象とする内容・質問（任意）',
+      items: '評価項目（重み付き yes/no 質問）',
+      itemsEmpty: '項目がありません。実行前に 1 つ以上追加してください。',
+      itemsRequired: '評価項目が 1 つ以上必要です',
+      addItem: '項目を追加',
+      removeItem: '削除',
+      question: '質問',
+      questionPlaceholder: '例：回答は規程の条番号を引用していますか？',
+      questionRequired: '各項目に質問文が必要です',
+      itemKey: 'キー',
+      itemKeyPlaceholder: 'キー（小文字アンダースコア）',
+      itemKeyInvalid: 'キーは小文字英字で始まる 2〜32 文字の小文字アンダースコア形式が必要です',
+      itemKeyDuplicate: 'キーは重複できません',
+      weight: '重み',
+      strictness: '厳格度',
+      strictnessHint:
+        '厳格度は「不明」判定の換算のみに影響します：中立=0.5、厳格=0、寛容=1。yes/no は常に 1/0。',
+      changeNote: 'バージョン説明',
+      changeNotePlaceholder: 'このバージョンの変更説明（任意、200 文字以内）',
+      bootstrap: '既定項目で初期化',
+      bootstrapName: '既定の回答品質ルーブリック',
+      bootstrapDone: '既定ルーブリックを初期化しました',
+      bootstrapFailed: 'ルーブリックの初期化に失敗しました',
+      loadFailed: 'ルーブリック一覧の読み込みに失敗しました',
+      empty: 'ルーブリックがありません',
+      emptyHint:
+        'ルーブリックは「回答が良いか」を編集可能・バージョン管理可能・較正可能な資産にします。編集のたびに不変バージョンが作られ、実行は使用したバージョンとケース集合ハッシュを凍結します。',
+      statusColumn: '状態',
+      versionTag: '{n} バージョン',
+      open: '開く',
+      runs: '実行履歴',
+      updatedAt: '更新日時'
+    },
+    detail: {
+      loadFailed: 'ルーブリック詳細の読み込みに失敗しました',
+      judgeDisclaimer:
+        '判定方式：yes/no/unsure は判定者が出し、unsure は各項目の厳格度で換算されます。judge はモデル判定（決定論的な正解ではない）、fake は呼び出し側が与えた判定のリプレイです。',
+      archivedBanner:
+        'このルーブリックはアーカイブ済み（読み取り専用）：新しいバージョンや実行は作成できません。既存の実行は影響を受けません。',
+      archive: 'ルーブリックをアーカイブ',
+      archiveConfirm:
+        'アーカイブ後は読み取り専用になります：新しいバージョンや実行は作成できません。既存の実行は影響を受けません。アーカイブは元に戻せません。続行しますか？',
+      archiveDone: 'ルーブリックをアーカイブしました',
+      archiveFailed: 'ルーブリックのアーカイブに失敗しました',
+      versionHistory: 'バージョン履歴',
+      versionCount: '{n} バージョン',
+      versionsEmpty: 'まだバージョンがありません',
+      sourceBootstrap: '初期化',
+      itemsUnit: '項目',
+      runAction: '評価を実行',
+      newVersionAction: '新バージョンとして編集',
+      newVersionSubmit: '新バージョンを保存',
+      newVersionDone: '新バージョンを保存しました',
+      newVersionFailed: '新バージョンの保存に失敗しました',
+      diffAction: 'バージョン比較',
+      diffHint: '読み取り専用の差分。バージョンも実行も変更しません',
+      diffTitle: 'バージョン差分（読み取り専用）',
+      diffBase: '基準バージョン',
+      diffTarget: '比較バージョン',
+      diffRun: '比較',
+      diffFailed: 'バージョン比較に失敗しました',
+      diffIdentical: '2 つのバージョンは同一です',
+      diffAdded: '追加項目',
+      diffRemoved: '削除項目',
+      diffChanged: '変更項目',
+      diffSummary: '追加 {added} · 削除 {removed} · 変更 {changed} · 未変更 {unchanged}',
+      diffField: {
+        question: '質問',
+        weight: '重み',
+        strictness: '厳格度'
+      },
+      versionContent: 'バージョン内容',
+      versionSelectHint: 'バージョンを選択して項目を表示',
+      versionCorrupt: '内容ハッシュ検証に失敗',
+      changeNoteLabel: 'バージョン説明',
+      itemKey: 'キー',
+      itemQuestion: '質問',
+      itemWeight: '重み',
+      itemStrictness: '厳格度',
+      runsTitle: '実行履歴',
+      runsEmpty: '実行がありません',
+      runTime: '時刻',
+      runMode: 'モード',
+      runVersion: 'バージョン',
+      runScore: 'スコア',
+      runStatus: '状態',
+      runOpen: '表示'
+    },
+    run: {
+      createTitle: 'ルーブリック評価を実行',
+      version: 'ルーブリックバージョン',
+      mode: 'モード',
+      judgeNote:
+        'judge モードはケースごとにモデル判定者を呼び出します（1 ケース 1 回）。不明は厳格度で換算されます。結果はモデル判定であり決定論的な正解ではありません。ゴールドがある場合のみ人手判定との一致率を表示します。',
+      fakeNote:
+        'fake モードは JSON で与えた判定（fake_verdicts）をリプレイします。配線テスト・デモ用であり、モデル判定でも人手の正解でもありません。',
+      casesJson: 'ケース（JSON 配列）',
+      casesPlaceholder:
+        'JSON 配列。各ケースに case_id、answer、任意で name / gold_verdicts / fake_verdicts',
+      casesHint:
+        '各ケース：case_id（一意）、answer（必須）、任意で name / gold_verdicts（人手ゴールド）/ fake_verdicts（fake では必須・全項目を網羅）。最大 50 件。',
+      casesInvalidJson: 'ケースが有効な JSON ではありません',
+      casesInvalidShape: 'ケースは JSON 配列で、各要素に case_id と answer が必要です',
+      casesTooMany: '1 回の実行は最大 50 件です',
+      submit: '実行',
+      done: '評価実行が完了しました',
+      failed: 'ルーブリック評価の実行に失敗しました',
+      loadFailed: '評価実行の読み込みに失敗しました',
+      failedTitle: 'この実行は失敗しました：スコアは生成されていません',
+      failedUnavailable:
+        '判定者が利用できませんでした（モデル呼び出し失敗）。失敗した実行は記録されています。後で再試行してください。',
+      failedContract:
+        '判定者の出力が JSON 契約に違反しました（キーの欠落・過多、不正な判定値）。スコアは生成されていません。ルーブリックやモデル設定を確認してください。',
+      errorCode: 'エラーコード',
+      score: 'スコア（重み付き通過率）',
+      judgeModelNote: '判定モデル：{model}',
+      fakeModelNote: '決定論的リプレイ（モデル呼び出しなし）',
+      versionLabel: 'バージョン / ケース数',
+      casesUnit: '件',
+      datasetHash: 'ケース集合ハッシュ',
+      questionsTitle: '質問ごとの通過率',
+      questionsHint:
+        '通過率 = 換算スコア 1.0 のケース数 / 判定対象ケース数。不明の換算は厳格度に依存します。',
+      passRate: '通過率',
+      verdictCounts: '判定分布',
+      verdictCountsValue: 'はい {yes} · いいえ {no} · 不明 {unsure}',
+      resultsTitle: 'ケースごとの結果',
+      resultsNote: '回答と判定は本組織の権限ある利用者だけが閲覧できます。実行スナップショットは不変です。',
+      caseId: 'ケース',
+      caseName: '名前',
+      caseScore: 'スコア',
+      caseVerdicts: '判定',
+      statusCompleted: '完了',
+      statusFailed: '失敗',
+      backToRubric: 'ルーブリックへ戻る'
+    },
+    calibration: {
+      title: '判定者較正（人手ゴールドとの比較）',
+      subtitle:
+        'judge 判定と人手ゴールドを項目ごとに比較します。両方の判定がある組のみ集計します。',
+      agreement: '一致率',
+      pairs: '一致 / 比較可能',
+      casesWithGold: 'ゴールド付き / 全ケース',
+      confusionHint: '混同行列：行が判定者、列が人手ゴールド。',
+      judgeRow: '判定者 \\ ゴールド',
+      note: '一致率はこのバッチでの較正結果であり、judge の正解率ではありません。サンプルが少ない場合は慎重に解釈してください。',
+      missingTitle: 'このバッチには人手ゴールドがなく、較正を計算できません',
+      missingHint:
+        'ケースに gold_verdicts（項目キーから yes/no/unsure へのマッピング）を追加して再実行すると、一致率と混同行列が得られます。',
+      unavailableOnFailure: '実行が失敗したため、較正できる判定がありません。'
+    }
   },
   memory: {
     loadFailed: 'メモリの読み込みに失敗しました',

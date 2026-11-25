@@ -797,6 +797,98 @@ class Executor:
         except tool_ledger.OrphanToolResultError as e:
             logger.error("工具调用账目不一致（孤儿 result，call=%s）：%s", call_id, e)
 
+    # ── 批次七：工件落库（工具结果里的显式 artifact 载荷）────────────────────
+
+    async def _record_artifact(
+        self,
+        *,
+        tool_name: str,
+        call_id: str,
+        raw_result: Any,
+        organization_id: int,
+        user_id: int,
+    ) -> AgentEvent | None:
+        """识别工具结果里的**显式**工件载荷并落库；返回待外发的 ``artifact`` 事件。
+
+        纪律：
+        - 只认显式载荷（``meta.extra["artifact"]`` 或字符串/结构化 data 里的
+          ``{"kind": "artifact/v1", ...}``）；普通结果一律不动——500 字符截断
+          的既有语义（tool_ledger.RESULT_CAP）保持原样。
+        - fail-open：工件落库失败只记 warning，绝不打断本回合或改写工具结果。
+        - 幂等：同一 (task_id, call_id) 重复落库返回既有行，工具重试/重放不产生
+          重复工件。
+
+        会话/任务行可能尚未创建或已被清理：``conversation_id`` 只作溯源；
+        ``task_id`` 取 ``tool_ledger_task_id``（checkpoint 任务）——
+        ``create_artifact`` 对会话/任务列**不建外键**，因此即使 agent_tasks 行
+        缺失也不会炸。
+        """
+        from app.core.database import AsyncSessionLocal
+        from app.services import artifact_service
+
+        try:
+            payload = artifact_service.parse_artifact_payload(raw_result)
+        except Exception as e:  # noqa: BLE001 — 载荷解析不得打断 run
+            logger.warning("工件载荷解析失败（tool=%s）：%s", tool_name, log_safe(e))
+            return None
+        if payload is None:
+            return None
+        # 工具已在未接线路径自行落库（meta.extra["artifactId"]）→ 只读回行发事件，
+        # 不再重复落库（避免同内容被当作新版本）。
+        pre_persisted_id = None
+        meta = getattr(raw_result, "meta", None)
+        if meta is not None and isinstance(getattr(meta, "extra", None), dict):
+            candidate = meta.extra.get("artifactId")
+            if isinstance(candidate, str) and candidate:
+                pre_persisted_id = candidate
+        try:
+            async with AsyncSessionLocal() as session:
+                if pre_persisted_id:
+                    row = await artifact_service.get_artifact(
+                        session,
+                        artifact_id=pre_persisted_id,
+                        organization_id=organization_id,
+                        user_id=user_id,
+                    )
+                    created = False
+                else:
+                    row, created = await artifact_service.create_artifact(
+                        session,
+                        organization_id=organization_id,
+                        user_id=user_id,
+                        kind=payload.get("kind") or "text",
+                        title=payload.get("title") or "",
+                        content=payload.get("content") or "",
+                        conversation_id=self._hook_session_id(),
+                        task_id=self.tool_ledger_task_id,
+                        agent_id=getattr(self.config, "agent_id", None),
+                        filename=payload.get("filename"),
+                        source_tool=tool_name,
+                        source_call_id=call_id or None,
+                    )
+                    await session.commit()
+                    await session.refresh(row)
+        except Exception as e:  # noqa: BLE001 — 工件是增强，不得打断主链
+            logger.warning(
+                "工件落库失败（tool=%s, call=%s）：%s",
+                tool_name,
+                log_safe(call_id),
+                log_safe(e),
+            )
+            return None
+        summary = artifact_service.artifact_summary(row)
+        return AgentEvent(
+            type="artifact",
+            content=summary["title"],
+            artifact_id=summary["id"],
+            artifact_title=summary["title"],
+            artifact_kind=summary["kind"],
+            artifact_version=summary["version_no"],
+            artifact_source_tool=summary["source_tool"] or "",
+            artifact_origin="tool",
+            artifact_created=created,
+        )
+
     async def execute(
         self,
         plan: Plan,
@@ -2374,6 +2466,10 @@ class Executor:
                         # ACL P0（issue #511）：唯一允许无 viewer 走组织级可读的
                         # 通道是调用方显式声明的内部系统任务；缺省 0 不再等价。
                         "internal_system_task": getattr(self, "internal_system_task", False),
+                        # 批次七：工件落库由执行器统一进行（工具只校验并返回载荷），
+                        # 这样行上能挂 task_id / call_id（版本链与幂等键）。没有任务
+                        # 行（裸执行器/子代理）时工具自行落库（见 tools/artifacts.py）。
+                        "artifact_capture": bool(self.tool_ledger_task_id),
                     },
                 )
                 raw_result = await asyncio.wait_for(
@@ -2492,6 +2588,20 @@ class Executor:
                         plan_step_id=step.id,
                         plan_progress=plan.progress,
                     )
+                    # 批次七：显式工件载荷 → 持久化 + 外发 artifact 事件。
+                    # 只认显式标记（见 parse_artifact_payload）；普通结果不动——
+                    # 500 字符截断语义由 tool_ledger 与 SSE 投影各自保持。
+                    artifact_event = await self._record_artifact(
+                        tool_name=func.name,
+                        call_id=tool_call_id,
+                        raw_result=raw_result,
+                        organization_id=organization_id,
+                        user_id=user_id,
+                    )
+                    if artifact_event is not None:
+                        artifact_event.plan_id = plan.id
+                        artifact_event.plan_step_id = step.id
+                        yield artifact_event
                     tool_results.append({"tool": func.name, "result": result})
                     if ctx:
                         # 显式传 confidence：Finding.confidence 有消费方

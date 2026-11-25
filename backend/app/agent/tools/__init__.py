@@ -14,6 +14,7 @@ Tool categories:
 # Import triggers @register_tool for each tool function
 # v2.1: 企业协同工具集
 from app.agent.tools import (
+    artifacts,  # noqa: F401  — 版本化工件（批次七；扩展面 enabled_predicate）
     code_execution,  # noqa: F401
     curated_skill_tools,  # noqa: F401  — 技能工具（issue #200 接线）
     data_analysis,  # noqa: F401

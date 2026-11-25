@@ -15,6 +15,7 @@ from types import SimpleNamespace
 from typing import Any
 
 from app.agent.registry import (
+    ToolMeta,
     ToolResult,
     extended_surface_enabled,
     register_tool,
@@ -1246,6 +1247,23 @@ async def generate_report(
     from app.core.config import settings
     from app.dependencies import get_rag_pipeline
 
+    def _with_artifact(report: str) -> ToolResult:
+        """批次七：报告正文随 **ToolMeta.extra** 走显式工件通道（success 载荷仍是
+        报告字符串，既有消费方零变化）；执行器据此落库并外发 artifact 事件。
+        JSON 格式的 sections 载荷不是可预览文档，不挂工件。"""
+        return ToolResult.ok(
+            data=report,
+            meta=ToolMeta(
+                extra={
+                    "artifact": {
+                        "kind": "markdown",
+                        "title": (title or "报告").strip()[:200],
+                        "content": report,
+                    }
+                }
+            ),
+        )
+
     # Parse sections
     try:
         parsed_sections = json.loads(sections)
@@ -1276,7 +1294,7 @@ async def generate_report(
     # Use LLM to generate a polished markdown report
     pipeline = get_rag_pipeline()
     if not pipeline.openai_client:
-        return _generate_markdown_fallback(title, parsed_sections)
+        return _with_artifact(_generate_markdown_fallback(title, parsed_sections))
 
     sections_text = "\n\n".join(
         f"## {s.get('heading', 'Section ' + str(i + 1))}\n{s.get('content', '')}"
@@ -1325,8 +1343,8 @@ async def generate_report(
         llm_recorded = True
         report = resp.choices[0].message.content or ""
         if not report.strip():
-            return _generate_markdown_fallback(title, parsed_sections)
-        return report
+            return _with_artifact(_generate_markdown_fallback(title, parsed_sections))
+        return _with_artifact(report)
     except Exception as e:
         logger.warning(f"Report generation LLM call failed: {e}")
         # issue #510：失败调用留一行（成功记账后的空正文/解析异常不重复记）。
@@ -1338,7 +1356,7 @@ async def generate_report(
                 latency_ms=(time.perf_counter() - llm_started) * 1000,
                 messages=llm_messages,
             )
-        return _generate_markdown_fallback(title, parsed_sections)
+        return _with_artifact(_generate_markdown_fallback(title, parsed_sections))
 
 
 def _generate_markdown_fallback(title: str, sections: list) -> str:
