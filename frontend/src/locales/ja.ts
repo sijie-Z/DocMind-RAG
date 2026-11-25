@@ -1924,7 +1924,19 @@ export default {
     },
     download: 'ダウンロード',
     runReport: '実行レポート',
-    exportMarkdown: 'Markdown をエクスポート'
+    exportMarkdown: 'Markdown をエクスポート',
+    panel: {
+      open: '成果物',
+      title: '成果物',
+      empty: '成果物はまだありません。ツールが生成したファイルがここに表示されます。',
+      loadFailed: '成果物一覧の読み込みに失敗しました。',
+      contentFailed: '成果物の内容を読み込めませんでした。',
+      preview: 'プレビュー',
+      source: 'ソース',
+      versions: 'バージョン',
+      badge: '成果物',
+      view: '表示'
+    }
   },
   help: {
     tasks: {

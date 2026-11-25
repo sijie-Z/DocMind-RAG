@@ -66,6 +66,9 @@ export const useAgentStore = defineStore('agent', () => {
   const pendingApproval = ref<PendingApproval | null>(null)
   // B：待审批计划（plan_approval_mode=always 的暂停现场）
   const pendingPlanApproval = ref<PendingPlanApproval | null>(null)
+  // 批次七：工件刷新键——每次收到 artifact 事件递增，右栏 watcher 据此重拉
+  // /artifacts 列表（SSE 事件对象与组件解耦；切换会话时页面对比作用域即可）。
+  const artifactRefreshKey = ref(0)
 
   // ── Computed ──
   const toolCount = computed(() => tools.value.length)
@@ -371,6 +374,16 @@ export const useAgentStore = defineStore('agent', () => {
         break
       }
 
+      // ── Agent 工件（批次七）────────────────────────────────────────────
+      case 'artifact':
+        // 工具显式产出的工件已持久化：时间线留痕 + 递增刷新键（右栏 listener
+        // 据此重拉列表，不把 SSE 事件对象直接耦合进组件）。
+        updateLastAssistant((msg) => {
+          msg.events.push(event)
+        })
+        artifactRefreshKey.value += 1
+        break
+
       case 'done':
         updateLastAssistant((msg) => {
           msg.loading = false
@@ -445,6 +458,8 @@ export const useAgentStore = defineStore('agent', () => {
     taskState.value = 'idle'
     pendingApproval.value = null
     pendingPlanApproval.value = null
+    // 工件刷新键同样换代：旧账号的 artifact 事件不得触发新账号右栏重拉。
+    artifactRefreshKey.value += 1
   }
 
   /** issue #476：历史会话消息载入（含 serverMessageId，供分叉边界判定）。 */
@@ -551,6 +566,7 @@ export const useAgentStore = defineStore('agent', () => {
     taskState,
     pendingApproval,
     pendingPlanApproval,
+    artifactRefreshKey,
     // Computed
     toolCount,
     enabledToolCount,

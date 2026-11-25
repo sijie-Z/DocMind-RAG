@@ -89,6 +89,7 @@ const CHAT_AGENT_EVENT_EXEMPTIONS: Record<string, string> = {
   command_result: '用户命令只在 /agent 工作台执行与展示',
   command_error: '用户命令只在 /agent 工作台执行与展示',
   hook_error: '后端已发射；/agent 暂未渲染（既有缺口，另行跟进）；Chat 已无 Agent 模式',
+  artifact: '工件事件只由 /agent 工作台消费（右栏 ArtifactRail 列表刷新）；Chat 无工件面板',
 }
 
 let registered: Set<string>

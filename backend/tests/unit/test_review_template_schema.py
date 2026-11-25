@@ -39,7 +39,8 @@ def test_039_revision_chain_and_id_length():
     assert revision.down_revision == PREVIOUS
     assert len(REVISION) <= 32, "MySQL alembic_version.version_num 是 VARCHAR(32)"
     assert script.get_revision(HEAD).down_revision == REVISION, "040 必须接在 039 之后"
-    assert set(script.get_heads()) == {HEAD}, "040 必须是当前唯一 head"
+    assert script.get_revision("041_agent_artifact").down_revision == HEAD
+    assert set(script.get_heads()) == {"041_agent_artifact"}, "041 必须是当前唯一 head"
 
 
 def test_040_revision_chain(tmp_path, monkeypatch):

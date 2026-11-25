@@ -155,6 +155,42 @@ async def test_guard_off_keeps_legacy_agent_branch_for_rollback(client, monkeypa
 
 
 @pytest.mark.asyncio
+async def test_legacy_agent_branch_projects_artifact_event(client, monkeypatch):
+    """批次七：chat 出口必须把 artifact 事件投影成 camelCase 载荷（右栏数据源）。
+
+    变异点：删 chat.py 的 ``elif agent_event.type == "artifact"`` 分支 → 该事件
+    落进 else 只转发 content → 本用例红（id/kind/contentUrl 全缺）。
+    """
+    monkeypatch.setattr(chat_api, "DEEP_ANALYSIS_GUARD_ENABLED", False)
+    monkeypatch.setattr(chat_api, "save_session_interaction", _noop_save)
+
+    async def _fake_agent_chat(**_kwargs):
+        yield AgentEvent(type="chunk", content="报告已生成")
+        yield AgentEvent(
+            type="artifact",
+            content="季度报告",
+            artifact_id="art-42",
+            artifact_title="季度报告",
+            artifact_kind="markdown",
+            artifact_version=2,
+            artifact_source_tool="create_artifact",
+            artifact_origin="tool",
+        )
+        yield AgentEvent(type="done", content="")
+
+    monkeypatch.setattr(agent_service, "chat", _fake_agent_chat)
+
+    resp = await client.post(STREAM_URL, json={"content": "产出报告", "useAgent": True})
+
+    assert resp.status_code == 200
+    assert "event: artifact" in resp.text
+    assert '"artifactId": "art-42"' in resp.text
+    assert '"kind": "markdown"' in resp.text
+    assert '"version": 2' in resp.text
+    assert '"/api/v1/artifacts/art-42/content"' in resp.text
+
+
+@pytest.mark.asyncio
 async def test_legacy_agent_failed_done_is_not_persisted(client, monkeypatch):
     """回滚阀分支：done(task_state=failed) 不得把占位/半截回答落库。"""
     monkeypatch.setattr(chat_api, "DEEP_ANALYSIS_GUARD_ENABLED", False)
@@ -495,6 +531,30 @@ def test_frontend_agent_event_taxonomy_matches_backend_literal():
     for required in ("approval_required", "plan_approval_required", "run_cancelled"):
         assert required in backend_types
         assert required in frontend_types
+
+    # 批次七：artifact 事件必须在两侧都可见。chat 投影是白名单式 if/elif（缺
+    # case 即静默消失），必须显式登记；/agent 出口是全量转发
+    # public_agent_event_data(event)（序列化在 AgentEvent.to_sse_dict），只要
+    # 事件类型与字段在 events.py 中存在就自动带出——这里钉住"全量转发"形态，
+    # 防止有人把它改成白名单后 artifact 在 /agent 入口静默失效。
+    assert "artifact" in backend_types
+    assert "artifact" in frontend_types
+    chat_source = Path(chat_api.__file__).read_text(encoding="utf-8")
+    agent_source = (Path(chat_api.__file__).parent / "agent.py").read_text(encoding="utf-8")
+    assert '"artifactId": agent_event.artifact_id' in chat_source
+    assert "public_agent_event_data(event)" in agent_source
+    from app.agent.events import AgentEvent
+
+    payload = AgentEvent(
+        type="artifact",
+        artifact_id="a-1",
+        artifact_title="T",
+        artifact_kind="markdown",
+        artifact_version=2,
+        artifact_origin="tool",
+    ).to_sse_dict()
+    for key in ("artifact_id", "artifact_title", "artifact_kind", "artifact_version"):
+        assert key in payload, f"artifact 事件缺少 {key}"
 
 
 @pytest.mark.asyncio

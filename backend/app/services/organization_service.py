@@ -18,6 +18,7 @@ from app.exceptions import (
     ServiceUnavailableError,
 )
 from app.models.agent_task import AgentTask
+from app.models.artifact import AgentArtifact
 from app.models.chat import ChatSession
 from app.models.document import Document
 from app.models.knowledge_base import KnowledgeBase
@@ -397,6 +398,9 @@ class OrganizationService:
         # 必须先转移再删组织。
         ("对方修订台账", ReviewRedlineSubmission),
         ("对方修订台账行", ReviewRedlineRow),
+        # 批次七：Agent 工件以 organization_id 外键引用 organizations；工件是
+        # 审计/复用资产，未纳入清理会触发 MySQL 1451，必须先转移再删组织。
+        ("Agent 工件", AgentArtifact),
     )
 
     async def _assert_org_has_no_attached_data(self, db: AsyncSession, org_ids: list[int]) -> None:

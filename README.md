@@ -33,7 +33,7 @@ DocMind 不是一个「聊天框套壳」：它把企业知识库当成一套**�
 三个典型用法：
 
 - **带出处的知识问答** — 上传 PDF/Word/Excel/TXT/Markdown、扫描件（OCR），系统解析、分块、混合检索（BM25 + 向量 + RRF）、重排后流式回答；每个引用都来自**未加工的解析原文**，可溯源到条款/页码/字符区间，而不是检索用的增强文本。
-- **能规划、能执行、能自检的 Agent** — PER（Plan → Execute → Reflect）循环，可调用 31 个工具完成多步任务；每轮运行产出 RunReport（做了什么、为何这么做、结果如何），支持执行回放与经验记忆。
+- **能规划、能执行、能自检的 Agent** — PER（Plan → Execute → Reflect）循环，可调用 32 个工具完成多步任务；每轮运行产出 RunReport（做了什么、为何这么做、结果如何），支持执行回放与经验记忆。
 - **合同核验（垂直场景）** — 把「制度/模板 + 合同 V1 + V2」绑成核验案件：文档版本身份与内容哈希、readiness 门禁、原文证据快照、确定性条款抽取与差异对齐，最后交付带覆盖范围与免责声明的核验单。这是本仓库最「产品化」的一块，见下文。
 
 > **项目状态**：公开项目，功能完整度高于稳定度，适合学习、二次开发与本地演示；生产部署前请按自己的合规要求加固。工程纪律先于功能数量：**数字带口径、修复带证据、退化拦在合并前**（见「工程质量」）。
@@ -49,7 +49,7 @@ DocMind 不是一个「聊天框套壳」：它把企业知识库当成一套**�
 │  FastAPI · JWT + RBAC · SSE · WebSocket · 请求 ID    │
 ├── AI Agent 核心 ────────────────────────────────────┤
 │  PER Loop (Planner → Executor → Reflector)          │
-│  Tool Registry (31) · RunReport · Hooks · 回放        │
+│  Tool Registry (32) · RunReport · Hooks · 回放        │
 ├── RAG 管线 ─────────────────────────────────────────┤
 │  HybridRetriever (BM25 + 向量 + RRF) · Reranker      │
 │  二级缓存 · PII 掩码 · 原文/检索文本分离(O/E)          │
@@ -78,14 +78,14 @@ DocMind 不是一个「聊天框套壳」：它把企业知识库当成一套**�
 | 方向 | 能力 | 关键事实 |
 |------|------|----------|
 | 知识库 / RAG | 多格式解析（含 OCR）、语义分块、混合检索、重排、查询改写/HyDE、语义缓存、严格模式、分块浏览与人工纠正、bad case 一键存为评测用例 | 检索评分按增强文本、**证据出口只放 parser 原文**；不可用文档显式 `SOURCE_ORIGINAL_UNAVAILABLE`；人工修正只写独立审计行并标 `manual_override`，永不覆盖原文/证据哈希；评测用例按组织内 query+金标集合去重，重复保存幂等返回既有用例 |
-| Agent | PER 三阶段循环、DAG 并行调度、超时/重试/回退、对抗式 Reviewer、RunReport、执行回放、经验记忆 | **31 个内置工具**（默认注入 10 个工具，终端/飞书/委派按门控开放） |
+| Agent | PER 三阶段循环、DAG 并行调度、超时/重试/回退、对抗式 Reviewer、RunReport、执行回放、经验记忆 | **32 个内置工具**（默认注入 10 个工具，终端/飞书/委派按门控开放） |
 | 合同核验 | 文档角色/版本族/版本序/内容哈希、readiness、核验案件、原文证据快照、确定性抽取与对齐 | 只输出文本事实与差异类型（modified/renumbered/…），不输出任何法律结论；未识别不猜值 |
-| 平台化 | 多租户组织隔离、RBAC + API Key scope、审计日志、Prometheus/Grafana、OpenTelemetry、24 种 SSE 事件 | 组织隔离贯穿检索/会话/文档/缓存/WS；失败语义可判定（4xx + error_code） |
+| 平台化 | 多租户组织隔离、RBAC + API Key scope、审计日志、Prometheus/Grafana、OpenTelemetry、25 种 SSE 事件 | 组织隔离贯穿检索/会话/文档/缓存/WS；失败语义可判定（4xx + error_code） |
 
 <details>
-<summary><b>31 个内置工具一览</b>（点击展开）</summary>
+<summary><b>32 个内置工具一览</b>（点击展开）</summary>
 
-`core_tools.py` 11 个 + `tools/` 20 个，默认注入 10 个；口径见 `docs/METRICS.md`。兼容口径：`disabled_tools` 中的旧工具名按**能力粒度**生效（如 `calculate` 只禁用 `utility` 的 calculate operation），写规范名则禁用整个工具。
+`core_tools.py` 11 个 + `tools/` 21 个，默认注入 10 个；口径见 `docs/METRICS.md`。兼容口径：`disabled_tools` 中的旧工具名按**能力粒度**生效（如 `calculate` 只禁用 `utility` 的 calculate operation），写规范名则禁用整个工具。
 
 | 类别 | 工具 | 说明 |
 |------|------|------|
@@ -214,13 +214,13 @@ DocMind/
 │   ├── app/
 │   │   ├── main.py                  # FastAPI 兼容入口（组装在 bootstrap.py）
 │   │   ├── agent/                   # PER Agent：loop / planner / executor / reflector
-│   │   │   ├── events.py            #   SSE 事件类型（24 种）
+│   │   │   ├── events.py            #   SSE 事件类型（25 种）
 │   │   │   ├── core_tools.py        #   基础工具（11 个）
-│   │   │   └── tools/               #   扩展工具（20 个；合计 31 个内置工具）
+│   │   │   └── tools/               #   扩展工具（21 个；合计 32 个内置工具）
 │   │   ├── rag/                     # 检索管线：retriever / reranker / pipeline / cache
 │   │   ├── api/v1/
-│   │   │   ├── router.py            # 主路由（注册 30 个模块）
-│   │   │   └── endpoints/           # 端点实现（30 个文件）
+│   │   │   ├── router.py            # 主路由（注册 31 个模块）
+│   │   │   └── endpoints/           # 端点实现（31 个文件）
 │   │   ├── services/                # 业务服务层（42 个服务）
 │   │   ├── models/                  # ORM 模型（23 个模型文件）
 │   │   ├── core/                    # 配置 / DB / Redis / ES / MinIO / Kafka / JWT
@@ -238,7 +238,7 @@ DocMind/
 
 ### 🌐 API 层 (`backend/app/api/v1/`)
 
-30 个端点模块，统一 `/api/v1` 前缀：
+31 个端点模块，统一 `/api/v1` 前缀：
 
 | 模块 | 路由前缀 | 说明 |
 |------|----------|------|

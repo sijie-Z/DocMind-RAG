@@ -4,7 +4,7 @@
 >
 > 本文只做**引述**，不做第二套真源：
 > - 端口、凭据、服务编排以 `backend/docker-compose.yml` 与 `backend/.env.docker.example` 为准；
-> - 关键数字（31 个内置工具 / 默认注入 10 个工具 / 30 个端点模块 / 41 条前端路由 / 24 种 SSE 事件）以 `docs/facts.json` 为单一事实源；README、架构页等既有锚点由 `backend/scripts/check_doc_facts.py` 在 CI 逐 PR 校验，本文数字与之一致（工具/端点/路由/SSE 锚点已纳入 CI 校验）；
+> - 关键数字（32 个内置工具 / 默认注入 10 个工具 / 31 个端点模块 / 41 条前端路由 / 25 种 SSE 事件）以 `docs/facts.json` 为单一事实源；README、架构页等既有锚点由 `backend/scripts/check_doc_facts.py` 在 CI 逐 PR 校验，本文数字与之一致（工具/端点/路由/SSE 锚点已纳入 CI 校验）；
 > - 架构与设计动机见 `README.md`、`AGENT_ARCHITECTURE.md`、`docs/decisions/`。
 >
 > 英文版：[USER_GUIDE_EN.md](USER_GUIDE_EN.md)
@@ -357,7 +357,7 @@ DocMind 的 Agent 不是「LLM 自由循环」，而是一个有明确阶段的�
 - 实际默认配置以 `backend/app/agent/config.py` 为准：`max_plan_steps=10`、`max_iterations=20`、`max_tool_calls_per_turn=5`、`max_retries_per_step=3`、单步超时 120s、`max_context_tokens=8000`；`approval_timeout_seconds=0`（一直等）、`plan_approval_mode="never"`。
 - `execute_python` / `execute_sql` / `mcp_call` 属于 `DEFAULT_DISABLED_TOOLS`，服务端会强制并入 `disabled_tools`，即使用户配置里没写（`backend/app/agent/config.py`、`endpoints/agent.py`）。
 - 反思的 `retry` 会在原地重跑该步骤；`replan` 会重新进入 Planning，每个 run 最多 1 次（`MAX_REPLANS_PER_RUN=1`）。Reviewer 的 `revise` / `reject` 只作为建议记录并展示，不会阻断最终回答。
-- Agent 的流式协议有 **24 种 SSE 事件类型**（`docs/facts.json` 的 `sse_event_types`，由 `backend/app/agent/events.py` 的 `EventType` 闭集派生），前端据此渲染计划树、思考流、工具卡片与审批卡片。
+- Agent 的流式协议有 **25 种 SSE 事件类型**（`docs/facts.json` 的 `sse_event_types`，由 `backend/app/agent/events.py` 的 `EventType` 闭集派生），前端据此渲染计划树、思考流、工具卡片与审批卡片。
 
 > `AGENT_ARCHITECTURE.md` 的「配置体系」示例写的是较早的默认值（如 `max_iterations=10`、`max_plan_steps=8`）；与代码冲突时以 `backend/app/agent/config.py` 为准。
 
@@ -405,7 +405,7 @@ ADR-001 曾把「组织 = 知识库」冻结为路线语义（`docs/decisions/AD
 
 ### 3.4 工具与 HITL 审批
 
-**工具**：所有工具通过 `@register_tool(name=...)` 自注册，共 **31 个内置工具**（`docs/facts.json` 的 `registered_tools`；11 个在 `core_tools.py`，20 个在 `tools/`；默认注入 10 个工具），另有 MCP 动态接入。工具参数用 JSON Schema 描述，自动转成 OpenAI function-calling 格式；`tags` 用于配置面板筛选，敏感工具在 `DEFAULT_DISABLED_TOOLS` 中默认禁用（`AGENT_ARCHITECTURE.md`）。
+**工具**：所有工具通过 `@register_tool(name=...)` 自注册，共 **32 个内置工具**（`docs/facts.json` 的 `registered_tools`；11 个在 `core_tools.py`，21 个在 `tools/`；默认注入 10 个工具），另有 MCP 动态接入。工具参数用 JSON Schema 描述，自动转成 OpenAI function-calling 格式；`tags` 用于配置面板筛选，敏感工具在 `DEFAULT_DISABLED_TOOLS` 中默认禁用（`AGENT_ARCHITECTURE.md`）。
 
 **HITL（人在环）** 让 Agent 在「有风险的下一步」停下来等人拍板：
 
@@ -696,7 +696,7 @@ API 前缀 `/api/v1/workflows`：工作流 CRUD、执行、调试、节点定义
 
 ### 5.2 端点模块清单
 
-当前共 **30 个端点模块**（`docs/facts.json` 的 `endpoint_modules`，由 `backend/app/api/v1/router.py` 的 `ROUTER_SPECS` 路由表派生）：
+当前共 **31 个端点模块**（`docs/facts.json` 的 `endpoint_modules`，由 `backend/app/api/v1/router.py` 的 `ROUTER_SPECS` 路由表派生）：
 
 | 模块 | 前缀 | 说明 |
 |------|------|------|

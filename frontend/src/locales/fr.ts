@@ -1925,7 +1925,19 @@ export default {
     },
     download: 'Télécharger',
     runReport: "Rapport d'exécution",
-    exportMarkdown: 'Exporter en Markdown'
+    exportMarkdown: 'Exporter en Markdown',
+    panel: {
+      open: 'Artefacts',
+      title: 'Artefacts',
+      empty: "Aucun artefact pour l'instant. Les fichiers produits par les outils apparaîtront ici.",
+      loadFailed: 'Échec du chargement des artefacts.',
+      contentFailed: "Échec du chargement du contenu de l'artefact.",
+      preview: 'Aperçu',
+      source: 'Source',
+      versions: 'Versions',
+      badge: 'Artefact',
+      view: 'Voir'
+    }
   },
   help: {
     tasks: {

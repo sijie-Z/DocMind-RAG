@@ -33,7 +33,7 @@ DocMind is not a chat box wrapped around an LLM. It treats an enterprise knowled
 Three typical uses:
 
 - **Knowledge Q&A with provenance** — upload PDF/Word/Excel/TXT/Markdown or scanned images (OCR); the system parses, chunks, retrieves with hybrid search (BM25 + vector + RRF) and reranking, then streams an answer. Every citation comes from **parser-original text** with clause/page/character anchors, not from retrieval-augmented text.
-- **An agent that plans, executes and self-checks** — a PER (Plan → Execute → Reflect) loop with 31 tools for complex multi-step tasks; every run produces a RunReport (what was done, why, with what result), with replay and experience memory.
+- **An agent that plans, executes and self-checks** — a PER (Plan → Execute → Reflect) loop with 32 tools for complex multi-step tasks; every run produces a RunReport (what was done, why, with what result), with replay and experience memory.
 - **Contract review (vertical slice)** — bind “policy/template + contract V1 + V2” into a review case: document identity and content hashes, readiness gates, evidence snapshots, deterministic clause extraction and V1↔V2 alignment, and finally a review report with coverage and disclaimers. This is the most product-oriented part of the repo.
 
 > **Project status**: public project, completeness ahead of stability — suitable for learning, secondary development and local demos; harden security and operations before any production use. Engineering discipline comes before feature count: **numbers have a stated method, fixes come with evidence, regressions are blocked before merge** (see “Engineering quality”).
@@ -49,7 +49,7 @@ Three typical uses:
 │  FastAPI · JWT + RBAC · SSE · WebSocket · Request ID│
 ├── AI Agent Core ────────────────────────────────────┤
 │  PER Loop (Planner → Executor → Reflector)          │
-│  Tool Registry (31) · RunReport · Hooks · Replay    │
+│  Tool Registry (32) · RunReport · Hooks · Replay    │
 ├── RAG Pipeline ─────────────────────────────────────┤
 │  HybridRetriever (BM25 + vector + RRF) · Reranker   │
 │  two-level cache · PII masking · original O/E split │
@@ -79,14 +79,14 @@ register document identity → readiness gate → create case (blocked/ready + r
 | Area | What it does | Key facts |
 |------|--------------|-----------|
 | Knowledge base / RAG | multi-format parsing (OCR included), semantic chunking, hybrid retrieval, reranking, query rewriting/HyDE, semantic cache, strict mode, chunk browsing and manual correction, one-click bad case → eval case | scoring happens on enhanced text; **the evidence exit only exposes parser-original text**; unusable documents return `SOURCE_ORIGINAL_UNAVAILABLE`; manual corrections are stored in a separate audited row labeled `manual_override` and never overwrite originals or evidence hashes; eval cases deduplicate by organization-scoped query + golden set, so repeated saves return the existing case |
-| Agent | PER loop, DAG-based parallel scheduling, timeout/retry/fallback, adversarial reviewer, RunReport, replay, experience memory | **31 Built-In Tools** (10 tools are injected by default; terminal/Feishu/delegation are gated) |
+| Agent | PER loop, DAG-based parallel scheduling, timeout/retry/fallback, adversarial reviewer, RunReport, replay, experience memory | **32 Built-In Tools** (10 tools are injected by default; terminal/Feishu/delegation are gated) |
 | Contract review | document role/family/version/content hash, readiness, review cases, evidence snapshots, deterministic extraction and alignment | text facts and change types only (modified/renumbered/…); no legal conclusions; ambiguous facts are never guessed |
-| Platform | multi-tenant org isolation, RBAC + API-Key scopes, audit logs, Prometheus/Grafana, OpenTelemetry, 24 SSE event types | org isolation spans retrieval/chat/documents/cache/WS; failure semantics are decidable (4xx + error_code) |
+| Platform | multi-tenant org isolation, RBAC + API-Key scopes, audit logs, Prometheus/Grafana, OpenTelemetry, 25 SSE event types | org isolation spans retrieval/chat/documents/cache/WS; failure semantics are decidable (4xx + error_code) |
 
 <details>
-<summary><b>31 Built-In Tools</b> (click to expand)</summary>
+<summary><b>32 Built-In Tools</b> (click to expand)</summary>
 
-11 in `core_tools.py` + 20 under `tools/` (31 built-in tools total), with 10 tools are injected by default; see `docs/METRICS.md` for the derivation. Legacy names in `disabled_tools` act at capability granularity (e.g. `calculate` disables only the calculate operation of `utility`); canonical names disable the whole tool.
+11 in `core_tools.py` + 21 under `tools/` (32 built-in tools total), with 10 tools are injected by default; see `docs/METRICS.md` for the derivation. Legacy names in `disabled_tools` act at capability granularity (e.g. `calculate` disables only the calculate operation of `utility`); canonical names disable the whole tool.
 
 | Category | Tools | Notes |
 |----------|-------|-------|
@@ -215,13 +215,13 @@ DocMind/
 │   ├── app/
 │   │   ├── main.py                  # FastAPI compatibility entry (assembly lives in bootstrap.py)
 │   │   ├── agent/                   # PER agent: loop / planner / executor / reflector
-│   │   │   ├── events.py            #   SSE event types (24 types)
+│   │   │   ├── events.py            #   SSE event types (25 types)
 │   │   │   ├── core_tools.py        #   base tools (11)
-│   │   │   └── tools/               #   extended tools (20; 31 built-in tools total)
+│   │   │   └── tools/               #   extended tools (21; 32 built-in tools total)
 │   │   ├── rag/                     # retriever / reranker / pipeline / cache
 │   │   ├── api/v1/
-│   │   │   ├── router.py            # main router (30 modules registered)
-│   │   │   └── endpoints/           # Endpoint implementations (30 files)
+│   │   │   ├── router.py            # main router (31 modules registered)
+│   │   │   └── endpoints/           # Endpoint implementations (31 files)
 │   │   ├── services/                # business services (42 services)
 │   │   ├── models/                  # ORM models (23 model files)
 │   │   ├── core/                    # config / DB / Redis / ES / MinIO / Kafka / JWT
@@ -239,7 +239,7 @@ DocMind/
 
 ### 🌐 API Layer (`backend/app/api/v1/`)
 
-30 endpoint modules under `/api/v1`:
+31 endpoint modules under `/api/v1`:
 
 | Module | Prefix | Description |
 |--------|--------|-------------|

@@ -9,6 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **版本化 Agent 工件层 + 右栏预览（竞品批次七）**：工具产出不再只是 500 字符截断的
+  SSE 文本。新增迁移 `041_agent_artifact`（单表 `agent_artifact`：内容寻址 sha256 +
+  确定性 MinIO 对象名 `artifacts/{org}/{sha[:2]}/{sha}.{ext}`，自引用
+  `replaces_artifact_id` 串成版本链；`conversation_id`/`task_id` 刻意不建外键，
+  会话/任务清理后工件仍可读）。服务层 `artifact_service` 提供创建（同调用幂等、
+  同内容不刷版本、正文 ≤512 KiB 显式拒绝）、列表、详情+完整版本链、正文读取，
+  全部按组织 + 用户双重隔离（跨组织/跨用户一律 404，超管按平台口径）。新增
+  `create_artifact` 工具（扩展面 `enabled_predicate`，`risk_level=medium`）与
+  `generate_report` 的显式工件通道（`ToolMeta.extra["artifact"]`）；执行器只对
+  **显式载荷**落库并发 `artifact` 事件（新增第 25 种 SSE 事件），普通工具结果的
+  500 字符截断语义不变。4 个端点（`POST/GET /api/v1/artifacts`、详情、正文）沿用
+  `chat:read|write` scope + `document:read` 权限；正文按入库 MIME 返回，文件名走
+  RFC 5987 `filename*`。前端新增工件右栏（真实 API 列表 / 预览↔源码 / 版本历史 /
+  下载），HTML/SVG **只在 `sandbox="allow-scripts"`（无 same-origin）iframe** 中
+  渲染，并补齐 zh/en/ja/fr 四语词条。
 - **对方红线变更事实台账（竞品批次六）**：合同核验案件详情新增对方 DOCX 红线上传与逐条事实台账
   （迁移 `040_inbound_redline_ledger`，新增 `review_redline_submission` / `review_redline_row` 两表）。
   后端用 `zipfile` + `defusedxml` 在内存中确定性解析 `w:ins`/`w:del`/批注，20 MB/2000 行/4000 字硬上限；
