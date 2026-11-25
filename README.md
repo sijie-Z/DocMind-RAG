@@ -221,8 +221,8 @@ DocMind/
 │   │   ├── api/v1/
 │   │   │   ├── router.py            # 主路由（注册 31 个模块）
 │   │   │   └── endpoints/           # 端点实现（31 个文件）
-│   │   ├── services/                # 业务服务层（42 个服务）
-│   │   ├── models/                  # ORM 模型（23 个模型文件）
+│   │   ├── services/                # 业务服务层（43 个服务）
+│   │   ├── models/                  # ORM 模型（24 个模型文件）
 │   │   ├── core/                    # 配置 / DB / Redis / ES / MinIO / Kafka / JWT
 │   │   └── worker/                  # Kafka 消费者（解析 → 分块 → 嵌入 → 索引）
 │   ├── tests/                       # 后端测试（单测 + API + 集成）
@@ -251,6 +251,7 @@ DocMind/
 | 知识库 | `/knowledge` | 知识库文档检索、统计、设置、检索评测用例/运行历史（bad case 捕获） |
 | 知识库管理 | `/knowledge-bases` | 多知识库实体 CRUD（组织隔离） |
 | 合同核验 | `/reviews` | 核验案件/核验项/证据快照 + 确定性抽取与 V1/V2 对齐 + 逐项决策与核验单导出（原文证据 + 版本哈希）；组织级模板库（不可变版本 + 只读 diff）；对方红线事实台账（DOCX 修订/批注解析、显式 unparsed、append-only、乐观锁 disposition） |
+| Agent 工件 | `/artifacts` | 工件列举/详情/内容流（内容寻址 sha256、版本链、组织+用户隔离）；HTML/SVG 内容响应带 CSP sandbox，仅允许在无同源沙箱中渲染 |
 | 组织管理 | `/organizations` | 组织 CRUD、成员管理、角色分配 |
 | 组织设置 | `/organizations` | 组织级设置读写与审计（与组织管理共用前缀） |
 | 系统监控 | `/monitoring` | 性能指标、健康检查、告警、RAG 质量评估 |

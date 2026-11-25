@@ -222,8 +222,8 @@ DocMind/
 │   │   ├── api/v1/
 │   │   │   ├── router.py            # main router (31 modules registered)
 │   │   │   └── endpoints/           # Endpoint implementations (31 files)
-│   │   ├── services/                # business services (42 services)
-│   │   ├── models/                  # ORM models (23 model files)
+│   │   ├── services/                # business services (43 services)
+│   │   ├── models/                  # ORM models (24 model files)
 │   │   ├── core/                    # config / DB / Redis / ES / MinIO / Kafka / JWT
 │   │   └── worker/                  # Kafka consumer (parse → chunk → embed → index)
 │   ├── tests/                       # backend tests (unit + API + integration)
@@ -252,6 +252,7 @@ DocMind/
 | Knowledge | `/knowledge` | Knowledge retrieval, statistics, settings, retrieval eval cases and run history (bad case capture) |
 | Knowledge Bases | `/knowledge-bases` | Multi-knowledge-base entity CRUD (organization-scoped) |
 | Contract Review | `/reviews` | Review cases / items / evidence snapshots + deterministic extraction and V1/V2 alignment + per-item decisions and report export (parser-original quotes + version hashes); org template library (immutable versions + read-only diff); inbound counterparty redline fact ledger (DOCX revisions/comments parsed, explicit unparsed rows, append-only, optimistic-locking disposition) |
+| Agent Artifacts | `/artifacts` | Artifact list / detail / content (content-addressed sha256, version chain, org+user isolation); HTML/SVG responses carry a CSP sandbox |
 | Organizations | `/organizations` | Org CRUD, member management, role assignment |
 | Organization Settings | `/organizations` | Org-level settings and audit (shared prefix with Organizations) |
 | Monitoring | `/monitoring` | Performance metrics, health checks, alerts, RAG quality scoring |
