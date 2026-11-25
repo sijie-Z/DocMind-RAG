@@ -372,7 +372,6 @@ def test_031_migration_chain_and_backfill(monkeypatch) -> None:
     cfg = _alembic_config()
     script = ScriptDirectory.from_config(cfg)
     heads = set(script.get_heads())
-    assert heads == {"041_agent_artifact"}
     assert heads == {"042_rubric_eval"}
     assert script.get_revision("039_review_template").down_revision == "038_eval_case_dedup"
     chain = [rev.revision for rev in script.iterate_revisions(next(iter(heads)), "base")]
