@@ -71,6 +71,12 @@ EventType = Literal[
     # hook / event_name / action / elapsed_ms 四个字段见 AgentEvent 的可选增补；
     # 其余事件类型不携带这些键（既有载荷零变化）。
     "hook_error",
+    # Agent 工件（批次七）：工具产出被固化为版本化工件后外发一枚。载荷在
+    # artifact_id / artifact_title / artifact_kind / artifact_version /
+    # artifact_source_tool / artifact_origin；content 为标题（展示用）。
+    # 前端右栏据此刷新工件列表并关联到工具卡；普通工具结果仍按 500 字符截断，
+    # 只有显式工件载荷才发本事件。
+    "artifact",
 ]
 
 ThinkingType = Literal["reasoning", "planning", "evaluation", "correction"]
@@ -157,6 +163,17 @@ class AgentEvent:
     # 默认空 → 序列化时省略，既有事件载荷零变化（向后兼容）。
     reason_code: str = ""
     reason_params: dict[str, Any] = field(default_factory=dict)
+
+    # Agent 工件（批次七）：artifact 事件的结构化载荷。默认空 → 序列化时省略，
+    # 其余事件类型载荷零变化（向后兼容瘦身契约）。
+    artifact_id: str = ""
+    artifact_title: str = ""
+    artifact_kind: str = ""
+    artifact_version: int = 0
+    artifact_source_tool: str = ""
+    # origin：tool（工具显式产出）/ manual（端点）——前端据此分组。
+    artifact_origin: str = ""
+    artifact_created: bool = True
 
     # Reflection
     reflection_result: ReflectionResult = "pass"
@@ -267,6 +284,23 @@ class AgentEvent:
             d["action"] = self.action
         if self.elapsed_ms is not None:
             d["elapsed_ms"] = self.elapsed_ms
+
+        # Agent 工件（批次七）：非空才带，其余事件载荷零变化。
+        if self.artifact_id:
+            d["artifact_id"] = self.artifact_id
+        if self.artifact_title:
+            d["artifact_title"] = self.artifact_title
+        if self.artifact_kind:
+            d["artifact_kind"] = self.artifact_kind
+        if self.artifact_version:
+            d["artifact_version"] = self.artifact_version
+        if self.artifact_source_tool:
+            d["artifact_source_tool"] = self.artifact_source_tool
+        if self.artifact_origin:
+            d["artifact_origin"] = self.artifact_origin
+        if self.artifact_id and not self.artifact_created:
+            # 只在幂等复用（未新建版本）时显式带 False；新建默认省略（瘦身契约）。
+            d["artifact_created"] = False
 
         if self.iteration:
             d["iteration"] = self.iteration

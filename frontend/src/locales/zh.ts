@@ -1946,7 +1946,19 @@ export default {
     },
     download: '下载',
     runReport: '运行报告',
-    exportMarkdown: '导出 Markdown'
+    exportMarkdown: '导出 Markdown',
+    panel: {
+      open: '工件',
+      title: '工件',
+      empty: '暂无工件。工具生成的文件会出现在这里。',
+      loadFailed: '工件列表加载失败。',
+      contentFailed: '工件内容加载失败。',
+      preview: '预览',
+      source: '源码',
+      versions: '版本',
+      badge: '工件',
+      view: '查看'
+    }
   },
   help: {
     tasks: {

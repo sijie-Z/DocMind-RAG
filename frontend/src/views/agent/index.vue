@@ -102,6 +102,15 @@
         <button class="header-btn" @click="showConfig = !showConfig" :class="{ active: showConfig }">
           <n-icon size="14" class="mr-1" aria-hidden="true"><SettingsOutline /></n-icon>{{ t('agent.config') }}
         </button>
+        <!-- 批次七：工件右栏开关（与配置栏互斥；收到 artifact 事件可手动/自动打开） -->
+        <button
+          class="header-btn"
+          data-testid="agent-artifacts-toggle"
+          :class="{ active: showArtifacts }"
+          @click="toggleArtifacts"
+        >
+          <n-icon size="14" class="mr-1" aria-hidden="true"><DocumentTextOutline /></n-icon>{{ t('artifacts.panel.open') }}
+        </button>
         <button
           v-if="agentStore.terminalEnabled"
           class="header-btn"
@@ -311,6 +320,25 @@
                   <span class="run-warning-badge">{{ t('common.warning') }}</span>
                   <span class="run-warning-text">{{ evt.content }}</span>
                 </div>
+                <!-- 工件（批次七）：工具产出已固化为版本化工件——时间线留痕 +
+                     一键打开右栏定位（诚实复用 kind/version，不猜内容）。 -->
+                <div
+                  v-else-if="evt.type === 'artifact'"
+                  class="artifact-standalone"
+                  data-testid="artifact-line"
+                >
+                  <span class="artifact-badge">{{ t('artifacts.panel.badge') }}</span>
+                  <span class="artifact-line-title">{{ evt.title || evt.content }}</span>
+                  <span v-if="evt.kind" class="artifact-line-kind">{{ evt.kind }}</span>
+                  <span v-if="evt.version" class="artifact-line-version">v{{ evt.version }}</span>
+                  <button
+                    class="artifact-line-open"
+                    data-testid="artifact-line-open"
+                    @click="toggleArtifacts"
+                  >
+                    {{ t('artifacts.panel.view') }}
+                  </button>
+                </div>
                 <!-- User Commands（#475）：命令三元组进入消息流；start 与
                      result/error 配对成结果卡片（结构化载荷 command_data）。 -->
                 <template v-else-if="evt.type === 'command_start'">
@@ -418,6 +446,16 @@
           :config="agentStore.config"
           :enforced-tools="agentStore.enforcedDisabledTools"
           @apply="handleConfigApply"
+        />
+      </div>
+
+      <!-- Right: Artifact rail（批次七）——真实 API 数据；与配置栏互斥占位，
+           窄屏走抽屉（见下方 n-drawer）。 -->
+      <div class="right-panel artifact-panel" v-if="showArtifacts && !showConfig">
+        <ArtifactRail
+          :conversation-id="agentStore.currentSessionId"
+          :refresh-key="agentStore.artifactRefreshKey"
+          @close="showArtifacts = false"
         />
       </div>
       </template>
@@ -546,6 +584,7 @@ import ReplayTimeline from '@/components/agent/ReplayTimeline.vue'
 import RecentTaskList from '@/components/agent/RecentTaskList.vue'
 import TerminalPanel from '@/components/agent/TerminalPanel.vue'
 import CommandResultCard from '@/components/agent/CommandResultCard.vue'
+import ArtifactRail from '@/components/agent/ArtifactRail.vue'
 import Markdown from '@/components/common/Markdown.vue'
 
 const agentStore = useAgentStore()
@@ -632,6 +671,19 @@ const lineageBadgeTitle = computed(() => {
 // 宽屏默认展开右侧配置（≥1280 时中央区仍有 ≥740px）；窄屏与测试环境保持收起。
 const showConfig = ref(typeof window !== 'undefined' && window.innerWidth >= 1280)
 const showTerminal = ref(false)
+// 批次七：工件右栏（与配置栏互斥——同一右栏位，避免三栏挤压中央对话区）。
+const showArtifacts = ref(false)
+// 收到 artifact 事件时自动展开右栏（用户首次看到产出物不需要再找入口）；
+// 仅宽屏自动打开——窄屏靠页头按钮/抽屉，不抢屏。
+watch(
+  () => agentStore.artifactRefreshKey,
+  (next, prev) => {
+    if (next > prev && typeof window !== 'undefined' && window.innerWidth >= 1024) {
+      showArtifacts.value = true
+      showConfig.value = false
+    }
+  },
+)
 // 窄屏时收起右侧配置栏（用户手动打开的宽屏状态不跨断点保留）。
 const handleViewportResize = () => {
   if (window.innerWidth < 1024) showConfig.value = false
@@ -1742,6 +1794,12 @@ async function handleConfigApply(config: typeof agentStore.config) {
   }
 }
 
+// 批次七：工件右栏与配置栏共用同一右栏位——打开一个必须收起另一个。
+function toggleArtifacts() {
+  const next = !showArtifacts.value
+  showArtifacts.value = next
+  if (next) showConfig.value = false
+}
 // Load initial data — wrap in try/catch to prevent errors from
 // propagating through Suspense and triggering the ErrorBoundary.
 onMounted(async () => {
@@ -2136,6 +2194,79 @@ async function loadInit() {
 
 .dark .right-panel {
   border-color: var(--border-color-dark, #1e293b);
+}
+
+/* 批次七：工件右栏（ArtifactRail 自带 padding/边框，外层只负责占位宽度）。 */
+.right-panel.artifact-panel {
+  width: 360px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+@media (max-width: 1024px) {
+  .right-panel.artifact-panel {
+    width: 100%;
+    max-height: 320px;
+    border-left: none;
+    border-top: 1px solid var(--border-color, #e5e7eb);
+  }
+
+  .dark .right-panel.artifact-panel {
+    border-top-color: var(--border-color-dark, #1e293b);
+  }
+}
+
+/* 批次七：工件时间线条目（蓝=已持久化的产出物，与失败红/取消灰区分）。 */
+.artifact-standalone {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  border: 1px solid rgba(59, 130, 246, 0.35);
+  border-radius: 6px;
+  background: rgba(59, 130, 246, 0.06);
+  font-size: 11px;
+  flex-wrap: wrap;
+}
+
+.artifact-badge {
+  font-size: 9px;
+  font-weight: 600;
+  color: #3b82f6;
+  background: rgba(59, 130, 246, 0.12);
+  border-radius: 4px;
+  padding: 1px 5px;
+}
+
+.artifact-line-title {
+  font-weight: 600;
+  color: var(--text-primary, #111827);
+}
+
+.dark .artifact-line-title {
+  color: var(--text-primary-dark, #f9fafb);
+}
+
+.artifact-line-kind,
+.artifact-line-version {
+  color: var(--text-tertiary, #9ca3af);
+}
+
+.artifact-line-open {
+  margin-left: auto;
+  font-size: 10px;
+  color: #3b82f6;
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 1px 4px;
+  border-radius: 4px;
+}
+
+.artifact-line-open:hover {
+  background: rgba(59, 130, 246, 0.1);
 }
 
 /* Empty state */

@@ -184,7 +184,7 @@ def test_product_definition_image_capability_matches_code():
 
 
 def test_architecture_numbers_match_code():
-    """架构页数字与代码一致：31 个内置工具（默认注入 10 个）、30 个路由模块，且不得虚报 Celery。"""
+    """架构页数字与代码一致：32 个内置工具（默认注入 10 个）、31 个路由模块，且不得虚报 Celery。"""
     _assert_absent(
         "docs/architecture.html",
         [
@@ -202,7 +202,7 @@ def test_architecture_numbers_match_code():
             "28 API 模块",
             "28 个路由模块",
             "29 API 模块",
-            "29 个路由模块",
+            "30 个路由模块",
             "39 个内置工具",
             "FastAPI · 19 模块",
             "Celery",
@@ -211,11 +211,11 @@ def test_architecture_numbers_match_code():
     _assert_present(
         "docs/architecture.html",
         [
-            "31 个内置工具",
+            "32 个内置工具",
             "默认注入 10 个工具",
             "基础工具（11 个）",
-            "30 API 模块",
-            "30 个路由模块",
+            "31 API 模块",
+            "31 个路由模块",
         ],
     )
     # 静态注册数 = 非隐藏 @register_tool 数（issue #509：hidden=True 的合并旧名
@@ -232,8 +232,8 @@ def test_architecture_numbers_match_code():
     spec.loader.exec_module(checker)
     agent_dir = _REPO_ROOT / "backend" / "app" / "agent"
     registered = checker.derive_registered_tool_names(agent_dir)
-    assert len(registered) == 31, (
-        f"内置工具注册数不再是 31（非隐藏）；请同步更新 README/docs/index.html/架构页: {registered}"
+    assert len(registered) == 32, (
+        f"内置工具注册数不再是 32（非隐藏）；请同步更新 README/docs/index.html/架构页: {registered}"
     )
     default_tools = checker.derive_default_tool_names(agent_dir, agent_dir / "config.py")
     assert len(default_tools) == 10, (
@@ -257,7 +257,7 @@ def test_index_page_stats_are_current():
             'stat-num">29<',
         ],
     )
-    _assert_present("docs/index.html", ["v1.22", "3084", "冻结快照", 'stat-num">30<'])
+    _assert_present("docs/index.html", ["v1.22", "3084", "冻结快照", 'stat-num">31<'])
 
 
 def test_readme_module_counts_match_code():
@@ -293,10 +293,10 @@ def test_readme_module_counts_match_code():
         "route_names": len(route_names),
     }
     assert counts == {
-        "endpoints": 29,
-        "routers": 30,
-        "services": 42,
-        "models": 23,
+        "endpoints": 30,
+        "routers": 31,
+        "services": 43,
+        "models": 24,
         "views": 25,
         "route_records": 41,
         "route_names": 36,
@@ -307,9 +307,9 @@ def test_readme_module_counts_match_code():
         rows = [line for line in block.splitlines() if line.startswith("|")]
         return len(rows) - 2  # 去掉表头与分隔行
 
-    assert _api_table_data_rows("README.md", "### 🌐 API 层") == 30, "README API 表行数应为 30"
-    assert _api_table_data_rows("README_EN.md", "### 🌐 API Layer") == 30, (
-        "README_EN API 表行数应为 30"
+    assert _api_table_data_rows("README.md", "### 🌐 API 层") == 31, "README API 表行数应为 31"
+    assert _api_table_data_rows("README_EN.md", "### 🌐 API Layer") == 31, (
+        "README_EN API 表行数应为 31"
     )
 
     _assert_absent(
@@ -376,11 +376,11 @@ def test_readme_module_counts_match_code():
     _assert_present(
         "README.md",
         [
-            "30 个端点模块",
-            "注册 30 个模块",
-            "30 个文件",
-            "42 个服务",
-            "23 个模型文件",
+            "31 个端点模块",
+            "注册 31 个模块",
+            "31 个文件",
+            "43 个服务",
+            "24 个模型文件",
             "25 个页面模块，41 条路由记录 / 36 条具名路由",
             "41 条路由记录（36 条具名路由",
         ],
@@ -446,11 +446,11 @@ def test_readme_module_counts_match_code():
     _assert_present(
         "README_EN.md",
         [
-            "30 endpoint modules",
-            "30 modules registered",
-            "30 files",
-            "42 services",
-            "23 model files",
+            "31 endpoint modules",
+            "31 modules registered",
+            "31 files",
+            "43 services",
+            "24 model files",
             "25 page modules, 41 route records / 36 named routes",
             "41 route records (36 named routes",
         ],
@@ -458,18 +458,18 @@ def test_readme_module_counts_match_code():
 
 
 def test_sse_event_count_matches_code():
-    """README/EN 的 SSE 事件数必须与 EventType 闭集一致（当前 24）。"""
+    """README/EN 的 SSE 事件数必须与 EventType 闭集一致（当前 25）。"""
     events_source = _read("backend/app/agent/events.py")
     match = re.search(r"EventType\s*=\s*Literal\[(.*?)\]", events_source, re.DOTALL)
     assert match, "events.py 中未找到 EventType Literal 定义"
     event_types = re.findall(r'"([^"]+)"', match.group(1))
-    assert len(event_types) == 24, (
+    assert len(event_types) == 25, (
         f"SSE 事件闭集已变化（{len(event_types)} 个）；请同步 README/README_EN 与本测试"
     )
     _assert_absent("README.md", ["12 种 SSE 事件", "SSE 事件类型（12 种）"])
-    _assert_present("README.md", ["24 种 SSE 事件", "SSE 事件类型（24 种）"])
+    _assert_present("README.md", ["25 种 SSE 事件", "SSE 事件类型（25 种）"])
     _assert_absent("README_EN.md", ["12 SSE event types", "SSE event types (12 types)"])
-    _assert_present("README_EN.md", ["24 SSE event types", "SSE event types (24 types)"])
+    _assert_present("README_EN.md", ["25 SSE event types", "SSE event types (25 types)"])
 
 
 def test_readme_pending_hardening_is_not_stale():

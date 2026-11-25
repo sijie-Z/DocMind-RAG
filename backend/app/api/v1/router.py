@@ -20,6 +20,7 @@ from fastapi import APIRouter
 from app.api.v1.endpoints import (
     agent,
     api_keys,
+    artifacts,
     auth,
     chat,
     commands,
@@ -87,6 +88,8 @@ ROUTER_SPECS: dict[str, tuple[APIRouter, str, list[str], str]] = {
     "curated_skills": (curated_skills.router, "/curated-skills", ["智能Agent"], "agent"),
     "memory": (memory.router, "/memory", ["Agent记忆"], "rag"),
     "agent": (agent.router, "/agent", ["智能Agent"], "agent"),
+    # 批次七：Agent 工件（版本化产出物）的创建/列表/详情/正文下载。
+    "artifacts": (artifacts.router, "/artifacts", ["Agent工件"], "agent"),
     # issue #477：容器持久终端（HTTP 会话管理 + 一次性票据 + PTY WebSocket）。
     "terminal": (terminal.router, "/terminal", ["终端"], "agent"),
     # issue #476：会话 fork / 谱系。与 /agent/sessions 共用同一批数据行与可见范围

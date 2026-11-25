@@ -1938,7 +1938,19 @@ export default {
     },
     download: 'Download',
     runReport: 'Run report',
-    exportMarkdown: 'Export Markdown'
+    exportMarkdown: 'Export Markdown',
+    panel: {
+      open: 'Artifacts',
+      title: 'Artifacts',
+      empty: 'No artifacts yet. Files produced by tools will appear here.',
+      loadFailed: 'Failed to load artifacts.',
+      contentFailed: 'Failed to load artifact content.',
+      preview: 'Preview',
+      source: 'Source',
+      versions: 'Versions',
+      badge: 'Artifact',
+      view: 'View'
+    }
   },
   help: {
     tasks: {

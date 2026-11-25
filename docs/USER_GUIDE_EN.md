@@ -4,7 +4,7 @@
 >
 > This guide only *references* the sources of truth:
 > - ports, credentials, and service orchestration: `backend/docker-compose.yml` and `backend/.env.docker.example`;
-> - headline numbers (31 built-in tools / 10 tools injected by default / 30 endpoint modules / 41 frontend routes / 24 SSE event types): `docs/facts.json`; existing anchors in README/architecture pages are checked on every PR by `backend/scripts/check_doc_facts.py`, and this guide mirrors them (its tool/endpoint/route/SSE anchors are now also checked);
+> - headline numbers (32 built-in tools / 10 tools injected by default / 31 endpoint modules / 41 frontend routes / 25 SSE event types): `docs/facts.json`; existing anchors in README/architecture pages are checked on every PR by `backend/scripts/check_doc_facts.py`, and this guide mirrors them (its tool/endpoint/route/SSE anchors are now also checked);
 > - architecture and design rationale: `README.md`, `AGENT_ARCHITECTURE.md`, `docs/decisions/`.
 >
 > 中文版：[USER_GUIDE.md](USER_GUIDE.md)
@@ -350,7 +350,7 @@ User instruction
 - Actual defaults come from `backend/app/agent/config.py`: `max_plan_steps=10`, `max_iterations=20`, `max_tool_calls_per_turn=5`, `max_retries_per_step=3`, step timeout 120 s, `max_context_tokens=8000`; `approval_timeout_seconds=0` (wait forever), `plan_approval_mode="never"`.
 - `execute_python` / `execute_sql` / `mcp_call` are in `DEFAULT_DISABLED_TOOLS`; the server always unions them into `disabled_tools` even if the user config omits them.
 - Reflection `retry` re-runs the step in place; `replan` re-enters planning at most once per run (`MAX_REPLANS_PER_RUN=1`). Reviewer `revise` / `reject` is recorded and displayed as advice only — it does not block the final answer.
-- The agent stream has **24 SSE event types** (`docs/facts.json` → `sse_event_types`, derived from the `EventType` literal in `backend/app/agent/events.py`); the frontend renders plan trees, thinking streams, tool cards, and approval cards from them.
+- The agent stream has **25 SSE event types** (`docs/facts.json` → `sse_event_types`, derived from the `EventType` literal in `backend/app/agent/events.py`); the frontend renders plan trees, thinking streams, tool cards, and approval cards from them.
 
 > The "Configuration" block in `AGENT_ARCHITECTURE.md` shows older defaults (e.g. `max_iterations=10`, `max_plan_steps=8`). When it conflicts with code, `backend/app/agent/config.py` wins.
 
@@ -398,7 +398,7 @@ ADR-001 once froze "organization = knowledge base" as the product semantic (`doc
 
 ### 3.4 Tools and HITL approval
 
-**Tools**: every tool self-registers via `@register_tool(name=...)`. There are **31 built-in tools** (`docs/facts.json` → `registered_tools`; 11 in `core_tools.py`, 20 in `tools/`; 10 tools injected by default), plus dynamic MCP tools. Parameters use JSON Schema and are converted to OpenAI function-calling format; `tags` drive configuration filtering, and sensitive tools are disabled by default in `DEFAULT_DISABLED_TOOLS`.
+**Tools**: every tool self-registers via `@register_tool(name=...)`. There are **32 built-in tools** (`docs/facts.json` → `registered_tools`; 11 in `core_tools.py`, 21 in `tools/`; 10 tools injected by default), plus dynamic MCP tools. Parameters use JSON Schema and are converted to OpenAI function-calling format; `tags` drive configuration filtering, and sensitive tools are disabled by default in `DEFAULT_DISABLED_TOOLS`.
 
 **HITL (human-in-the-loop)** lets the agent pause before a risky next action:
 
@@ -562,7 +562,7 @@ Practical notes:
 - **Strict / privacy mode**: passed in the request `payload` (`strictMode` / `privacyMode`). In strict mode, retrieval failure emits an SSE `error` instead of letting the model improvise; privacy mode works with end-to-end PII masking.
 - **Stop generation**: the frontend aborts the SSE stream with an AbortController; the server finalizes on disconnect.
 - **History**: `GET /api/v1/chat/conversations` supports `page` / `page_size` / `search` (title LIKE), newest first; conversations are visible by "owner + current organization" (see 7.4).
-- **Deep analysis shows its work**: plan tree, thinking stream, tool-call cards, and reflection are driven by the 24 agent SSE event types; quick Q&A only emits `chunk` / `message` / `error` / `debug`.
+- **Deep analysis shows its work**: plan tree, thinking stream, tool-call cards, and reflection are driven by the 25 agent SSE event types; quick Q&A only emits `chunk` / `message` / `error` / `debug`.
 - **When approval is needed**: deep analysis inherits HITL. `approval_mode` defaults to `risky`, but risky tools are disabled by default, so the default configuration triggers no approvals. Once you enable `execute_python` / `execute_sql` / `mcp_call`, risky calls pause for approval. For complex tasks prefer the Agent workbench (4.3), which has the full approval and replay UI.
 - **Search scope filters**: the standalone search page (`/search`) offers knowledge-base selection, multi-select tags, and multi-select file types, sent to `POST /api/v1/knowledge/search` as `knowledge_base_id` and `metadata_filters` (`tags` / `file_type`). Conditions compose (values within a field are ORed, fields are ANDed); top-level `file_types` is not a backend field. Selecting a knowledge base with no matching documents returns no results rather than falling back to all documents in the organization.
 
@@ -689,7 +689,7 @@ Successful login returns an envelope:
 
 ### 5.2 Endpoint modules
 
-There are **30 endpoint modules** (`docs/facts.json` → `endpoint_modules`, derived from the `ROUTER_SPECS` table in `backend/app/api/v1/router.py`):
+There are **31 endpoint modules** (`docs/facts.json` → `endpoint_modules`, derived from the `ROUTER_SPECS` table in `backend/app/api/v1/router.py`):
 
 | Module | Prefix | Purpose |
 |--------|--------|---------|
@@ -830,7 +830,7 @@ alembic revision --autogenerate -m "desc"   # create a migration (dev)
 ```
 
 - Config: `backend/alembic.ini`; the runtime URL is overridden from `settings.DATABASE_URL` in `backend/alembic/env.py`.
-- Current head: `040_inbound_redline_ledger` (`backend/alembic/versions/040_inbound_redline_ledger.py`).
+- Current head: `041_agent_artifact` (`backend/alembic/versions/041_agent_artifact.py`).
 - `init_db()` runs `create_all` **only on an empty database**; existing databases are not auto-upgraded. `USE_ALEMBIC=true` skips `create_all` entirely (`backend/app/core/database.py`).
 - **Release order**: new code may read new tables/columns (e.g. `organization_settings` and `prompt_templates.scope` from 011). Upgrade existing deployments by running migrations **before** routing traffic to new instances; do not create personal prompt templates during the rolling window (old instances treat them as organization-visible).
 - 011's `downgrade` is **lossy**: dropping `organization_settings` loses overrides; dropping `scope` makes personal templates organization-visible. Export/disable related data first (migration header).
@@ -1030,7 +1030,7 @@ python scripts/check_doc_facts.py                                  # three-way c
 | Endpoint modules | `backend/app/api/v1/router.py`; numbers in `docs/facts.json` |
 | Supported formats and parsing | `backend/app/services/document_parser.py` |
 | Index reconciliation / reindex | `backend/scripts/reconcile_knowledge_index.py` |
-| Migrations | `backend/alembic/versions/` (head: `040_inbound_redline_ledger`) |
+| Migrations | `backend/alembic/versions/` (head: `041_agent_artifact`) |
 | Agent architecture and events | `AGENT_ARCHITECTURE.md`, `backend/app/agent/events.py` |
 | Admin semantics and knowledge-base boundaries | `docs/decisions/ADR-001-路线冻结.md` (D3 / D5 historical semantics), `backend/app/models/knowledge_base.py`, `backend/app/rag/knowledge_base_filter.py`, `backend/app/rag/metadata_filter.py` (current behavior) |
 | Deployment and production checklist | `deploy/README.md`, `SETUP.md` |

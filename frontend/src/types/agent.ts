@@ -39,12 +39,20 @@ export const AGENT_EVENT_TYPES = [
   'command_error',
   // Hooks（issue #474）：hook 失败不静默——超时/异常/非法决策以本事件外发。
   'hook_error',
+  // Agent 工件（批次七）：工具显式产出被固化为版本化工件后外发；载荷在
+  // artifactId / title / kind / version / sourceTool / origin / contentUrl。
+  // 普通工具结果仍按 500 字符截断，只有显式工件载荷才发本事件。
+  'artifact',
 ] as const
 
 export type AgentEventType =
   | (typeof AGENT_EVENT_TYPES)[number]
   // steer_sent — **前端本地事件**（乐观落账，后端无此类型）：指导已提交成功。
   | 'steer_sent'
+
+// Agent 工件（批次七）：类型真源在 types/artifact.ts；此处仅为其在事件载荷中的
+// 引用再导出，避免两个文件各自维护一套字面量。
+export type { ArtifactKind } from '@/types/artifact'
 
 export type ThinkingType = 'reasoning' | 'planning' | 'evaluation' | 'correction'
 // 六态真源：backend/app/agent/events.py:39-42（unavailable=评估服务不可用；
@@ -105,6 +113,16 @@ export interface AgentEvent {
   // User Commands（#475）：command_* 事件的命令名与结构化结果（非空才由后端带出）
   command_name?: string
   command_data?: Record<string, any>
+  // Agent 工件（批次七）：artifact 事件载荷（camelCase 投影，见后端 chat/agent
+  // 两个 SSE 出口）；其余事件类型不带这些键。
+  artifactId?: string
+  title?: string
+  kind?: string
+  version?: number
+  sourceTool?: string
+  origin?: 'tool' | 'manual' | string
+  created?: boolean
+  contentUrl?: string
 }
 
 // ── HITL（人在环）─────────────────────────────────────────────────────────

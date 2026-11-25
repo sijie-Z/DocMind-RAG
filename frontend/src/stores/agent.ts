@@ -66,6 +66,9 @@ export const useAgentStore = defineStore('agent', () => {
   const pendingApproval = ref<PendingApproval | null>(null)
   // B：待审批计划（plan_approval_mode=always 的暂停现场）
   const pendingPlanApproval = ref<PendingPlanApproval | null>(null)
+  // 批次七：工件刷新键——每次收到 artifact 事件递增，右栏 watcher 据此重拉
+  // /artifacts 列表（SSE 事件对象与组件解耦；切换会话时页面对比作用域即可）。
+  const artifactRefreshKey = ref(0)
 
   // ── Computed ──
   const toolCount = computed(() => tools.value.length)
@@ -371,6 +374,37 @@ export const useAgentStore = defineStore('agent', () => {
         break
       }
 
+      // ── Agent 工件（批次七）────────────────────────────────────────────
+      case 'artifact': {
+        // 两个 SSE 出口的载荷形状不同：/chat 投影成 camelCase，/agent 直接转发
+        // 后端 AgentEvent（snake_case）。这里统一归一化，避免消费点各写一套。
+        const raw = event as Record<string, any>
+        const normalized = {
+          ...event,
+          artifactId: raw.artifactId ?? raw.artifact_id,
+          title: raw.title ?? raw.artifact_title,
+          kind: raw.kind ?? raw.artifact_kind,
+          version: raw.version ?? raw.artifact_version,
+          sourceTool: raw.sourceTool ?? raw.artifact_source_tool,
+          origin: raw.origin ?? raw.artifact_origin,
+          created: raw.created ?? raw.artifact_created,
+        } as typeof event
+        // 工具显式产出的工件已持久化：时间线留痕 + 递增刷新键（右栏 listener
+        // 据此重拉列表，不把 SSE 事件对象直接耦合进组件）。
+        updateLastAssistant((msg) => {
+          // 重放/续跑可能重复投递同一工件事件；按 artifactId 去重，避免时间线重复。
+          if (normalized.artifactId && msg.events.some(
+            (e) => e.type === 'artifact' &&
+              ((e as Record<string, any>).artifactId ?? (e as Record<string, any>).artifact_id) === normalized.artifactId,
+          )) {
+            return
+          }
+          msg.events.push(normalized)
+        })
+        artifactRefreshKey.value += 1
+        break
+      }
+
       case 'done':
         updateLastAssistant((msg) => {
           msg.loading = false
@@ -445,6 +479,8 @@ export const useAgentStore = defineStore('agent', () => {
     taskState.value = 'idle'
     pendingApproval.value = null
     pendingPlanApproval.value = null
+    // 工件刷新键同样换代：旧账号的 artifact 事件不得触发新账号右栏重拉。
+    artifactRefreshKey.value += 1
   }
 
   /** issue #476：历史会话消息载入（含 serverMessageId，供分叉边界判定）。 */
@@ -551,6 +587,7 @@ export const useAgentStore = defineStore('agent', () => {
     taskState,
     pendingApproval,
     pendingPlanApproval,
+    artifactRefreshKey,
     // Computed
     toolCount,
     enabledToolCount,
