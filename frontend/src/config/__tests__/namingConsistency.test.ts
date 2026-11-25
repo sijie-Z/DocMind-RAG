@@ -129,6 +129,10 @@ const HIDDEN_PAGES: Record<string, string> = {
   // 批次五：模板库从核验列表页进入，菜单面无独立项 → 高亮归属合同核验。
   ReviewTemplates: 'Reviews',
   ReviewTemplateDetail: 'Reviews',
+  // Rubric 评测从核验页进入，菜单面无独立项 → 高亮归属合同核验。
+  EvalRubrics: 'Reviews',
+  EvalRubricDetail: 'Reviews',
+  EvalRubricRunDetail: 'Reviews',
   WorkflowEditor: 'Workflow',
   AgentMemory: 'Workflow',
   Notifications: 'Notifications',
@@ -157,6 +161,10 @@ const DEEP_PAGE_HEADINGS: Record<string, string> = {
   // 批次五：模板库页头与顶栏/面包屑同源（router.reviewTemplates）。
   ReviewTemplates: '../../views/reviews/templateLibrary.vue',
   ReviewTemplateDetail: '../../views/reviews/templateVersionDetail.vue',
+  // 本批：rubric 评测三页页头与顶栏/面包屑同源（router.evalRubrics / router.evalRubricRun）。
+  EvalRubrics: '../../views/eval/rubricLibrary.vue',
+  EvalRubricDetail: '../../views/eval/rubricDetail.vue',
+  EvalRubricRunDetail: '../../views/eval/rubricRunDetail.vue',
 }
 
 /** 从视图源码提取页面主标题（首个 h1/h2）里的第一个 t('…') 键 */

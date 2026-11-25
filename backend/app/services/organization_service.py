@@ -21,6 +21,7 @@ from app.models.agent_task import AgentTask
 from app.models.artifact import AgentArtifact
 from app.models.chat import ChatSession
 from app.models.document import Document
+from app.models.eval_rubric import EvalRubric, EvalRubricRun, EvalRubricVersion
 from app.models.knowledge_base import KnowledgeBase
 from app.models.knowledge_job import KnowledgeProcessingJob
 from app.models.organization import Organization, user_organization
@@ -379,6 +380,12 @@ class OrganizationService:
         ("检索评测用例", RetrievalEvalCase),
         # 评测运行历史同样是组织资产；未纳入清理会触发 MySQL 1451。
         ("检索评测运行", RetrievalEvalRun),
+        # Rubric 评测：评分表/版本/运行三张表都以 organization_id 外键引用
+        # organizations；未纳入清理会在 MySQL 上以 1451 失败。它们是审计资产，
+        # 必须先转移再删组织。
+        ("评分表", EvalRubric),
+        ("评分表版本", EvalRubricVersion),
+        ("评分表评测运行", EvalRubricRun),
         ("工作流", Workflow),
         ("提示词模板", PromptTemplate),
         ("用量记录", TokenUsageRecord),

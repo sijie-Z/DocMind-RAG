@@ -27,6 +27,7 @@ from app.api.v1.endpoints import (
     curated_skills,
     demo,
     documents,
+    eval_rubrics,
     files,
     knowledge,
     knowledge_bases,
@@ -71,6 +72,10 @@ ROUTER_SPECS: dict[str, tuple[APIRouter, str, list[str], str]] = {
     ),
     # 合同核验案件（Batch 2）：建案/列表/详情/证据选择；证据只读 parser 原文。
     "reviews": (reviews.router, "/reviews", ["合同核验"], "rag"),
+    # Rubric 评测（评分表 + 不可变版本 + 判定/校准）：评的是**答案**是否满足
+    # 用户可编辑的加权 yes/no 评分表，与 /knowledge/eval/*（检索 recall@k）
+    # 是两套判定对象，刻意独立成模块、独立前缀。
+    "eval_rubrics": (eval_rubrics.router, "/eval", ["Rubric 评测"], "rag"),
     "organizations": (organizations.router, "/organizations", ["组织管理"], "core"),
     "organization_settings": (
         organization_settings.router,

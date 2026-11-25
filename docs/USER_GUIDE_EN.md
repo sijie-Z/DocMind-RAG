@@ -5,6 +5,7 @@
 > This guide only *references* the sources of truth:
 > - ports, credentials, and service orchestration: `backend/docker-compose.yml` and `backend/.env.docker.example`;
 > - headline numbers (32 built-in tools / 10 tools injected by default / 31 endpoint modules / 41 frontend routes / 25 SSE event types): `docs/facts.json`; existing anchors in README/architecture pages are checked on every PR by `backend/scripts/check_doc_facts.py`, and this guide mirrors them (its tool/endpoint/route/SSE anchors are now also checked);
+> - headline numbers (31 built-in tools / 10 tools injected by default / 31 endpoint modules / 44 frontend routes / 24 SSE event types): `docs/facts.json`; existing anchors in README/architecture pages are checked on every PR by `backend/scripts/check_doc_facts.py`, and this guide mirrors them (its tool/endpoint/route/SSE anchors are now also checked);
 > - architecture and design rationale: `README.md`, `AGENT_ARCHITECTURE.md`, `docs/decisions/`.
 >
 > 中文版：[USER_GUIDE.md](USER_GUIDE.md)
@@ -701,6 +702,7 @@ There are **31 endpoint modules** (`docs/facts.json` → `endpoint_modules`, der
 | chat | `/api/v1/chat` | session CRUD, SSE Q&A |
 | knowledge | `/api/v1/knowledge` | retrieval, stats, rebuild, graph |
 | knowledge_bases | `/api/v1/knowledge-bases` | multi-knowledge-base entity CRUD (organization-scoped) |
+| eval_rubrics | `/api/v1/eval` | Rubric eval: answer-level rubric specs (weighted yes/no with NEUTRAL/STRICT/LENIENT remapping), immutable versions and read-only diff, judge/fake runs with human-gold calibration (agreement + confusion matrix); `/eval/rubrics*` manages specs, `/eval/runs*` reads runs |
 | reviews | `/api/v1/reviews` | contract review: cases, items, evidence snapshots (parser original + version hashes); org template library at `/reviews/templates` (immutable versions + read-only diff); inbound redline ledger at `/reviews/{id}/redlines` (upload/list/ledger/optimistic-locking disposition) |
 | organizations | `/api/v1/organizations` | org CRUD, members, roles |
 | organization_settings | `/api/v1/organizations` | org-level settings (shared prefix) |
@@ -831,6 +833,7 @@ alembic revision --autogenerate -m "desc"   # create a migration (dev)
 
 - Config: `backend/alembic.ini`; the runtime URL is overridden from `settings.DATABASE_URL` in `backend/alembic/env.py`.
 - Current head: `041_agent_artifact` (`backend/alembic/versions/041_agent_artifact.py`).
+- Current head: `042_rubric_eval` (`backend/alembic/versions/042_rubric_eval.py`).
 - `init_db()` runs `create_all` **only on an empty database**; existing databases are not auto-upgraded. `USE_ALEMBIC=true` skips `create_all` entirely (`backend/app/core/database.py`).
 - **Release order**: new code may read new tables/columns (e.g. `organization_settings` and `prompt_templates.scope` from 011). Upgrade existing deployments by running migrations **before** routing traffic to new instances; do not create personal prompt templates during the rolling window (old instances treat them as organization-visible).
 - 011's `downgrade` is **lossy**: dropping `organization_settings` loses overrides; dropping `scope` makes personal templates organization-visible. Export/disable related data first (migration header).
@@ -1031,6 +1034,7 @@ python scripts/check_doc_facts.py                                  # three-way c
 | Supported formats and parsing | `backend/app/services/document_parser.py` |
 | Index reconciliation / reindex | `backend/scripts/reconcile_knowledge_index.py` |
 | Migrations | `backend/alembic/versions/` (head: `041_agent_artifact`) |
+| Migrations | `backend/alembic/versions/` (head: `042_rubric_eval`) |
 | Agent architecture and events | `AGENT_ARCHITECTURE.md`, `backend/app/agent/events.py` |
 | Admin semantics and knowledge-base boundaries | `docs/decisions/ADR-001-路线冻结.md` (D3 / D5 historical semantics), `backend/app/models/knowledge_base.py`, `backend/app/rag/knowledge_base_filter.py`, `backend/app/rag/metadata_filter.py` (current behavior) |
 | Deployment and production checklist | `deploy/README.md`, `SETUP.md` |

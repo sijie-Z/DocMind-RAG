@@ -216,6 +216,38 @@ export const routes: RouteRecordRaw[] = [
         }
       },
       {
+        // Rubric 评测：评分表库（列表 → 详情/版本 → 运行）。菜单面无独立项，
+        // 生效高亮归属「合同核验」下的评测场景由 rubrics 页内入口承载。
+        path: 'eval/rubrics',
+        name: 'EvalRubrics',
+        component: () => import('@/views/eval/rubricLibrary.vue'),
+        meta: {
+          title: 'router.evalRubrics',
+          activeMenu: 'Reviews',
+          icon: 'bar-chart'
+        }
+      },
+      {
+        path: 'eval/rubrics/:id',
+        name: 'EvalRubricDetail',
+        component: () => import('@/views/eval/rubricDetail.vue'),
+        meta: {
+          title: 'router.evalRubrics',
+          activeMenu: 'Reviews',
+          icon: 'bar-chart'
+        }
+      },
+      {
+        path: 'eval/runs/:id',
+        name: 'EvalRubricRunDetail',
+        component: () => import('@/views/eval/rubricRunDetail.vue'),
+        meta: {
+          title: 'router.evalRubricRun',
+          activeMenu: 'Reviews',
+          icon: 'bar-chart'
+        }
+      },
+      {
         path: 'reviews/:id',
         name: 'ReviewDetail',
         component: () => import('@/views/reviews/detail.vue'),

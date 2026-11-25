@@ -2086,6 +2086,8 @@ export default {
     register: 'Register',
     knowledgeGraph: 'Knowledge Graph',
     knowledgeEvalRuns: 'Eval run history',
+    evalRubrics: 'Answer rubrics',
+    evalRubricRun: 'Rubric evaluation run',
     knowledgeDocument: 'Document Details',
     workflowEditor: 'Workflow Editor',
     agentMemory: 'Agent Memory'
@@ -2488,6 +2490,197 @@ export default {
     templateVersionLatest: 'Latest (v{n})',
     templateLoadFailed: 'Failed to load review templates',
     templateOpenManager: 'Manage templates',
+  },
+  rubricEval: {
+    common: {
+      retry: 'Retry',
+      refresh: 'Refresh',
+      cancel: 'Cancel',
+      statusActive: 'Active',
+      statusArchived: 'Archived',
+      statusAll: 'All statuses',
+      runId: 'Run ID'
+    },
+    strictness: {
+      neutral: 'Neutral (unsure = half credit)',
+      strict: 'Strict (unsure = fail)',
+      lenient: 'Lenient (unsure = pass)'
+    },
+    verdict: {
+      yes: 'Yes',
+      no: 'No',
+      unsure: 'Unsure'
+    },
+    mode: {
+      judge: 'Model judge',
+      fake: 'Deterministic replay'
+    },
+    library: {
+      subtitle:
+        'Answer-level rubrics: weighted yes/no questions with immutable versions; judge verdicts can be calibrated against human gold.',
+      scopeBanner:
+        'This page scores whether an ANSWER satisfies the rubric — it is not retrieval recall (retrieval eval lives in the knowledge page run history). Judge mode is model-based, not deterministic ground truth; agreement is only reported when cases carry human gold labels.',
+      navEntry: 'Answer rubrics',
+      create: 'New rubric',
+      createSubmit: 'Create',
+      createDone: 'Rubric created',
+      createFailed: 'Failed to create rubric',
+      name: 'Rubric name',
+      namePlaceholder: 'e.g. Contract Q&A answer quality',
+      nameRequired: 'Please enter a rubric name',
+      description: 'Description',
+      descriptionPlaceholder: 'What this rubric covers and which questions it applies to (optional)',
+      items: 'Rubric items (weighted yes/no questions)',
+      itemsEmpty: 'No items yet; add at least one before running.',
+      itemsRequired: 'At least one rubric item is required',
+      addItem: 'Add item',
+      removeItem: 'Remove',
+      question: 'Question',
+      questionPlaceholder: 'e.g. Does the answer cite the policy clause number?',
+      questionRequired: 'Every rubric item needs question text',
+      itemKey: 'Key',
+      itemKeyPlaceholder: 'Key (lowercase underscore)',
+      itemKeyInvalid: 'Item keys must start with a lowercase letter and be 2-32 chars',
+      itemKeyDuplicate: 'Item keys must be unique',
+      weight: 'Weight',
+      strictness: 'Strictness',
+      strictnessHint:
+        'Strictness only changes how an unsure verdict is scored: neutral=0.5, strict=0, lenient=1; yes/no are always 1/0.',
+      changeNote: 'Version note',
+      changeNotePlaceholder: 'Change note for this version (optional, up to 200 chars)',
+      bootstrap: 'Start from defaults',
+      bootstrapName: 'Default answer quality rubric',
+      bootstrapDone: 'Default rubric initialized',
+      bootstrapFailed: 'Failed to initialize rubric',
+      loadFailed: 'Failed to load rubrics',
+      empty: 'No rubrics yet',
+      emptyHint:
+        'Rubrics turn "is this answer good?" into an editable, versioned, calibratable asset: every edit creates an immutable version, and runs freeze the version and case-set hash they used.',
+      statusColumn: 'Status',
+      versionTag: '{n} versions',
+      open: 'Open',
+      runs: 'Runs',
+      updatedAt: 'Updated'
+    },
+    detail: {
+      loadFailed: 'Failed to load rubric detail',
+      judgeDisclaimer:
+        "Scoring: the judge returns yes/no/unsure; unsure is remapped by each item's strictness. Judge mode is model-based (not deterministic ground truth); fake mode replays caller-supplied verdicts.",
+      archivedBanner:
+        'This rubric is archived (read-only): no new versions or runs; existing runs are unaffected.',
+      archive: 'Archive rubric',
+      archiveConfirm:
+        'Archiving makes the rubric read-only: no new versions or runs; existing runs are unaffected. Archiving cannot be undone. Continue?',
+      archiveDone: 'Rubric archived',
+      archiveFailed: 'Failed to archive rubric',
+      versionHistory: 'Version history',
+      versionCount: '{n} versions',
+      versionsEmpty: 'This rubric has no versions yet',
+      sourceBootstrap: 'Bootstrap',
+      itemsUnit: 'items',
+      runAction: 'Run evaluation',
+      newVersionAction: 'Edit as new version',
+      newVersionSubmit: 'Save new version',
+      newVersionDone: 'New version saved',
+      newVersionFailed: 'Failed to save new version',
+      diffAction: 'Compare versions',
+      diffHint: 'Read-only diff; creates no version and changes no run',
+      diffTitle: 'Version diff (read-only)',
+      diffBase: 'Base version',
+      diffTarget: 'Target version',
+      diffRun: 'Compare',
+      diffFailed: 'Failed to compare versions',
+      diffIdentical: 'The two versions are identical',
+      diffAdded: 'Added items',
+      diffRemoved: 'Removed items',
+      diffChanged: 'Changed items',
+      diffSummary: 'Added {added} · Removed {removed} · Changed {changed} · Unchanged {unchanged}',
+      diffField: {
+        question: 'Question',
+        weight: 'Weight',
+        strictness: 'Strictness'
+      },
+      versionContent: 'Version content',
+      versionSelectHint: 'Select a version to view its items',
+      versionCorrupt: 'Content hash check failed',
+      changeNoteLabel: 'Version note',
+      itemKey: 'Key',
+      itemQuestion: 'Question',
+      itemWeight: 'Weight',
+      itemStrictness: 'Strictness',
+      runsTitle: 'Runs',
+      runsEmpty: 'No runs yet',
+      runTime: 'Time',
+      runMode: 'Mode',
+      runVersion: 'Version',
+      runScore: 'Score',
+      runStatus: 'Status',
+      runOpen: 'View'
+    },
+    run: {
+      createTitle: 'Run rubric evaluation',
+      version: 'Rubric version',
+      mode: 'Mode',
+      judgeNote:
+        'Judge mode calls a model judge per case (one call per case); unsure verdicts are remapped by strictness. Results are model-based, not deterministic ground truth; agreement vs human labels is reported only when gold verdicts are supplied.',
+      fakeNote:
+        'Fake mode replays the verdicts you provide (fake_verdicts) for wiring tests and demos; it is neither a model judgment nor human ground truth.',
+      casesJson: 'Cases (JSON array)',
+      casesPlaceholder:
+        'A JSON array; each case has case_id, answer, and optional name / gold_verdicts / fake_verdicts',
+      casesHint:
+        'Each case: case_id (unique), answer (required), optional name / gold_verdicts (human gold) / fake_verdicts (required in fake mode, covering every item). Up to 50 cases.',
+      casesInvalidJson: 'Cases are not valid JSON',
+      casesInvalidShape: 'Cases must be a JSON array; each entry needs case_id and answer',
+      casesTooMany: 'At most 50 cases per run',
+      submit: 'Run',
+      done: 'Evaluation run completed',
+      failed: 'Failed to run rubric evaluation',
+      loadFailed: 'Failed to load evaluation run',
+      failedTitle: 'This run failed: no score was produced',
+      failedUnavailable:
+        'The judge was unavailable (model call failed). The failed run is kept for inspection; retry later.',
+      failedContract:
+        'The judge output violated the JSON contract (missing/extra keys or invalid verdicts). No score was produced; check the rubric or model config.',
+      errorCode: 'Error code',
+      score: 'Score (weighted pass rate)',
+      judgeModelNote: 'Judge model: {model}',
+      fakeModelNote: 'Deterministic replay, no model call',
+      versionLabel: 'Version / cases',
+      casesUnit: 'cases',
+      datasetHash: 'Case-set hash',
+      questionsTitle: 'Per-question pass rate',
+      questionsHint:
+        'Pass rate = cases with credit 1.0 / cases judged; unsure credit depends on strictness.',
+      passRate: 'Pass rate',
+      verdictCounts: 'Verdicts',
+      verdictCountsValue: 'yes {yes} · no {no} · unsure {unsure}',
+      resultsTitle: 'Per-case results',
+      resultsNote:
+        'Answers and verdicts are visible only to authorized users in this organization; run snapshots are immutable.',
+      caseId: 'Case',
+      caseName: 'Name',
+      caseScore: 'Score',
+      caseVerdicts: 'Verdicts',
+      statusCompleted: 'Completed',
+      statusFailed: 'Failed',
+      backToRubric: 'Back to rubric'
+    },
+    calibration: {
+      title: 'Judge calibration (vs human gold)',
+      subtitle:
+        'Compares judge verdicts with human gold per question; only pairs with both labels count.',
+      agreement: 'Agreement',
+      pairs: 'Agreed / compared',
+      casesWithGold: 'Cases with gold / total',
+      confusionHint: 'Confusion matrix: rows are judge verdicts, columns are human gold.',
+      judgeRow: 'Judge \\ Gold',
+      note: "Agreement is calibration on this batch, not the judge's ground-truth accuracy; interpret small samples with care.",
+      missingTitle: 'No human gold labels in this batch — calibration unavailable',
+      missingHint:
+        'Add gold_verdicts (item key to yes/no/unsure) to cases and rerun to get agreement and a confusion matrix.',
+      unavailableOnFailure: 'The run failed, so there are no verdicts to calibrate.'
+    }
   },
   memory: {
     loadFailed: 'Failed to load memory',

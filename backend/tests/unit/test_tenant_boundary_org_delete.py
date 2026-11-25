@@ -23,6 +23,7 @@ from app.models import Base
 from app.models.agent_task import AgentTask
 from app.models.chat import ChatSession
 from app.models.document import Document, DocumentType
+from app.models.eval_rubric import EvalRubric, EvalRubricRun, EvalRubricVersion
 from app.models.organization import Organization
 from app.models.retrieval_eval import RetrievalEvalCase, RetrievalEvalRun
 from app.models.review import ReviewCase, ReviewExport, ReviewRuleSet
@@ -313,6 +314,99 @@ async def test_delete_org_with_retrieval_eval_runs_blocks():
             with pytest.raises(ConflictError) as excinfo:
                 await organization_service.delete_organization_thoroughly(s, 10)
         assert "检索评测运行 1 条" in str(excinfo.value)
+        async with factory() as s:
+            assert await s.get(Organization, 10) is not None
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_delete_org_with_eval_rubrics_blocks():
+    """Rubric 评分表/版本/运行都有组织外键：未纳入清理会触发 MySQL 1451。
+
+    变异点：从 organization_service._ATTACHED_DATA_MODELS 删除任一
+    ("评分表", ...) / ("评分表版本", ...) / ("评分表评测运行", ...) → 本用例红。
+    """
+    engine, factory = await _setup()
+    try:
+        async with factory() as s:
+            s.add(
+                EvalRubric(
+                    id="rubric-1",
+                    organization_id=10,
+                    name="rubric",
+                    status="active",
+                    latest_version=1,
+                    created_by=20,
+                    lock_version=1,
+                )
+            )
+            s.add(
+                EvalRubricVersion(
+                    id="rubric-ver-1",
+                    rubric_id="rubric-1",
+                    organization_id=10,
+                    version_no=1,
+                    payload_json=[
+                        {"key": "a", "question": "q", "weight": 1, "strictness": "neutral"}
+                    ],
+                    payload_sha256="a" * 64,
+                    item_count=1,
+                    source="manual",
+                    created_by=20,
+                )
+            )
+            await s.commit()
+        async with factory() as s:
+            with pytest.raises(ConflictError) as excinfo:
+                await organization_service.delete_organization_thoroughly(s, 10)
+        message = str(excinfo.value)
+        assert "评分表 1 条" in message
+        assert "评分表版本 1 条" in message
+        async with factory() as s:
+            assert await s.get(Organization, 10) is not None
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_delete_org_with_eval_rubric_runs_blocks():
+    """Rubric 运行同样是组织资产：未纳入清理会触发 MySQL 1451。"""
+    engine, factory = await _setup()
+    try:
+        async with factory() as s:
+            s.add(
+                EvalRubric(
+                    id="rubric-2",
+                    organization_id=10,
+                    name="rubric2",
+                    status="active",
+                    latest_version=1,
+                    created_by=20,
+                    lock_version=1,
+                )
+            )
+            s.add(
+                EvalRubricRun(
+                    id="rubric-run-1",
+                    organization_id=10,
+                    rubric_id="rubric-2",
+                    rubric_version_no=1,
+                    dataset_hash="b" * 64,
+                    mode="fake",
+                    status="completed",
+                    aggregate=None,
+                    results=None,
+                    case_count=1,
+                    judge_model="fake",
+                    created_by=20,
+                )
+            )
+            await s.commit()
+        async with factory() as s:
+            with pytest.raises(ConflictError) as excinfo:
+                await organization_service.delete_organization_thoroughly(s, 10)
+        assert "评分表评测运行 1 条" in str(excinfo.value)
         async with factory() as s:
             assert await s.get(Organization, 10) is not None
     finally:
