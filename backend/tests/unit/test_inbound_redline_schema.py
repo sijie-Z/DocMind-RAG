@@ -28,7 +28,7 @@ from app.models.review import (
 )
 
 BACKEND_ROOT = Path(__file__).resolve().parents[2]
-HEAD = "040_inbound_redline_ledger"
+REVISION = "040_inbound_redline_ledger"
 PREVIOUS = "039_review_template"
 SUBMISSION = "review_redline_submission"
 ROW = "review_redline_row"
@@ -70,10 +70,12 @@ def test_040_migration_source_guard():
 
 def test_040_revision_chain():
     script = ScriptDirectory.from_config(_cfg())
-    rev = script.get_revision(HEAD)
+    rev = script.get_revision(REVISION)
     assert rev.down_revision == PREVIOUS
-    assert len(HEAD) <= 32, "MySQL alembic_version.version_num 是 VARCHAR(32)"
-    assert set(script.get_heads()) == {HEAD}
+    assert len(REVISION) <= 32, "MySQL alembic_version.version_num 是 VARCHAR(32)"
+    # 040 不再是全链 head（批次七在它之后追加迁移），但必须仍在链上且只有一个 head。
+    assert REVISION in {r.revision for r in script.walk_revisions()}
+    assert len(script.get_heads()) == 1
 
 
 def test_revision_constants_match_contract():
@@ -95,7 +97,7 @@ def test_040_schema_and_downgrade_roundtrip(tmp_path, monkeypatch):
     monkeypatch.setattr(settings, "DATABASE_URL", f"sqlite+aiosqlite:///{db_path.as_posix()}")
     cfg = _cfg()
 
-    command.upgrade(cfg, HEAD)
+    command.upgrade(cfg, REVISION)
     with sqlite3.connect(str(db_path)) as conn:
         tables = {
             row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
@@ -170,7 +172,7 @@ def test_040_schema_and_downgrade_roundtrip(tmp_path, monkeypatch):
         provenance = Base.metadata.tables[ROW].c.text_provenance
         assert provenance.default.arg == REVIEW_REDLINE_TEXT_PROVENANCE
 
-    assert _revision(db_path) == {HEAD}
+    assert _revision(db_path) == {REVISION}
 
     command.downgrade(cfg, PREVIOUS)
     with sqlite3.connect(str(db_path)) as conn:

@@ -48,6 +48,34 @@ describe('useAgentStore · artifact 事件（批次七）', () => {
     expect(msg.events[0].artifactId).toBe('art-1')
   })
 
+  it('接受 /agent 出口的 snake_case 载荷并归一化为 camelCase', () => {
+    const store = seedAssistantMessage()
+    store.processEvent({
+      type: 'artifact',
+      content: '季度报告',
+      artifact_id: 'art-9',
+      artifact_title: '季度报告',
+      artifact_kind: 'markdown',
+      artifact_version: 3,
+      artifact_origin: 'tool',
+    } as any)
+    const msg = store.messages[store.messages.length - 1]
+    const evt = msg.events[0] as any
+    expect(evt.artifactId).toBe('art-9')
+    expect(evt.kind).toBe('markdown')
+    expect(evt.version).toBe(3)
+  })
+
+  it('重放重复投递同一 artifactId 不产生重复时间线', () => {
+    const store = seedAssistantMessage()
+    const payload = { type: 'artifact', content: 'A', artifactId: 'a1' } as any
+    store.processEvent(payload)
+    store.processEvent(payload)
+    const msg = store.messages[store.messages.length - 1]
+    const lines = msg.events.filter((e) => e.type === 'artifact')
+    expect(lines).toHaveLength(1)
+  })
+
   it('每次 artifact 事件递增刷新键（右栏 watcher 的数据源）', () => {
     const store = seedAssistantMessage()
     const before = store.artifactRefreshKey

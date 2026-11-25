@@ -140,6 +140,19 @@ async def test_version_chain_appends_and_links(factory):
     assert [row.id for row in mid_chain] == [v1.id, v2.id, v3.id]
 
 
+async def test_version_chain_survives_across_runs_in_same_conversation(factory):
+    """task_id 是每次运行的记账 id；同一会话复用标题必须继续成链，而不是回到 v1。"""
+    v1, _ = await _create(
+        factory, title="周报", content="第一版", conversation_id="conv-9", task_id="task-A"
+    )
+    v2, created = await _create(
+        factory, title="周报", content="第二版", conversation_id="conv-9", task_id="task-B"
+    )
+    assert created is True
+    assert v2.version_no == 2, "跨 run 的同一会话标题必须追加版本"
+    assert v2.replaces_artifact_id == v1.id
+
+
 async def test_different_title_or_scope_is_a_separate_chain(factory):
     a, _ = await _create(factory, title="A", content="1")
     b, _ = await _create(factory, title="B", content="1")

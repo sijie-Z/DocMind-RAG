@@ -169,6 +169,11 @@ async def test_create_list_detail_content_roundtrip(factory):
         assert content.headers["x-content-type-options"] == "nosniff"
         assert "attachment" not in content.headers["content-disposition"]
         assert "filename*=UTF-8''" in content.headers["content-disposition"]
+        # 工件可能是模型生成的 HTML/SVG：直开该 URL 也必须在无同源沙箱中运行。
+        csp = content.headers["content-security-policy"]
+        assert csp.startswith("sandbox")
+        assert "default-src 'none'" in csp
+        assert content.headers["x-frame-options"] == "DENY"
 
 
 async def test_version_chain_via_api(factory):

@@ -205,6 +205,13 @@ async def get_artifact_content(
                 ),
                 "X-Content-Type-Options": "nosniff",
                 "Cache-Control": "private, max-age=0, must-revalidate",
+                # 工件可能是模型生成的 HTML/SVG：即使客户端直接打开该 URL，
+                # 也必须运行在无同源权限的沙箱里（应用 UI 走 iframe srcdoc +
+                # sandbox，另有防护）。没有这条，直开链接会在应用源上执行脚本。
+                "Content-Security-Policy": (
+                    "sandbox; default-src 'none'; img-src data:; style-src 'unsafe-inline'"
+                ),
+                "X-Frame-Options": "DENY",
             },
         )
     except (NotFoundError, AuthorizationError):

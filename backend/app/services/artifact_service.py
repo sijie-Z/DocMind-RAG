@@ -321,13 +321,16 @@ async def create_artifact(
             return existing, False
 
     # ② 内容级幂等：链头内容相同 → 不制造空版本。
+    # 版本链的身份是「同一会话里的同一标题」，不是单次运行：task_id 是每次
+    # agent 运行的记账 id，若参与链头匹配，跨 run 复用标题会永远回到 v1
+    # （工具描述承诺的是同一会话内追加版本）。只有在没有会话时才退化到任务作用域。
     parent = await _find_chain_head(
         session,
         organization_id=organization_id,
         user_id=user_id,
         title=safe_title,
         conversation_id=conversation_id,
-        task_id=task_id,
+        task_id=None if conversation_id is not None else task_id,
     )
     if parent is not None and parent.content_sha256 == sha256:
         return parent, False
