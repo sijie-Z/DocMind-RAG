@@ -738,7 +738,6 @@ async def create_proposal(
         if description is not None:
             # 说明是技能头字段（不在版本里）；追加 pending 版本不得即时改写它。
             raise ValidationError("已有技能不能通过提议修改说明", field="description")
-        skill.updated_by = user_id
     else:
         if not name:
             raise ValidationError("新建技能必须提供名称", field="name")
@@ -782,6 +781,12 @@ async def create_proposal(
             error_code="ORG_SKILL_VERSION_LIMIT",
         )
     version_no = skill.latest_version + 1
+    await _conditional_header_update(
+        session,
+        skill=skill,
+        organization_id=organization_id,
+        values={"latest_version": version_no, "updated_by": user_id},
+    )
     source = SOURCE_RUN_PROPOSAL if task is not None else SOURCE_MANUAL
     provenance: dict[str, Any] = {"source": source}
     if task is not None:
@@ -799,7 +804,6 @@ async def create_proposal(
         created_by=user_id,
     )
     session.add(version)
-    skill.latest_version = version_no
     try:
         if commit:
             await session.commit()
@@ -814,6 +818,33 @@ async def create_proposal(
         await session.refresh(skill)
         await session.refresh(version)
     return skill, version
+
+
+async def _conditional_header_update(
+    session: AsyncSession,
+    *,
+    skill: OrgSkill,
+    organization_id: int,
+    values: dict[str, Any],
+) -> None:
+    """以 lock_version 做条件 UPDATE；并发改动 → 409，不静默覆盖。"""
+    expected = int(skill.lock_version)
+    result = await session.execute(
+        update(OrgSkill)
+        .where(
+            OrgSkill.id == skill.id,
+            OrgSkill.organization_id == organization_id,
+            OrgSkill.status == STATUS_ACTIVE,
+            OrgSkill.lock_version == expected,
+        )
+        .values(**values, lock_version=expected + 1)
+    )
+    if result.rowcount != 1:
+        await session.rollback()
+        raise ConflictError(
+            "技能已被其他操作修改，请刷新后重试",
+            error_code="ORG_SKILL_CONFLICT",
+        )
 
 
 async def review_version(
@@ -852,6 +883,8 @@ async def review_version(
         raise AuthorizationError("作者不能审核自己的技能版本", error_code="ORG_SKILL_SELF_REVIEW")
     if version.review_status != REVIEW_PENDING:
         raise ConflictError("版本已审核，不能重复审核", error_code="ORG_SKILL_ALREADY_REVIEWED")
+    # 审核前复验完整性与规范化：坏 payload 不得被批准成“永远无法启用”的版本。
+    _load_payload_or_conflict(version)
     # 条件 UPDATE 提供并发保护：两个审核请求只有一个能把 pending 翻走。
     result = await session.execute(
         update(OrgSkillVersion)
@@ -923,9 +956,12 @@ async def enable_version(
     _load_payload_or_conflict(version)
     if skill.enabled_version_no == version_no:
         return skill
-    skill.enabled_version_no = version_no
-    skill.updated_by = user_id
-    skill.lock_version += 1
+    await _conditional_header_update(
+        session,
+        skill=skill,
+        organization_id=organization_id,
+        values={"enabled_version_no": version_no, "updated_by": user_id},
+    )
     if commit:
         await session.commit()
         await session.refresh(skill)
@@ -946,9 +982,12 @@ async def disable_skill(
     skill = await _get_skill(session, organization_id=organization_id, skill_id=skill_id)
     if skill.enabled_version_no is None:
         return skill
-    skill.enabled_version_no = None
-    skill.updated_by = user_id
-    skill.lock_version += 1
+    await _conditional_header_update(
+        session,
+        skill=skill,
+        organization_id=organization_id,
+        values={"enabled_version_no": None, "updated_by": user_id},
+    )
     if commit:
         await session.commit()
         await session.refresh(skill)
@@ -1012,9 +1051,12 @@ async def rollback_skill(
         if target.review_status != REVIEW_APPROVED:
             raise ConflictError("只能回滚到已批准版本", error_code="ORG_SKILL_VERSION_NOT_APPROVED")
     _load_payload_or_conflict(target)
-    skill.enabled_version_no = target.version_no
-    skill.updated_by = user_id
-    skill.lock_version += 1
+    await _conditional_header_update(
+        session,
+        skill=skill,
+        organization_id=organization_id,
+        values={"enabled_version_no": target.version_no, "updated_by": user_id},
+    )
     if commit:
         await session.commit()
         await session.refresh(skill)
@@ -1035,12 +1077,18 @@ async def archive_skill(
     skill = await _get_skill(session, organization_id=organization_id, skill_id=skill_id)
     if skill.status == STATUS_ARCHIVED:
         raise ConflictError("技能已归档", error_code="ORG_SKILL_ALREADY_ARCHIVED")
-    skill.status = STATUS_ARCHIVED
-    skill.enabled_version_no = None
-    skill.archived_at = _now()
-    skill.archived_by = user_id
-    skill.updated_by = user_id
-    skill.lock_version += 1
+    await _conditional_header_update(
+        session,
+        skill=skill,
+        organization_id=organization_id,
+        values={
+            "status": STATUS_ARCHIVED,
+            "enabled_version_no": None,
+            "archived_at": _now(),
+            "archived_by": user_id,
+            "updated_by": user_id,
+        },
+    )
     if commit:
         await session.commit()
         await session.refresh(skill)

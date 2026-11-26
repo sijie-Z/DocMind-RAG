@@ -321,7 +321,7 @@ async def reject_org_skill_version(
 # ── 启用 / 禁用 / 回滚 / 归档 ─────────────────────────────────────────────
 
 
-@router.post("/{skill_id}/enable", response_model=dict)
+@router.post("/{skill_id}/enable", response_model=dict, dependencies=_WRITE_DEPS)
 async def enable_org_skill(
     skill_id: str,
     body: SkillEnableRequest,
@@ -364,7 +364,7 @@ async def enable_org_skill(
         raise AppError("启用技能失败") from e
 
 
-@router.post("/{skill_id}/disable", response_model=dict)
+@router.post("/{skill_id}/disable", response_model=dict, dependencies=_WRITE_DEPS)
 async def disable_org_skill(
     skill_id: str,
     request: Request,
@@ -396,7 +396,7 @@ async def disable_org_skill(
         raise AppError("禁用技能失败") from e
 
 
-@router.post("/{skill_id}/rollback", response_model=dict)
+@router.post("/{skill_id}/rollback", response_model=dict, dependencies=_WRITE_DEPS)
 async def rollback_org_skill(
     skill_id: str,
     body: SkillRollbackRequest,
@@ -438,7 +438,7 @@ async def rollback_org_skill(
         raise AppError("回滚技能失败") from e
 
 
-@router.post("/{skill_id}/archive", response_model=dict)
+@router.post("/{skill_id}/archive", response_model=dict, dependencies=_WRITE_DEPS)
 async def archive_org_skill(
     skill_id: str,
     request: Request,
