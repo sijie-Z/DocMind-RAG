@@ -51,7 +51,14 @@ def _as_utc(value: datetime | None) -> datetime | None:
 
 
 def _iso(value: datetime | None) -> str | None:
-    return value.isoformat() if value else None
+    """ISO 输出统一带 UTC 偏移（DB 回读的 naive 值按 UTC 解释）。
+
+    分享时间会直接展示给用户：创建/轮换响应里是 aware datetime，而 MySQL
+    DATETIME / SQLite 回读是 naive；若不归一，前端 ``new Date()`` 会按浏览器
+    本地时区解释 naive 字符串，导致过期提示随查看路径漂移。
+    """
+    normalized = _as_utc(value)
+    return normalized.isoformat() if normalized else None
 
 
 def _validate_expiry(expires_in_days: int | None) -> datetime | None:

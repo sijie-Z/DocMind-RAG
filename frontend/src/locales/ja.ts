@@ -1979,6 +1979,8 @@ export default {
       loadFailed: '共有状態の読み込みに失敗しました。',
       inactiveNotice: 'まだ共有していません',
       activeNotice: '共有リンクは有効です（リンク自体は再表示できません。再生成してください）',
+      expiredNotice: '共有リンクの有効期限が切れています。再作成できます',
+      revokedNotice: '共有は無効化されています。再作成できます',
       linkLabel: '共有リンク',
       onceNotice: 'リンクは一度しか表示されません。すぐにコピーしてください。再生成すると古いリンクは即座に無効になります。',
       expiryLabel: '有効期限',

@@ -191,6 +191,7 @@ async def test_create_status_public_revoke_roundtrip(factory):
 
         meta = await ac.get(f"/api/v1/public/artifacts/{token}")
         assert meta.status_code == 200, meta.text
+        assert meta.headers["cache-control"] == "no-store"
         data = meta.json()["data"]
         assert set(data) == _PUBLIC_KEYS, f"公开元数据字段漂移: {set(data)}"
         assert data["title"] == "报告"
@@ -357,6 +358,63 @@ async def test_missing_scope_is_403(factory):
         assert resp.status_code == 403, resp.text
         assert (await ac.get(f"/api/v1/artifacts/{created['id']}/share")).status_code == 403
         assert (await ac.delete(f"/api/v1/artifacts/{created['id']}/share")).status_code == 403
+
+
+async def test_share_timestamps_stay_utc_across_reads(factory):
+    """创建响应与 DB 回读/公开响应必须同一口径（带 UTC 偏移）。
+
+    变异点：`_iso` 直接 isoformat（naive 回读不带偏移）→ 本用例红，前端
+    `new Date()` 会按浏览器本地时区解释，过期提示偏移。
+    """
+    async with _Ctx(_user(), factory) as ac:
+        created = await _create(ac, content="时间正文")
+        resp = await _share(ac, created["id"], expires_in_days=30)
+        assert resp.status_code == 200, resp.text
+        data = resp.json()["data"]
+        token = data["token"]
+        assert data["expires_at"].endswith("+00:00"), data["expires_at"]
+
+        status = (await ac.get(f"/api/v1/artifacts/{created['id']}/share")).json()["data"]
+        assert status["expires_at"] == data["expires_at"]
+        assert status["created_at"].endswith("+00:00")
+
+        meta = (await ac.get(f"/api/v1/public/artifacts/{token}")).json()["data"]
+        assert meta["expires_at"] == data["expires_at"]
+        assert meta["created_at"].endswith("+00:00")
+
+
+async def test_superuser_cannot_manage_others_share(factory):
+    """owner-only：超管也只能管理自己的分享（不是组织内任意人）。"""
+    async with _Ctx(_user(), factory) as ac:
+        created = await _create(ac, title="超管勿动", content="正文")
+        token = (await _share(ac, created["id"])).json()["data"]["token"]
+
+    async with _Ctx(_user(user_id=OTHER_USER, superuser=True), factory) as ac:
+        for method, path in (
+            ("post", f"/api/v1/artifacts/{created['id']}/share"),
+            ("get", f"/api/v1/artifacts/{created['id']}/share"),
+            ("delete", f"/api/v1/artifacts/{created['id']}/share"),
+        ):
+            resp = await getattr(ac, method)(path, **({"json": {}} if method == "post" else {}))
+            assert resp.status_code == 404, (method, resp.text)
+        # 超管也不是公开面的旁路：没有 token 就没有读取途径。
+        assert (await ac.get("/api/v1/public/artifacts/not-a-token")).status_code == 404
+
+    async with _Ctx(_user(), factory) as ac:
+        assert (await ac.get(f"/api/v1/public/artifacts/{token}")).status_code == 200
+
+
+async def test_revoke_without_share_is_404_and_revoke_twice_is_idempotent(factory):
+    async with _Ctx(_user(), factory) as ac:
+        created = await _create(ac, title="未分享")
+        assert (await ac.delete(f"/api/v1/artifacts/{created['id']}/share")).status_code == 404
+
+        await _share(ac, created["id"])
+        first = await ac.delete(f"/api/v1/artifacts/{created['id']}/share")
+        assert first.status_code == 200, first.text
+        second = await ac.delete(f"/api/v1/artifacts/{created['id']}/share")
+        assert second.status_code == 200, second.text
+        assert second.json()["data"]["shared"] is False
 
 
 async def test_unknown_and_oversized_tokens_are_404(factory):

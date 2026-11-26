@@ -1993,6 +1993,8 @@ export default {
       loadFailed: 'Failed to load share status.',
       inactiveNotice: 'Not shared yet',
       activeNotice: 'Share link is active (the link itself cannot be read back; regenerate to get a new one)',
+      expiredNotice: 'Share link has expired; create a new one',
+      revokedNotice: 'Share has been revoked; create a new one',
       linkLabel: 'Share link',
       onceNotice: 'The link is shown only once — copy it now. Regenerating invalidates the old link immediately.',
       expiryLabel: 'Expires',

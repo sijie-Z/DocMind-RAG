@@ -2,13 +2,13 @@
 
 > **规则**：任何对外数字必须能链到本表的一行；每行必须带 **值 · 口径 · 命令 · 日期 · 备注**。没有这五样的数字不写。
 >
-> **更新顺序**：先跑命令 → 改本表 → 改引用文档 → `cd backend && python scripts/check_doc_facts.py`（逐项校验七项 facts 与 `docs/facts.json` 同值）。
+> **更新顺序**：先跑命令 → 改本表 → 改引用文档 → `cd backend && python scripts/check_doc_facts.py`（逐项校验八项 facts 与 `docs/facts.json` 同值）。
 >
 > **口径纪律**：`live`（真实嵌入 / 真实 ES / 真实模型）与 `fake`（确定性伪嵌入）不可混写；含嵌套 / 不含嵌套必须写明；旧版本（Eval v1：28 条）与新版本（Eval v1.5：80 条）不可混比。
 
-维护：DocMind 维护者（issue #513）。最近复核：2026-10-27。
+维护：DocMind 维护者（issue #513）。最近复核：2026-11-27。
 
-## 1. 源码派生 facts（机器校验，七项与 docs/facts.json 同值）
+## 1. 源码派生 facts（机器校验，八项与 docs/facts.json 同值）
 
 | 指标 | 值 | 口径 | 命令 | 日期 | 备注 |
 |---|---|---|---|---|---|
@@ -58,7 +58,7 @@
 
 ## 4. 引用与边界
 
-- 文档引用写法：数字旁标注 `（见 docs/METRICS.md）`；同一文档同一指标只能出现一个数字，漂移由 `backend/scripts/check_doc_facts.py` 校验（多数字先告警，facts 七项不一致则红）。
+- 文档引用写法：数字旁标注 `（见 docs/METRICS.md）`；同一文档同一指标只能出现一个数字，漂移由 `backend/scripts/check_doc_facts.py` 校验（多数字先告警，facts 八项不一致则红）。
 - 父目录 `AI_projects/CLAUDE.md` 不在本仓库内，其 `25+ tools` 表述无法在本仓库修订；本仓库对外一律以本表 `registered_tools=32` / `default_tools=10`（2026-11-25）为准。
 - `docs/USER_GUIDE*.md` 已同步 Eval v1.5（80 条，PR #617）。
 - 本表不是 CI 实时结果；测试与评测的实时真源是 CI artifact / 报告。

@@ -142,8 +142,44 @@ describe('ArtifactSharePanel', () => {
     await w.find('[data-testid="artifact-share-revoke"]').trigger('click')
     await flushPromises()
     expect(revokeShareMock).toHaveBeenCalledWith('art-1')
-    expect(w.find('[data-testid="artifact-share-inactive"]').exists()).toBe(true)
+    expect(w.find('[data-testid="artifact-share-revoked"]').exists()).toBe(true)
+    expect(w.find('[data-testid="artifact-share-inactive"]').exists()).toBe(false)
     expect(w.find('[data-testid="artifact-share-revoked-at"]').exists()).toBe(true)
+  })
+
+  it('过期分享显示过期态，而不是“尚未分享”', async () => {
+    getShareMock.mockResolvedValue({
+      data: {
+        success: true,
+        data: {
+          shared: false,
+          expires_at: new Date(Date.now() - 60_000).toISOString(),
+          revoked_at: null,
+        },
+      },
+    })
+    const w = mountPanel()
+    await flushPromises()
+    expect(w.find('[data-testid="artifact-share-expired"]').exists()).toBe(true)
+    expect(w.find('[data-testid="artifact-share-inactive"]').exists()).toBe(false)
+  })
+
+  it('轮换时回填现有过期档位，不会静默变成永久链接', async () => {
+    getShareMock.mockResolvedValue({
+      data: {
+        success: true,
+        data: {
+          shared: true,
+          expires_at: new Date(Date.now() + 30 * 86_400_000).toISOString(),
+          revoked_at: null,
+        },
+      },
+    })
+    const w = mountPanel()
+    await flushPromises()
+    await w.find('[data-testid="artifact-share-create"]').trigger('click')
+    await flushPromises()
+    expect(createShareMock).toHaveBeenCalledWith('art-1', 30)
   })
 
   it('轮换会调用创建 API 并显示新 token', async () => {

@@ -2002,6 +2002,8 @@ export default {
       loadFailed: '分享状态加载失败。',
       inactiveNotice: '尚未分享',
       activeNotice: '分享链接已启用（链接本身不可回读，可重新生成）',
+      expiredNotice: '分享已过期，可重新创建',
+      revokedNotice: '分享已撤销，可重新创建',
       linkLabel: '分享链接',
       onceNotice: '链接只显示一次，请立即复制；重新生成会使旧链接立即失效。',
       expiryLabel: '有效期',

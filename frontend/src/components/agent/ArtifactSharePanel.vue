@@ -51,6 +51,20 @@
         <div v-else-if="shared" class="artifact-share-active" data-testid="artifact-share-active">
           {{ t('artifacts.share.activeNotice') }}
         </div>
+        <div
+          v-else-if="expired"
+          class="artifact-share-state artifact-share-expired"
+          data-testid="artifact-share-expired"
+        >
+          {{ t('artifacts.share.expiredNotice') }}
+        </div>
+        <div
+          v-else-if="revoked"
+          class="artifact-share-state"
+          data-testid="artifact-share-revoked"
+        >
+          {{ t('artifacts.share.revokedNotice') }}
+        </div>
         <div v-else class="artifact-share-state" data-testid="artifact-share-inactive">
           {{ t('artifacts.share.inactiveNotice') }}
         </div>
@@ -152,6 +166,28 @@ const link = computed(() =>
   token.value ? `${window.location.origin}/share/artifact/${token.value}` : '',
 )
 
+/** 失效态区分：过期 ≠ 撤销 ≠ 从未分享（主状态文案必须与事实一致）。 */
+const expired = computed(() => {
+  if (shared.value || !expiresAt.value) return false
+  const time = new Date(expiresAt.value).getTime()
+  return !Number.isNaN(time) && time <= Date.now()
+})
+const revoked = computed(() => !shared.value && !expired.value && !!revokedAt.value)
+
+/**
+ * 从现有过期时间回填下拉选择，避免「点了重新生成 → 静默变成永久链接」。
+ * 取不小于剩余天数的档位；已过期/无过期 → 不过期（用户需显式选择）。
+ */
+function expiryChoiceFrom(value: string | null): number {
+  if (!value) return 0
+  const remaining = new Date(value).getTime() - Date.now()
+  if (Number.isNaN(remaining) || remaining <= 0) return 0
+  const days = Math.ceil(remaining / 86_400_000)
+  if (days <= 7) return 7
+  if (days <= 30) return 30
+  return 90
+}
+
 function formatTime(value: string | null): string {
   if (!value) return ''
   const date = new Date(value)
@@ -170,6 +206,7 @@ async function loadStatus() {
     shared.value = !!data?.shared
     expiresAt.value = data?.expires_at ?? null
     revokedAt.value = data?.revoked_at ?? null
+    expiryChoice.value = expiryChoiceFrom(expiresAt.value)
   } catch {
     // 状态拉取失败不等于未分享：保留错误提示，禁用依赖状态的推断。
     shared.value = false
@@ -435,5 +472,9 @@ async function revokeShare() {
   margin: 8px 0 0;
   font-size: 12px;
   color: #dc2626;
+}
+
+.artifact-share-expired {
+  color: #b45309;
 }
 </style>

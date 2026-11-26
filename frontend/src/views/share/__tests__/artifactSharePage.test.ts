@@ -10,6 +10,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import { defineComponent, h } from 'vue'
 import { createI18n } from 'vue-i18n'
+import { createMemoryHistory, createRouter } from 'vue-router'
 import en from '@/locales/en'
 
 const { getMock, fetchContentMock } = vi.hoisted(() => ({
@@ -19,10 +20,6 @@ const { getMock, fetchContentMock } = vi.hoisted(() => ({
 
 vi.mock('@/api/artifacts', () => ({
   publicArtifactsApi: { get: getMock, fetchContent: fetchContentMock },
-}))
-
-vi.mock('vue-router', () => ({
-  useRoute: () => ({ params: { token: 'public-token' } }),
 }))
 
 import PublicArtifactPage from '../artifact.vue'
@@ -55,10 +52,17 @@ function textResponse(text: string, ok = true): Response {
   return { ok, text: async () => text } as unknown as Response
 }
 
-function mountPage() {
-  return mount(PublicArtifactPage, {
-    global: { plugins: [i18n], stubs: { Markdown: MarkdownStub } },
+async function mountPage(initialToken = 'public-token') {
+  const router = createRouter({
+    history: createMemoryHistory(),
+    routes: [{ path: '/share/artifact/:token', component: { template: '<div />' } }],
   })
+  await router.push(`/share/artifact/${initialToken}`)
+  await router.isReady()
+  const wrapper = mount(PublicArtifactPage, {
+    global: { plugins: [i18n, router], stubs: { Markdown: MarkdownStub } },
+  })
+  return { wrapper, router }
 }
 
 beforeEach(() => {
@@ -71,7 +75,7 @@ beforeEach(() => {
 
 describe('public artifact share page', () => {
   it('匿名访客按 token 拉取元数据与正文并渲染 Markdown', async () => {
-    const w = mountPage()
+    const { wrapper: w } = await mountPage()
     await flushPromises()
     expect(getMock).toHaveBeenCalledWith('public-token')
     expect(fetchContentMock).toHaveBeenCalledWith('public-token')
@@ -89,7 +93,7 @@ describe('public artifact share page', () => {
     fetchContentMock.mockResolvedValue(
       textResponse('<html><body><script>alert(1)</script><p>hi</p></body></html>'),
     )
-    const w = mountPage()
+    const { wrapper: w } = await mountPage()
     await flushPromises()
     const frame = w.find('[data-testid="public-artifact-sandbox-frame"]')
     expect(frame.exists()).toBe(true)
@@ -101,7 +105,7 @@ describe('public artifact share page', () => {
 
   it('失效/撤销/过期链接显示不可用提示', async () => {
     getMock.mockRejectedValue(new Error('404'))
-    const w = mountPage()
+    const { wrapper: w } = await mountPage()
     await flushPromises()
     expect(w.find('[data-testid="public-artifact-unavailable"]').exists()).toBe(true)
     expect(w.text()).toContain('does not exist or has expired')
@@ -110,7 +114,7 @@ describe('public artifact share page', () => {
 
   it('元数据成功但正文 404（撤销发生于两次请求之间）也按不可用处理', async () => {
     fetchContentMock.mockResolvedValue(textResponse('', false))
-    const w = mountPage()
+    const { wrapper: w } = await mountPage()
     await flushPromises()
     expect(w.find('[data-testid="public-artifact-unavailable"]').exists()).toBe(true)
   })
@@ -129,7 +133,7 @@ describe('public artifact share page', () => {
         },
       },
     })
-    const w = mountPage()
+    const { wrapper: w } = await mountPage()
     await flushPromises()
     const text = w.text()
     expect(text).not.toContain('conv-internal-303')
@@ -140,7 +144,7 @@ describe('public artifact share page', () => {
   })
 
   it('下载按钮把正文导出为文件', async () => {
-    const w = mountPage()
+    const { wrapper: w } = await mountPage()
     await flushPromises()
     await w.find('[data-testid="public-artifact-download"]').trigger('click')
     expect(URL.createObjectURL).toHaveBeenCalledTimes(1)
@@ -154,9 +158,25 @@ describe('public artifact share page', () => {
         data: meta({ expires_at: '2026-12-31T00:00:00Z' }),
       },
     })
-    const w = mountPage()
+    const { wrapper: w } = await mountPage()
     await flushPromises()
     expect(w.find('[data-testid="public-artifact-expires-at"]').exists()).toBe(true)
     expect(w.text()).toContain('expires at')
+  })
+
+  it('SPA 内切换到另一个 token 会重新拉取，不展示旧内容', async () => {
+    const { wrapper: w, router } = await mountPage('token-a')
+    await flushPromises()
+    expect(getMock).toHaveBeenLastCalledWith('token-a')
+
+    getMock.mockResolvedValue({ data: { success: true, data: meta({ title: 'Second artifact' }) } })
+    fetchContentMock.mockResolvedValue(textResponse('# Second body'))
+    await router.push('/share/artifact/token-b')
+    await flushPromises()
+
+    expect(getMock).toHaveBeenLastCalledWith('token-b')
+    expect(fetchContentMock).toHaveBeenLastCalledWith('token-b')
+    expect(w.text()).toContain('Second artifact')
+    expect(w.find('.md').text()).toBe('# Second body')
   })
 })

@@ -59,7 +59,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import Markdown from '@/components/common/Markdown.vue'
@@ -89,8 +89,11 @@ function formatTime(value: string): string {
   return Number.isNaN(date.getTime()) ? value : date.toLocaleString()
 }
 
-onMounted(async () => {
-  const token = String(route.params.token || '')
+async function load(token: string) {
+  loading.value = true
+  error.value = false
+  meta.value = null
+  content.value = ''
   try {
     const res = await publicArtifactsApi.get(token)
     const data = res.data?.data
@@ -107,7 +110,16 @@ onMounted(async () => {
   } finally {
     loading.value = false
   }
-})
+}
+
+// SPA 内从一个分享链接导航到另一个（组件复用）时也必须重新拉取，避免展示旧内容。
+watch(
+  () => String(route.params.token || ''),
+  (token) => {
+    if (token) void load(token)
+  },
+  { immediate: true },
+)
 
 function download() {
   if (!meta.value) return

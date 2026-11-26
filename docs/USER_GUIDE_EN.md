@@ -5,7 +5,6 @@
 > This guide only *references* the sources of truth:
 > - ports, credentials, and service orchestration: `backend/docker-compose.yml` and `backend/.env.docker.example`;
 > - headline numbers (32 built-in tools / 10 tools injected by default / 34 endpoint modules / 47 frontend routes / 25 SSE event types): `docs/facts.json`; existing anchors in README/architecture pages are checked on every PR by `backend/scripts/check_doc_facts.py`, and this guide mirrors them (its tool/endpoint/route/SSE anchors are now also checked);
-> - headline numbers (32 built-in tools / 10 tools injected by default / 34 endpoint modules / 47 frontend routes / 24 SSE event types): `docs/facts.json`; existing anchors in README/architecture pages are checked on every PR by `backend/scripts/check_doc_facts.py`, and this guide mirrors them (its tool/endpoint/route/SSE anchors are now also checked);
 > - architecture and design rationale: `README.md`, `AGENT_ARCHITECTURE.md`, `docs/decisions/`.
 >
 > 中文版：[USER_GUIDE.md](USER_GUIDE.md)
@@ -835,8 +834,7 @@ alembic revision --autogenerate -m "desc"   # create a migration (dev)
 ```
 
 - Config: `backend/alembic.ini`; the runtime URL is overridden from `settings.DATABASE_URL` in `backend/alembic/env.py`.
-- Current head: `041_agent_artifact` (`backend/alembic/versions/041_agent_artifact.py`).
-- Current head: `042_rubric_eval` (`backend/alembic/versions/042_rubric_eval.py`).
+- Current head: `045_artifact_share` (`backend/alembic/versions/045_artifact_share.py`).
 - `init_db()` runs `create_all` **only on an empty database**; existing databases are not auto-upgraded. `USE_ALEMBIC=true` skips `create_all` entirely (`backend/app/core/database.py`).
 - **Release order**: new code may read new tables/columns (e.g. `organization_settings` and `prompt_templates.scope` from 011). Upgrade existing deployments by running migrations **before** routing traffic to new instances; do not create personal prompt templates during the rolling window (old instances treat them as organization-visible).
 - 011's `downgrade` is **lossy**: dropping `organization_settings` loses overrides; dropping `scope` makes personal templates organization-visible. Export/disable related data first (migration header).
@@ -1036,8 +1034,7 @@ python scripts/check_doc_facts.py                                  # three-way c
 | Endpoint modules | `backend/app/api/v1/router.py`; numbers in `docs/facts.json` |
 | Supported formats and parsing | `backend/app/services/document_parser.py` |
 | Index reconciliation / reindex | `backend/scripts/reconcile_knowledge_index.py` |
-| Migrations | `backend/alembic/versions/` (head: `041_agent_artifact`) |
-| Migrations | `backend/alembic/versions/` (head: `042_rubric_eval`) |
+| Migrations | `backend/alembic/versions/` (head: `045_artifact_share`) |
 | Agent architecture and events | `AGENT_ARCHITECTURE.md`, `backend/app/agent/events.py` |
 | Admin semantics and knowledge-base boundaries | `docs/decisions/ADR-001-路线冻结.md` (D3 / D5 historical semantics), `backend/app/models/knowledge_base.py`, `backend/app/rag/knowledge_base_filter.py`, `backend/app/rag/metadata_filter.py` (current behavior) |
 | Deployment and production checklist | `deploy/README.md`, `SETUP.md` |

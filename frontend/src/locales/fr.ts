@@ -1980,6 +1980,8 @@ export default {
       loadFailed: "Échec du chargement de l'état du partage.",
       inactiveNotice: 'Pas encore partagé',
       activeNotice: 'Le lien de partage est actif (le lien lui-même ne peut pas être relu ; régénérez-le)',
+      expiredNotice: 'Le lien de partage a expiré ; créez-en un nouveau',
+      revokedNotice: 'Le partage a été révoqué ; créez-en un nouveau',
       linkLabel: 'Lien de partage',
       onceNotice: "Le lien n'est affiché qu'une seule fois — copiez-le maintenant. La régénération invalide immédiatement l'ancien lien.",
       expiryLabel: 'Expiration',

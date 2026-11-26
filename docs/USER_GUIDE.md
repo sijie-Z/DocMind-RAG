@@ -5,7 +5,6 @@
 > 本文只做**引述**，不做第二套真源：
 > - 端口、凭据、服务编排以 `backend/docker-compose.yml` 与 `backend/.env.docker.example` 为准；
 > - 关键数字（32 个内置工具 / 默认注入 10 个工具 / 34 个端点模块 / 47 条前端路由 / 25 种 SSE 事件）以 `docs/facts.json` 为单一事实源；README、架构页等既有锚点由 `backend/scripts/check_doc_facts.py` 在 CI 逐 PR 校验，本文数字与之一致（工具/端点/路由/SSE 锚点已纳入 CI 校验）；
-> - 关键数字（32 个内置工具 / 默认注入 10 个工具 / 34 个端点模块 / 47 条前端路由 / 24 种 SSE 事件）以 `docs/facts.json` 为单一事实源；README、架构页等既有锚点由 `backend/scripts/check_doc_facts.py` 在 CI 逐 PR 校验，本文数字与之一致（工具/端点/路由/SSE 锚点已纳入 CI 校验）；
 > - 架构与设计动机见 `README.md`、`AGENT_ARCHITECTURE.md`、`docs/decisions/`。
 >
 > 英文版：[USER_GUIDE_EN.md](USER_GUIDE_EN.md)
@@ -839,8 +838,7 @@ alembic revision --autogenerate -m "描述"   # 新增迁移（开发）
 ```
 
 - 配置：`backend/alembic.ini`；运行时的连接串由 `backend/alembic/env.py` 从 `settings.DATABASE_URL` 覆盖。
-- 当前 head：`041_agent_artifact`（`backend/alembic/versions/041_agent_artifact.py`）。
-- 当前 head：`042_rubric_eval`（`backend/alembic/versions/042_rubric_eval.py`）。
+- 当前 head：`045_artifact_share`（`backend/alembic/versions/045_artifact_share.py`）。
 - 应用启动时的 `init_db()` 只在**空库**执行 `create_all`；已有库不会自动补表。`USE_ALEMBIC=true` 时完全跳过 `create_all`（`backend/app/core/database.py`）。
 - **发布顺序**：新代码可能读取新表/新列（例如 011 引入的 `organization_settings` 与 `prompt_templates.scope`）。升级既有部署时，**先跑迁移，再放流量到新实例**；滚动窗口内不要创建个人提示词模板（旧实例会把它当组织模板可见）。
 - 011 的 `downgrade` 是**有损**的：删除 `organization_settings` 会丢失组织覆盖值；删除 `scope` 会让个人模板退化为组织可见。回滚前先导出/停用相关数据（迁移文件头注释）。
@@ -1040,8 +1038,7 @@ python scripts/check_doc_facts.py                                  # 校验三�
 | 端点模块清单 | `backend/app/api/v1/router.py`；数字口径 `docs/facts.json` |
 | 文档格式与解析 | `backend/app/services/document_parser.py` |
 | 索引对账/重索引 | `backend/scripts/reconcile_knowledge_index.py` |
-| 迁移 | `backend/alembic/versions/`（head：`041_agent_artifact`） |
-| 迁移 | `backend/alembic/versions/`（head：`042_rubric_eval`） |
+| 迁移 | `backend/alembic/versions/`（head：`045_artifact_share`） |
 | Agent 架构与事件 | `AGENT_ARCHITECTURE.md`、`backend/app/agent/events.py` |
 | 管理员语义与知识库边界 | `docs/decisions/ADR-001-路线冻结.md`（D3 / D5 历史语义）、`backend/app/models/knowledge_base.py`、`backend/app/rag/knowledge_base_filter.py`、`backend/app/rag/metadata_filter.py`（现状） |
 | 部署与生产检查 | `deploy/README.md`、`SETUP.md` |

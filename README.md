@@ -251,6 +251,7 @@ DocMind/
 | 知识库 | `/knowledge` | 知识库文档检索、统计、设置、检索评测用例/运行历史（bad case 捕获） |
 | 知识库管理 | `/knowledge-bases` | 多知识库实体 CRUD（组织隔离） |
 | Rubric 评测 | `/eval` | 回答级 rubric 评分表（加权 yes/no + NEUTRAL/STRICT/LENIENT 重映射）、不可变版本与只读 diff、judge/fake 运行与 judge 人工金标校准（一致率 + 混淆矩阵）；评的是**答案**，与 `/knowledge/eval` 的检索 recall@k 不同口径 |
+| 答案质量评测 | `/eval/answer-quality` | 固定维度连续分评委运行的不可变历史快照与趋势；与 rubric（用户评分表）和检索 recall@k 是三套判定对象 |
 | 合同核验 | `/reviews` | 核验案件/核验项/证据快照 + 确定性抽取与 V1/V2 对齐 + 逐项决策与核验单导出（原文证据 + 版本哈希）；组织级模板库（不可变版本 + 只读 diff）；对方红线事实台账（DOCX 修订/批注解析、显式 unparsed、append-only、乐观锁 disposition） |
 | Agent 工件 | `/artifacts` | 工件列举/详情/内容流（内容寻址 sha256、版本链、组织+用户隔离）；创建/查询/撤销只读分享链接（绑定具体版本、owner-only，token 只存摘要）；HTML/SVG 内容响应带 CSP sandbox，仅允许在无同源沙箱中渲染 |
 | 公开工件 | `/public` | 工件只读分享的公开面（凭 token 免登录）：元数据与正文；字段白名单不含内部标识；撤销/过期/开关关闭一律 404，带限流与安全响应头 |

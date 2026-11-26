@@ -262,7 +262,9 @@ def test_index_page_stats_are_current():
             'stat-num">33<',
         ],
     )
-    _assert_present("docs/index.html", ["v1.22", "3084", "冻结快照", 'stat-num">32<', 'stat-num">34<'])
+    _assert_present(
+        "docs/index.html", ["v1.22", "3084", "冻结快照", 'stat-num">32<', 'stat-num">34<']
+    )
 
 
 def test_readme_module_counts_match_code():
@@ -312,9 +314,13 @@ def test_readme_module_counts_match_code():
         rows = [line for line in block.splitlines() if line.startswith("|")]
         return len(rows) - 2  # 去掉表头与分隔行
 
-    assert _api_table_data_rows("README.md", "### 🌐 API 层") == 33, "README API 表行数应为 33"
-    assert _api_table_data_rows("README_EN.md", "### 🌐 API Layer") == 33, (
-        "README_EN API 表行数应为 33"
+    # 表行数直接对 ROUTER_SPECS 派生值断言，避免把当前值再硬编码一份。
+    expected_modules = _count_router_specs(router_source)
+    assert _api_table_data_rows("README.md", "### 🌐 API 层") == expected_modules, (
+        "README API 表行数应与 ROUTER_SPECS 模块数一致"
+    )
+    assert _api_table_data_rows("README_EN.md", "### 🌐 API Layer") == expected_modules, (
+        "README_EN API 表行数应与 ROUTER_SPECS 模块数一致"
     )
 
     _assert_absent(

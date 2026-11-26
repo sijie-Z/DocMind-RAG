@@ -124,6 +124,17 @@ def test_045_schema_and_downgrade_roundtrip(tmp_path, monkeypatch):
     assert {"agent_artifact", "answer_quality_eval_run"} <= tables
 
 
+def test_045_upgrade_is_idempotent(tmp_path, monkeypatch):
+    """重复 upgrade 到同一 head 不报错、不重复建表（DDL 存在性守卫）。"""
+    db_path = tmp_path / "artifact-share-045-idempotent.db"
+    monkeypatch.setattr(settings, "DATABASE_URL", f"sqlite+aiosqlite:///{db_path.as_posix()}")
+    cfg = _cfg()
+    command.upgrade(cfg, HEAD)
+    command.upgrade(cfg, HEAD)
+    assert _revision(db_path) == {HEAD}
+    assert TABLE in _tables(db_path)
+
+
 def test_045_model_is_registered():
     """模型必须在 app.models 注册（create_all / schema guard 依赖它）。"""
     import app.models as models

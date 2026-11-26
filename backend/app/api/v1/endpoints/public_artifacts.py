@@ -20,7 +20,7 @@ import logging
 import time
 from urllib.parse import quote
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Request, Response
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -81,6 +81,7 @@ def _filename_headers(filename: str) -> str:
 async def get_public_artifact(
     token: str,
     request: Request,
+    response: Response,
     db: AsyncSession = Depends(get_db),
 ):
     """公开分享的工件元数据（展示字段白名单；无任何内部标识）。"""
@@ -88,6 +89,8 @@ async def get_public_artifact(
     _check_rate_limit(request, token)
     try:
         artifact, share = await artifact_share_service.resolve_public_share(db, token)
+        # 元数据同样绑定 token 且含过期时间：撤销后不得被缓存复用。
+        response.headers["Cache-Control"] = "no-store"
         return {
             "success": True,
             "data": artifact_share_service.public_artifact_dict(artifact, share, token),
@@ -107,7 +110,10 @@ async def get_public_artifact_content(
     request: Request,
     db: AsyncSession = Depends(get_db),
 ):
-    """公开分享的工件正文（流式；安全头逐项设置，见模块 docstring）。"""
+    """公开分享的工件正文（有界内容 ≤512 KiB，以单块 StreamingResponse 返回）。
+
+    安全头逐项设置，见模块 docstring。
+    """
     _require_share_enabled()
     _check_rate_limit(request, token)
     try:

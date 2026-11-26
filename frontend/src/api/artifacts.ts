@@ -57,9 +57,11 @@ export const artifactsApi = {
     artifactId: string,
     expiresInDays?: number | null,
   ): Promise<AxiosResponse<ApiResponse<ArtifactShareCreation>>> {
-    return request.post(`/artifacts/${encodeURIComponent(artifactId)}/share`, {
-      expires_in_days: expiresInDays ?? null,
-    })
+    return request.post(
+      `/artifacts/${encodeURIComponent(artifactId)}/share`,
+      { expires_in_days: expiresInDays ?? null },
+      { headers: { 'X-Silent-Error': '1' } },
+    )
   },
 
   /** 查询分享状态（不返回 token）。 */
@@ -71,7 +73,9 @@ export const artifactsApi = {
 
   /** 撤销分享；撤销后旧链接立即失效。 */
   revokeShare(artifactId: string): Promise<AxiosResponse<ApiResponse<ArtifactShareStatus>>> {
-    return request.delete(`/artifacts/${encodeURIComponent(artifactId)}/share`)
+    return request.delete(`/artifacts/${encodeURIComponent(artifactId)}/share`, {
+      headers: { 'X-Silent-Error': '1' },
+    })
   },
 }
 
