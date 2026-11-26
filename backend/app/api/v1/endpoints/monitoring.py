@@ -1115,6 +1115,7 @@ async def rag_eval_single(item: EvalItem):
             RAG_EVAL_TOTAL,
         )
         from app.rag.evaluator import RAGEvaluator
+        from app.services import answer_quality_eval_service as eval_service
 
         # 批量/评估路径与聊天链路同一预检：LLM 未配置时如实 503 + 明确文案，
         # 不得落到 AsyncOpenAI(api_key=None) 的构造异常被兜成 500。
@@ -1128,22 +1129,23 @@ async def rag_eval_single(item: EvalItem):
             base_url=settings.DEEPSEEK_API_URL,
         )
         evaluator = RAGEvaluator(client=client, model=settings.DEEPSEEK_MODEL)
-        result = await evaluator.evaluate(
+        result = await eval_service.evaluate_single(
+            evaluator,
             question=item.question,
             answer=item.answer,
             context=item.context,
         )
 
         RAG_EVAL_TOTAL.inc()
-        RAG_EVAL_FAITHFULNESS.observe(result.faithfulness)
-        RAG_EVAL_RELEVANCY.observe(result.relevancy)
-        RAG_EVAL_CONTEXT_PRECISION.observe(result.context_precision)
+        RAG_EVAL_FAITHFULNESS.observe(result["faithfulness"])
+        RAG_EVAL_RELEVANCY.observe(result["relevancy"])
+        RAG_EVAL_CONTEXT_PRECISION.observe(result["context_precision"])
 
         return {
-            "faithfulness": result.faithfulness,
-            "relevancy": result.relevancy,
-            "context_precision": result.context_precision,
-            "details": result.details,
+            "faithfulness": result["faithfulness"],
+            "relevancy": result["relevancy"],
+            "context_precision": result["context_precision"],
+            "details": result["details"],
         }
     except EvalJudgeUnavailableError as e:
         # issue #301（批 C）：评委（LLM）不可用 → 分数不可知，绝不呈现成 0/0/0。
@@ -1169,6 +1171,7 @@ async def rag_eval_batch(body: BatchEvalRequest):
         from openai import AsyncOpenAI
 
         from app.rag.evaluator import RAGEvaluator
+        from app.services import answer_quality_eval_service as eval_service
 
         # 与单条评估、聊天链路同一预检（批量路径同样拦截）。
         if not settings.DEEPSEEK_API_KEY:
@@ -1181,7 +1184,9 @@ async def rag_eval_batch(body: BatchEvalRequest):
             base_url=settings.DEEPSEEK_API_URL,
         )
         evaluator = RAGEvaluator(client=client, model=settings.DEEPSEEK_MODEL)
-        batch_result = await evaluator.evaluate_batch([item.model_dump() for item in body.items])
+        batch_result = await eval_service.evaluate_batch(
+            evaluator, [item.model_dump() for item in body.items]
+        )
         return {
             "count": batch_result.count,
             "avg_faithfulness": batch_result.avg_faithfulness,

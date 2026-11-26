@@ -219,8 +219,8 @@ DocMind/
 │   │   │   └── tools/               #   扩展工具（21 个；合计 32 个内置工具）
 │   │   ├── rag/                     # 检索管线：retriever / reranker / pipeline / cache
 │   │   ├── api/v1/
-│   │   │   ├── router.py            # 主路由（注册 32 个模块）
-│   │   │   └── endpoints/           # 端点实现（32 个文件）
+│   │   │   ├── router.py            # 主路由（注册 33 个模块）
+│   │   │   └── endpoints/           # 端点实现（33 个文件）
 │   │   ├── services/                # 业务服务层（43 个服务）
 │   │   ├── models/                  # ORM 模型（24 个模型文件）
 │   │   ├── core/                    # 配置 / DB / Redis / ES / MinIO / Kafka / JWT
@@ -238,7 +238,7 @@ DocMind/
 
 ### 🌐 API 层 (`backend/app/api/v1/`)
 
-32 个端点模块，统一 `/api/v1` 前缀：
+33 个端点模块，统一 `/api/v1` 前缀：
 
 | 模块 | 路由前缀 | 说明 |
 |------|----------|------|

@@ -220,8 +220,8 @@ DocMind/
 │   │   │   └── tools/               #   extended tools (21; 32 built-in tools total)
 │   │   ├── rag/                     # retriever / reranker / pipeline / cache
 │   │   ├── api/v1/
-│   │   │   ├── router.py            # main router (32 modules registered)
-│   │   │   └── endpoints/           # Endpoint implementations (32 files)
+│   │   │   ├── router.py            # main router (33 modules registered)
+│   │   │   └── endpoints/           # Endpoint implementations (33 files)
 │   │   ├── services/                # business services (43 services)
 │   │   ├── models/                  # ORM models (24 model files)
 │   │   ├── core/                    # config / DB / Redis / ES / MinIO / Kafka / JWT
@@ -239,7 +239,7 @@ DocMind/
 
 ### 🌐 API Layer (`backend/app/api/v1/`)
 
-32 endpoint modules under `/api/v1`:
+33 endpoint modules under `/api/v1`:
 
 | Module | Prefix | Description |
 |--------|--------|-------------|

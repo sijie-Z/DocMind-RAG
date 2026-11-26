@@ -18,6 +18,7 @@ from app.exceptions import (
     ServiceUnavailableError,
 )
 from app.models.agent_task import AgentTask
+from app.models.answer_quality_eval import AnswerQualityEvalRun
 from app.models.artifact import AgentArtifact
 from app.models.chat import ChatSession
 from app.models.document import Document
@@ -386,6 +387,9 @@ class OrganizationService:
         ("评分表", EvalRubric),
         ("评分表版本", EvalRubricVersion),
         ("评分表评测运行", EvalRubricRun),
+        # 批次八：答案质量评测运行同样是组织资产（organization_id 外键），
+        # 未纳入清理会在 MySQL 上以 1451 失败；必须先转移再删组织。
+        ("答案质量评测运行", AnswerQualityEvalRun),
         ("工作流", Workflow),
         ("提示词模板", PromptTemplate),
         ("用量记录", TokenUsageRecord),

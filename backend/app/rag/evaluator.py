@@ -16,6 +16,12 @@ from app.rag.errors import EvalJudgeUnavailableError
 
 logger = logging.getLogger(__name__)
 
+PROMPT_VERSION = "rag-eval-v1"
+"""评委提示词/评分口径版本；修改下方任一 PROMPT 或解析规则时必须同步提升。
+
+持久化的答案质量运行会存这个版本号，用于解释「两次分数为何不可直接比较」。
+"""
+
 # Judge prompts are capped so a single oversized retrieval batch cannot blow up
 # prompt cost / latency. Characters, not tokens — no tokenizer dependency here.
 MAX_CONTEXT_CHARS = 1200

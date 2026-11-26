@@ -219,20 +219,21 @@ async def test_guarded_database_at_head_is_not_rebuilt_or_remigrated(sqlite_db, 
 async def test_guarded_legacy_database_still_requires_explicit_adoption(
     sqlite_db, monkeypatch, auto_migrate
 ):
-    """53 表 create_all/legacy 库在两种策略下都不得被自动收养或改写。
+    """54 表 create_all/legacy 库在两种策略下都不得被自动收养或改写。
 
     P2 新增 knowledge_bases 与 retrieval_eval_case；批次四再加
     document_chunk_overrides（迁移 036），批次五加 review_template /
     review_template_version；批次六再加 review_redline_submission /
-    review_redline_row；本批再加 rubric 评测三表（eval_rubric /
-    eval_rubric_version / eval_rubric_run）。这些表均来自 ORM 模型。
+    review_redline_row；批次七加 rubric 评测三表（eval_rubric /
+    eval_rubric_version / eval_rubric_run）；批次八加答案质量评测运行
+    （answer_quality_eval_run，迁移 043）。这些表均来自 ORM 模型。
     该用例断言的是“create_all 产出的表数”必须随模型数同步，不是固定历史值。
     """
     db_path, engine = sqlite_db
     async with engine.begin() as conn:
         await conn.run_sync(database_module.Base.metadata.create_all)
     tables_before = _table_names(db_path)
-    assert len(tables_before) == 53
+    assert len(tables_before) == 54
     assert _revision_rows(db_path) is None
 
     create_all = _spy_create_all(monkeypatch)

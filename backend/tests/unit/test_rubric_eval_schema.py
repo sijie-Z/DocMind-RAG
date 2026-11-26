@@ -24,6 +24,7 @@ from app.core.database import Base
 
 BACKEND_ROOT = Path(__file__).resolve().parents[2]
 HEAD = "042_rubric_eval"
+CURRENT_HEAD = "043_answer_quality_eval"
 PREVIOUS = "041_agent_artifact"
 RUBRIC = "eval_rubric"
 VERSION = "eval_rubric_version"
@@ -51,7 +52,9 @@ def test_041_revision_chain():
     rev = script.get_revision(HEAD)
     assert rev.down_revision == PREVIOUS
     assert len(HEAD) <= 32, "MySQL alembic_version.version_num 是 VARCHAR(32)"
-    assert set(script.get_heads()) == {HEAD}
+    # 批次八在 042 之后追加 043：本用例守 042 的链位置，单头由 CURRENT_HEAD 守。
+    assert script.get_revision(CURRENT_HEAD).down_revision == HEAD
+    assert set(script.get_heads()) == {CURRENT_HEAD}
 
 
 def test_041_downgrade_does_not_drop_indexes_before_tables():
