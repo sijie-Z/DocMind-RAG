@@ -24,7 +24,7 @@ from app.core.database import Base
 
 BACKEND_ROOT = Path(__file__).resolve().parents[2]
 HEAD = "042_rubric_eval"
-LATEST = "043_session_tree"
+LATEST = "044_answer_quality_eval"
 PREVIOUS = "041_agent_artifact"
 RUBRIC = "eval_rubric"
 VERSION = "eval_rubric_version"
@@ -52,7 +52,8 @@ def test_041_revision_chain():
     rev = script.get_revision(HEAD)
     assert rev.down_revision == PREVIOUS
     assert len(HEAD) <= 32, "MySQL alembic_version.version_num 是 VARCHAR(32)"
-    assert script.get_revision(LATEST).down_revision == HEAD
+    assert script.get_revision("043_session_tree").down_revision == HEAD
+    assert script.get_revision(LATEST).down_revision == "043_session_tree"
     assert set(script.get_heads()) == {LATEST}
 
 

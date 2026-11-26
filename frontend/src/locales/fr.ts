@@ -2109,6 +2109,8 @@ export default {
     knowledgeEvalRuns: 'Historique des évaluations',
     evalRubrics: 'Rubriques de réponse',
     evalRubricRun: "Exécution d'évaluation de rubrique",
+    answerQualityRuns: "Exécutions d'évaluation de la qualité des réponses",
+    answerQualityRun: "Détail de l'exécution d'évaluation de la qualité des réponses",
     knowledgeDocument: 'Détails du document',
     workflowEditor: 'Éditeur de workflow',
     agentMemory: 'Mémoire de l\'Agent'
@@ -2705,6 +2707,98 @@ export default {
       missingHint:
         "Ajoutez gold_verdicts (clé vers yes/no/unsure) aux cas puis relancez pour obtenir l'accord et la matrice.",
       unavailableOnFailure: "L'exécution a échoué : aucun verdict à calibrer."
+    }
+  },
+  answerQualityEval: {
+    navEntry: 'Évaluation de la qualité des réponses',
+    subtitle:
+      'Historique des exécutions du juge LLM à trois indicateurs fixes : faithfulness / relevancy / context precision',
+    scopeBanner:
+      "Cette page évalue la réponse générée (faithfulness, relevancy et context precision par un juge LLM). Ce n'est ni le rappel de recherche (recall{'@'}k / MRR, voir l'historique des évaluations dans la base de connaissances), ni l'évaluation par rubrique (oui/non pondéré modifiable, voir les rubriques de réponse). Les objets et indicateurs diffèrent ; les exécutions ne sont jamais partagées.",
+    common: {
+      retry: 'Réessayer',
+      refresh: 'Actualiser',
+      viewDetail: 'Voir le détail',
+      loadFailed: 'Échec du chargement'
+    },
+    filters: {
+      status: 'Statut',
+      dateRange: 'Période (UTC)',
+      user: "ID de l'utilisateur",
+      userPlaceholder: 'ID utilisateur',
+      reset: 'Réinitialiser les filtres',
+      filteredCount: '{total} exécutions'
+    },
+    metrics: {
+      faithfulness: 'Fidélité',
+      relevancy: 'Pertinence',
+      context_precision: 'Précision du contexte'
+    },
+    mode: {
+      judge: 'Juge LLM (judge)',
+      fake: 'Rejeu déterministe (fake)'
+    },
+    status: {
+      completed: 'Terminée',
+      failed: 'Échouée',
+      all: 'Tous les statuts'
+    },
+    list: {
+      title: 'Historique des exécutions',
+      empty: "Aucune exécution d'évaluation de la qualité des réponses",
+      emptyHint:
+        "Les exécutions sont créées via l'API d'évaluation (POST /api/v1/eval/answer-quality/runs). Les exécutions réussies et échouées sont conservées ; une exécution échouée n'enregistre que le code d'erreur et ne produit aucun score — jamais zéro.",
+      columns: {
+        time: 'Date',
+        status: 'Statut',
+        mode: 'Mode',
+        judgeModel: 'Modèle juge',
+        promptVersion: 'Version du prompt',
+        cases: 'Cas',
+        user: 'Utilisateur',
+        actions: 'Actions'
+      },
+      trendTitle: 'Tendance des indicateurs',
+      trendHint:
+        "Par ordre chronologique ; les exécutions échouées comptent dans les totaux mais n'affectent jamais les moyennes.",
+      trendLoadFailed:
+        "Échec du chargement de la tendance ; l'historique des exécutions ci-dessous n'est pas affecté.",
+      trendRuns: 'Exécutions',
+      trendSucceeded: 'Réussies',
+      trendFailed: 'Échouées',
+      trendAverage: 'Moyenne {metric}',
+      trendTableTime: 'Date',
+      maskedNote:
+        "Les exécutions ne stockent que les indicateurs, des raisons de juge bornées, des hachages de sources et des aperçus masqués ; la question, la réponse et le contexte d'origine ne sont jamais enregistrés."
+    },
+    detail: {
+      loadFailed: "Échec du chargement du détail de l'exécution",
+      failedTitle: "Cette exécution a échoué : aucun score n'a été produit",
+      failedUnavailable:
+        "Le juge était indisponible (échec de l'appel au service de modèle). L'exécution échouée est conservée pour traçabilité, avec le code machine et la version du modèle/prompt utilisée ; veuillez réessayer plus tard.",
+      errorCode: "Code d'erreur",
+      noScores: "Aucun score n'a été enregistré pour cette exécution (pas zéro).",
+      aggregateHint:
+        "Chaque indicateur est la moyenne arithmétique des cas notés. faithfulness / relevancy / context_precision sont des scores continus LLM-as-judge, pas une vérité humaine.",
+      casesScored: 'Cas notés',
+      metaTitle: "Informations sur l'exécution",
+      judgeModel: 'Modèle juge',
+      promptVersion: 'Version du prompt',
+      mode: 'Mode',
+      caseCount: 'Cas',
+      datasetHash: 'Hachage du jeu de données',
+      user: "Utilisateur de l'exécution",
+      createdAt: 'Créée le',
+      completedAt: 'Terminée le',
+      resultsTitle: 'Résultats par cas',
+      resultsHint:
+        "Seuls les aperçus masqués, les raisons de juge bornées et les hachages de sources sont affichés ; la question, la réponse et le contexte d'origine ne sont ni persistés ni renvoyés.",
+      caseId: 'Cas',
+      reasons: 'Raisons du juge',
+      sources: 'Références de sources (masquées)',
+      noReason: 'Aucune raison fournie',
+      noSources: 'Aucune référence de source',
+      backToList: "Retour à l'historique"
     }
   },
   memory: {

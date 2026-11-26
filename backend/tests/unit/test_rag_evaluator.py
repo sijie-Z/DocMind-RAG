@@ -6,6 +6,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from app.rag.errors import EvalJudgeContractError
 from app.rag.evaluator import BatchEvalResult, EvalResult, RAGEvaluator, _extract_score
 
 
@@ -40,17 +41,33 @@ class TestExtractScore:
     def test_score_clamped_below_0(self):
         assert _extract_score('{"score": -0.5}') == pytest.approx(0.0)
 
-    def test_no_score_returns_zero(self):
-        assert _extract_score("I cannot determine a score.") == 0.0
+    def test_no_score_returns_none(self):
+        """无法解析 ≠ 0 分：返回 None，让调用方落失败运行而不是伪造低质量。"""
+        assert _extract_score("I cannot determine a score.") is None
 
-    def test_empty_string(self):
-        assert _extract_score("") == 0.0
+    def test_empty_string_returns_none(self):
+        assert _extract_score("") is None
 
     def test_score_100_percent(self):
         assert _extract_score("100%") == pytest.approx(1.0)
 
     def test_score_zero_percent(self):
         assert _extract_score("0%") == pytest.approx(0.0)
+
+
+class TestJudgeContract:
+    def test_unparseable_reply_raises_contract_error(self):
+        """调用成功但输出无法解析 → EvalJudgeContractError，绝不返回 0 分。"""
+        judge = _CapturingJudge(reply="I cannot determine a score.")
+        evaluator = RAGEvaluator(client=judge, model="m")
+        with pytest.raises(EvalJudgeContractError):
+            asyncio.run(evaluator.evaluate(question="q", answer="a", context=[]))
+
+    def test_empty_reply_raises_contract_error(self):
+        judge = _CapturingJudge(reply="")
+        evaluator = RAGEvaluator(client=judge, model="m")
+        with pytest.raises(EvalJudgeContractError):
+            asyncio.run(evaluator.evaluate(question="q", answer="a", context=[]))
 
 
 class TestEvalResult:

@@ -541,7 +541,7 @@ def test_migration_chain_has_single_head_including_040_redline_ledger(tmp_path, 
     cfg.set_main_option("script_location", str(backend / "alembic"))
     script = ScriptDirectory.from_config(cfg)
     heads = set(script.get_heads())
-    assert heads == {"043_session_tree"}
+    assert heads == {"044_answer_quality_eval"}
     assert script.get_revision("038_eval_case_dedup").down_revision == ("037_index_error_codes")
     assert script.get_revision("039_review_template").down_revision == ("038_eval_case_dedup")
     assert script.get_revision("040_inbound_redline_ledger").down_revision == (
@@ -549,3 +549,4 @@ def test_migration_chain_has_single_head_including_040_redline_ledger(tmp_path, 
     )
     assert script.get_revision("042_rubric_eval").down_revision == "041_agent_artifact"
     assert script.get_revision("043_session_tree").down_revision == "042_rubric_eval"
+    assert script.get_revision("044_answer_quality_eval").down_revision == "043_session_tree"

@@ -14,7 +14,7 @@
 ``--noconftest``）中自动跳过，静态检查仍会执行。
 
 对外口径单一事实源：``docs/METRICS.md`` 必须存在，表格每行必须有 6 列且无
-空项，七项 facts 必须与 ``docs/facts.json`` 同值；同一文档同一指标出现多个
+空项，八项 facts 必须与 ``docs/facts.json`` 同值；同一文档同一指标出现多个
 不同数字时只告警、不判失败（facts 不一致仍红）。
 
 变异验证（PR 证据）：在 ``events.py`` 的 ``EventType`` 中临时加入一个事件，
@@ -275,6 +275,7 @@ def test_required_doc_anchor_missing_is_reported(tmp_path):
         {
             "sse_event_types": 20,
             "endpoint_modules": 22,
+            "endpoint_files": 22,
             "frontend_routes": 34,
             "registered_tools": 33,
             "default_tools": 12,
@@ -298,6 +299,7 @@ def test_optional_doc_anchor_missing_is_allowed(tmp_path):
         {
             "sse_event_types": 20,
             "endpoint_modules": 22,
+            "endpoint_files": 22,
             "frontend_routes": 34,
             "registered_tools": 33,
             "default_tools": 12,
@@ -307,7 +309,7 @@ def test_optional_doc_anchor_missing_is_allowed(tmp_path):
 
 
 def _write_metrics(root: Path, facts: dict[str, int]) -> None:
-    """写一份最小可用的 docs/METRICS.md（六列、七项 facts）。"""
+    """写一份最小可用的 docs/METRICS.md（六列、八项 facts）。"""
     rows = "\n".join(
         f"| {key} | {value} | 合成仓库口径 | 无（测试夹具） | 2026-10-24 | 测试夹具 |"
         for key, value in facts.items()
@@ -380,6 +382,7 @@ def _make_mini_repo(tmp_path: Path) -> Path:
         "facts": {
             "sse_event_types": 2,
             "endpoint_modules": 1,
+            "endpoint_files": 1,
             "frontend_routes": 1,
             "registered_tools": 2,
             "default_tools": 2,
@@ -422,6 +425,7 @@ def _mini_facts() -> dict[str, int]:
     return {
         "sse_event_types": 2,
         "endpoint_modules": 1,
+        "endpoint_files": 1,
         "frontend_routes": 1,
         "registered_tools": 2,
         "default_tools": 2,

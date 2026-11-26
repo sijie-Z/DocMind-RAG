@@ -1,6 +1,7 @@
 from app.core.database import Base
 from app.models.agent_task import AgentTask, TaskStatus
 from app.models.agent_tool_call import AgentToolCall, AgentToolResult, ToolCallStatus
+from app.models.answer_quality_eval import AnswerQualityEvalRun
 from app.models.api_key import ApiKey
 from app.models.artifact import ARTIFACT_KINDS, ARTIFACT_STATUSES, AgentArtifact
 from app.models.chat import ChatMessage, ChatSession, DeletedChatSession
@@ -83,6 +84,7 @@ __all__ = [
     "EvalRubric",
     "EvalRubricVersion",
     "EvalRubricRun",
+    "AnswerQualityEvalRun",
     "TokenUsageRecord",
     "SystemManual",
     "Permission",

@@ -81,6 +81,15 @@ class EvalJudgeUnavailableError(RuntimeError):
     """
 
 
+class EvalJudgeContractError(RuntimeError):
+    """评委输出不符合评分契约（无分/拒答/空内容）—— 分数不可知，绝不等于 0 分。
+
+    与 ``EvalJudgeUnavailableError`` 区分：后者是调用失败（网络/鉴权），
+    本异常是调用成功但输出无法解析出 0..1 的分数。两者都必须落成失败运行，
+    不能把「测量失败」持久化成「真实 0 分」。
+    """
+
+
 def is_timeout_error(exc: BaseException) -> bool:
     """判定异常是否属于「超时」态（三态之一）。
 
