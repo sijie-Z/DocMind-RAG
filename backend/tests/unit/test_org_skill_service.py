@@ -556,6 +556,63 @@ async def test_concurrent_review_is_conflict(factory, monkeypatch):
             )
 
 
+@pytest.mark.asyncio
+async def test_corrupt_payload_cannot_be_approved_but_can_be_rejected(factory):
+    """坏 payload 不得被批准；拒绝必须始终可用，否则版本卡死在 pending。"""
+    skill_id, _, version_id, version_no = await _create_skill(factory)
+    async with factory() as db:
+        version = await db.get(OrgSkillVersion, version_id)
+        version.payload_json = {
+            "schema_version": 1,
+            "trigger_phrases": ["另一个触发"],
+            "tool_sequence": [{"tool_name": "web_search"}],
+        }
+        await db.commit()
+
+    async with factory() as db:
+        with pytest.raises(ConflictError) as excinfo:
+            await svc.review_version(
+                db,
+                organization_id=ORG,
+                skill_id=skill_id,
+                version_no=version_no,
+                reviewer_id=REVIEWER,
+                decision="approved",
+            )
+        assert excinfo.value.error_code == "ORG_SKILL_VERSION_HASH_MISMATCH"
+
+    async with factory() as db:
+        rejected = await svc.review_version(
+            db,
+            organization_id=ORG,
+            skill_id=skill_id,
+            version_no=version_no,
+            reviewer_id=REVIEWER,
+            decision="rejected",
+        )
+    assert rejected.review_status == "rejected"
+
+
+@pytest.mark.asyncio
+async def test_stale_lock_header_mutation_is_conflict(factory, monkeypatch):
+    """表头变更必须用 lock_version 条件更新；陈旧锁 → 409，不静默覆盖。"""
+    skill_id, _, _, _ = await _create_skill(factory)
+    async with factory() as db:
+        stale = await db.get(OrgSkill, skill_id)
+        assert stale.lock_version >= 1
+    # 另一个会话推进 lock_version。
+    async with factory() as db:
+        current = await db.get(OrgSkill, skill_id)
+        current.lock_version += 1
+        await db.commit()
+
+    async with factory() as db:
+        monkeypatch.setattr(svc, "_get_skill", AsyncMock(return_value=stale))
+        with pytest.raises(ConflictError) as excinfo:
+            await svc.archive_skill(db, organization_id=ORG, skill_id=skill_id, user_id=REVIEWER)
+        assert excinfo.value.error_code == "ORG_SKILL_CONFLICT"
+
+
 # ── 启用 / 禁用 / 回滚 / 归档 ─────────────────────────────────────────────
 
 

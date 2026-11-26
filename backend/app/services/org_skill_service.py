@@ -76,7 +76,6 @@ SOURCE_RUN_PROPOSAL = "run_proposal"
 SOURCE_MANUAL = "manual"
 
 _TOOL_NAME_RE = re.compile(r"^[a-z][a-z0-9_]{1,63}$")
-_CONTROL_RE = re.compile(r"[\x00-\x1f\x7f]")
 _INJECTION_MARKERS = (
     "<|",
     "|>",
@@ -883,8 +882,10 @@ async def review_version(
         raise AuthorizationError("作者不能审核自己的技能版本", error_code="ORG_SKILL_SELF_REVIEW")
     if version.review_status != REVIEW_PENDING:
         raise ConflictError("版本已审核，不能重复审核", error_code="ORG_SKILL_ALREADY_REVIEWED")
-    # 审核前复验完整性与规范化：坏 payload 不得被批准成“永远无法启用”的版本。
-    _load_payload_or_conflict(version)
+    # 批准前复验完整性与规范化：坏 payload 不得被批准成“永远无法启用”的版本；
+    # 拒绝必须始终可用，否则坏版本会卡死在 pending。
+    if decision == REVIEW_APPROVED:
+        _load_payload_or_conflict(version)
     # 条件 UPDATE 提供并发保护：两个审核请求只有一个能把 pending 翻走。
     result = await session.execute(
         update(OrgSkillVersion)
