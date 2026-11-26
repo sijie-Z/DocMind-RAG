@@ -393,9 +393,7 @@ async def test_missing_metric_is_contract_failure_not_zero(factory, monkeypatch)
             RUNS,
             json={
                 "mode": "judge",
-                "cases": [
-                    {"case_id": "c1", "question": "q", "answer": "a", "context": []}
-                ],
+                "cases": [{"case_id": "c1", "question": "q", "answer": "a", "context": []}],
             },
         )
         assert response.status_code == 502, response.text
