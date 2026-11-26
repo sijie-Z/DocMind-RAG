@@ -62,6 +62,19 @@ describe('路由表', () => {
     const protectedParents = all.filter((r) => r.meta?.requiresAuth)
     expect(protectedParents.length, '没有任何 requiresAuth 标记').toBeGreaterThan(0)
   })
+
+  it('工件公开分享路由：匿名可访问、参数正确，且不被 /share/:token 抢占', () => {
+    const router = createRouter({ history: createMemoryHistory(), routes })
+    const artifact = router.resolve('/share/artifact/tok-1')
+    expect(artifact.name).toBe('SharedArtifact')
+    expect(artifact.params.token).toBe('tok-1')
+    expect(artifact.meta.requiresAuth).toBe(false)
+
+    // 旧会话分享仍是两段路径，不能被新路由吞掉。
+    const conversation = router.resolve('/share/tok-1')
+    expect(conversation.name).toBe('SharedConversation')
+    expect(conversation.params.token).toBe('tok-1')
+  })
 })
 
 describe('导航守卫（真实行为）', () => {

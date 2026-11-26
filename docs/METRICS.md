@@ -2,23 +2,23 @@
 
 > **规则**：任何对外数字必须能链到本表的一行；每行必须带 **值 · 口径 · 命令 · 日期 · 备注**。没有这五样的数字不写。
 >
-> **更新顺序**：先跑命令 → 改本表 → 改引用文档 → `cd backend && python scripts/check_doc_facts.py`（逐项校验七项 facts 与 `docs/facts.json` 同值）。
+> **更新顺序**：先跑命令 → 改本表 → 改引用文档 → `cd backend && python scripts/check_doc_facts.py`（逐项校验八项 facts 与 `docs/facts.json` 同值）。
 >
 > **口径纪律**：`live`（真实嵌入 / 真实 ES / 真实模型）与 `fake`（确定性伪嵌入）不可混写；含嵌套 / 不含嵌套必须写明；旧版本（Eval v1：28 条）与新版本（Eval v1.5：80 条）不可混比。
 
-维护：DocMind 维护者（issue #513）。最近复核：2026-10-27。
+维护：DocMind 维护者（issue #513）。最近复核：2026-11-27。
 
-## 1. 源码派生 facts（机器校验，七项与 docs/facts.json 同值）
+## 1. 源码派生 facts（机器校验，八项与 docs/facts.json 同值）
 
 | 指标 | 值 | 口径 | 命令 | 日期 | 备注 |
 |---|---|---|---|---|---|
 | registered_tools | 32 | live：未隐藏（`hidden=False`）的 `@register_tool(name=...)`（`core_tools.py` 11 + `tools/` 21；批次七新增 `create_artifact`（扩展面，`enabled_predicate`）；不含 MCP 动态工具与未接线模块；issue #509 合并/降级的旧名以 hidden 保留注册，仍可经别名调用但不计入本口径） | `cd backend && python scripts/check_doc_facts.py --print-derived` | 2026-11-25 | `docs/facts.json` 同值；源码 `backend/app/agent/` |
 | default_tools | 10 | live：**默认 AgentConfig + 默认环境**（`TERMINAL_ENABLED=false`、未配置飞书凭据、MCP 未连接）下实际注入 schema 的工具数（非 hidden、未声明 `enabled_predicate`、且不在 `DEFAULT_DISABLED_TOOLS`；issue #509 目标常驻档 10–12，schema ≤1,500 tokens）。显式开启门控会按族增加：terminal +6 / 飞书 +1 / 委派 +1 / 扩展面按非空 `tool_tags` 解锁 | `cd backend && python scripts/check_doc_facts.py --print-derived` | 2026-10-25 | `docs/facts.json` 同值；运行时 token 实测 1,464（cl100k，2026-10-25） |
 | sse_event_types | 25 | live：`EventType = Literal[...]` 闭集（含 agent 事件子集 17；不含 `ThinkingType` 等非事件 Literal；批次七新增 `artifact`） | `cd backend && python scripts/check_doc_facts.py --print-derived` | 2026-11-25 | `docs/facts.json` 同值；源码 `backend/app/agent/events.py` |
-| endpoint_modules | 33 | live：`ROUTER_SPECS` 字典键（声明顺序、去重；不含嵌套 router 内部子模块；批次七新增 artifacts） | `cd backend && python scripts/check_doc_facts.py --print-derived` | 2026-11-25 | `docs/facts.json` 同值；源码 `backend/app/api/v1/router.py` |
-| endpoint_files | 32 | live：`backend/app/api/v1/endpoints` 目录下 `*.py` 文件数（含 `__init__.py`；与 `endpoint_modules` 的 ROUTER_SPECS 口径分开） | `cd backend && python scripts/check_doc_facts.py --print-derived` | 2026-11-26 | `docs/facts.json` 同值 |
-| frontend_routes | 46 | live：`routes` 数组 `path:` 字面量（**含 `children` 嵌套**；注释与 redirect 回调内对象不计） | `cd backend && python scripts/check_doc_facts.py --print-derived` | 2026-11-23 | `docs/facts.json` 同值；13 条顶层 + 28 条页面子路由（批次五新增 `/reviews/templates` 与 `/reviews/templates/:id`）；**36 条具名路由是另一口径** |
-| http_route_decorators | 293 | live：`@router.get/post/put/patch/delete/head/options` 装饰器总数（`app/api/v1/endpoints/**`，含子目录） | `cd backend && python scripts/check_doc_facts.py --print-derived` | 2026-11-26 | `docs/facts.json` 同值；批次四后为 252，批次五新增 1 个 bad-case 捕获端点与 10 个模板库端点，批次六 feature B 新增 4 个对方红线台账端点，批次七新增 4 个工件端点，批次八新增 5 个会话树端点（tree/branch-context/branch-label/summary/share）；不与 `endpoint_modules` 混用 |
+| endpoint_modules | 34 | live：`ROUTER_SPECS` 字典键（声明顺序、去重；不含嵌套 router 内部子模块；批次九新增 public_artifacts） | `cd backend && python scripts/check_doc_facts.py --print-derived` | 2026-11-27 | `docs/facts.json` 同值；源码 `backend/app/api/v1/router.py` |
+| endpoint_files | 33 | live：`backend/app/api/v1/endpoints` 目录下 `*.py` 文件数（含 `__init__.py`；批次九新增 public_artifacts.py；与 `endpoint_modules` 的 ROUTER_SPECS 口径分开） | `cd backend && python scripts/check_doc_facts.py --print-derived` | 2026-11-27 | `docs/facts.json` 同值 |
+| frontend_routes | 47 | live：`routes` 数组 `path:` 字面量（**含 `children` 嵌套**；注释与 redirect 回调内对象不计；批次九新增 `/share/artifact/:token`） | `cd backend && python scripts/check_doc_facts.py --print-derived` | 2026-11-27 | `docs/facts.json` 同值；**42 条具名路由是另一口径** |
+| http_route_decorators | 298 | live：`@router.get/post/put/patch/delete/head/options` 装饰器总数（`app/api/v1/endpoints/**`，含子目录；批次九新增 5 个：工件分享管理 3 + 公开分享 2） | `cd backend && python scripts/check_doc_facts.py --print-derived` | 2026-11-27 | `docs/facts.json` 同值；批次四后为 252，批次五新增 1 个 bad-case 捕获端点与 10 个模板库端点，批次六 feature B 新增 4 个对方红线台账端点，批次七新增 4 个工件端点，批次八新增 5 个会话树端点（tree/branch-context/branch-label/summary/share）；不与 `endpoint_modules` 混用 |
 | websocket_route_decorators | 3 | live：`@router.websocket` 装饰器数（`app/api/v1/endpoints/**`；与 HTTP 分开计） | `cd backend && python scripts/check_doc_facts.py --print-derived` | 2026-10-24 | `docs/facts.json` 同值 |
 
 ## 2. 检索评测（Eval v1.5）
@@ -58,7 +58,7 @@
 
 ## 4. 引用与边界
 
-- 文档引用写法：数字旁标注 `（见 docs/METRICS.md）`；同一文档同一指标只能出现一个数字，漂移由 `backend/scripts/check_doc_facts.py` 校验（多数字先告警，facts 七项不一致则红）。
+- 文档引用写法：数字旁标注 `（见 docs/METRICS.md）`；同一文档同一指标只能出现一个数字，漂移由 `backend/scripts/check_doc_facts.py` 校验（多数字先告警，facts 八项不一致则红）。
 - 父目录 `AI_projects/CLAUDE.md` 不在本仓库内，其 `25+ tools` 表述无法在本仓库修订；本仓库对外一律以本表 `registered_tools=32` / `default_tools=10`（2026-11-25）为准。
 - `docs/USER_GUIDE*.md` 已同步 Eval v1.5（80 条，PR #617）。
 - 本表不是 CI 实时结果；测试与评测的实时真源是 CI artifact / 报告。

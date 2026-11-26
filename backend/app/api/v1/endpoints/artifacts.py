@@ -20,6 +20,7 @@ from fastapi import APIRouter, Depends, Query, Response
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
 from app.core.database import get_db
 from app.core.security import (
     get_current_user,
@@ -35,7 +36,7 @@ from app.exceptions import (
 )
 from app.models.rbac import PermissionType
 from app.models.user import User
-from app.services import artifact_service
+from app.services import artifact_service, artifact_share_service
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -59,6 +60,14 @@ class ArtifactCreate(BaseModel):
     filename: str | None = Field(None, max_length=255)
     conversation_id: str | None = Field(None, max_length=36)
     source_tool: str | None = Field(None, max_length=128)
+
+
+class ArtifactShareCreate(BaseModel):
+    """创建/轮换分享：可选过期天数（1-90；缺省不过期）。"""
+
+    expires_in_days: int | None = Field(
+        None, description=f"过期天数（1-{artifact_share_service.MAX_EXPIRY_DAYS}）；缺省不过期"
+    )
 
 
 @router.post("", response_model=dict, dependencies=_WRITE_DEPS)
@@ -221,3 +230,100 @@ async def get_artifact_content(
     except Exception as e:
         logger.error(f"Get artifact content failed: {type(e).__name__}: {e}")
         raise AppError("读取工件内容失败") from e
+
+
+# ── 只读分享（批次九）──────────────────────────────────────────────────────
+# 管理面严格 owner-only：不是「组织内任意成员」，超管也不绕过（服务层按
+# organization_id + user_id 双限定，跨组织/他人 404）。
+# 开关只门控「创建」与公开读取：撤销/状态查询必须始终可用（撤链接是安全操作）。
+
+
+@router.post("/{artifact_id}/share", response_model=dict, dependencies=_WRITE_DEPS)
+async def create_artifact_share(
+    artifact_id: str,
+    body: ArtifactShareCreate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """创建或轮换分享链接；token 明文仅本次响应返回（旧链接立即失效）。"""
+    if not settings.ARTIFACT_PUBLIC_SHARE_ENABLED:
+        # 不泄露部署开关状态：与「工件不存在」同一 404。
+        raise NotFoundError("工件不存在")
+    try:
+        org_id = await require_organization(current_user, db)
+        share, token = await artifact_share_service.create_or_rotate_share(
+            db,
+            artifact_id=artifact_id,
+            organization_id=org_id,
+            user_id=current_user.id,
+            expires_in_days=body.expires_in_days,
+        )
+        data = artifact_share_service.share_status(share)
+        data["token"] = token
+        data["url"] = f"/share/artifact/{token}"
+        await db.commit()
+        return {"success": True, "data": data}
+    except (ValidationError, NotFoundError, AuthorizationError):
+        await db.rollback()
+        raise
+    except AppError:
+        await db.rollback()
+        raise
+    except Exception as e:
+        await db.rollback()
+        logger.error(f"Create artifact share failed: {type(e).__name__}: {e}")
+        raise AppError("创建分享链接失败") from e
+
+
+@router.get("/{artifact_id}/share", response_model=dict, dependencies=_READ_DEPS)
+async def get_artifact_share_status(
+    artifact_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """查询分享状态（不返回 token；token 只在创建/轮换时给一次）。"""
+    try:
+        org_id = await require_organization(current_user, db)
+        data = await artifact_share_service.get_share_status(
+            db,
+            artifact_id=artifact_id,
+            organization_id=org_id,
+            user_id=current_user.id,
+        )
+        return {"success": True, "data": data}
+    except (NotFoundError, AuthorizationError):
+        raise
+    except AppError:
+        raise
+    except Exception as e:
+        logger.error(f"Get artifact share status failed: {type(e).__name__}: {e}")
+        raise AppError("获取分享状态失败") from e
+
+
+@router.delete("/{artifact_id}/share", response_model=dict, dependencies=_WRITE_DEPS)
+async def revoke_artifact_share(
+    artifact_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """撤销分享：撤销后旧 token 立即失效（包括已打开的页面刷新时）。"""
+    try:
+        org_id = await require_organization(current_user, db)
+        data = await artifact_share_service.revoke_share(
+            db,
+            artifact_id=artifact_id,
+            organization_id=org_id,
+            user_id=current_user.id,
+        )
+        await db.commit()
+        return {"success": True, "data": data}
+    except (NotFoundError, AuthorizationError):
+        await db.rollback()
+        raise
+    except AppError:
+        await db.rollback()
+        raise
+    except Exception as e:
+        await db.rollback()
+        logger.error(f"Revoke artifact share failed: {type(e).__name__}: {e}")
+        raise AppError("撤销分享失败") from e

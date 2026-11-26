@@ -54,7 +54,8 @@ def test_041_revision_chain():
     assert len(HEAD) <= 32, "MySQL alembic_version.version_num 是 VARCHAR(32)"
     assert script.get_revision("043_session_tree").down_revision == HEAD
     assert script.get_revision(LATEST).down_revision == "043_session_tree"
-    assert set(script.get_heads()) == {LATEST}
+    assert script.get_revision("045_artifact_share").down_revision == LATEST
+    assert set(script.get_heads()) == {"045_artifact_share"}
 
 
 def test_041_downgrade_does_not_drop_indexes_before_tables():

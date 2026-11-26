@@ -20,6 +20,7 @@ from app.exceptions import (
 from app.models.agent_task import AgentTask
 from app.models.answer_quality_eval import AnswerQualityEvalRun
 from app.models.artifact import AgentArtifact
+from app.models.artifact_share import AgentArtifactShare
 from app.models.chat import ChatSession
 from app.models.document import Document
 from app.models.eval_rubric import EvalRubric, EvalRubricRun, EvalRubricVersion
@@ -412,6 +413,9 @@ class OrganizationService:
         # 批次七：Agent 工件以 organization_id 外键引用 organizations；工件是
         # 审计/复用资产，未纳入清理会触发 MySQL 1451，必须先转移再删组织。
         ("Agent 工件", AgentArtifact),
+        # 批次九：工件分享记录同样以 organization_id 外键引用 organizations；
+        # 未纳入清理会触发 MySQL 1451。分享是工件的附属审计资产，一起转移。
+        ("工件分享", AgentArtifactShare),
     )
 
     async def _assert_org_has_no_attached_data(self, db: AsyncSession, org_ids: list[int]) -> None:

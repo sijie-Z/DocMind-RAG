@@ -469,6 +469,16 @@ export const routes: RouteRecordRaw[] = [
     }
   },
   {
+    // 工件只读分享（批次九）：公开页，token 即能力凭证；必须先于 /share/:token。
+    path: '/share/artifact/:token',
+    name: 'SharedArtifact',
+    component: () => import('@/views/share/artifact.vue'),
+    meta: {
+      title: 'artifacts.public.title',
+      requiresAuth: false
+    }
+  },
+  {
     // Read-only conversation snapshot: public, must precede the catch-all.
     path: '/share/:token',
     name: 'SharedConversation',
