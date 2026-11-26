@@ -1970,6 +1970,38 @@ export default {
       versions: 'バージョン',
       badge: '成果物',
       view: '表示'
+    },
+    share: {
+      button: '共有',
+      title: '成果物を共有',
+      warning: 'このリンクを知っている人は誰でも、ログインなしでこのバージョンの成果物を閲覧できます。',
+      loading: '共有状態を読み込み中…',
+      loadFailed: '共有状態の読み込みに失敗しました。',
+      inactiveNotice: 'まだ共有していません',
+      activeNotice: '共有リンクは有効です（リンク自体は再表示できません。再生成してください）',
+      linkLabel: '共有リンク',
+      onceNotice: 'リンクは一度しか表示されません。すぐにコピーしてください。再生成すると古いリンクは即座に無効になります。',
+      expiryLabel: '有効期限',
+      expiryNever: '無期限',
+      expiryDays: '{days} 日',
+      expiresAt: '有効期限：{time}',
+      revokedAt: '無効化日時：{time}',
+      create: 'リンクを作成',
+      regenerate: 'リンクを再生成',
+      copy: 'リンクをコピー',
+      revoke: '共有を無効化',
+      copied: 'コピーしました',
+      copyFailed: 'コピーに失敗しました。リンクを手動で選択してください',
+      createFailed: '共有リンクの作成に失敗しました。',
+      revokeFailed: '共有の無効化に失敗しました。'
+    },
+    public: {
+      title: '共有された成果物',
+      notice: '読み取り専用共有 · リンクを知っている人は誰でも閲覧できます',
+      loading: '共有内容を読み込み中…',
+      unavailable: 'この共有リンクは存在しないか、有効期限が切れています。',
+      download: 'ダウンロード',
+      expiresAt: 'このリンクは {time} に期限切れになります'
     }
   },
   help: {

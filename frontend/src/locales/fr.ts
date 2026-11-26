@@ -1971,6 +1971,38 @@ export default {
       versions: 'Versions',
       badge: 'Artefact',
       view: 'Voir'
+    },
+    share: {
+      button: 'Partager',
+      title: "Partager l'artefact",
+      warning: "Toute personne disposant de ce lien peut consulter cette version de l'artefact sans se connecter.",
+      loading: "Chargement de l'état du partage…",
+      loadFailed: "Échec du chargement de l'état du partage.",
+      inactiveNotice: 'Pas encore partagé',
+      activeNotice: 'Le lien de partage est actif (le lien lui-même ne peut pas être relu ; régénérez-le)',
+      linkLabel: 'Lien de partage',
+      onceNotice: "Le lien n'est affiché qu'une seule fois — copiez-le maintenant. La régénération invalide immédiatement l'ancien lien.",
+      expiryLabel: 'Expiration',
+      expiryNever: 'Jamais',
+      expiryDays: '{days} jours',
+      expiresAt: 'Expire le : {time}',
+      revokedAt: 'Révoqué le : {time}',
+      create: 'Créer un lien',
+      regenerate: 'Régénérer le lien',
+      copy: 'Copier le lien',
+      revoke: 'Révoquer',
+      copied: 'Copié',
+      copyFailed: 'Échec de la copie ; sélectionnez le lien manuellement',
+      createFailed: 'Échec de la création du lien de partage.',
+      revokeFailed: 'Échec de la révocation du partage.'
+    },
+    public: {
+      title: 'Artefact partagé',
+      notice: 'Partage en lecture seule · toute personne disposant du lien peut consulter',
+      loading: 'Chargement du contenu partagé…',
+      unavailable: "Ce lien de partage n'existe pas ou a expiré.",
+      download: 'Télécharger',
+      expiresAt: 'Ce lien expire le {time}'
     }
   },
   help: {

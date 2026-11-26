@@ -40,6 +40,32 @@ export interface ArtifactListResponse {
   total: number
 }
 
+/** 工件分享状态（管理面；token 不在状态响应中回传）。 */
+export interface ArtifactShareStatus {
+  shared: boolean
+  created_at?: string | null
+  expires_at?: string | null
+  revoked_at?: string | null
+}
+
+/** 创建/轮换分享的响应：token 原文只在本次响应出现一次。 */
+export interface ArtifactShareCreation extends ArtifactShareStatus {
+  token: string
+  url: string
+}
+
+/** 公开分享元数据（后端白名单字段；不含任何内部标识）。 */
+export interface PublicArtifactMeta {
+  title: string
+  kind: ArtifactKind
+  filename?: string | null
+  mime_type: string
+  version_no: number
+  created_at?: string | null
+  content_url: string
+  expires_at?: string | null
+}
+
 /** SSE `artifact` 事件（后端 AgentEvent 的 artifact_* 字段的 camelCase 投影）。 */
 export interface ArtifactStreamEvent {
   type: 'artifact'

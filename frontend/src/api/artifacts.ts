@@ -2,7 +2,13 @@ import request from '@/utils/request'
 import { getToken } from '@/utils/auth'
 import type { AxiosResponse } from 'axios'
 import type { ApiResponse } from '@/types/common'
-import type { AgentArtifact, ArtifactListResponse } from '@/types/artifact'
+import type {
+  AgentArtifact,
+  ArtifactListResponse,
+  ArtifactShareCreation,
+  ArtifactShareStatus,
+  PublicArtifactMeta,
+} from '@/types/artifact'
 
 /** 工件 API 客户端（批次七）。信封契约同 agentApi：拦截器返回完整 AxiosResponse，
  *  消费者统一用 `apiUnwrap(res)` 解一层。 */
@@ -43,6 +49,46 @@ export const artifactsApi = {
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
         'X-Silent-Error': '1',
       },
+    })
+  },
+
+  /** 创建/轮换分享；token 原文只在本次响应出现一次（旧链接立即失效）。 */
+  createShare(
+    artifactId: string,
+    expiresInDays?: number | null,
+  ): Promise<AxiosResponse<ApiResponse<ArtifactShareCreation>>> {
+    return request.post(`/artifacts/${encodeURIComponent(artifactId)}/share`, {
+      expires_in_days: expiresInDays ?? null,
+    })
+  },
+
+  /** 查询分享状态（不返回 token）。 */
+  getShare(artifactId: string): Promise<AxiosResponse<ApiResponse<ArtifactShareStatus>>> {
+    return request.get(`/artifacts/${encodeURIComponent(artifactId)}/share`, {
+      headers: { 'X-Silent-Error': '1' },
+    })
+  },
+
+  /** 撤销分享；撤销后旧链接立即失效。 */
+  revokeShare(artifactId: string): Promise<AxiosResponse<ApiResponse<ArtifactShareStatus>>> {
+    return request.delete(`/artifacts/${encodeURIComponent(artifactId)}/share`)
+  },
+}
+
+/** 公开工件分享（匿名，无 Authorization）：token 即能力凭证。 */
+export const publicArtifactsApi = {
+  get(token: string): Promise<AxiosResponse<ApiResponse<PublicArtifactMeta>>> {
+    return request.get(`/public/artifacts/${encodeURIComponent(token)}`, {
+      headers: { 'X-Silent-Error': '1' },
+    })
+  },
+
+  /** 拉公开正文；404（撤销/过期/开关关闭）由页面统一按不可用处理。 */
+  async fetchContent(token: string): Promise<Response> {
+    const baseUrl = import.meta.env.VITE_API_BASE_URL || '/api/v1'
+    return fetch(`${baseUrl}/public/artifacts/${encodeURIComponent(token)}/content`, {
+      method: 'GET',
+      headers: { 'X-Silent-Error': '1' },
     })
   },
 }

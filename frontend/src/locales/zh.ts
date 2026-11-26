@@ -1993,6 +1993,38 @@ export default {
       versions: '版本',
       badge: '工件',
       view: '查看'
+    },
+    share: {
+      button: '分享',
+      title: '分享工件',
+      warning: '任何拿到链接的人都能查看此工件版本，无需登录。',
+      loading: '正在加载分享状态…',
+      loadFailed: '分享状态加载失败。',
+      inactiveNotice: '尚未分享',
+      activeNotice: '分享链接已启用（链接本身不可回读，可重新生成）',
+      linkLabel: '分享链接',
+      onceNotice: '链接只显示一次，请立即复制；重新生成会使旧链接立即失效。',
+      expiryLabel: '有效期',
+      expiryNever: '不过期',
+      expiryDays: '{days} 天',
+      expiresAt: '过期时间：{time}',
+      revokedAt: '撤销时间：{time}',
+      create: '创建链接',
+      regenerate: '重新生成链接',
+      copy: '复制链接',
+      revoke: '撤销分享',
+      copied: '已复制',
+      copyFailed: '复制失败，请手动选择链接',
+      createFailed: '创建分享链接失败。',
+      revokeFailed: '撤销分享失败。'
+    },
+    public: {
+      title: '分享工件',
+      notice: '只读分享 · 任何拿到链接的人都能查看',
+      loading: '正在加载分享内容…',
+      unavailable: '分享链接不存在或已失效。',
+      download: '下载',
+      expiresAt: '此链接将于 {time} 过期'
     }
   },
   help: {
