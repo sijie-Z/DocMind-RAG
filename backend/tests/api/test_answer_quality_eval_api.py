@@ -311,6 +311,16 @@ async def test_judge_success_reuses_core_bounds_reasons_and_is_idempotent(factor
         assert (await ac.get(RUNS)).json()["data"]["total"] == 1
 
 
+class _NoneMetricEvaluator:
+    async def evaluate(self, question, answer, context):
+        return SimpleNamespace(
+            faithfulness=None,
+            relevancy=0.8,
+            context_precision=0.7,
+            details={},
+        )
+
+
 class _ContractEvaluator:
     async def evaluate(self, question, answer, context):
         raise EvalJudgeContractError("judge output unparseable")
@@ -361,6 +371,39 @@ async def test_judge_contract_violation_is_failed_run_not_zero(factory, monkeypa
 
     rows = await _rows(factory)
     assert len(rows) == 1
+    assert rows[0].aggregate is None and rows[0].results is None
+
+
+@pytest.mark.asyncio
+async def test_missing_metric_is_contract_failure_not_zero(factory, monkeypatch):
+    """evaluator 返回 None 指标 -> 失败运行，绝不补 0 分。"""
+    monkeypatch.setattr(
+        "app.core.security.permission_service.get_user_permissions",
+        _grant(PermissionType.SEARCH_KNOWLEDGE_BASE),
+    )
+
+    async def _resolver(_db, _user):
+        return _NoneMetricEvaluator(), "test-judge-model"
+
+    monkeypatch.setattr(
+        "app.api.v1.endpoints.answer_quality_eval._judge_evaluator_and_model", _resolver
+    )
+    async with _Ctx(_user(), factory) as ac:
+        response = await ac.post(
+            RUNS,
+            json={
+                "mode": "judge",
+                "cases": [
+                    {"case_id": "c1", "question": "q", "answer": "a", "context": []}
+                ],
+            },
+        )
+        assert response.status_code == 502, response.text
+        assert response.json()["error_code"] == "JUDGE_CONTRACT_VIOLATION"
+        run_id = response.json()["detail"]["run_id"]
+        data = (await ac.get(f"{RUNS}/{run_id}")).json()["data"]
+        assert data["aggregate"] is None and data["results"] is None
+    rows = await _rows(factory)
     assert rows[0].aggregate is None and rows[0].results is None
 
 
