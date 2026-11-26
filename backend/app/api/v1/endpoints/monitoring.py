@@ -45,7 +45,7 @@ from app.models.document import Document
 from app.models.organization import Organization
 from app.models.rbac import PermissionType
 from app.models.user import User
-from app.rag.errors import EvalJudgeUnavailableError
+from app.rag.errors import EvalJudgeContractError, EvalJudgeUnavailableError
 from app.services.organization_service import organization_service
 
 router = APIRouter()
@@ -1147,7 +1147,7 @@ async def rag_eval_single(item: EvalItem):
             "context_precision": result["context_precision"],
             "details": result["details"],
         }
-    except EvalJudgeUnavailableError as e:
+    except (EvalJudgeContractError, EvalJudgeUnavailableError) as e:
         # issue #301（批 C）：评委（LLM）不可用 → 分数不可知，绝不呈现成 0/0/0。
         # 此前该异常源头被 evaluator._score 吞成 (0.0, err)，端点 except 再兜一层
         # 全零 200 —— 「测量失败」被伪装成「真实评了 0 分」。评委是外部 LLM 服务
@@ -1205,7 +1205,7 @@ async def rag_eval_batch(body: BatchEvalRequest):
                 for r in batch_result.results
             ],
         }
-    except EvalJudgeUnavailableError as e:
+    except (EvalJudgeContractError, EvalJudgeUnavailableError) as e:
         # issue #301（批 C）：全部条目评委不可用 → 严禁回落 count 0 全零 200
         # （「全零」还会诱导把故障当成「质量极差」的结论）。与单条同语义 502。
         logger.error(f"RAG batch eval judge unavailable: {e}")

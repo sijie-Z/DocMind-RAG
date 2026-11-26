@@ -22,11 +22,12 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 import app.models  # noqa: F401
 from app.core.database import Base, get_db
 from app.core.security import get_current_user
+from app.exceptions import ServiceUnavailableError
 from app.models.answer_quality_eval import AnswerQualityEvalRun
 from app.models.organization import Organization
 from app.models.rbac import PermissionType
 from app.models.user import User
-from app.rag.errors import EvalJudgeUnavailableError
+from app.rag.errors import EvalJudgeContractError, EvalJudgeUnavailableError
 
 ORG = 1
 OTHER_ORG = 2
@@ -310,6 +311,280 @@ async def test_judge_success_reuses_core_bounds_reasons_and_is_idempotent(factor
         assert (await ac.get(RUNS)).json()["data"]["total"] == 1
 
 
+class _ContractEvaluator:
+    async def evaluate(self, question, answer, context):
+        raise EvalJudgeContractError("judge output unparseable")
+
+
+class _LeakyReasonEvaluator:
+    async def evaluate(self, question, answer, context):
+        return SimpleNamespace(
+            faithfulness=0.9,
+            relevancy=0.8,
+            context_precision=0.7,
+            details={
+                "faithfulness_reason": f"答案提到 {answer}",
+                "relevancy_reason": f"上下文 {context[0]['text'] if context else ''}",
+                "context_precision_reason": "normal reason",
+            },
+        )
+
+
+@pytest.mark.asyncio
+async def test_judge_contract_violation_is_failed_run_not_zero(factory, monkeypatch):
+    """评委输出不可解析 -> failed + JUDGE_CONTRACT_VIOLATION，不是 completed 0 分。"""
+    monkeypatch.setattr(
+        "app.core.security.permission_service.get_user_permissions",
+        _grant(PermissionType.SEARCH_KNOWLEDGE_BASE),
+    )
+
+    async def _resolver(_db, _user):
+        return _ContractEvaluator(), "test-judge-model"
+
+    monkeypatch.setattr(
+        "app.api.v1.endpoints.answer_quality_eval._judge_evaluator_and_model", _resolver
+    )
+    async with _Ctx(_user(), factory) as ac:
+        response = await ac.post(
+            RUNS,
+            json={
+                "mode": "judge",
+                "cases": [{"case_id": "c1", "question": "q", "answer": "a", "context": []}],
+            },
+        )
+        assert response.status_code == 502, response.text
+        assert response.json()["error_code"] == "JUDGE_CONTRACT_VIOLATION"
+        run_id = response.json()["detail"]["run_id"]
+        data = (await ac.get(f"{RUNS}/{run_id}")).json()["data"]
+        assert data["status"] == "failed"
+        assert data["aggregate"] is None and data["results"] is None
+
+    rows = await _rows(factory)
+    assert len(rows) == 1
+    assert rows[0].aggregate is None and rows[0].results is None
+
+
+@pytest.mark.asyncio
+async def test_judge_reason_quoting_input_is_dropped(factory, monkeypatch):
+    """评委理由转述原文 -> 整条理由丢弃，DB/响应都不得含 sentinel。"""
+    monkeypatch.setattr(
+        "app.core.security.permission_service.get_user_permissions",
+        _grant(PermissionType.SEARCH_KNOWLEDGE_BASE),
+    )
+
+    async def _resolver(_db, _user):
+        return _LeakyReasonEvaluator(), "test-judge-model"
+
+    monkeypatch.setattr(
+        "app.api.v1.endpoints.answer_quality_eval._judge_evaluator_and_model", _resolver
+    )
+    async with _Ctx(_user(), factory) as ac:
+        response = await ac.post(
+            RUNS,
+            json={
+                "mode": "judge",
+                "cases": [
+                    {
+                        "case_id": "c1",
+                        "question": f"{SENTINEL_Q}-c1",
+                        "answer": f"{SENTINEL_A}-c1",
+                        "context": [{"text": f"{SENTINEL_C}-c1"}],
+                    }
+                ],
+            },
+        )
+        assert response.status_code == 200, response.text
+        body = response.text
+        for sentinel in (SENTINEL_Q, SENTINEL_A, SENTINEL_C):
+            assert sentinel not in body
+        reasons = response.json()["data"]["results"][0]["reasons"]
+        assert "faithfulness" not in reasons
+        assert "relevancy" not in reasons
+
+    rows = await _rows(factory)
+    serialized = json.dumps(rows[0].results, ensure_ascii=False)
+    for sentinel in (SENTINEL_Q, SENTINEL_A, SENTINEL_C):
+        assert sentinel not in serialized
+
+
+@pytest.mark.asyncio
+async def test_masked_preview_has_no_raw_prefix_and_counts_chars(factory, monkeypatch):
+    """预览不得保留原文前缀（9 字符秘密曾泄露 8/9），只给固定占位 + 长度。"""
+    monkeypatch.setattr(
+        "app.core.security.permission_service.get_user_permissions",
+        _grant(PermissionType.SEARCH_KNOWLEDGE_BASE),
+    )
+    async with _Ctx(_user(), factory) as ac:
+        response = await ac.post(
+            RUNS,
+            json={
+                "mode": "fake",
+                "cases": [
+                    {
+                        "case_id": "c1",
+                        "question": "q",
+                        "answer": "a",
+                        "context": [{"text": "123456789"}],
+                        "fake_scores": {
+                            "faithfulness": 0.9,
+                            "relevancy": 0.8,
+                            "context_precision": 0.7,
+                        },
+                    }
+                ],
+            },
+        )
+        assert response.status_code == 200, response.text
+        ref = response.json()["data"]["results"][0]["source_refs"][0]
+        assert ref["masked_preview"] == "[redacted]"
+        assert ref["char_count"] == 9
+        assert "12345678" not in response.text
+
+
+@pytest.mark.asyncio
+async def test_context_non_string_values_are_coerced_not_500(factory, monkeypatch):
+    """context 数值字段必须在调用评委前归一，不能事后 500。"""
+    monkeypatch.setattr(
+        "app.core.security.permission_service.get_user_permissions",
+        _grant(PermissionType.SEARCH_KNOWLEDGE_BASE),
+    )
+    async with _Ctx(_user(), factory) as ac:
+        response = await ac.post(
+            RUNS,
+            json={
+                "mode": "fake",
+                "cases": [
+                    {
+                        "case_id": "c1",
+                        "question": "q",
+                        "answer": "a",
+                        "context": [{"text": 123}],
+                        "fake_scores": {
+                            "faithfulness": 0.9,
+                            "relevancy": 0.8,
+                            "context_precision": 0.7,
+                        },
+                    }
+                ],
+            },
+        )
+        assert response.status_code == 200, response.text
+        nested = await ac.post(
+            RUNS,
+            json={
+                "mode": "fake",
+                "cases": [
+                    {
+                        "case_id": "c2",
+                        "question": "q",
+                        "answer": "a",
+                        "context": [{"text": {"nested": "x"}}],
+                        "fake_scores": {
+                            "faithfulness": 0.9,
+                            "relevancy": 0.8,
+                            "context_precision": 0.7,
+                        },
+                    }
+                ],
+            },
+        )
+        assert nested.status_code == 400, nested.text
+
+
+@pytest.mark.asyncio
+async def test_trend_returns_newest_runs_not_oldest(factory, monkeypatch):
+    """趋势先取最新 N 条再反转；超过 limit 时不得丢掉最新运行。"""
+    monkeypatch.setattr(
+        "app.core.security.permission_service.get_user_permissions",
+        _grant(PermissionType.SEARCH_KNOWLEDGE_BASE),
+    )
+    base = datetime(2026, 1, 1, tzinfo=UTC)
+    async with factory() as db:
+        for index in range(3):
+            ts = base + timedelta(minutes=index)
+            db.add(
+                AnswerQualityEvalRun(
+                    id=f"run-{index}",
+                    organization_id=ORG,
+                    user_id=USER_A,
+                    dataset_hash=str(index) * 64,
+                    judge_model="fake",
+                    prompt_version="v1",
+                    mode="fake",
+                    status="completed",
+                    case_count=1,
+                    aggregate={
+                        "faithfulness": 0.1 * index,
+                        "relevancy": 0.1 * index,
+                        "context_precision": 0.1 * index,
+                    },
+                    results=[],
+                    created_by=USER_A,
+                    created_at=ts,
+                    completed_at=ts,
+                )
+            )
+        await db.commit()
+    async with _Ctx(_user(), factory) as ac:
+        response = await ac.get(f"{RUNS}/trend?limit=2")
+        assert response.status_code == 200, response.text
+        points = response.json()["data"]["points"]
+        assert [point["id"] for point in points] == ["run-1", "run-2"]
+
+
+@pytest.mark.asyncio
+async def test_llm_not_configured_returns_503_without_run_row(factory, monkeypatch):
+    """LLM 未配置是请求前配置错误：503 且不产生运行行。"""
+    monkeypatch.setattr(
+        "app.core.security.permission_service.get_user_permissions",
+        _grant(PermissionType.SEARCH_KNOWLEDGE_BASE),
+    )
+
+    async def _resolver(_db, _user):
+        raise ServiceUnavailableError("LLM 服务未配置", error_code="LLM_NOT_CONFIGURED")
+
+    monkeypatch.setattr(
+        "app.api.v1.endpoints.answer_quality_eval._judge_evaluator_and_model", _resolver
+    )
+    async with _Ctx(_user(), factory) as ac:
+        response = await ac.post(
+            RUNS,
+            json={
+                "mode": "judge",
+                "cases": [{"case_id": "c1", "question": "q", "answer": "a", "context": []}],
+            },
+        )
+        assert response.status_code == 503, response.text
+        assert response.json()["error_code"] == "LLM_NOT_CONFIGURED"
+    assert await _rows(factory) == []
+
+
+@pytest.mark.asyncio
+async def test_validation_error_does_not_echo_raw_input(factory, monkeypatch):
+    """422 响应只回显 loc/msg/type，不能把原始答案正文带回客户端。"""
+    monkeypatch.setattr(
+        "app.core.security.permission_service.get_user_permissions",
+        _grant(PermissionType.SEARCH_KNOWLEDGE_BASE),
+    )
+    async with _Ctx(_user(), factory) as ac:
+        response = await ac.post(
+            RUNS,
+            json={
+                "mode": "fake",
+                "cases": [
+                    {
+                        "case_id": "c1",
+                        "question": "q",
+                        "answer": SENTINEL_A * 2000,
+                        "context": [],
+                    }
+                ],
+            },
+        )
+        assert response.status_code == 422, response.text
+        assert SENTINEL_A not in response.text
+
+
 @pytest.mark.asyncio
 async def test_judge_unavailable_persists_failed_run_with_null_scores(factory, monkeypatch):
     """评委不可用 → 502 + failed 行；aggregate/results 为 NULL（不是 0 分）。
@@ -585,3 +860,15 @@ async def test_rbac_and_scope_matrix(factory, monkeypatch):
         assert (await ac.get(RUNS)).status_code == 403
         allowed_write = await _post_fake(ac, [_case("scope-write")])
         assert allowed_write.status_code == 200, allowed_write.text
+
+
+@pytest.mark.asyncio
+async def test_non_superuser_without_permission_is_denied(factory, monkeypatch):
+    """非超管缺 SEARCH_KNOWLEDGE_BASE → 读/写都 403（RBAC 分支，不只是 scope）。"""
+    monkeypatch.setattr(
+        "app.core.security.permission_service.get_user_permissions",
+        _grant(),
+    )
+    async with _Ctx(_user(superuser=False), factory) as ac:
+        assert (await ac.get(RUNS)).status_code == 403
+        assert (await _post_fake(ac)).status_code == 403

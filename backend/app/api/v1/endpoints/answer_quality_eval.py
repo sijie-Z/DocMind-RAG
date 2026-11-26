@@ -74,8 +74,8 @@ async def _judge_evaluator_and_model(
 ) -> tuple[Any, str | None]:
     """解析本次 judge 运行的 LLM 客户端/模型并构造评分核心。
 
-    客户端缺失 → 503（与既有 RAG 评估端点的「LLM 未配置」同一语义）；评委
-    调用期的失败由 ``execute_run`` 落成失败运行并映射为 502。
+    客户端缺失 → 503 ``LLM_NOT_CONFIGURED``（配置错误，未发起评测，不产生
+    运行行）；评委调用期的失败由 ``execute_run`` 落成失败运行并映射为 502。
     """
     from app.services.llm_settings_service import resolve_for_user
 
@@ -99,7 +99,11 @@ async def create_answer_quality_run(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """执行并持久化一次答案质量评测；评委不可用 → 502（失败运行已落库）。"""
+    """执行并持久化一次答案质量评测；评委不可用 → 502（失败运行已落库）。
+
+    例外：LLM 未配置属于请求前的配置错误，返回 503 且不产生运行行——这是
+    「没有发起评测」，不是「评测失败」。
+    """
     try:
         org_id = await require_organization(current_user, db)
         evaluator = None

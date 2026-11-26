@@ -10,11 +10,15 @@
 - 与 ``retrieval_eval``（检索 recall）、``eval_rubric``（加权 yes/no 评分表）
   不共用运行表；本模块是固定维度连续分评委的运行历史。
 
-隐私：落库结果只含指标、有界评审理由、来源哈希与脱敏预览；原始
-query/answer/context 文本绝不写入 DB 或 API 响应。
+隐私：落库结果只含指标、有界评审理由、来源哈希与固定占位预览；原始
+query/answer/context 文本绝不写入 DB 或 API 响应。评委理由在落库前会做
+敏感片段筛查（命中任一 12 字符片段即整条丢弃），避免模型转述原文。
 
-失败：评委不可用 → 运行 ``status='failed'`` + ``error_code=JUDGE_UNAVAILABLE``，
+失败：评委不可用/输出不符合契约 → 运行 ``status='failed'`` +
+``error_code``（``JUDGE_UNAVAILABLE`` / ``JUDGE_CONTRACT_VIOLATION``），
 ``aggregate`` / ``results`` 为 NULL；端点映射为 502，绝不返回 0 分。
+LLM 未配置是请求前的配置错误（503），不产生运行行——这属于「没有发起
+评测」而不是「评测失败」。
 
 幂等：唯一键 ``(organization_id, user_id, dataset_hash, judge_model,
 prompt_version, mode, status)``。成功配置重复提交返回既有运行（幂等重放）；
@@ -26,6 +30,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import uuid
 from datetime import UTC, date, datetime, time, timedelta
 from typing import Any
@@ -41,7 +46,7 @@ from app.models.answer_quality_eval import (
 )
 from app.rag import evaluator as rag_evaluator
 from app.rag.context_compressor import get_prompt_text
-from app.rag.errors import EvalJudgeUnavailableError
+from app.rag.errors import EvalJudgeContractError, EvalJudgeUnavailableError
 
 # ── 上限（与 schema Field 约束同值；服务层重复校验防内部调用绕过）────────────
 MAX_CASES_PER_RUN = 20
@@ -63,6 +68,7 @@ RUN_STATUS_COMPLETED = "completed"
 RUN_STATUS_FAILED = "failed"
 
 ERROR_CODE_JUDGE_UNAVAILABLE = "JUDGE_UNAVAILABLE"
+ERROR_CODE_JUDGE_CONTRACT = "JUDGE_CONTRACT_VIOLATION"
 
 FAKE_JUDGE_MODEL = "fake"
 DEFAULT_JUDGE_MODEL = "unknown"
@@ -187,7 +193,19 @@ def normalize_cases(
                 raise ValidationError(
                     f"{case_id!r} 的 context 条目必须是对象", field="cases.context"
                 )
-            context.append(dict(item))
+            normalized_item: dict[str, str] = {}
+            for key, value in item.items():
+                if isinstance(value, (dict, list)):
+                    raise ValidationError(
+                        f"{case_id!r} 的 context 字段必须是字符串或数字: {key}",
+                        field="cases.context",
+                    )
+                # 数值/布尔/None 统一转字符串：评分核心只读文本，且必须在
+                # 调用评委之前完成类型归一，避免事后 500。
+                normalized_item[str(key)] = (
+                    "" if value is None else (value if isinstance(value, str) else str(value))
+                )
+            context.append(normalized_item)
         fake_scores = None
         if mode == RUN_MODE_FAKE:
             fake_scores = _normalize_scores(entry.get("fake_scores"), case_id=case_id)
@@ -221,21 +239,31 @@ def case_set_fingerprint(cases: list[dict[str, Any]]) -> str:
 # ── 来源引用（只存哈希 + 脱敏预览）────────────────────────────────────────
 
 
-def _mask_preview(text: str, *, keep: int = 8) -> str | None:
-    """脱敏预览：最多保留前 8 字符；过短文本整段掩码，避免泄露全文。"""
-    stripped = (text or "").strip()
-    if not stripped:
+REDACTED_PREVIEW = "[redacted]"
+"""来源预览固定占位：不保留任何原文前缀（9 字符秘密曾被泄露 8/9）。"""
+
+
+def _mask_preview(text: Any) -> str | None:
+    """来源预览：只返回固定占位，绝不保留原文前缀。
+
+    之前的「前 8 字符」实现对 9 字符秘密等于泄露 8/9；且 ``***`` 与真实
+    文本冲突。哈希（``ref_sha256``）保留可关联性，预览只用于展示。
+    """
+    if text is None:
         return None
-    if len(stripped) <= keep:
-        return "***"
-    return stripped[:keep] + "…"
+    if isinstance(text, str) and not text.strip():
+        return None
+    return REDACTED_PREVIEW
 
 
 def _source_refs(case: dict[str, Any]) -> list[dict[str, Any]]:
-    """上下文的来源引用：身份哈希 + 脱敏预览，绝不返回原文。"""
+    """上下文的来源引用：身份哈希 + 固定占位预览，绝不返回原文。"""
     refs: list[dict[str, Any]] = []
     for item in case["context"]:
         text = get_prompt_text(item)
+        if not isinstance(text, str):
+            # 非字符串值不崩溃、也不泄露：用规范化 JSON 参与哈希。
+            text = _canonical_json(item)
         identity = (
             item.get("doc_id") or item.get("document_id") or item.get("chunk_id") or item.get("id")
         )
@@ -244,6 +272,7 @@ def _source_refs(case: dict[str, Any]) -> list[dict[str, Any]]:
             {
                 "ref_sha256": _sha256(identity_text or _canonical_json(item)),
                 "masked_preview": _mask_preview(text),
+                "char_count": len(text),
             }
         )
     return refs
@@ -251,21 +280,61 @@ def _source_refs(case: dict[str, Any]) -> list[dict[str, Any]]:
 
 # ── 评分（复用 app.rag.evaluator 核心）────────────────────────────────────
 
+_REASON_SENSITIVE_WINDOW = 12
+"""理由中任一 12 字符片段命中原始输入即整条丢弃（防模型转述原文）。"""
 
-def _bounded_reason(raw: Any) -> str | None:
+
+def _contains_sensitive_fragment(text: str, sensitive_texts: list[str]) -> bool:
+    joined = "\n".join(item for item in sensitive_texts if item)
+    if not joined:
+        return False
+    if len(text) <= _REASON_SENSITIVE_WINDOW:
+        return text in joined
+    window = _REASON_SENSITIVE_WINDOW
+    return any(text[i : i + window] in joined for i in range(len(text) - window + 1))
+
+
+def _bounded_reason(raw: Any, sensitive_texts: list[str]) -> str | None:
     if not isinstance(raw, str):
         return None
     text = raw.strip()
     if not text:
         return None
-    return text[:MAX_REASON_CHARS]
+    text = text[:MAX_REASON_CHARS]
+    if _contains_sensitive_fragment(text, sensitive_texts):
+        return None
+    return text
+
+
+def _numeric_metric(value: Any) -> float | None:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    number = float(value)
+    if not math.isfinite(number):
+        return None
+    return number
 
 
 def _result_from_evaluation(case: dict[str, Any], result: Any) -> dict[str, Any]:
     details = getattr(result, "details", None)
     details = details if isinstance(details, dict) else {}
-    metrics = {metric: round(float(getattr(result, metric, 0.0) or 0.0), 4) for metric in METRICS}
-    reasons = {metric: _bounded_reason(details.get(f"{metric}_reason")) for metric in METRICS}
+    metrics: dict[str, float] = {}
+    for metric in METRICS:
+        number = _numeric_metric(getattr(result, metric, None))
+        if number is None:
+            # 缺指标/NaN/非数字：测量不可知，绝不补 0 分。
+            raise EvalJudgeContractError(
+                f"evaluator returned invalid {metric} score: {getattr(result, metric, None)!r}"
+            )
+        metrics[metric] = round(number, 4)
+    sensitive = [case["question"], case["answer"]]
+    for item in case["context"]:
+        text = get_prompt_text(item)
+        if isinstance(text, str):
+            sensitive.append(text)
+    reasons = {
+        metric: _bounded_reason(details.get(f"{metric}_reason"), sensitive) for metric in METRICS
+    }
     return {
         "case_id": case["case_id"],
         "metrics": metrics,
@@ -390,13 +459,18 @@ async def execute_run(
                     answer=case["answer"],
                     context=case["context"],
                 )
+                results.append(_result_from_evaluation(case, evaluation))
+            except EvalJudgeContractError:
+                # 输出不可解析/缺指标 = 测量失败，不是 0 分。
+                error_code = ERROR_CODE_JUDGE_CONTRACT
+                results = []
+                break
             except EvalJudgeUnavailableError:
                 # 显式失败：任意一条评委不可用 → 整次运行不可知。不给部分分数，
                 # 也不把失败条目按 0 分计入（那会把故障伪装成低质量）。
                 error_code = ERROR_CODE_JUDGE_UNAVAILABLE
                 results = []
                 break
-            results.append(_result_from_evaluation(case, evaluation))
 
     run = AnswerQualityEvalRun(
         id=str(uuid.uuid4()),
@@ -585,18 +659,21 @@ async def trend(
         date_from=date_from,
         date_to=date_to,
     )
-    rows = (
+    # 先取最新 N 条再反转成正序（与 retrieval_eval 相同契约）；用 asc+limit
+    # 会静默丢掉最新运行，让趋势停留在最老的窗口。
+    rows = list(
         (
             await session.execute(
                 select(AnswerQualityEvalRun)
                 .where(*conditions)
-                .order_by(AnswerQualityEvalRun.created_at.asc(), AnswerQualityEvalRun.id.asc())
+                .order_by(AnswerQualityEvalRun.created_at.desc(), AnswerQualityEvalRun.id.desc())
                 .limit(limit)
             )
         )
         .scalars()
         .all()
     )
+    rows.reverse()
     points: list[dict[str, Any]] = []
     metric_sums = {metric: 0.0 for metric in METRICS}
     scored_runs = 0
