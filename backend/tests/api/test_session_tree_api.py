@@ -209,7 +209,18 @@ async def test_branch_context_switch_does_not_create_session(client, db_factory)
     async with db_factory() as db:
         before = (await db.execute(select(func.count(ChatSession.id)))).scalar_one()
         seq_before = (await db.get(ChatSession, "t-child")).next_message_seq
-        tree_sessions_before = (await db.execute(select(func.count(ChatSession.id)))).scalar_one()
+        message_seqs_before = {
+            (row.id, row.seq)
+            for row in (
+                await db.execute(select(ChatMessage).where(ChatMessage.session_id == "t-child"))
+            )
+            .scalars()
+            .all()
+        }
+
+    # 真的读一次树：断言「树读取」本身也不创建会话/不改消息序号。
+    tree_response = client.get("/api/v1/sessions/t-child/tree")
+    assert tree_response.status_code == 200
 
     r = client.get("/api/v1/sessions/t-child/branch-context")
     assert r.status_code == 200
@@ -230,8 +241,17 @@ async def test_branch_context_switch_does_not_create_session(client, db_factory)
     async with db_factory() as db:
         seq_after = (await db.get(ChatSession, "t-child")).next_message_seq
         tree_sessions_after = (await db.execute(select(func.count(ChatSession.id)))).scalar_one()
+        message_seqs_after = {
+            (row.id, row.seq)
+            for row in (
+                await db.execute(select(ChatMessage).where(ChatMessage.session_id == "t-child"))
+            )
+            .scalars()
+            .all()
+        }
     assert seq_after == seq_before, "branch-context 不得推进会话消息序号（只读）"
-    assert tree_sessions_after == tree_sessions_before, "读取树上下文不得创建会话"
+    assert message_seqs_after == message_seqs_before, "branch-context 不得改写消息 seq（只读）"
+    assert tree_sessions_after == before, "读取树/分支上下文不得创建会话"
     assert fork_like == 1, "branch-context 不得隐式 fork（只允许种子里的 t-grand）"
 
 
