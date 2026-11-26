@@ -632,9 +632,7 @@ def derive_all(root: Path = REPO_ROOT) -> dict[str, int]:
         "endpoint_modules": len(
             derive_endpoint_modules(backend / "app" / "api" / "v1" / "router.py")
         ),
-        "endpoint_files": len(
-            list((backend / "app" / "api" / "v1" / "endpoints").glob("*.py"))
-        ),
+        "endpoint_files": len(list((backend / "app" / "api" / "v1" / "endpoints").glob("*.py"))),
         "frontend_routes": len(
             derive_frontend_routes(root / "frontend" / "src" / "router" / "index.ts")
         ),
