@@ -342,6 +342,42 @@ async def test_owner_only_same_org_and_cross_org_are_404(factory):
             assert (await ac.get(f"/api/v1/public/artifacts/{token}")).status_code == 200
 
 
+async def test_oversized_token_is_rejected_before_hashing(monkeypatch, factory):
+    """超长 token 必须在哈希/查询前短路，不能被拿来打 DB/哈希。"""
+    from app.services import artifact_share_service
+
+    calls: list[str] = []
+    real_digest = artifact_share_service.share_token_digest
+
+    def _spy(token):
+        calls.append(token)
+        return real_digest(token)
+
+    monkeypatch.setattr(artifact_share_service, "share_token_digest", _spy)
+    async with _Ctx(_user(), factory) as ac:
+        resp = await ac.get("/api/v1/public/artifacts/" + "x" * 5000)
+        assert resp.status_code == 404, resp.text
+    assert calls == [], "超长 token 不得进入哈希/查询"
+
+
+async def test_non_ready_artifact_is_not_public_and_not_manageable(factory):
+    """artifact 非 ready（内容未就绪/失败）时，公开面与管理面都必须 404。"""
+    async with _Ctx(_user(), factory) as ac:
+        created = await _create(ac, content="未就绪正文")
+        token = (await _share(ac, created["id"])).json()["data"]["token"]
+
+    async with factory() as db:
+        row = await db.get(AgentArtifact, created["id"])
+        row.status = "pending"
+        await db.commit()
+
+    async with _Ctx(_user(), factory) as ac:
+        assert (await ac.get(f"/api/v1/public/artifacts/{token}")).status_code == 404
+        assert (await ac.get(f"/api/v1/public/artifacts/{token}/content")).status_code == 404
+        assert (await ac.get(f"/api/v1/artifacts/{created['id']}/share")).status_code == 404
+        assert (await ac.delete(f"/api/v1/artifacts/{created['id']}/share")).status_code == 404
+
+
 async def test_disabled_switch_create_and_public_are_404(monkeypatch, factory):
     async with _Ctx(_user(), factory) as ac:
         created = await _create(ac, content="开关正文")
