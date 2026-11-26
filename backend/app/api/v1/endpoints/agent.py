@@ -47,7 +47,6 @@ from app.agent.events import AgentEvent, FinalAnswerAccumulator
 from app.agent.registry import tool_registry
 from app.agent.replay.engine import ReplayEngine
 from app.agent.service import agent_service, notify_task_terminal
-from app.agent.skills import get_skill_manager
 from app.core.config import settings
 from app.core.database import AsyncSessionLocal, get_db
 from app.core.error_mapping import (
@@ -1555,29 +1554,20 @@ async def list_tools(
 
 @router.get("/skills")
 async def list_skills(
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_scope("chat:read")),
     db: AsyncSession = Depends(get_db),
 ):
-    """List learned agent skills（仅当前组织）。"""
+    """List the org's reviewed+enabled skills（兼容面；不读 Redis）。
+
+    批次十起技能库是评审门控的组织资产：本端点只返回 approved + enabled +
+    哈希校验通过的版本，字段沿用旧契约（``success_rate`` 固定 0.0）。完整的
+    列表/审核/版本/diff 在 ``/org-skills``。
+    """
+    from app.services import org_skill_service
+
     organization_id = await require_organization(current_user, db)
-    # 超管也必须走组织命名空间：新数据只写 org key，全局实例看不到
-    manager = get_skill_manager(organization_id)
-    await manager.load()
-    skills = manager.list_skills()
-    return {
-        "success": True,
-        "data": [
-            {
-                "id": s.id,
-                "name": s.name,
-                "description": s.description,
-                "success_rate": round(s.success_rate, 2),
-                "trigger_patterns": s.trigger_patterns,
-                "tool_sequence": s.tool_sequence,
-            }
-            for s in skills
-        ],
-    }
+    data = await org_skill_service.list_runtime_skills(db, organization_id=organization_id)
+    return {"success": True, "data": data}
 
 
 # ── Session Management ──────────────────────────────────────────────────────

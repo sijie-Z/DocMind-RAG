@@ -39,9 +39,9 @@ from app.agent.registry import canonical_tool_name, tool_registry
 from app.agent.reviewer import Reviewer
 from app.agent.run_report import build_run_report, render_run_report_text
 from app.agent.skill_prompt import build_skills_index
-from app.agent.skills import get_skill_manager
 from app.agent.usage import record_llm_call_error, record_llm_usage
 from app.core.config import ai as ai_config
+from app.core.database import AsyncSessionLocal
 from app.core.llm_failures import (
     USER_LLM_REQUEST_FAILED_CODE,
     USER_LLM_REQUEST_FAILED_MESSAGE,
@@ -225,9 +225,11 @@ class PERAgentLoop:
         # （Agent 提示词来自模块常量 / system_prompt_override），因此真实 run
         # 恒回退到配置/内置常量摘要——如实留白，不臆造模板 id。
         self.prompt_template: Any | None = None
-        # 技能学习闭环（issue #200）：此前 SkillManager 全仓零调用者
-        # 技能学习按组织隔离（A 组织学到的技能不得注入 B 组织的规划）
-        self.skill_manager = get_skill_manager(organization_id)
+        # 技能（批次十）：生产路径不再持有 Redis SkillManager / 自动学习闭环。
+        # 运行时只经 ``org_skill_service.match_skill`` 读取组织内 approved +
+        # enabled + 哈希校验通过 + 工具仍可见的版本；pending/rejected/disabled/
+        # archived 一律不注入。自动学习已关闭，技能只能经 /org-skills/proposals
+        # 提议并由人工审核。
 
         # Checkpoint / resume（issue #201 最小版）：run() 起始处重置两者，
         # 这里只是类型占位——loop 实例可能被复用，不得泄露上一轮的状态。
@@ -710,16 +712,9 @@ class PERAgentLoop:
         else:
             document_context = ctx.document_context or None
 
-        # 技能（issue #200）：懒加载已学技能（load 幂等）；失败绝不阻塞主流程
-        if self.config.enable_skills and final_resume_phase in (None, "collecting"):
-            try:
-                await self.skill_manager.load()
-                # 顺带清理 7 天未使用的技能（评审 B2：prune_stale 此前零调用）。
-                # prune_stale 内部只在真的有 stale 项时才落盘。
-                await self.skill_manager.prune_stale()
-            except Exception as e:
-                logger.warning("Skill manager load failed: %s", e)
-
+        # 技能（批次十）：生产路径不再从 Redis 加载/清理已学技能。运行时匹配
+        # 由 ``_apply_skill_hints`` 在规划完成后按需查询组织技能库（reviewed-only）。
+        # 这里不做任何技能 I/O：没有待审/自动学习旁路，也就不需要 load/prune。
         memory_context = ""
         if resume_plan is None:
             # ── Phase 0a: Context fitting ────────────────────────────────
@@ -887,11 +882,12 @@ class PERAgentLoop:
                     yield event
                 plan = plan_sink[0]
 
-                # 学习闭环（读侧，issue #200）：命中已学技能时，把其工具序列补进
-                # 没有 tool_hint 的步骤（只补空缺，不覆盖 planner 的判断）。
-                # 返回值 = 实际被应用的 skill_id，供本回合结束时回报使用结果（评审 B2 反馈边）。
+                # 学习闭环（读侧，批次十）：命中**已评审 + 已启用**的组织技能时，
+                # 把其工具序列补进没有 tool_hint 的步骤（只补空缺，不覆盖
+                # planner 的判断）。不再读取 Redis / 未经审核的技能。
+                # 返回值 = 实际被应用的 skill_id，仅用于日志/未来反馈。
                 if self.config.enable_skills and plan:
-                    matched_skill_id = self._apply_skill_hints(plan, query)
+                    matched_skill_id = await self._apply_skill_hints(plan, query)
 
                 # T1 checkpoint：规划完成（含 skill 提示应用后）——快照 ctx + 完整
                 # plan；崩溃于规划阶段时（尚无任何快照）resume 走"无 plan"重规划路径。
@@ -2339,38 +2335,47 @@ class PERAgentLoop:
                 yield _legacy_step_result_event(plan, step, "".join(legacy_retry_chunks))
             return
 
-    def _apply_skill_hints(self, plan: Plan, query: str) -> str | None:
-        """学习闭环（读侧，issue #200）：命中的已学技能 → 补全步骤的工具提示。
+    async def _apply_skill_hints(self, plan: Plan, query: str) -> str | None:
+        """读侧（批次十）：命中**已评审 + 已启用**的组织技能 → 补全工具提示。
 
-        只补没有 tool_hint 的步骤、不覆盖 planner 自己的判断；来源是
-        SkillManager.match()（trigger_patterns 命中且成功率加权达标）。
-        hint 工具名不在**当前可见工具集**时跳过（#245 第 6 条）：技能学自历史
-        会话，tool_tags / disabled_tools / enable_tools 漂移后旧工具名不可再承诺。
-        返回**实际被应用**的 skill_id（供 run 结束时回报使用结果，评审 B2 反馈边）；
-        没命中、或一条提示都没应用上 → None。
-        任何失败只记日志——学习闭环绝不阻塞主流程。
+        只补没有 tool_hint 的步骤、不覆盖 planner 自己的判断；匹配来源是
+        ``org_skill_service.match_skill``（approved + enabled + sha256 校验通过
+        + 工具仍注册/非隐藏/非高风险）。hint 工具名不在**当前可见工具集**时
+        跳过（#245 第 6 条）：运行配置漂移后旧工具名不可再承诺。
+        返回**实际被应用**的 skill_id；没命中、或一条提示都没应用上 → None。
+        任何失败只记日志——技能读取绝不阻塞主流程，也绝不读取 Redis/未审核技能。
         """
-        try:
-            skill = self.skill_manager.match(query or plan.goal or "")
-        except Exception as e:
-            logger.warning("Skill hint lookup failed: %s", e)
-            return None
-        if not skill or not skill.tool_sequence:
+        if not self.config.enable_skills or not self.config.enable_tools:
             return None
         # 可见工具预校验（#245 第 5/6 条，与 _get_tools 的呈现过滤同源）：
         # hint 进提示词会诱导模型调用一个当前看不见、甚至被执行层拒绝的工具。
-        # toolless（enable_tools=False）时可见集为空 → 一条都不应用。
         visible = {t.get("function", {}).get("name") for t in (self._get_tools() or [])}
+        if not visible:
+            return None
+        try:
+            from app.services import org_skill_service
+
+            async with AsyncSessionLocal() as session:
+                matched = await org_skill_service.match_skill(
+                    session,
+                    organization_id=self.organization_id,
+                    query=query or plan.goal or "",
+                    visible_tool_names=visible,
+                )
+        except Exception as e:
+            logger.warning("Reviewed org skill lookup failed: %s", e)
+            return None
+        if not matched or not matched.tool_sequence:
+            return None
         applied = 0
         i = 0
         for step in plan.steps:
             if step.tool_hint:
                 continue
-            if i >= len(skill.tool_sequence):
+            if i >= len(matched.tool_sequence):
                 break
-            item = skill.tool_sequence[i]
+            item = matched.tool_sequence[i]
             hint = item.get("tool_name") if isinstance(item, dict) else None
-            # issue #509：历史技能可能记录旧名（vector_search 等）→ 规范名后再比对。
             if hint:
                 hint = canonical_tool_name(hint)
             if hint and hint in visible:
@@ -2380,53 +2385,37 @@ class PERAgentLoop:
                 logger.info(
                     "Skill hint skipped（跨会话工具漂移）: %s 不在当前可见工具集（技能 %s）",
                     hint,
-                    skill.id,
+                    matched.skill_id,
                 )
             i += 1
         if applied:
             logger.info(
-                "Skill hints applied: %d/%d 个步骤（来自技能 %s）",
+                "Reviewed skill hints applied: %d/%d 个步骤（来自技能 %s v%s）",
                 applied,
                 len(plan.steps),
-                skill.id,
+                matched.skill_id,
+                matched.version_no,
             )
-            return skill.id
+            return matched.skill_id
         return None
 
     async def _learn_skills(self, ctx: Any, plan: Plan, qg_result: dict | None) -> None:
-        """学习闭环（写侧，issue #200）：成功计划 → 自动沉淀为可复用技能。
+        """自动学习已停用（批次十）。
 
-        与 `_write_experiences` 同址调用（质检之后），门槛同样刻意设高——
-        只在质检**全 A** 时学习，避免把平庸路径固化成"技能"污染后续规划。
-        失败绝不影响用户请求。
+        旧实现把质检全 A 的计划直接写成 Redis 技能并在下一轮自动注入——没有
+        审核、来源、版本或回滚。v1 起技能只能经 ``POST /org-skills/proposals``
+        提议（pending）并由组织管理员审核；本方法保留为空操作，保证既有调用点
+        稳定且明确表达"不再自动沉淀"。
         """
-        grades = (qg_result or {}).get("grades") or {}
-        if not grades or not all(g == "A" for g, _ in grades.values()):
-            return
-        steps = [{"tool_hint": s.tool_hint, "description": s.description} for s in plan.steps]
-        learned = await self.skill_manager.learn_from_plan_success(
-            query=ctx.query or plan.goal, plan_steps=steps
-        )
-        if learned:
-            logger.info("Skill learned from successful run: %s", learned.name)
+        return
 
     async def _record_skill_outcome(self, skill_id: str | None, qg_result: dict | None) -> None:
-        """学习闭环（反馈边，issue #200 评审 B2）：回报本轮命中技能的使用结果。
+        """使用结果回报已停用（批次十）。
 
-        判据与写侧共用：质检全 A = 成功（record_success），有等级但非全 A = 失败
-        （record_failure）；grades 为空（本轮没有可评级的工具步）→ 无证据，不记录。
-        success/failure 都会刷新 last_used_at —— 被用过的技能不会再被 7 天过期误杀，
-        success_rate 也不再恒 0（命中阈值加权从此有真实数据，单模式技能用一次后近似查询可命中）。
+        v1 的运行时匹配不依赖成功率加权，也没有使用结果持久化字段；保留空操作
+        以免误以为仍在追踪成功率。命中技能只影响本轮的步骤 tool_hint。
         """
-        if not skill_id:
-            return
-        grades = (qg_result or {}).get("grades") or {}
-        if not grades:
-            return
-        if all(g == "A" for g, _ in grades.values()):
-            await self.skill_manager.record_success(skill_id)
-        else:
-            await self.skill_manager.record_failure(skill_id)
+        return
 
     async def _write_experiences(self, ctx: Any, plan: Plan, qg_result: dict | None) -> None:
         """经验回路的写入侧：把本次执行的成败转成经验落库。
