@@ -192,6 +192,9 @@ async def test_create_status_public_revoke_roundtrip(factory):
         meta = await ac.get(f"/api/v1/public/artifacts/{token}")
         assert meta.status_code == 200, meta.text
         assert meta.headers["cache-control"] == "no-store"
+        assert meta.headers["referrer-policy"] == "no-referrer"
+        assert meta.headers["x-robots-tag"] == "noindex"
+        assert meta.headers["x-content-type-options"] == "nosniff"
         data = meta.json()["data"]
         assert set(data) == _PUBLIC_KEYS, f"公开元数据字段漂移: {set(data)}"
         assert data["title"] == "报告"
@@ -319,7 +322,11 @@ async def test_owner_only_same_org_and_cross_org_are_404(factory):
         created = await _create(ac, title="机密工件", content="绝密正文")
         token = (await _share(ac, created["id"])).json()["data"]["token"]
 
-    for other in (_user(user_id=OTHER_USER), _user(org=OTHER_ORG, user_id=OTHER_USER)):
+    for other in (
+        _user(user_id=OTHER_USER),  # 同组织他人：杀 user 过滤缺失
+        _user(org=OTHER_ORG, user_id=OTHER_USER),
+        _user(org=OTHER_ORG, user_id=USER),  # 同 user id 但跨组织：杀 org 过滤缺失
+    ):
         async with _Ctx(other, factory) as ac:
             for method, path in (
                 ("post", f"/api/v1/artifacts/{created['id']}/share"),
@@ -341,7 +348,9 @@ async def test_disabled_switch_create_and_public_are_404(monkeypatch, factory):
         token = (await _share(ac, created["id"])).json()["data"]["token"]
 
         monkeypatch.setattr(settings, "ARTIFACT_PUBLIC_SHARE_ENABLED", False)
-        assert (await _share(ac, created["id"])).status_code == 404
+        disabled = await _share(ac, created["id"])
+        assert disabled.status_code == 404
+        assert "分享功能未启用" not in disabled.text, "开关状态不得泄露"
         assert (await ac.get(f"/api/v1/public/artifacts/{token}")).status_code == 404
         assert (await ac.get(f"/api/v1/public/artifacts/{token}/content")).status_code == 404
         # 撤销/状态始终可用：撤链接是安全操作，不受功能开关影响。
@@ -451,6 +460,31 @@ async def test_public_content_security_headers(factory):
         assert disposition.startswith("inline;")
         assert "filename*=UTF-8''" in disposition
         assert created["id"] not in disposition
+
+
+async def test_rate_limit_invalid_tokens_do_not_block_valid_link(monkeypatch, factory):
+    """无效 token 的 IP 桶不得占用有效链接桶（防单客户端打满全站）。"""
+    monkeypatch.setattr(settings, "ARTIFACT_PUBLIC_RATE_LIMIT_PER_MINUTE", 1)
+    async with _Ctx(_user(), factory) as ac:
+        created = await _create(ac, content="隔离正文")
+        token = (await _share(ac, created["id"])).json()["data"]["token"]
+        for _ in range(5):
+            assert (await ac.get("/api/v1/public/artifacts/not-a-real-token")).status_code == 404
+        assert (await ac.get(f"/api/v1/public/artifacts/{token}")).status_code == 200
+        assert (await ac.get(f"/api/v1/public/artifacts/{token}")).status_code == 429
+
+
+async def test_rate_limit_is_per_link_not_global(monkeypatch, factory):
+    """一个链接打满只影响自身，不能拖累其它分享链接。"""
+    monkeypatch.setattr(settings, "ARTIFACT_PUBLIC_RATE_LIMIT_PER_MINUTE", 1)
+    async with _Ctx(_user(), factory) as ac:
+        first = await _create(ac, title="A", content="A 正文")
+        second = await _create(ac, title="B", content="B 正文")
+        token_a = (await _share(ac, first["id"])).json()["data"]["token"]
+        token_b = (await _share(ac, second["id"])).json()["data"]["token"]
+        assert (await ac.get(f"/api/v1/public/artifacts/{token_a}")).status_code == 200
+        assert (await ac.get(f"/api/v1/public/artifacts/{token_a}")).status_code == 429
+        assert (await ac.get(f"/api/v1/public/artifacts/{token_b}")).status_code == 200
 
 
 async def test_rate_limit_returns_429(monkeypatch, factory):

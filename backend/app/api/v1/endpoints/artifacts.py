@@ -247,7 +247,8 @@ async def create_artifact_share(
 ):
     """创建或轮换分享链接；token 明文仅本次响应返回（旧链接立即失效）。"""
     if not settings.ARTIFACT_PUBLIC_SHARE_ENABLED:
-        raise NotFoundError("分享功能未启用")
+        # 不泄露部署开关状态：与「工件不存在」同一 404。
+        raise NotFoundError("工件不存在")
     try:
         org_id = await require_organization(current_user, db)
         share, token = await artifact_share_service.create_or_rotate_share(

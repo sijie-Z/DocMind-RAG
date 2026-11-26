@@ -35,7 +35,10 @@ router = APIRouter()
 
 _SHARE_INVALID = "分享链接不存在或已失效"
 _RATE_WINDOW_SECONDS = 60
-# 固定窗口内存桶：key -> (window_start, count)。键含 IP 与 token 摘要两维。
+# 固定窗口内存桶：key -> (window_start, count)。
+# - 有效 token：只按 token 摘要计数（不按 IP）。反向代理后所有访客共享代理 IP，
+#   按 IP 聚合会让一个客户端打满全站；按链接桶最多只影响该链接自身。
+# - 无效 token：按客户端 IP 单独计数，阈值更高；失败请求不占用有效链接桶。
 _RATE_BUCKETS: dict[str, tuple[int, int]] = {}
 _MAX_BUCKET_KEYS = 4096
 
@@ -51,22 +54,35 @@ def _client_ip(request: Request) -> str:
     return client.host if client is not None and client.host else "unknown"
 
 
-def _check_rate_limit(request: Request, token: str) -> None:
-    """每 IP / 每 token 每分钟上限；超限 429（先 IP 后 token，任一超限即拒绝）。"""
-    limit = max(1, int(settings.ARTIFACT_PUBLIC_RATE_LIMIT_PER_MINUTE))
+def _consume_bucket(key: str, limit: int) -> None:
     now = int(time.time())
     window_start = now - (now % _RATE_WINDOW_SECONDS)
-    for bucket_key in (f"ip:{_client_ip(request)}", f"token:{share_token_digest(token)}"):
-        current = _RATE_BUCKETS.get(bucket_key)
-        count = 1 if current is None or current[0] != window_start else current[1] + 1
-        _RATE_BUCKETS[bucket_key] = (window_start, count)
-        if count > limit:
-            raise RateLimitError()
-    # 有界内存：跨窗口的旧桶只在下一次请求时清理，避免无限增长。
+    current = _RATE_BUCKETS.get(key)
+    count = 1 if current is None or current[0] != window_start else current[1] + 1
+    _RATE_BUCKETS[key] = (window_start, count)
+    if count > limit:
+        raise RateLimitError()
+    # 有界内存：先清过期桶；仍超上限则淘汰任意一个旧键，保证 O(1) 有界。
     if len(_RATE_BUCKETS) > _MAX_BUCKET_KEYS:
-        for key, (start, _count) in list(_RATE_BUCKETS.items()):
+        for bucket_key, (start, _count) in list(_RATE_BUCKETS.items()):
             if start != window_start:
-                _RATE_BUCKETS.pop(key, None)
+                _RATE_BUCKETS.pop(bucket_key, None)
+        while len(_RATE_BUCKETS) > _MAX_BUCKET_KEYS:
+            _RATE_BUCKETS.pop(next(iter(_RATE_BUCKETS)))
+
+
+def _check_link_rate_limit(token: str) -> None:
+    """有效链接：按 token 摘要限流，单客户端不影响其它链接。"""
+    _consume_bucket(
+        f"token:{share_token_digest(token)}",
+        max(1, int(settings.ARTIFACT_PUBLIC_RATE_LIMIT_PER_MINUTE)),
+    )
+
+
+def _check_invalid_rate_limit(request: Request) -> None:
+    """无效 token：按 IP 用更高阈值限流，仅约束扫描，不阻断有效链接。"""
+    limit = max(1, int(settings.ARTIFACT_PUBLIC_RATE_LIMIT_PER_MINUTE))
+    _consume_bucket(f"invalid-ip:{_client_ip(request)}", max(300, limit * 5))
 
 
 def _filename_headers(filename: str) -> str:
@@ -86,11 +102,18 @@ async def get_public_artifact(
 ):
     """公开分享的工件元数据（展示字段白名单；无任何内部标识）。"""
     _require_share_enabled()
-    _check_rate_limit(request, token)
     try:
-        artifact, share = await artifact_share_service.resolve_public_share(db, token)
+        try:
+            artifact, share = await artifact_share_service.resolve_public_share(db, token)
+        except NotFoundError:
+            _check_invalid_rate_limit(request)
+            raise
+        _check_link_rate_limit(token)
         # 元数据同样绑定 token 且含过期时间：撤销后不得被缓存复用。
         response.headers["Cache-Control"] = "no-store"
+        response.headers["Referrer-Policy"] = "no-referrer"
+        response.headers["X-Robots-Tag"] = "noindex"
+        response.headers["X-Content-Type-Options"] = "nosniff"
         return {
             "success": True,
             "data": artifact_share_service.public_artifact_dict(artifact, share, token),
@@ -115,9 +138,13 @@ async def get_public_artifact_content(
     安全头逐项设置，见模块 docstring。
     """
     _require_share_enabled()
-    _check_rate_limit(request, token)
     try:
-        artifact, _share = await artifact_share_service.resolve_public_share(db, token)
+        try:
+            artifact, _share = await artifact_share_service.resolve_public_share(db, token)
+        except NotFoundError:
+            _check_invalid_rate_limit(request)
+            raise
+        _check_link_rate_limit(token)
         payload = await artifact_service.read_content(artifact)
         return StreamingResponse(
             iter([payload]),

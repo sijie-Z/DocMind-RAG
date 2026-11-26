@@ -130,6 +130,11 @@ def test_045_upgrade_is_idempotent(tmp_path, monkeypatch):
     monkeypatch.setattr(settings, "DATABASE_URL", f"sqlite+aiosqlite:///{db_path.as_posix()}")
     cfg = _cfg()
     command.upgrade(cfg, HEAD)
+    # 模拟半迁移：表已存在但 alembic 版本回退到 044；再次 upgrade 时
+    # 045 的 DDL 存在性守卫必须跳过建表（直接二次 upgrade 是 no-op，测不到守卫）。
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.execute("UPDATE alembic_version SET version_num = '044_answer_quality_eval'")
+        conn.commit()
     command.upgrade(cfg, HEAD)
     assert _revision(db_path) == {HEAD}
     assert TABLE in _tables(db_path)
