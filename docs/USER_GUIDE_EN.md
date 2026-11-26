@@ -4,8 +4,8 @@
 >
 > This guide only *references* the sources of truth:
 > - ports, credentials, and service orchestration: `backend/docker-compose.yml` and `backend/.env.docker.example`;
-> - headline numbers (32 built-in tools / 10 tools injected by default / 33 endpoint modules / 44 frontend routes / 25 SSE event types): `docs/facts.json`; existing anchors in README/architecture pages are checked on every PR by `backend/scripts/check_doc_facts.py`, and this guide mirrors them (its tool/endpoint/route/SSE anchors are now also checked);
-> - headline numbers (32 built-in tools / 10 tools injected by default / 33 endpoint modules / 44 frontend routes / 24 SSE event types): `docs/facts.json`; existing anchors in README/architecture pages are checked on every PR by `backend/scripts/check_doc_facts.py`, and this guide mirrors them (its tool/endpoint/route/SSE anchors are now also checked);
+> - headline numbers (32 built-in tools / 10 tools injected by default / 33 endpoint modules / 46 frontend routes / 25 SSE event types): `docs/facts.json`; existing anchors in README/architecture pages are checked on every PR by `backend/scripts/check_doc_facts.py`, and this guide mirrors them (its tool/endpoint/route/SSE anchors are now also checked);
+> - headline numbers (32 built-in tools / 10 tools injected by default / 33 endpoint modules / 46 frontend routes / 24 SSE event types): `docs/facts.json`; existing anchors in README/architecture pages are checked on every PR by `backend/scripts/check_doc_facts.py`, and this guide mirrors them (its tool/endpoint/route/SSE anchors are now also checked);
 > - architecture and design rationale: `README.md`, `AGENT_ARCHITECTURE.md`, `docs/decisions/`.
 >
 > 中文版：[USER_GUIDE.md](USER_GUIDE.md)
