@@ -26,6 +26,8 @@ from app.models.artifact import ARTIFACT_KINDS, ARTIFACT_STATUSES, AgentArtifact
 BACKEND_ROOT = Path(__file__).resolve().parents[2]
 HEAD = "041_agent_artifact"
 CURRENT_HEAD = "042_rubric_eval"
+LATEST_HEAD = "043_session_tree"
+FINAL_HEAD = "044_answer_quality_eval"
 PREVIOUS = "040_inbound_redline_ledger"
 TABLE = "agent_artifact"
 
@@ -67,7 +69,9 @@ def test_041_revision_chain():
     assert rev.down_revision == PREVIOUS, "041 必须接在 040 之后"
     assert len(HEAD) <= 32, "MySQL alembic_version.version_num 是 VARCHAR(32)"
     assert script.get_revision(CURRENT_HEAD).down_revision == HEAD
-    assert set(script.get_heads()) == {CURRENT_HEAD}, "042 必须是当前唯一 head"
+    assert script.get_revision(LATEST_HEAD).down_revision == CURRENT_HEAD
+    assert script.get_revision(FINAL_HEAD).down_revision == LATEST_HEAD
+    assert set(script.get_heads()) == {FINAL_HEAD}, "044 必须是当前唯一 head"
 
 
 def test_artifact_constants_are_closed_sets():

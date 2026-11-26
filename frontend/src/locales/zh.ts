@@ -555,6 +555,41 @@ export default {
       unavailable: '分享链接不存在或已失效。',
       sources: '检索来源',
     },
+    // 批次八：会话树 / 分支导航
+    sessionTree: {
+      open: '会话树',
+      title: '会话树与分支',
+      description: '点击分支原位切换；切换是只读的，不会创建新会话。',
+      loading: '正在加载会话树…',
+      loadFailed: '会话树加载失败',
+      retry: '重试',
+      empty: '当前会话还没有分支。从任意消息分叉后会出现在这里。',
+      current: '当前',
+      root: '根会话',
+      forkPoint: '切点',
+      messageCount: '{count} 条消息',
+      artifactStats: '{count} 个工件 · 最新 v{version}',
+      noArtifacts: '暂无工件',
+      noSummary: '暂无摘要',
+      generateSummary: '生成摘要',
+      summarizing: '生成中…',
+      summaryFailed: '摘要生成失败：模型不可用，未生成摘要',
+      summaryFailedGeneric: '摘要生成失败',
+      summaryEmpty: '该分支没有可摘要的消息',
+      labelPlaceholder: '按标签或标题筛选',
+      editLabel: '编辑标签',
+      labelInput: '分支标签',
+      saveLabel: '保存',
+      cancel: '取消',
+      labelFailed: '标签保存失败',
+      share: '复制只读链接',
+      shareCopied: '链接已复制',
+      shareFailed: '分享链接生成失败',
+      shareHint: '只读链接仅包含根会话的消息快照。',
+      close: '关闭',
+      filterEmpty: '没有匹配该筛选条件的分支',
+      treeTruncated: '部分父分支已不可见，仅展示可见分支。',
+    },
     roleUser: '用户',
     roleAssistant: '助手',
     sourceDoc: '文档',
@@ -2096,6 +2131,8 @@ export default {
     knowledgeEvalRuns: '评测运行历史',
     evalRubrics: '回答质量评分表',
     evalRubricRun: '评分表评测运行',
+    answerQualityRuns: '答案质量评测运行',
+    answerQualityRun: '答案质量评测运行详情',
     knowledgeDocument: '文档详情',
     workflowEditor: '工作流编辑器',
     agentMemory: 'Agent记忆'
@@ -2676,6 +2713,93 @@ export default {
       missingHint:
         '在用例中加入 gold_verdicts（评分项 key 到 yes/no/unsure 的映射）后重新运行，即可得到一致率与混淆矩阵。',
       unavailableOnFailure: '运行失败，没有可校准的判定。'
+    }
+  },
+  answerQualityEval: {
+    navEntry: '答案质量评测',
+    subtitle: '固定三维连续分评委的运行历史：faithfulness / relevancy / context precision',
+    scopeBanner:
+      '本页评的是「生成答案」的忠实度、相关性与上下文精度（LLM 评委连续分），不是检索召回（recall{\'@\'}k / MRR，见知识库的评测运行历史），也不是评分表评测（可编辑的加权 yes/no，见回答质量评分表）。三者判定对象与指标不同，运行记录互不混用。',
+    common: {
+      retry: '重试',
+      refresh: '刷新',
+      viewDetail: '查看详情',
+      loadFailed: '加载失败'
+    },
+    filters: {
+      status: '状态',
+      dateRange: '日期范围（UTC）',
+      user: '运行用户 ID',
+      userPlaceholder: '用户 ID',
+      reset: '重置筛选',
+      filteredCount: '共 {total} 次运行'
+    },
+    metrics: {
+      faithfulness: '忠实度',
+      relevancy: '相关性',
+      context_precision: '上下文精度'
+    },
+    mode: {
+      judge: '模型评委（judge）',
+      fake: '确定性回放（fake）'
+    },
+    status: {
+      completed: '已完成',
+      failed: '失败',
+      all: '全部状态'
+    },
+    list: {
+      title: '运行历史',
+      empty: '还没有答案质量评测运行',
+      emptyHint:
+        '运行通过评测 API（POST /api/v1/eval/answer-quality/runs）创建。成功与失败运行都会留档；失败运行只记录错误码、不产生分数，绝不以 0 分代替。',
+      columns: {
+        time: '时间',
+        status: '状态',
+        mode: '模式',
+        judgeModel: '评委模型',
+        promptVersion: '提示词版本',
+        cases: '用例数',
+        user: '用户',
+        actions: '操作'
+      },
+      trendTitle: '指标趋势',
+      trendHint: '按运行时间正序；失败运行计入次数但不参与均值。',
+      trendLoadFailed: '趋势数据加载失败；下方运行历史不受影响。',
+      trendRuns: '运行次数',
+      trendSucceeded: '成功运行',
+      trendFailed: '失败运行',
+      trendAverage: '平均 {metric}',
+      trendTableTime: '时间',
+      maskedNote: '运行只保存指标、有界评审理由、来源哈希与脱敏预览，不保存原始问题/答案/上下文。'
+    },
+    detail: {
+      loadFailed: '加载运行详情失败',
+      failedTitle: '本次运行失败：没有产生任何分数',
+      failedUnavailable:
+        '评委不可用（模型服务调用失败）。失败运行已保留，可回查机器码与所用模型/提示词版本；请稍后重试。',
+      errorCode: '错误码',
+      noScores: '本次运行没有任何分数（不是 0 分）。',
+      aggregateHint:
+        '三维指标为参与计分用例的算术平均。faithfulness / relevancy / context_precision 是 LLM-as-judge 的连续分，不是人工真值。',
+      casesScored: '参与计分用例',
+      metaTitle: '运行信息',
+      judgeModel: '评委模型',
+      promptVersion: '提示词版本',
+      mode: '模式',
+      caseCount: '用例数',
+      datasetHash: '用例集哈希',
+      user: '运行用户',
+      createdAt: '创建时间',
+      completedAt: '完成时间',
+      resultsTitle: '逐条结果',
+      resultsHint: '只展示脱敏预览、有界评审理由与来源哈希；原始问题、答案与上下文不落库、不回显。',
+      caseId: '用例',
+      reasons: '评审理由',
+      sources: '来源引用（脱敏）',
+      noReason: '评委未给出理由',
+      noSources: '无来源引用',
+      backToList: '返回运行历史'
     }
   },
   memory: {

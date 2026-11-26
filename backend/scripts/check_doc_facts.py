@@ -14,9 +14,9 @@ N 种 SSE 事件 / N 个路由装饰器」曾多次滞后于代码演进（例�
 三层必须一致；任一层漂移即退出码 1。脚本零依赖（仅标准库），可在
 ci-hygiene 的轻量 job 中直接运行。
 
-docs/METRICS.md：必须存在，表格每行必须有 6 列且无空项，七项 facts 必须与
+docs/METRICS.md：必须存在，表格每行必须有 6 列且无空项，八项 facts 必须与
 docs/facts.json 同值。同一文档同一指标出现多个不同数字时**仅告警**（warn，
-不改变退出码），避免旧文档一次性全红；facts 七项不一致仍判失败。
+不改变退出码），避免旧文档一次性全红；facts 八项不一致仍判失败。
 
 派生口径：
     sse_event_types          app/agent/events.py 的 EventType = Literal[...]
@@ -66,6 +66,7 @@ REPO_ROOT = BACKEND_DIR.parent
 FACT_KEYS = (
     "sse_event_types",
     "endpoint_modules",
+    "endpoint_files",
     "frontend_routes",
     "registered_tools",
     "default_tools",
@@ -84,7 +85,7 @@ REQUIRED_DOC_FACTS = frozenset(
     }
 )
 
-# 对外口径的单一事实源（issue #513）：必须存在，七项 facts 与 facts JSON 同值。
+# 对外口径的单一事实源（issue #513）：必须存在，八项 facts 与 facts JSON 同值。
 METRICS_PATH = "docs/METRICS.md"
 METRICS_COLUMN_COUNT = 6  # 指标 | 值 | 口径 | 命令 | 日期 | 备注
 
@@ -631,6 +632,7 @@ def derive_all(root: Path = REPO_ROOT) -> dict[str, int]:
         "endpoint_modules": len(
             derive_endpoint_modules(backend / "app" / "api" / "v1" / "router.py")
         ),
+        "endpoint_files": len(list((backend / "app" / "api" / "v1" / "endpoints").glob("*.py"))),
         "frontend_routes": len(
             derive_frontend_routes(root / "frontend" / "src" / "router" / "index.ts")
         ),
@@ -672,7 +674,7 @@ DOC_ANCHORS: tuple[DocAnchor, ...] = (
         "endpoint_modules", "README.md", r"注册 (\d+) 个模块", "端点模块数（目录树 router.py）"
     ),
     DocAnchor(
-        "endpoint_modules",
+        "endpoint_files",
         "README.md",
         r"端点实现（(\d+) 个文件）",
         "端点文件数（目录树 endpoints/）",
@@ -716,7 +718,7 @@ DOC_ANCHORS: tuple[DocAnchor, ...] = (
         "endpoint modules (tree)",
     ),
     DocAnchor(
-        "endpoint_modules",
+        "endpoint_files",
         "README_EN.md",
         r"Endpoint implementations \((\d+) files\)",
         "endpoint files (tree)",
@@ -998,7 +1000,7 @@ def iter_metrics_rows(text: str) -> list[tuple[int, list[str]]]:
 
 
 def check_metrics_document(root: Path, facts: dict[str, int]) -> list[str]:
-    """校验 docs/METRICS.md：存在、表格完整、七项 facts 与 facts JSON 同值。"""
+    """校验 docs/METRICS.md：存在、表格完整、八项 facts 与 facts JSON 同值。"""
     path = Path(root) / METRICS_PATH
     if not path.is_file():
         return [f"{METRICS_PATH} 缺失：指标唯一事实源必须存在"]
@@ -1034,7 +1036,7 @@ def check_metrics_document(root: Path, facts: dict[str, int]) -> list[str]:
             problems.append(f"{METRICS_PATH}:{lineno}: {key}: METRICS={value}, facts={facts[key]}")
     for key in FACT_KEYS:
         if key not in seen:
-            problems.append(f"{METRICS_PATH}: 缺少指标行 {key}（七项 facts 必须逐一登记）")
+            problems.append(f"{METRICS_PATH}: 缺少指标行 {key}（八项 facts 必须逐一登记）")
     return problems
 
 
@@ -1165,7 +1167,7 @@ def main(argv: list[str] | None = None) -> int:
     if warnings:
         print(
             "WARN: 同一文档同一指标出现多个数字（仅告警，请收敛到 "
-            f"{METRICS_PATH}；facts 七项不一致仍判失败）:",
+            f"{METRICS_PATH}；facts 八项不一致仍判失败）:",
             file=sys.stderr,
         )
         for warning in warnings:

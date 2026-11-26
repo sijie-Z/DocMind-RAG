@@ -1229,18 +1229,9 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
         field = ".".join(str(loc) for loc in error.get("loc", []))
         msg = error.get("msg", "")
         error_messages.append(f"字段 '{field}' 错误: {msg}")
-        # 确保所有值都是 JSON 可序列化的
-        safe_error = {}
-        for k, v in error.items():
-            if isinstance(v, Exception):
-                safe_error[k] = str(v)
-            elif isinstance(v, dict):
-                safe_error[k] = {
-                    kk: str(vv) if isinstance(vv, Exception) else vv for kk, vv in v.items()
-                }
-            else:
-                safe_error[k] = v
-        safe_errors.append(safe_error)
+        # 只回显定位/提示/类型：Pydantic 的 ``input``/``ctx`` 会带原始请求值，
+        # 可能把答案/上下文正文回显到客户端与代理日志（隐私边界）。
+        safe_errors.append({key: error[key] for key in ("loc", "msg", "type") if key in error})
 
     error_msg = "; ".join(error_messages)
 

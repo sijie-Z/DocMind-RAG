@@ -21,6 +21,7 @@
 import request from '@/utils/request'
 import type { AxiosResponse } from 'axios'
 import type { ApiResponse } from '@/types/common'
+import type { AgentArtifact } from '@/types/artifact'
 
 export interface SessionForkInput {
   message_id?: string
@@ -83,6 +84,103 @@ export interface SessionLineageData {
   lineage_truncated: boolean
 }
 
+// ── 批次八：会话树导航 ─────────────────────────────────────────────────────
+
+/** 树中的一个分支节点（与 backend get_session_tree 的 branch payload 对齐）。 */
+export interface SessionTreeBranch {
+  session_id: string
+  title: string | null
+  parent_session_id: string | null
+  root_session_id: string
+  fork_point_message_id: string | null
+  /** 切点消息正文前 120 字符（源消息已删除时为空）。 */
+  fork_point_preview: string | null
+  fork_reason: string | null
+  branch_label: string | null
+  branch_summary: string | null
+  summary_model: string | null
+  summarized_at: string | null
+  created_at: string
+  /** 可见子树内深度（根=0）。 */
+  depth: number
+  is_root: boolean
+  is_current: boolean
+  parent_visible: boolean
+  message_count: number
+  /** 本分支工件行数（含历史版本）。 */
+  artifact_count: number
+  /** 本分支最新工件版本号（0=暂无工件）。 */
+  artifact_latest_version: number
+  /** 本分支工件版本号之和（版本链总长）。 */
+  artifact_version_total: number
+}
+
+export interface SessionTreeData {
+  root_session_id: string
+  current_session_id: string
+  root_present: boolean
+  branch_count: number
+  branches_truncated: boolean
+  tree_truncated: boolean
+  branches: SessionTreeBranch[]
+}
+
+export interface BranchContextMessage {
+  id: string
+  seq: number
+  content: string
+  messageType: 'user' | 'assistant' | 'system'
+  createdAt: string
+  sources: unknown[]
+  feedback: number
+  feedbackNote: string | null
+}
+
+export interface BranchContextData {
+  session_id: string
+  title: string | null
+  root_session_id: string
+  parent_session_id: string | null
+  fork_point_message_id: string | null
+  fork_reason: string | null
+  branch_label: string | null
+  branch_summary: string | null
+  summary_model: string | null
+  summarized_at: string | null
+  created_at: string
+  updated_at: string | null
+  settings: Record<string, unknown> | null
+  message_count: number
+  artifact_count: number
+  artifacts_truncated: boolean
+  messages: BranchContextMessage[]
+  artifacts: AgentArtifact[]
+}
+
+export interface BranchLabelData {
+  session_id: string
+  branch_label: string | null
+  updated: boolean
+}
+
+export type BranchSummaryMode = 'fake' | 'llm'
+
+export interface BranchSummaryData {
+  session_id: string
+  generated: boolean
+  summary: string | null
+  summary_model: string | null
+  summarized_at: string | null
+  message_count: number
+}
+
+export interface SessionTreeShareData {
+  root_session_id: string
+  token: string
+  url: string
+  createdAt: string
+}
+
 export const sessionsApi = {
   /** 从边界消息分叉；省略 message_id = 从最后一条已结算消息分叉。 */
   fork(
@@ -97,6 +195,55 @@ export const sessionsApi = {
   /** 会话谱系：祖先链 + 直接子级（父会话删除后仍可查）。 */
   lineage(sessionId: string): Promise<AxiosResponse<ApiResponse<SessionLineageData>>> {
     return request.get(`/sessions/${sessionId}/lineage`, {
+      headers: { 'X-Silent-Error': '1' },
+    })
+  },
+
+  /** 批次八：会话树（根 + 可见分支、切点、标签/摘要、按分支工件统计）。只读。 */
+  tree(sessionId: string): Promise<AxiosResponse<ApiResponse<SessionTreeData>>> {
+    return request.get(`/sessions/${sessionId}/tree`, {
+      headers: { 'X-Silent-Error': '1' },
+    })
+  },
+
+  /** 选中分支的消息 + 摘要 + 工件上下文；原位切换，不创建会话。 */
+  branchContext(
+    sessionId: string,
+  ): Promise<AxiosResponse<ApiResponse<BranchContextData>>> {
+    return request.get(`/sessions/${sessionId}/branch-context`, {
+      headers: { 'X-Silent-Error': '1' },
+    })
+  },
+
+  /** 设置/清除分支标签（null/空白清除）。 */
+  setBranchLabel(
+    sessionId: string,
+    branchLabel: string | null,
+  ): Promise<AxiosResponse<ApiResponse<BranchLabelData>>> {
+    return request.put(
+      `/sessions/${sessionId}/branch-label`,
+      { branch_label: branchLabel },
+      { headers: { 'X-Silent-Error': '1' } },
+    )
+  },
+
+  /** 生成分支摘要；llm 不可用时后端 503 SUMMARY_MODEL_UNAVAILABLE。 */
+  summarize(
+    sessionId: string,
+    mode: BranchSummaryMode = 'llm',
+  ): Promise<AxiosResponse<ApiResponse<BranchSummaryData>>> {
+    return request.post(
+      `/sessions/${sessionId}/summary`,
+      { mode },
+      { headers: { 'X-Silent-Error': '1' } },
+    )
+  },
+
+  /** 复制只读分享链接（复用既有分享 token；每次调用轮换）。 */
+  shareTree(
+    rootSessionId: string,
+  ): Promise<AxiosResponse<ApiResponse<SessionTreeShareData>>> {
+    return request.post(`/sessions/tree/${rootSessionId}/share`, null, {
       headers: { 'X-Silent-Error': '1' },
     })
   },

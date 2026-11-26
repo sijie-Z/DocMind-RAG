@@ -377,7 +377,7 @@ def test_migration_030_extends_029_head():
     rev = script.get_revision("030_cost_attribution")
     assert rev is not None
     assert rev.down_revision == "029_chat_session_share_token"
-    assert get_alembic_heads() == {"042_rubric_eval"}
+    assert get_alembic_heads() == {"044_answer_quality_eval"}
     assert script.get_revision("039_review_template").down_revision == "038_eval_case_dedup"
 
     columns = {c.name for c in TokenUsageRecord.__table__.columns}

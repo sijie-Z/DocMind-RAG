@@ -19,6 +19,7 @@ from fastapi import APIRouter
 
 from app.api.v1.endpoints import (
     agent,
+    answer_quality_eval,
     api_keys,
     artifacts,
     auth,
@@ -76,6 +77,15 @@ ROUTER_SPECS: dict[str, tuple[APIRouter, str, list[str], str]] = {
     # 用户可编辑的加权 yes/no 评分表，与 /knowledge/eval/*（检索 recall@k）
     # 是两套判定对象，刻意独立成模块、独立前缀。
     "eval_rubrics": (eval_rubrics.router, "/eval", ["Rubric 评测"], "rag"),
+    # 答案质量评测历史（批次八）：复用 app.rag.evaluator 的固定维度连续分
+    # 评委，把运行快照固化为可比较的历史；与 /eval/rubrics（用户可编辑
+    # yes/no 评分表）和 /knowledge/eval（检索 recall@k）是三套判定对象。
+    "answer_quality_eval": (
+        answer_quality_eval.router,
+        "/eval/answer-quality",
+        ["答案质量评测"],
+        "rag",
+    ),
     "organizations": (organizations.router, "/organizations", ["组织管理"], "core"),
     "organization_settings": (
         organization_settings.router,

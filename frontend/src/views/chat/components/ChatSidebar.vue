@@ -56,6 +56,20 @@
       </n-input>
     </div>
 
+    <!-- 批次八：会话树 / 分支导航入口（无当前会话时禁用） -->
+    <div class="px-3 pt-2">
+      <button
+        type="button"
+        class="flex w-full items-center justify-center gap-1.5 rounded-lg border border-gray-200 px-2 py-1.5 text-xs text-gray-700 transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-700 dark:text-gray-200 dark:hover:bg-gray-800"
+        :disabled="!hasCurrentConversation"
+        data-testid="chat-open-session-tree"
+        @click="$emit('openSessionTree')"
+      >
+        <n-icon size="14"><GitBranchOutline /></n-icon>
+        {{ t('chat.sessionTree.open') }}
+      </button>
+    </div>
+
     <!-- Conversation list -->
     <div class="flex-1 overflow-y-auto p-3 space-y-2 scrollbar-thin">
       <!-- Loading skeleton -->
@@ -151,7 +165,7 @@ import { format } from 'date-fns'
 import { parseApiDate } from '@/utils/format'
 import { useAppVersion } from '@/composables/useAppVersion'
 import {
-  AddOutline, RefreshOutline, ChatboxOutline, ChatboxEllipsesOutline, TrashOutline, CloseOutline, SearchOutline
+  AddOutline, RefreshOutline, ChatboxOutline, ChatboxEllipsesOutline, TrashOutline, CloseOutline, SearchOutline, GitBranchOutline
 } from '@vicons/ionicons5'
 
 const { t } = useI18n()
@@ -167,6 +181,8 @@ const props = defineProps<{
   convLoadError: boolean
   currentConversationId: string | number | undefined
   conversationSearch?: string
+  /** 批次八：是否有当前会话（决定「会话树」入口是否可用） */
+  hasCurrentConversation?: boolean
   /** 关闭（或移动端抽屉未打开）时整体移出 tab 序与可访问性树 */
   inert?: boolean
 }>()
@@ -180,6 +196,7 @@ const emit = defineEmits<{
   close: []
   searchChange: [value: string]
   searchClear: []
+  openSessionTree: []
 }>()
 
 const onSearchInput = (value: string) => emit('searchChange', value)

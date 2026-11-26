@@ -549,6 +549,40 @@ export default {
       unavailable: 'This share link does not exist or has expired.',
       sources: 'Sources',
     },
+    sessionTree: {
+      open: 'Session tree',
+      title: 'Session tree & branches',
+      description: 'Click a branch to switch in place; switching is read-only and never creates a session.',
+      loading: 'Loading session tree…',
+      loadFailed: 'Failed to load the session tree',
+      retry: 'Retry',
+      empty: 'No branches yet. Forks of this conversation will appear here.',
+      current: 'Current',
+      root: 'Root',
+      forkPoint: 'Fork point',
+      messageCount: '{count} messages',
+      artifactStats: '{count} artifacts · latest v{version}',
+      noArtifacts: 'No artifacts',
+      noSummary: 'No summary',
+      generateSummary: 'Generate summary',
+      summarizing: 'Generating…',
+      summaryFailed: 'Summary failed: model unavailable, nothing was generated',
+      summaryFailedGeneric: 'Summary generation failed',
+      summaryEmpty: 'This branch has no messages to summarize',
+      labelPlaceholder: 'Filter by label or title',
+      editLabel: 'Edit label',
+      labelInput: 'Branch label',
+      saveLabel: 'Save',
+      cancel: 'Cancel',
+      labelFailed: 'Failed to save label',
+      share: 'Copy read-only link',
+      shareCopied: 'Link copied',
+      shareFailed: 'Failed to create share link',
+      shareHint: 'The read-only link contains the root conversation snapshot only.',
+      close: 'Close',
+      filterEmpty: 'No branches match this filter',
+      treeTruncated: 'Some parent branches are no longer visible; only visible branches are shown.',
+    },
     roleUser: 'User',
     roleAssistant: 'Assistant',
     sourceDoc: 'Document',
@@ -2088,6 +2122,8 @@ export default {
     knowledgeEvalRuns: 'Eval run history',
     evalRubrics: 'Answer rubrics',
     evalRubricRun: 'Rubric evaluation run',
+    answerQualityRuns: 'Answer quality eval runs',
+    answerQualityRun: 'Answer quality eval run details',
     knowledgeDocument: 'Document Details',
     workflowEditor: 'Workflow Editor',
     agentMemory: 'Agent Memory'
@@ -2680,6 +2716,95 @@ export default {
       missingHint:
         'Add gold_verdicts (item key to yes/no/unsure) to cases and rerun to get agreement and a confusion matrix.',
       unavailableOnFailure: 'The run failed, so there are no verdicts to calibrate.'
+    }
+  },
+  answerQualityEval: {
+    navEntry: 'Answer quality eval',
+    subtitle: 'Run history for the fixed three-metric LLM judge: faithfulness / relevancy / context precision',
+    scopeBanner:
+      "This page evaluates the generated answer (faithfulness, relevancy and context precision from an LLM judge). It is not retrieval recall (recall{'@'}k / MRR, see Eval run history under Knowledge), and not rubric evaluation (editable weighted yes/no, see Answer rubrics). The objects and metrics differ, so run records are never shared.",
+    common: {
+      retry: 'Retry',
+      refresh: 'Refresh',
+      viewDetail: 'View details',
+      loadFailed: 'Failed to load'
+    },
+    filters: {
+      status: 'Status',
+      dateRange: 'Date range (UTC)',
+      user: 'Run user ID',
+      userPlaceholder: 'User ID',
+      reset: 'Reset filters',
+      filteredCount: '{total} runs'
+    },
+    metrics: {
+      faithfulness: 'Faithfulness',
+      relevancy: 'Relevancy',
+      context_precision: 'Context precision'
+    },
+    mode: {
+      judge: 'LLM judge (judge)',
+      fake: 'Deterministic replay (fake)'
+    },
+    status: {
+      completed: 'Completed',
+      failed: 'Failed',
+      all: 'All statuses'
+    },
+    list: {
+      title: 'Run history',
+      empty: 'No answer quality runs yet',
+      emptyHint:
+        'Runs are created through the eval API (POST /api/v1/eval/answer-quality/runs). Completed and failed runs are both kept; a failed run records only the error code and produces no scores — never a zero.',
+      columns: {
+        time: 'Time',
+        status: 'Status',
+        mode: 'Mode',
+        judgeModel: 'Judge model',
+        promptVersion: 'Prompt version',
+        cases: 'Cases',
+        user: 'User',
+        actions: 'Actions'
+      },
+      trendTitle: 'Metric trend',
+      trendHint: 'Chronological by run time; failed runs count toward totals but never pollute averages.',
+      trendLoadFailed: 'Failed to load trend data; the run history below is unaffected.',
+      trendRuns: 'Runs',
+      trendSucceeded: 'Succeeded',
+      trendFailed: 'Failed',
+      trendAverage: 'Average {metric}',
+      trendTableTime: 'Time',
+      maskedNote:
+        'Runs store only metrics, bounded judge reasons, source hashes and masked previews; raw question/answer/context are never saved.'
+    },
+    detail: {
+      loadFailed: 'Failed to load run details',
+      failedTitle: 'This run failed: no scores were produced',
+      failedUnavailable:
+        'The judge was unavailable (model service call failed). The failed run is kept for traceability, including the machine code and the model/prompt version used; please retry later.',
+      errorCode: 'Error code',
+      noScores: 'No scores were recorded for this run (not zero).',
+      aggregateHint:
+        'Each metric is the arithmetic mean over scored cases. faithfulness / relevancy / context_precision are LLM-as-judge continuous scores, not human ground truth.',
+      casesScored: 'Scored cases',
+      metaTitle: 'Run information',
+      judgeModel: 'Judge model',
+      promptVersion: 'Prompt version',
+      mode: 'Mode',
+      caseCount: 'Cases',
+      datasetHash: 'Dataset hash',
+      user: 'Run user',
+      createdAt: 'Created at',
+      completedAt: 'Completed at',
+      resultsTitle: 'Per-case results',
+      resultsHint:
+        'Only masked previews, bounded judge reasons and source hashes are shown; raw question, answer and context are never persisted or returned.',
+      caseId: 'Case',
+      reasons: 'Judge reasons',
+      sources: 'Source refs (masked)',
+      noReason: 'No reason provided',
+      noSources: 'No source refs',
+      backToList: 'Back to run history'
     }
   },
   memory: {

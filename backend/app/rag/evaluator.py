@@ -5,6 +5,7 @@ Uses LLM-as-judge for scoring. Each metric returns a float in [0, 1].
 
 import json
 import logging
+import math
 import re
 from dataclasses import dataclass, field
 from typing import Any
@@ -12,9 +13,15 @@ from typing import Any
 from openai import AsyncOpenAI
 
 from app.rag.context_compressor import get_prompt_text
-from app.rag.errors import EvalJudgeUnavailableError
+from app.rag.errors import EvalJudgeContractError, EvalJudgeUnavailableError
 
 logger = logging.getLogger(__name__)
+
+PROMPT_VERSION = "rag-eval-v1"
+"""评委提示词/评分口径版本；修改下方任一 PROMPT 或解析规则时必须同步提升。
+
+持久化的答案质量运行会存这个版本号，用于解释「两次分数为何不可直接比较」。
+"""
 
 # Judge prompts are capped so a single oversized retrieval batch cannot blow up
 # prompt cost / latency. Characters, not tokens — no tokenizer dependency here.
@@ -68,17 +75,42 @@ class BatchEvalResult:
     failures: list[dict[str, Any]] = field(default_factory=list)
 
 
-def _extract_score(text: str) -> float:
-    """Extract a 0-1 float score from LLM response text."""
+def _coerce_score(value: object) -> float | None:
+    """把 JSON 分数值归一为 0..1；bool/None/NaN/Infinity/非数字一律 None。
+
+    布尔值在 Python 里是 int 的子类，``true`` 会被 ``float()`` 变成 1.0，
+    这正是「伪造满分」的来源，必须显式排除。
+    """
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    number = float(value)
+    if not math.isfinite(number):
+        return None
+    return max(0.0, min(1.0, number))
+
+
+def _extract_score(text: str) -> float | None:
+    """Extract a 0-1 float score from LLM response text.
+
+    无法解析出分数时返回 ``None``（而非 0.0）——调用方必须把「没有分数」
+    与「评了 0 分」区分开，否则测量失败会被持久化成真实低质量。
+    """
     # Try JSON first
     try:
         data = json.loads(text)
-        if isinstance(data, dict):
-            for key in ("score", "faithfulness", "relevancy", "precision"):
-                if key in data:
-                    return max(0.0, min(1.0, float(data[key])))
-    except (json.JSONDecodeError, ValueError):
-        pass
+    except (json.JSONDecodeError, TypeError, ValueError):
+        data = None
+
+    if isinstance(data, dict):
+        for key in ("score", "faithfulness", "relevancy", "precision"):
+            if key in data:
+                return _coerce_score(data[key])
+        # JSON 对象但没有可识别分数键：不回落正则，避免从 reason 里的数字
+        # 臆造一个分数。
+        return None
+    if isinstance(data, list):
+        # 数组不是评分契约；同样不回落正则。
+        return None
 
     # Try regex — order matters: specific patterns first, generic last
     # "8/10" style
@@ -100,7 +132,7 @@ def _extract_score(text: str) -> float:
     m = re.search(r"(\d\.\d+)", text)
     if m:
         return max(0.0, min(1.0, float(m.group(1))))
-    return 0.0
+    return None
 
 
 FAITHFULNESS_PROMPT = """你是一个 RAG 系统质量评估专家。请评估以下回答是否忠实于提供的参考文档。
@@ -183,12 +215,18 @@ class RAGEvaluator:
                 timeout=30,
             )
             text = response.choices[0].message.content or ""
-            return _extract_score(text), text
         except Exception as e:
             logger.warning(f"RAG eval LLM call failed: {e}")
             raise EvalJudgeUnavailableError(
                 f"RAG eval judge call failed: {type(e).__name__}"
             ) from e
+
+        score = _extract_score(text)
+        if score is None:
+            # 调用成功但输出无法解析（拒答/空内容/超长截断）——这是契约违规，
+            # 不是 0 分；上抛让调用方落成失败运行/5xx。
+            raise EvalJudgeContractError("RAG eval judge output has no parseable score")
+        return score, text
 
     async def evaluate_faithfulness(
         self, question: str, answer: str, context: list[dict[str, Any]]
@@ -247,6 +285,7 @@ class RAGEvaluator:
         """
         results: list[EvalResult] = []
         failures: list[dict[str, Any]] = []
+        contract_failures = 0
         for index, item in enumerate(items):
             try:
                 r = await self.evaluate(
@@ -254,6 +293,11 @@ class RAGEvaluator:
                     answer=item["answer"],
                     context=item.get("context", []),
                 )
+            except EvalJudgeContractError as e:
+                contract_failures += 1
+                logger.warning(f"RAG batch eval item {index} skipped (judge contract): {e}")
+                failures.append({"index": index, "error": "judge_contract"})
+                continue
             except EvalJudgeUnavailableError as e:
                 logger.warning(f"RAG batch eval item {index} skipped (judge unavailable): {e}")
                 failures.append({"index": index, "error": "judge_unavailable"})
@@ -261,6 +305,10 @@ class RAGEvaluator:
             results.append(r)
 
         if not results:
+            if contract_failures:
+                raise EvalJudgeContractError(
+                    "批量评估全部条目的评委输出均不符合评分契约，评价结果不可知"
+                )
             raise EvalJudgeUnavailableError("批量评估全部条目的评委调用均不可用，评价结果不可知")
 
         n = max(1, len(results))

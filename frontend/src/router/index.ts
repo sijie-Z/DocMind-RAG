@@ -248,6 +248,28 @@ export const routes: RouteRecordRaw[] = [
         }
       },
       {
+        // 答案质量评测：固定三维连续分评委的运行历史（列表 → 详情）。
+        // 与 rubric 评测/检索评测刻意分离，菜单面无独立项 → 高亮归属合同核验。
+        path: 'eval/answer-quality/runs',
+        name: 'AnswerQualityRuns',
+        component: () => import('@/views/eval/answerQualityRuns.vue'),
+        meta: {
+          title: 'router.answerQualityRuns',
+          activeMenu: 'Reviews',
+          icon: 'bar-chart'
+        }
+      },
+      {
+        path: 'eval/answer-quality/runs/:id',
+        name: 'AnswerQualityRunDetail',
+        component: () => import('@/views/eval/answerQualityRunDetail.vue'),
+        meta: {
+          title: 'router.answerQualityRun',
+          activeMenu: 'Reviews',
+          icon: 'bar-chart'
+        }
+      },
+      {
         path: 'reviews/:id',
         name: 'ReviewDetail',
         component: () => import('@/views/reviews/detail.vue'),

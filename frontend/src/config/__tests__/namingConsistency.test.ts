@@ -133,6 +133,9 @@ const HIDDEN_PAGES: Record<string, string> = {
   EvalRubrics: 'Reviews',
   EvalRubricDetail: 'Reviews',
   EvalRubricRunDetail: 'Reviews',
+  // 答案质量评测从核验页入口进入，菜单面无独立项 → 高亮归属合同核验。
+  AnswerQualityRuns: 'Reviews',
+  AnswerQualityRunDetail: 'Reviews',
   WorkflowEditor: 'Workflow',
   AgentMemory: 'Workflow',
   Notifications: 'Notifications',
@@ -151,6 +154,9 @@ const BREADCRUMB_PAGES: Record<string, string> = {
   Notifications: '../../views/notifications/index.vue',
   SystemHelp: '../../views/systemHelp/index.vue',
   SystemAbout: '../../views/systemAbout/index.vue',
+  // 答案质量评测两页：面包屑/返回出口与页头同源（router.answerQualityRuns / router.answerQualityRun）。
+  AnswerQualityRuns: '../../views/eval/answerQualityRuns.vue',
+  AnswerQualityRunDetail: '../../views/eval/answerQualityRunDetail.vue',
 }
 
 /** 深页页头注册表（T9）：h1 必须引用路由 meta.title 键（顶栏/面包屑/h1 同源） */
@@ -165,6 +171,9 @@ const DEEP_PAGE_HEADINGS: Record<string, string> = {
   EvalRubrics: '../../views/eval/rubricLibrary.vue',
   EvalRubricDetail: '../../views/eval/rubricDetail.vue',
   EvalRubricRunDetail: '../../views/eval/rubricRunDetail.vue',
+  // 答案质量评测两页：h1 与顶栏/面包屑同源（router.answerQualityRuns / router.answerQualityRun）。
+  AnswerQualityRuns: '../../views/eval/answerQualityRuns.vue',
+  AnswerQualityRunDetail: '../../views/eval/answerQualityRunDetail.vue',
 }
 
 /** 从视图源码提取页面主标题（首个 h1/h2）里的第一个 t('…') 键 */

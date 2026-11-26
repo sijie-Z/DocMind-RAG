@@ -62,6 +62,15 @@
           >
             {{ t('rubricEval.library.navEntry') }}
           </n-button>
+          <n-button
+            secondary
+            round
+            class="template-lib-btn"
+            data-testid="reviews-answer-quality-open"
+            @click="router.push('/eval/answer-quality/runs')"
+          >
+            {{ t('answerQualityEval.navEntry') }}
+          </n-button>
           <n-button type="primary" round class="create-case-btn" data-testid="create-case-open" @click="createVisible = true">
             {{ t('reviews.createCase') }}
           </n-button>

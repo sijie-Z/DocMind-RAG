@@ -217,8 +217,8 @@ def test_architecture_numbers_match_code():
             "32 个内置工具",
             "默认注入 10 个工具",
             "基础工具（11 个）",
-            "32 API 模块",
-            "32 个路由模块",
+            "33 API 模块",
+            "33 个路由模块",
         ],
     )
     # 静态注册数 = 非隐藏 @register_tool 数（issue #509：hidden=True 的合并旧名
@@ -296,13 +296,13 @@ def test_readme_module_counts_match_code():
         "route_names": len(route_names),
     }
     assert counts == {
-        "endpoints": 31,
-        "routers": 32,
-        "services": 44,
-        "models": 25,
+        "endpoints": 32,
+        "routers": 33,
+        "services": 46,
+        "models": 26,
         "views": 26,
-        "route_records": 44,
-        "route_names": 39,
+        "route_records": 46,
+        "route_names": 41,
     }, f"代码侧计数已漂移: {counts}；请同步 README 与本测试"
 
     def _api_table_data_rows(rel: str, start: str) -> int:
@@ -385,15 +385,15 @@ def test_readme_module_counts_match_code():
     _assert_present(
         "README.md",
         [
-            "32 个端点模块",
-            "注册 32 个模块",
+            "33 个端点模块",
+            "注册 33 个模块",
             "32 个文件",
-            "43 个服务",
-            "24 个模型文件",
-            "26 个页面模块，44 条路由记录 / 39 条具名路由",
-            "44 条路由记录（39 条具名路由",
-            "26 个页面模块，44 条路由记录 / 39 条具名路由",
-            "44 条路由记录（39 条具名路由",
+            "46 个服务",
+            "26 个模型文件",
+            "26 个页面模块，46 条路由记录 / 41 条具名路由",
+            "46 条路由记录（41 条具名路由",
+            "26 个页面模块，46 条路由记录 / 41 条具名路由",
+            "46 条路由记录（41 条具名路由",
         ],
     )
     _assert_absent(
@@ -462,15 +462,15 @@ def test_readme_module_counts_match_code():
     _assert_present(
         "README_EN.md",
         [
-            "32 endpoint modules",
-            "32 modules registered",
+            "33 endpoint modules",
+            "33 modules registered",
             "32 files",
-            "43 services",
-            "24 model files",
-            "26 page modules, 44 route records / 39 named routes",
-            "44 route records (39 named routes",
-            "26 page modules, 44 route records / 39 named routes",
-            "44 route records (39 named routes",
+            "46 services",
+            "26 model files",
+            "26 page modules, 46 route records / 41 named routes",
+            "46 route records (41 named routes",
+            "26 page modules, 46 route records / 41 named routes",
+            "46 route records (41 named routes",
         ],
     )
 
