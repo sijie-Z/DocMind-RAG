@@ -17,7 +17,7 @@ export default {
       backend: 'FastAPI + SQLAlchemy (async) + MySQL 8 + Redis + Elasticsearch 8 + Kafka + MinIO',
       frontend: 'Vue 3 + TypeScript + Vite + Naive UI + Pinia',
       aiEngine: 'API DeepSeek + Embedding compatible OpenAI + LangChain',
-      agentSystem: 'Boucle PER en trois phases (Plan → Execute → Reflect) + registre d\'outils + moteur de contexte + apprentissage de compétences',
+      agentSystem: "Boucle PER en trois phases (Plan → Execute → Reflect) + registre d'outils + moteur de contexte + bibliothèque de compétences d'organisation (validée)",
       security: 'JWT + RBAC + isolation multi-tenant au niveau des organisations',
     },
     highlights: {

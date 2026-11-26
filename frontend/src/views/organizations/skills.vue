@@ -71,16 +71,16 @@
                   :data-testid="`org-skill-pending-payload-${item.skill.id}-${item.version.version_no}`"
                 >
                   <n-tag
-                    v-for="phrase in item.version.payload?.trigger_phrases || []"
-                    :key="`p-${phrase}`"
+                    v-for="(phrase, idx) in item.version.payload?.trigger_phrases || []"
+                    :key="`p-${idx}-${phrase}`"
                     size="small"
                     :bordered="false"
                   >
                     {{ phrase }}
                   </n-tag>
                   <n-tag
-                    v-for="step in item.version.payload?.tool_sequence || []"
-                    :key="`s-${step.tool_name}`"
+                    v-for="(step, idx) in item.version.payload?.tool_sequence || []"
+                    :key="`s-${idx}-${step.tool_name}`"
                     type="info"
                     size="small"
                     :bordered="false"
@@ -271,8 +271,8 @@
                     >
                       <span class="text-[11px] text-slate-400 dark:text-slate-500">{{ t('orgSkills.detail.triggerPhrases') }}:</span>
                       <n-tag
-                        v-for="phrase in version.payload?.trigger_phrases || []"
-                        :key="`vp-${phrase}`"
+                        v-for="(phrase, idx) in version.payload?.trigger_phrases || []"
+                        :key="`vp-${idx}-${phrase}`"
                         size="small"
                         :bordered="false"
                       >
@@ -280,8 +280,8 @@
                       </n-tag>
                       <span class="ml-2 text-[11px] text-slate-400 dark:text-slate-500">{{ t('orgSkills.detail.toolSequence') }}:</span>
                       <n-tag
-                        v-for="step in version.payload?.tool_sequence || []"
-                        :key="`vs-${step.tool_name}`"
+                        v-for="(step, idx) in version.payload?.tool_sequence || []"
+                        :key="`vs-${idx}-${step.tool_name}`"
                         type="info"
                         size="small"
                         :bordered="false"
@@ -505,12 +505,26 @@ async function load(): Promise<void> {
 async function loadPendingQueue(): Promise<void> {
   pendingLoading.value = true
   try {
-    const list = apiUnwrap<OrgSkillListData>(
-      await orgSkillsApi.list({ status: 'active', page: 1, page_size: 100 }),
-    )
-    pendingRows.value = (list?.items || []).flatMap((row) =>
-      (row.pending_versions || []).map((version) => ({ skill: row, version })),
-    )
+    const collected: Array<{ skill: OrgSkillSummary; version: OrgSkillVersion }> = []
+    let pageNo = 1
+    let seen = 0
+    // 分页扫描全部 active 技能（后端单页上限 100）；不再按技能详情 N+1。
+    for (;;) {
+      const list = apiUnwrap<OrgSkillListData>(
+        await orgSkillsApi.list({ status: 'active', page: pageNo, page_size: 100 }),
+      )
+      const items = list?.items || []
+      collected.push(
+        ...items.flatMap((row) =>
+          (row.pending_versions || []).map((version) => ({ skill: row, version })),
+        ),
+      )
+      seen += items.length
+      const total = list?.total || 0
+      if (items.length === 0 || seen >= total || pageNo >= 100) break
+      pageNo += 1
+    }
+    pendingRows.value = collected
   } catch {
     // 待审队列是辅助视图：失败不覆盖主列表错误态。
     pendingRows.value = []

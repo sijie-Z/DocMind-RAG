@@ -346,7 +346,19 @@ async def _get_version(
         OrgSkillVersion.organization_id == organization_id,
         OrgSkillVersion.version_no == version_no,
     )
-    version = (await session.execute(stmt)).scalar_one_or_none()
+    try:
+        version = (await session.execute(stmt)).scalar_one_or_none()
+    except (TypeError, ValueError) as exc:
+        # 损坏 payload_json 在任意读取路径都收敛为可解释冲突（review/enable/
+        # rollback/diff 都经过这里），绝不升级成 500。
+        logger.warning(
+            "Org skill version payload deserialization failed (skill=%s v%s)",
+            skill_id,
+            version_no,
+        )
+        raise ConflictError(
+            "技能版本数据损坏，请联系管理员", error_code="ORG_SKILL_VERSION_CORRUPT"
+        ) from exc
     if version is None:
         raise NotFoundError(
             "技能版本不存在", resource="org_skill_version", resource_id=f"{skill_id}:{version_no}"
@@ -414,22 +426,27 @@ async def list_skills(
             )
         ).all()
         pending_counts = {skill_id: count for skill_id, count in count_rows}
-        # 待审队列一次取回（避免前端按技能详情 N+1，也不受 100 条扫描上限影响）。
-        pending_rows = (
-            (
-                await session.execute(
-                    select(OrgSkillVersion)
-                    .where(
-                        OrgSkillVersion.organization_id == organization_id,
-                        OrgSkillVersion.skill_id.in_(skill_ids),
-                        OrgSkillVersion.review_status == REVIEW_PENDING,
+        # 待审队列一次取回（当前页技能，避免前端按技能详情 N+1）。
+        try:
+            pending_rows = (
+                (
+                    await session.execute(
+                        select(OrgSkillVersion)
+                        .where(
+                            OrgSkillVersion.organization_id == organization_id,
+                            OrgSkillVersion.skill_id.in_(skill_ids),
+                            OrgSkillVersion.review_status == REVIEW_PENDING,
+                        )
+                        .order_by(OrgSkillVersion.version_no.desc())
                     )
-                    .order_by(OrgSkillVersion.version_no.desc())
                 )
+                .scalars()
+                .all()
             )
-            .scalars()
-            .all()
-        )
+        except (TypeError, ValueError) as exc:
+            # 损坏 payload_json 只影响待审摘要；主列表仍可读。
+            logger.warning("Org skill pending list payload deserialization failed: %s", exc)
+            pending_rows = []
         for version in pending_rows:
             pending_versions.setdefault(version.skill_id, []).append(version_to_dict(version))
     data = []
@@ -445,20 +462,28 @@ async def get_skill_detail(
     session: AsyncSession, *, organization_id: int, skill_id: str
 ) -> dict[str, Any]:
     skill = await _get_skill(session, organization_id=organization_id, skill_id=skill_id)
-    versions = (
-        (
-            await session.execute(
-                select(OrgSkillVersion)
-                .where(
-                    OrgSkillVersion.skill_id == skill.id,
-                    OrgSkillVersion.organization_id == organization_id,
+    try:
+        versions = (
+            (
+                await session.execute(
+                    select(OrgSkillVersion)
+                    .where(
+                        OrgSkillVersion.skill_id == skill.id,
+                        OrgSkillVersion.organization_id == organization_id,
+                    )
+                    .order_by(OrgSkillVersion.version_no.desc())
                 )
-                .order_by(OrgSkillVersion.version_no.desc())
             )
+            .scalars()
+            .all()
         )
-        .scalars()
-        .all()
-    )
+    except (TypeError, ValueError) as exc:
+        # 半写/截断的 payload_json 在 SELECT 反序列化时失败：如实返回冲突，
+        # 不把整页详情炸成 500。
+        logger.warning("Org skill detail payload deserialization failed (skill=%s)", skill.id)
+        raise ConflictError(
+            "技能版本数据损坏，请联系管理员", error_code="ORG_SKILL_VERSION_CORRUPT"
+        ) from exc
     item = skill_to_dict(skill)
     item["versions"] = [version_to_dict(row) for row in versions]
     return item
@@ -472,12 +497,22 @@ async def get_version_detail(
     version_no: int,
 ) -> dict[str, Any]:
     await _get_skill(session, organization_id=organization_id, skill_id=skill_id)
-    version = await _get_version(
-        session,
-        organization_id=organization_id,
-        skill_id=skill_id,
-        version_no=version_no,
-    )
+    try:
+        version = await _get_version(
+            session,
+            organization_id=organization_id,
+            skill_id=skill_id,
+            version_no=version_no,
+        )
+    except (TypeError, ValueError) as exc:
+        logger.warning(
+            "Org skill version payload deserialization failed (skill=%s v%s)",
+            skill_id,
+            version_no,
+        )
+        raise ConflictError(
+            "技能版本数据损坏，请联系管理员", error_code="ORG_SKILL_VERSION_CORRUPT"
+        ) from exc
     return version_to_dict(version)
 
 
@@ -544,7 +579,10 @@ async def diff_skill_versions(
     return diff_versions(base, target)
 
 
-def _derive_payload_from_task(task: AgentTask, snapshot: Any | None = None) -> dict[str, Any]:
+_UNSET = object()
+
+
+def _derive_payload_from_task(task: AgentTask, snapshot: Any = _UNSET) -> dict[str, Any]:
     """从完成任务的执行快照派生结构化 payload（失败即拒绝，不猜测）。
 
     生产 ``agent_tasks.context_snapshot`` 存的是 checkpoint **v1 信封**
@@ -552,8 +590,10 @@ def _derive_payload_from_task(task: AgentTask, snapshot: Any | None = None) -> d
     不是顶层 ``steps``。这里先走 ``checkpoint.parse_snapshot``；同时兼容
     历史上的顶层 ``steps`` 形状（旧测试/带外写入），两种都拿不到才拒绝。
     """
-    raw = task.context_snapshot if snapshot is None else snapshot
+    raw = task.context_snapshot if snapshot is _UNSET else snapshot
     if not isinstance(raw, dict):
+        # 显式传入 None（列为 NULL / 行不存在）必须干净拒绝：绝不回退访问
+        # deferred 属性（AsyncSession 同步访问会抛 MissingGreenlet → 端点 500）。
         raise SkillPayloadError("来源任务缺少可用的执行快照", field="source_task_id")
     steps: Any = None
     envelope = checkpoint.parse_snapshot(raw)

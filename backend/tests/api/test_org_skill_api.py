@@ -229,6 +229,18 @@ async def test_full_flow_propose_review_enable_disable_rollback_archive(factory)
         assert diff_data["trigger_phrases"]["added"] == ["分析现金流"]
         assert diff_data["tool_sequence"]["added"] == ["web_search"]
 
+        # 列表内联 pending_versions（含 payload）：前端待审队列无需 N+1 详情请求。
+        listed_pending = await ac.get("/api/v1/org-skills")
+        row = next(
+            item for item in listed_pending.json()["data"]["items"] if item["id"] == skill_id
+        )
+        assert row["pending_count"] == 2
+        pending_payloads = [version["payload"] for version in row["pending_versions"]]
+        assert any("分析现金流" in payload["trigger_phrases"] for payload in pending_payloads)
+        assert any(
+            {"tool_name": "web_search"} in payload["tool_sequence"] for payload in pending_payloads
+        )
+
     async with _Ctx(_user(ADMIN), factory) as ac:
         approved = await _approve(ac, skill_id, 1)
         assert approved.status_code == 200, approved.text

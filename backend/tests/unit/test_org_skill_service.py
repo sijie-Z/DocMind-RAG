@@ -394,6 +394,89 @@ async def test_poison_source_snapshot_is_clean_400(factory):
             )
 
 
+@pytest.mark.asyncio
+async def test_null_source_snapshot_is_clean_400_not_missing_greenlet(factory):
+    """NULL 快照（completed 但从未落 checkpoint）→ 400，不得触发 MissingGreenlet 500。"""
+    async with factory() as db:
+        db.add(_task(context_snapshot=None))
+        await db.commit()
+    async with factory() as db:
+        with pytest.raises(ValidationError) as excinfo:
+            await svc.create_proposal(
+                db, organization_id=ORG, user_id=AUTHOR, name="x", source_task_id="task-1"
+            )
+    assert "执行快照" in excinfo.value.message
+
+
+@pytest.mark.asyncio
+async def test_payload_and_source_task_are_mutually_exclusive(factory):
+    async with factory() as db:
+        db.add(_task())
+        await db.commit()
+    async with factory() as db:
+        with pytest.raises(ValidationError):
+            await svc.create_proposal(
+                db,
+                organization_id=ORG,
+                user_id=AUTHOR,
+                name="x",
+                payload=_payload(),
+                source_task_id="task-1",
+            )
+
+
+@pytest.mark.asyncio
+async def test_poison_payload_read_paths_fail_closed(factory):
+    """list/detail 读路径遇到损坏 payload_json：列表忽略待审摘要，详情 409。"""
+    skill_id, _, version_id, version_no = await _create_skill(factory)
+    async with factory() as db:
+        await db.execute(
+            text("UPDATE org_skill_version SET payload_json = '{broken' WHERE id = :id"),
+            {"id": version_id},
+        )
+        await db.commit()
+    async with factory() as db:
+        detail = await svc.list_skills(db, organization_id=ORG)
+        assert detail["items"][0]["pending_versions"] == []
+    async with factory() as db:
+        with pytest.raises(ConflictError):
+            await svc.get_skill_detail(db, organization_id=ORG, skill_id=skill_id)
+    async with factory() as db:
+        with pytest.raises(ConflictError):
+            await svc.get_version_detail(
+                db, organization_id=ORG, skill_id=skill_id, version_no=version_no
+            )
+    # review / enable / diff 也经过 _get_version：损坏行必须同样 409，不得 500。
+    async with factory() as db:
+        with pytest.raises(ConflictError):
+            await svc.review_version(
+                db,
+                organization_id=ORG,
+                skill_id=skill_id,
+                version_no=version_no,
+                reviewer_id=REVIEWER,
+                decision="approved",
+            )
+    async with factory() as db:
+        with pytest.raises(ConflictError):
+            await svc.enable_version(
+                db,
+                organization_id=ORG,
+                skill_id=skill_id,
+                version_no=version_no,
+                user_id=REVIEWER,
+            )
+    async with factory() as db:
+        with pytest.raises(ConflictError):
+            await svc.diff_skill_versions(
+                db,
+                organization_id=ORG,
+                skill_id=skill_id,
+                base_version_no=version_no,
+                target_version_no=version_no,
+            )
+
+
 # ── 审核 ────────────────────────────────────────────────────────────────────
 
 

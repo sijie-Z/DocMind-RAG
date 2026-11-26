@@ -227,6 +227,14 @@ describe('OrgSkillsView', () => {
     await flushPromises()
     const approve = wrapper.find('[data-testid="org-skill-approve-sk-1-3"]')
     expect(approve.attributes('disabled')).toBeDefined()
+
+    // 详情里的破坏性/治理动作同样按管理员门禁禁用（不是只靠后端 403）。
+    await wrapper.find('[data-testid="org-skill-open-sk-1"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('[data-testid="org-skill-disable"]').attributes('disabled')).toBeDefined()
+    expect(wrapper.find('[data-testid="org-skill-rollback"]').attributes('disabled')).toBeDefined()
+    expect(wrapper.find('[data-testid="org-skill-archive"]').attributes('disabled')).toBeDefined()
+    expect(wrapper.find('[data-testid="org-skill-enable-1"]').attributes('disabled')).toBeDefined()
   })
 
   it('详情：版本历史 + 结构化 diff（触发短语/工具序列增删）', async () => {
@@ -268,6 +276,33 @@ describe('OrgSkillsView', () => {
     await wrapper.find('[data-testid="org-skill-archive"]').trigger('click')
     await flushPromises()
     expect(api.archive).toHaveBeenCalledWith('sk-1')
+  })
+
+  it('待审队列分页扫描全部 active 技能（>100 不漏）', async () => {
+    const SKILL2 = {
+      ...SKILL,
+      id: 'sk-2',
+      name: '第二技能',
+      pending_count: 0,
+      pending_versions: [],
+    }
+    api.list.mockImplementation((async ({ page }: { page?: number }) => ({
+      data: {
+        success: true,
+        data: {
+          items: page === 2 ? [SKILL2] : [SKILL],
+          total: 2,
+          page: page || 1,
+          page_size: 100,
+        },
+      },
+    })) as never)
+    const wrapper = mountView()
+    await flushPromises()
+
+    expect(api.list).toHaveBeenCalledWith({ status: 'active', page: 1, page_size: 100 })
+    expect(api.list).toHaveBeenCalledWith({ status: 'active', page: 2, page_size: 100 })
+    expect(wrapper.find('[data-testid="org-skill-pending-payload-sk-1-3"]').exists()).toBe(true)
   })
 
   it('加载失败：诚实错误态 + 重试', async () => {
