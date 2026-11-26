@@ -1691,7 +1691,7 @@ export default {
     close: '关闭',
     loading: '正在加载回放…',
     emptyTitle: '该任务没有可回放的数据',
-    emptyHint: '回放仅在运行完整结束时保存；失败、取消或尚未完成的任务不产生回放。',
+    emptyHint: '从一次已完成的 Agent 运行点击「保存为技能」，或在组织技能库中提议手工技能；提议需组织管理员审核并启用后才会生效。',
     loadFailed: '回放加载失败，请稍后重试',
     steps: '步骤',
     tokens: 'Tokens',

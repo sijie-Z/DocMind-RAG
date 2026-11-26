@@ -16,12 +16,16 @@ from __future__ import annotations
 from unittest.mock import AsyncMock
 
 import pytest
+from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 import app.agent.service  # noqa: F401 — 触发全部工具注册
 import app.agent.tools  # noqa: F401
 import app.models  # noqa: F401
+from app.agent.checkpoint import build_envelope
+from app.agent.exec_context import ExecutionContext
+from app.agent.planner import Plan, PlanStep
 from app.core.database import Base
 from app.exceptions import (
     AuthorizationError,
@@ -94,6 +98,25 @@ async def factory(tmp_path):
     await engine.dispose()
 
 
+def _real_snapshot(tool_names=("search_knowledge_base", "web_search")):
+    """生产真实形状：checkpoint v1 信封（步骤在 ctx.steps），不是顶层 steps。"""
+    ctx = ExecutionContext(query="总结季度财务报告")
+    for index, tool in enumerate(tool_names):
+        ctx.complete_step(
+            step_id=f"s{index + 1}",
+            description="执行",
+            tool=tool,
+            status="completed",
+            duration=10.0,
+        )
+    plan = Plan(
+        id="p1",
+        goal="总结季度财务报告",
+        steps=[PlanStep(id="s1", description="执行")],
+    )
+    return build_envelope(ctx=ctx, plan=plan, trigger="test")
+
+
 def _task(**overrides):
     task = AgentTask(
         id="task-1",
@@ -101,12 +124,7 @@ def _task(**overrides):
         organization_id=ORG,
         status=TaskStatus.COMPLETED,
         query="总结季度财务报告",
-        context_snapshot={
-            "steps": [
-                {"step_id": "s1", "tool_used": "search_knowledge_base"},
-                {"step_id": "s2", "tool_used": "web_search"},
-            ]
-        },
+        context_snapshot=_real_snapshot(),
     )
     for key, value in overrides.items():
         setattr(task, key, value)
@@ -170,8 +188,13 @@ def test_payload_normalizes_and_dedupes_triggers():
     "payload",
     [
         _payload(trigger_phrases=["访问 https://example.com"]),
+        _payload(trigger_phrases=["javascript:alert(1)"]),
+        _payload(trigger_phrases=["data:text/html,<script>alert(1)</script>"]),
         _payload(trigger_phrases=["第一行\n第二行"]),
         _payload(trigger_phrases=["a\x00b"]),
+        _payload(trigger_phrases=["a b"]),
+        _payload(trigger_phrases=["a​b"]),
+        _payload(trigger_phrases=["a‮b"]),
         _payload(trigger_phrases=["长" * 41]),
         _payload(trigger_phrases=[f"触发{i}" for i in range(9)]),
         _payload(trigger_phrases=[]),
@@ -186,6 +209,11 @@ def test_payload_normalizes_and_dedupes_triggers():
         _payload(tool_sequence=[{"tool_name": "execute_sql"}]),
         _payload(tool_sequence=[{"tool_name": "mcp_call"}]),
         _payload(trigger_phrases=["key sk-" + "a" * 32]),
+        _payload(trigger_phrases=["AIza" + "a" * 35]),
+        _payload(trigger_phrases=["sk_live_" + "a" * 24]),
+        _payload(
+            trigger_phrases=["eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.signature123456"]
+        ),
         _payload(trigger_phrases=["powershell -enc AAAA"]),
         _payload(trigger_phrases=["C:\\秘密\\文件.txt"]),
         _payload(trigger_phrases=["/etc/passwd"]),
@@ -263,7 +291,7 @@ async def test_proposal_source_task_scope_is_404(factory, task_overrides):
 @pytest.mark.asyncio
 async def test_proposal_source_task_without_tools_rejected(factory):
     async with factory() as db:
-        db.add(_task(context_snapshot={"steps": [{"step_id": "s1", "tool_used": None}]}))
+        db.add(_task(context_snapshot=_real_snapshot(())))
         await db.commit()
     async with factory() as db:
         with pytest.raises(ValidationError):
@@ -306,6 +334,63 @@ async def test_duplicate_skill_name_conflicts(factory):
         with pytest.raises(ConflictError):
             await svc.create_proposal(
                 db, organization_id=ORG, user_id=AUTHOR, name="季度总结", payload=_payload()
+            )
+
+
+@pytest.mark.asyncio
+async def test_concurrent_same_name_insert_is_409_not_500(factory, monkeypatch):
+    """预检查竞态：预检查 miss、唯一约束在 flush 触发 → 必须 ConflictError。"""
+    await _create_skill(factory)
+    async with factory() as db:
+        monkeypatch.setattr(svc, "_find_skill_id_by_name", AsyncMock(return_value=None))
+        with pytest.raises(ConflictError) as excinfo:
+            await svc.create_proposal(
+                db, organization_id=ORG, user_id=AUTHOR, name="季度总结", payload=_payload()
+            )
+    assert excinfo.value.error_code == "ORG_SKILL_NAME_CONFLICT"
+
+
+@pytest.mark.asyncio
+async def test_appending_version_cannot_change_header_description(factory):
+    async with factory() as db:
+        skill, _ = await svc.create_proposal(
+            db,
+            organization_id=ORG,
+            user_id=AUTHOR,
+            name="季度总结",
+            description="original",
+            payload=_payload(),
+        )
+        skill_id = skill.id
+    async with factory() as db:
+        with pytest.raises(ValidationError):
+            await svc.create_proposal(
+                db,
+                organization_id=ORG,
+                user_id=AUTHOR,
+                skill_id=skill_id,
+                description="changed-without-review",
+                payload=_payload(trigger_phrases=["分析现金流"]),
+            )
+    async with factory() as db:
+        assert (await db.get(OrgSkill, skill_id)).description == "original"
+
+
+@pytest.mark.asyncio
+async def test_poison_source_snapshot_is_clean_400(factory):
+    """半写 JSON 快照不得把「保存为技能」升级成 500（毒丸行降级为可解释 400）。"""
+    async with factory() as db:
+        db.add(_task())
+        await db.commit()
+    async with factory() as db:
+        await db.execute(
+            text("UPDATE agent_tasks SET context_snapshot = '{broken' WHERE id = 'task-1'")
+        )
+        await db.commit()
+    async with factory() as db:
+        with pytest.raises(ValidationError):
+            await svc.create_proposal(
+                db, organization_id=ORG, user_id=AUTHOR, name="x", source_task_id="task-1"
             )
 
 
@@ -548,6 +633,73 @@ async def test_matcher_respects_disabled_and_archived(factory):
         assert await svc.match_skill(db, organization_id=ORG, query=query) is None, (
             "archive 后不注入"
         )
+
+
+@pytest.mark.asyncio
+async def test_matcher_rejects_forced_pointer_to_pending_rejected_or_archived(factory):
+    """变异点：删掉 matcher 的 review_status==approved 或 status==active 条件 → 红。
+
+    这里绕过 enable/archive 服务层，直接篡改数据库指针/状态，验证运行时两道
+    独立防线本身有效（而不是依赖写入侧从未产生坏指针）。
+    """
+    skill_id, _, _, version_no = await _create_skill(factory)
+    await _approve(factory, skill_id, version_no)
+    async with factory() as db:
+        _, pending_v2 = await svc.create_proposal(
+            db,
+            organization_id=ORG,
+            user_id=AUTHOR,
+            skill_id=skill_id,
+            payload=_payload(trigger_phrases=["分析现金流"]),
+        )
+        skill = await db.get(OrgSkill, skill_id)
+        skill.enabled_version_no = pending_v2.version_no
+        await db.commit()
+    async with factory() as db:
+        assert await svc.match_skill(db, organization_id=ORG, query="总结季度财务报告") is None, (
+            "指针指向 pending 版本不得注入"
+        )
+
+    async with factory() as db:
+        version = await db.get(OrgSkillVersion, pending_v2.id)
+        version.review_status = "rejected"
+        await db.commit()
+    async with factory() as db:
+        assert await svc.match_skill(db, organization_id=ORG, query="总结季度财务报告") is None, (
+            "指针指向 rejected 版本不得注入"
+        )
+
+    async with factory() as db:
+        skill = await db.get(OrgSkill, skill_id)
+        skill.status = "archived"
+        skill.enabled_version_no = version_no  # 强行保留指针
+        await db.commit()
+    async with factory() as db:
+        assert await svc.match_skill(db, organization_id=ORG, query="总结季度财务报告") is None, (
+            "archived 技能即使保留指针也不得注入"
+        )
+
+
+@pytest.mark.asyncio
+async def test_matched_skill_has_no_description_or_trigger_text(factory):
+    """红线：运行时注入面只含工具名；description / 触发词文本不得进入 MatchedSkill。"""
+    import dataclasses
+
+    skill_id, _, _, version_no = await _create_skill(
+        factory, description="这段说明绝不能进入运行时提示词"
+    )
+    await _approve(factory, skill_id, version_no)
+    await _enable(factory, skill_id, version_no)
+    async with factory() as db:
+        matched = await svc.match_skill(db, organization_id=ORG, query="总结季度财务报告")
+    assert matched is not None
+    assert {field.name for field in dataclasses.fields(matched)} == {
+        "skill_id",
+        "version_no",
+        "tool_sequence",
+    }
+    assert not hasattr(matched, "description")
+    assert "绝不能进入" not in repr(matched)
 
 
 @pytest.mark.asyncio

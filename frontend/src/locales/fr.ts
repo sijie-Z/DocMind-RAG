@@ -2168,7 +2168,7 @@ export default {
     open: 'Voir',
     openLibrary: 'Compétences d’organisation',
     empty: 'Aucune compétence d’organisation',
-    emptyHint: 'Cliquez sur « Enregistrer comme compétence » depuis une exécution Agent terminée, ou proposez une compétence manuelle. Une approbation et une activation par un administrateur sont requises.',
+    emptyHint: 'Cliquez sur « Enregistrer comme compétence » depuis une exécution Agent terminée. Une proposition ne prend effet qu’après approbation et activation par un administrateur.',
     loadFailed: 'Échec du chargement des compétences',
     actionFailed: 'Échec de l’action, veuillez réessayer',
     latestVersion: 'Dernière version',

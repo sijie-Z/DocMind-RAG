@@ -458,7 +458,7 @@
               <label class="text-sm font-medium text-gray-600 dark:text-gray-300">关联 Skill</label>
               <n-select
                 v-model:value="nodeData.skillName"
-                :options="skills.map(s => ({ label: `${s.name} (成功率 ${Math.round(s.success_rate * 100)}%)`, value: s.name }))"
+                :options="skills.map(s => ({ label: s.name, value: s.name }))"
                 placeholder="选择 Skill（可选）..."
                 class="mt-1"
                 clearable

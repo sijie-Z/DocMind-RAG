@@ -28,6 +28,7 @@ import hashlib
 import json
 import logging
 import re
+import unicodedata
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -36,7 +37,9 @@ from typing import Any
 from sqlalchemy import func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import defer
 
+from app.agent import checkpoint
 from app.agent.approval import tool_risk_level
 from app.agent.registry import canonical_tool_name, tool_registry
 from app.exceptions import AuthorizationError, ConflictError, NotFoundError, ValidationError
@@ -87,7 +90,7 @@ _INJECTION_MARKERS = (
     "system prompt",
     "系统提示词",
 )
-_URL_RE = re.compile(r"(?i)\b(?:https?|ftp)://|www\.")
+_URL_RE = re.compile(r"(?i)\b(?:https?|ftp|javascript|data|vbscript|file):|www\.")
 # 文件系统路径：盘符、POSIX 常见根、~ 主目录。
 _PATH_RE = re.compile(
     r"(?i)(?:^|\s)(?:[a-z]:[\\/]|/(?:etc|bin|usr|var|home|root|tmp|opt)/|~/|\\\\[a-z0-9_])"
@@ -103,7 +106,21 @@ _SECRET_PATTERNS = (
     re.compile(r"\bxox[baprs]-[A-Za-z0-9-]{10,}\b"),
     re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----"),
     re.compile(r"(?i)\bbearer\s+[A-Za-z0-9._-]{20,}\b"),
+    re.compile(r"\bAIza[0-9A-Za-z_-]{35}\b"),
+    re.compile(r"\b(?:sk|pk)_(?:live|test)_[A-Za-z0-9]{16,}\b"),
+    re.compile(r"\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b"),
 )
+
+
+def _has_forbidden_char(value: str, *, allow_newlines: bool) -> bool:
+    """Unicode 级单行判定：Cc/Cf/Zl/Zp 一律拒绝（覆盖 U+2028/Zl、U+200B/Cf、
+    U+0085/Cc、U+202E 双向控制等 ASCII 正则抓不到的形态）。"""
+    for ch in value:
+        if allow_newlines and ch in ("\n", "\t"):
+            continue
+        if unicodedata.category(ch) in ("Cc", "Cf", "Zl", "Zp"):
+            return True
+    return False
 
 
 class SkillPayloadError(ValidationError):
@@ -135,11 +152,9 @@ def payload_digest(payload: Any) -> str:
 
 
 def _reject_unsafe_text(value: str, *, field: str, allow_newlines: bool = False) -> str:
-    """拒绝控制字符、URL/路径/命令、秘密模式与常见提示注入标记。"""
-    if not allow_newlines and ("\n" in value or "\r" in value or _CONTROL_RE.search(value)):
-        raise SkillPayloadError(f"{field} 必须是单行文本，且不得包含控制字符", field=field)
-    if allow_newlines and any(ch for ch in value if ord(ch) < 0x20 and ch not in ("\n", "\t")):
-        raise SkillPayloadError(f"{field} 不得包含控制字符", field=field)
+    """拒绝控制/格式字符、URL/路径/命令、秘密模式与常见提示注入标记。"""
+    if _has_forbidden_char(value, allow_newlines=allow_newlines):
+        raise SkillPayloadError(f"{field} 不得包含控制/格式字符", field=field)
     if _URL_RE.search(value):
         raise SkillPayloadError(f"{field} 不得包含 URL", field=field)
     if _PATH_RE.search(value):
@@ -251,7 +266,7 @@ def _check_name(raw: Any) -> str:
     name = raw.strip()
     if not name or len(name) > MAX_NAME_CHARS:
         raise ValidationError(f"技能名称必须为 1–{MAX_NAME_CHARS} 个字符", field="name")
-    if _CONTROL_RE.search(name):
+    if _has_forbidden_char(name, allow_newlines=False):
         raise ValidationError("技能名称不得包含控制字符", field="name")
     return name
 
@@ -385,6 +400,7 @@ async def list_skills(
     rows = (await session.execute(stmt)).scalars().all()
     skill_ids = [row.id for row in rows]
     pending_counts: dict[str, int] = {}
+    pending_versions: dict[str, list[dict[str, Any]]] = {}
     if skill_ids:
         count_rows = (
             await session.execute(
@@ -398,10 +414,29 @@ async def list_skills(
             )
         ).all()
         pending_counts = {skill_id: count for skill_id, count in count_rows}
+        # 待审队列一次取回（避免前端按技能详情 N+1，也不受 100 条扫描上限影响）。
+        pending_rows = (
+            (
+                await session.execute(
+                    select(OrgSkillVersion)
+                    .where(
+                        OrgSkillVersion.organization_id == organization_id,
+                        OrgSkillVersion.skill_id.in_(skill_ids),
+                        OrgSkillVersion.review_status == REVIEW_PENDING,
+                    )
+                    .order_by(OrgSkillVersion.version_no.desc())
+                )
+            )
+            .scalars()
+            .all()
+        )
+        for version in pending_rows:
+            pending_versions.setdefault(version.skill_id, []).append(version_to_dict(version))
     data = []
     for row in rows:
         item = skill_to_dict(row)
         item["pending_count"] = pending_counts.get(row.id, 0)
+        item["pending_versions"] = pending_versions.get(row.id, [])
         data.append(item)
     return {"items": data, "total": total, "page": page, "page_size": page_size}
 
@@ -509,12 +544,23 @@ async def diff_skill_versions(
     return diff_versions(base, target)
 
 
-def _derive_payload_from_task(task: AgentTask) -> dict[str, Any]:
-    """从完成任务的执行快照派生结构化 payload（失败即拒绝，不猜测）。"""
-    snapshot = task.context_snapshot
-    if not isinstance(snapshot, dict):
+def _derive_payload_from_task(task: AgentTask, snapshot: Any | None = None) -> dict[str, Any]:
+    """从完成任务的执行快照派生结构化 payload（失败即拒绝，不猜测）。
+
+    生产 ``agent_tasks.context_snapshot`` 存的是 checkpoint **v1 信封**
+    （``checkpoint.build_envelope``）：步骤在 ``envelope["ctx"]["steps"]``，
+    不是顶层 ``steps``。这里先走 ``checkpoint.parse_snapshot``；同时兼容
+    历史上的顶层 ``steps`` 形状（旧测试/带外写入），两种都拿不到才拒绝。
+    """
+    raw = task.context_snapshot if snapshot is None else snapshot
+    if not isinstance(raw, dict):
         raise SkillPayloadError("来源任务缺少可用的执行快照", field="source_task_id")
-    steps = snapshot.get("steps")
+    steps: Any = None
+    envelope = checkpoint.parse_snapshot(raw)
+    if envelope is not None and isinstance(envelope.get("ctx"), dict):
+        steps = envelope["ctx"].get("steps")
+    if not isinstance(steps, list):
+        steps = raw.get("steps")
     if not isinstance(steps, list):
         raise SkillPayloadError("来源任务快照缺少步骤列表", field="source_task_id")
     tool_names: list[str] = []
@@ -554,7 +600,12 @@ async def _validate_source_task(
     user_id: int,
     source_task_id: str,
 ) -> AgentTask:
-    stmt = select(AgentTask).where(AgentTask.id == source_task_id)
+    # 快照列单独 defer：半写/截断的 JSON 不能让「读任务行」整体炸成 500（毒丸）。
+    stmt = (
+        select(AgentTask)
+        .where(AgentTask.id == source_task_id)
+        .options(defer(AgentTask.context_snapshot))
+    )
     task = (await session.execute(stmt)).scalar_one_or_none()
     # 跨组织/跨用户/非 COMPLETED 一律 404：绝不泄露任务是否存在。
     if (
@@ -569,6 +620,35 @@ async def _validate_source_task(
             resource_id=source_task_id,
         )
     return task
+
+
+async def _read_task_snapshot(session: AsyncSession, task_id: str) -> Any:
+    """单独读取快照列；反序列化失败按可解释 400 拒绝（不把毒丸行升级成 500）。"""
+    try:
+        return (
+            await session.execute(select(AgentTask.context_snapshot).where(AgentTask.id == task_id))
+        ).scalar_one_or_none()
+    except (TypeError, ValueError) as exc:
+        # json.JSONDecodeError 是 ValueError 子类（截断/半写 JSON 的实测形态）。
+        logger.warning("来源任务快照反序列化失败（task=%s）", task_id)
+        raise SkillPayloadError(
+            "来源任务快照无法解析，请改用手工 payload 或重新完成任务",
+            field="source_task_id",
+        ) from exc
+
+
+async def _find_skill_id_by_name(
+    session: AsyncSession, *, organization_id: int, name: str
+) -> str | None:
+    """同名预检查（并发下仅作快速失败；唯一约束的 flush 才是权威判定）。"""
+    return (
+        await session.execute(
+            select(OrgSkill.id).where(
+                OrgSkill.organization_id == organization_id,
+                OrgSkill.name == name,
+            )
+        )
+    ).scalar_one_or_none()
 
 
 async def create_proposal(
@@ -587,9 +667,12 @@ async def create_proposal(
 
     - ``skill_id`` 给出时向该技能追加版本；否则用 ``name`` 新建技能头；
     - ``source_task_id`` 必须是**本人 + 本组织 + COMPLETED** 的任务；payload
-      缺省时从任务执行快照派生；
+      缺省时从任务执行快照（checkpoint v1 信封）派生；
+    - ``payload`` 与 ``source_task_id`` 只能二选一（来源语义必须唯一）；
     - 服务端重新校验 payload、计算 sha256，并维护 ``latest_version``。
     """
+    if payload is not None and source_task_id is not None:
+        raise SkillPayloadError("payload 与 source_task_id 只能二选一", field="payload")
     task: AgentTask | None = None
     if source_task_id is not None:
         task = await _validate_source_task(
@@ -601,7 +684,8 @@ async def create_proposal(
     if payload is None:
         if task is None:
             raise SkillPayloadError("必须提供结构化 payload 或来源任务", field="payload")
-        normalized = _derive_payload_from_task(task)
+        snapshot = await _read_task_snapshot(session, task.id)
+        normalized = _derive_payload_from_task(task, snapshot)
     else:
         normalized = normalize_payload(payload)
 
@@ -611,23 +695,18 @@ async def create_proposal(
             raise ConflictError("技能已归档，不能追加新版本", error_code="ORG_SKILL_ARCHIVED")
         if name is not None and _check_name(name) != skill.name:
             raise ValidationError("已有技能不能通过提议改名", field="name")
-        checked_description = _check_description(description)
-        if checked_description is not None:
-            skill.description = checked_description
+        if description is not None:
+            # 说明是技能头字段（不在版本里）；追加 pending 版本不得即时改写它。
+            raise ValidationError("已有技能不能通过提议修改说明", field="description")
         skill.updated_by = user_id
     else:
         if not name:
             raise ValidationError("新建技能必须提供名称", field="name")
         checked_name = _check_name(name)
         checked_description = _check_description(description)
-        existing = (
-            await session.execute(
-                select(OrgSkill.id).where(
-                    OrgSkill.organization_id == organization_id,
-                    OrgSkill.name == checked_name,
-                )
-            )
-        ).scalar_one_or_none()
+        existing = await _find_skill_id_by_name(
+            session, organization_id=organization_id, name=checked_name
+        )
         if existing is not None:
             raise ConflictError(
                 "同名技能已存在；请指定 skill_id 追加版本",
@@ -646,7 +725,16 @@ async def create_proposal(
             lock_version=1,
         )
         session.add(skill)
-        await session.flush()
+        # flush 必须在 try 内：并发同名时预检查都会 miss，唯一约束在这里才触发；
+        # 未包裹的 IntegrityError 会经端点兜底变成 500 而不是 409。
+        try:
+            await session.flush()
+        except IntegrityError as exc:
+            await session.rollback()
+            raise ConflictError(
+                "同名技能已存在；请指定 skill_id 追加版本",
+                error_code="ORG_SKILL_NAME_CONFLICT",
+            ) from exc
 
     if skill.latest_version >= MAX_VERSIONS_PER_SKILL:
         raise ConflictError(
@@ -943,7 +1031,13 @@ async def match_skill(
             OrgSkillVersion.review_status == REVIEW_APPROVED,
         )
     )
-    rows = (await session.execute(stmt)).all()
+    try:
+        rows = (await session.execute(stmt)).all()
+    except (TypeError, ValueError) as exc:
+        # 半写/截断的 payload_json 在 SELECT 反序列化时即失败；运行时必须
+        # fail-closed（不注入），绝不能把整轮 run 拖成 500。
+        logger.warning("Org skill match query failed and was skipped: %s", type(exc).__name__)
+        return None
     query_folded = query.casefold()
     best: tuple[tuple[int, int, str], MatchedSkill] | None = None
     for skill, version in rows:
@@ -1017,7 +1111,13 @@ async def list_runtime_skills(
         )
         .order_by(OrgSkill.name)
     )
-    rows = (await session.execute(stmt)).all()
+    try:
+        rows = (await session.execute(stmt)).all()
+    except (TypeError, ValueError) as exc:
+        logger.warning(
+            "Org skill runtime listing query failed and was skipped: %s", type(exc).__name__
+        )
+        return []
     data: list[dict[str, Any]] = []
     for skill, version in rows:
         try:

@@ -66,6 +66,28 @@
                 <div v-if="item.version.review_status === 'pending' && isAuthor(item.version)" class="mt-1 text-xs text-amber-600 dark:text-amber-400" data-testid="org-skill-self-review-hint">
                   {{ t('orgSkills.pendingQueue.authorCannotReview') }}
                 </div>
+                <div
+                  class="mt-2 flex flex-wrap items-center gap-1"
+                  :data-testid="`org-skill-pending-payload-${item.skill.id}-${item.version.version_no}`"
+                >
+                  <n-tag
+                    v-for="phrase in item.version.payload?.trigger_phrases || []"
+                    :key="`p-${phrase}`"
+                    size="small"
+                    :bordered="false"
+                  >
+                    {{ phrase }}
+                  </n-tag>
+                  <n-tag
+                    v-for="step in item.version.payload?.tool_sequence || []"
+                    :key="`s-${step.tool_name}`"
+                    type="info"
+                    size="small"
+                    :bordered="false"
+                  >
+                    {{ step.tool_name }}
+                  </n-tag>
+                </div>
               </div>
               <div class="flex shrink-0 items-center gap-2">
                 <n-button
@@ -178,6 +200,7 @@
                 v-if="selected.enabled_version_no !== null"
                 size="small"
                 secondary
+                :disabled="!isAdmin"
                 :loading="actionBusy === 'disable'"
                 data-testid="org-skill-disable"
                 @click="disableSkill"
@@ -188,7 +211,7 @@
                 v-if="selected.enabled_version_no !== null"
                 size="small"
                 secondary
-                :disabled="rollbackTarget === null"
+                :disabled="!isAdmin || rollbackTarget === null"
                 :loading="actionBusy === 'rollback'"
                 data-testid="org-skill-rollback"
                 @click="rollbackSkill"
@@ -200,6 +223,7 @@
                 size="small"
                 secondary
                 type="error"
+                :disabled="!isAdmin"
                 :loading="actionBusy === 'archive'"
                 data-testid="org-skill-archive"
                 @click="archiveSkill"
@@ -240,6 +264,31 @@
                     <p v-if="version.review_note" class="mt-1 text-xs text-slate-500 dark:text-slate-400">
                       {{ t('orgSkills.detail.reviewNote') }}: {{ version.review_note }}
                     </p>
+                    <!-- 审核人必须看到实际会进入运行时的 payload（v1 无上一版可 diff） -->
+                    <div
+                      class="mt-2 flex flex-wrap items-center gap-1"
+                      :data-testid="`org-skill-version-payload-${version.version_no}`"
+                    >
+                      <span class="text-[11px] text-slate-400 dark:text-slate-500">{{ t('orgSkills.detail.triggerPhrases') }}:</span>
+                      <n-tag
+                        v-for="phrase in version.payload?.trigger_phrases || []"
+                        :key="`vp-${phrase}`"
+                        size="small"
+                        :bordered="false"
+                      >
+                        {{ phrase }}
+                      </n-tag>
+                      <span class="ml-2 text-[11px] text-slate-400 dark:text-slate-500">{{ t('orgSkills.detail.toolSequence') }}:</span>
+                      <n-tag
+                        v-for="step in version.payload?.tool_sequence || []"
+                        :key="`vs-${step.tool_name}`"
+                        type="info"
+                        size="small"
+                        :bordered="false"
+                      >
+                        {{ step.tool_name }}
+                      </n-tag>
+                    </div>
                     <p v-if="version.review_status === 'pending' && isAuthor(version)" class="mt-1 text-xs text-amber-600 dark:text-amber-400" data-testid="org-skill-detail-self-review-hint">
                       {{ t('orgSkills.pendingQueue.authorCannotReview') }}
                     </p>
@@ -272,7 +321,11 @@
                       v-if="version.review_status === 'approved'"
                       size="tiny"
                       type="primary"
-                      :disabled="!isAdmin || selected.enabled_version_no === version.version_no"
+                      :disabled="
+                        !isAdmin ||
+                        selected.status !== 'active' ||
+                        selected.enabled_version_no === version.version_no
+                      "
                       :loading="actionBusy === `enable-${version.version_no}`"
                       :data-testid="`org-skill-enable-${version.version_no}`"
                       @click="enableVersion(version)"
@@ -347,7 +400,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { useRoute } from 'vue-router'
 import { useUserStore } from '@/stores/user'
 import { useDedupedMessage } from '@/utils/message'
 import { getErrorMessage } from '@/utils/apiError'
@@ -364,7 +416,6 @@ import {
 
 const { t, locale } = useI18n()
 const userStore = useUserStore()
-const route = useRoute()
 const message = useDedupedMessage()
 
 type StatusFilter = 'active' | 'archived' | 'all'
@@ -457,16 +508,9 @@ async function loadPendingQueue(): Promise<void> {
     const list = apiUnwrap<OrgSkillListData>(
       await orgSkillsApi.list({ status: 'active', page: 1, page_size: 100 }),
     )
-    const withPending = (list?.items || []).filter((row) => (row.pending_count || 0) > 0)
-    const groups = await Promise.all(
-      withPending.map(async (row) => {
-        const detail = apiUnwrap<OrgSkillDetail>(await orgSkillsApi.get(row.id))
-        return (detail?.versions || [])
-          .filter((version) => version.review_status === 'pending')
-          .map((version) => ({ skill: row, version }))
-      }),
+    pendingRows.value = (list?.items || []).flatMap((row) =>
+      (row.pending_versions || []).map((version) => ({ skill: row, version })),
     )
-    pendingRows.value = groups.flat()
   } catch {
     // 待审队列是辅助视图：失败不覆盖主列表错误态。
     pendingRows.value = []
@@ -576,9 +620,6 @@ async function showDiff(version: OrgSkillVersion): Promise<void> {
 }
 
 onMounted(() => {
-  if (route?.query?.pending === '1' && statusFilter.value !== 'active') {
-    statusFilter.value = 'active'
-  }
   void load()
 })
 </script>

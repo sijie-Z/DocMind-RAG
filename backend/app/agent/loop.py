@@ -859,7 +859,6 @@ class PERAgentLoop:
                 return
 
             # ── Phase 1: Planning ────────────────────────────────────────
-            matched_skill_id: str | None = None
             if resume_plan is not None:
                 # resume：直接复用快照里的计划（不重新规划——需要修计划时由
                 # 既有的 replan 路径负责）；首轮消费一次后置空。
@@ -885,9 +884,8 @@ class PERAgentLoop:
                 # 学习闭环（读侧，批次十）：命中**已评审 + 已启用**的组织技能时，
                 # 把其工具序列补进没有 tool_hint 的步骤（只补空缺，不覆盖
                 # planner 的判断）。不再读取 Redis / 未经审核的技能。
-                # 返回值 = 实际被应用的 skill_id，仅用于日志/未来反馈。
                 if self.config.enable_skills and plan:
-                    matched_skill_id = await self._apply_skill_hints(plan, query)
+                    await self._apply_skill_hints(plan, query)
 
                 # T1 checkpoint：规划完成（含 skill 提示应用后）——快照 ctx + 完整
                 # plan；崩溃于规划阶段时（尚无任何快照）resume 走"无 plan"重规划路径。
@@ -1202,14 +1200,9 @@ class PERAgentLoop:
                 except Exception as e:
                     logger.warning("Experience write-back failed: %s", e)
 
-                # 技能闭环（issue #200，评审 m1 拆开）：使用结果反馈 + 成功计划沉淀。
-                # 与经验回写各用各的 try：互不连坐，日志也不互相错标。
-                if self.config.enable_skills:
-                    try:
-                        await self._record_skill_outcome(matched_skill_id, qg_result)
-                        await self._learn_skills(ctx, plan, qg_result)
-                    except Exception as e:
-                        logger.warning("Skill learning/feedback failed: %s", e)
+                # 技能闭环（issue #200，批次十已停用）：不再自动学习/回报使用结果；
+                # 组织技能只能经 /org-skills/proposals 提议并由人工审核。这里不再
+                # 调用空操作，避免日志/注释让人误以为生产仍在学习。
 
             # ── Phase 3: Reflection ──────────────────────────────────────────
             # 预算已尽则跳过反思：不再为"评价结果"发起额外 LLM 调用（issue #203 ②）。

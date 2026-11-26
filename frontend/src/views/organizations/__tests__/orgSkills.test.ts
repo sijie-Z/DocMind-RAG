@@ -72,6 +72,7 @@ const SKILL = {
   created_at: '2026-11-20T00:00:00Z',
   updated_at: '2026-11-22T00:00:00Z',
   pending_count: 1,
+  pending_versions: [] as Array<Record<string, unknown>>,
 }
 
 const V1 = {
@@ -87,6 +88,11 @@ const V1 = {
   review_note: null,
   created_by: 1,
   created_at: '2026-11-20T00:00:00Z',
+  payload: {
+    schema_version: 1,
+    trigger_phrases: ['季度财务总结'],
+    tool_sequence: [{ tool_name: 'search_knowledge_base' }],
+  },
 }
 const V2 = {
   ...V1,
@@ -97,6 +103,11 @@ const V2 = {
   provenance: { source: 'manual' },
   review_note: '触发词收紧',
   created_at: '2026-11-21T00:00:00Z',
+  payload: {
+    schema_version: 1,
+    trigger_phrases: ['季度财务总结', '分析现金流'],
+    tool_sequence: [{ tool_name: 'search_knowledge_base' }, { tool_name: 'web_search' }],
+  },
 }
 const V3 = {
   ...V1,
@@ -108,7 +119,14 @@ const V3 = {
   reviewed_by: null,
   reviewed_at: null,
   created_at: '2026-11-22T00:00:00Z',
+  payload: {
+    schema_version: 1,
+    trigger_phrases: ['机密触发词PENDING'],
+    tool_sequence: [{ tool_name: 'search_knowledge_base' }],
+  },
 }
+
+SKILL.pending_versions = [V3]
 
 function detail(overrides: Record<string, unknown> = {}) {
   return { ...SKILL, versions: [V3, V2, V1], ...overrides }
@@ -166,6 +184,21 @@ describe('OrgSkillsView', () => {
     expect(row.text()).toContain('已启用 v2')
     expect(row.text()).toContain('待审 1')
     expect(wrapper.find('[data-testid="org-skill-pending-queue"]').exists()).toBe(true)
+  })
+
+  it('待审版本展示 payload（触发短语 + 工具序列），v1 也可审', async () => {
+    const wrapper = mountView()
+    await flushPromises()
+    const pendingPayload = wrapper.find('[data-testid="org-skill-pending-payload-sk-1-3"]')
+    expect(pendingPayload.exists()).toBe(true)
+    expect(pendingPayload.text()).toContain('机密触发词PENDING')
+    expect(pendingPayload.text()).toContain('search_knowledge_base')
+
+    await wrapper.find('[data-testid="org-skill-open-sk-1"]').trigger('click')
+    await flushPromises()
+    const versionPayload = wrapper.find('[data-testid="org-skill-version-payload-3"]')
+    expect(versionPayload.exists()).toBe(true)
+    expect(versionPayload.text()).toContain('机密触发词PENDING')
   })
 
   it('待审队列：管理员可批准/拒绝，作者自己不可审核', async () => {

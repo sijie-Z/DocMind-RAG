@@ -41,6 +41,8 @@ export interface OrgSkillSummary {
   created_at: string | null
   updated_at: string | null
   pending_count?: number
+  /** 列表内联的 pending 版本摘要（含 payload；一次查询，避免 N+1）。 */
+  pending_versions?: OrgSkillVersion[]
 }
 
 export interface OrgSkillVersion {

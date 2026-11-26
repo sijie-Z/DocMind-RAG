@@ -118,7 +118,7 @@ async def get_org_skill_version(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """单个不可变版本（含结构化 payload；哈希由服务层重算校验）。"""
+    """单个不可变版本（含结构化 payload；哈希完整性在启用/运行时匹配时校验）。"""
     try:
         org_id = await require_organization(current_user, db)
         data = await skill_service.get_version_detail(

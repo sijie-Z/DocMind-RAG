@@ -21,6 +21,9 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 import app.agent.service  # noqa: F401 — 触发全部工具注册
 import app.agent.tools  # noqa: F401
 import app.models  # noqa: F401
+from app.agent.checkpoint import build_envelope
+from app.agent.exec_context import ExecutionContext
+from app.agent.planner import Plan, PlanStep
 from app.api.v1.endpoints import org_skills as org_skills_ep
 from app.core.database import Base, get_db
 from app.core.security import get_current_user
@@ -42,6 +45,20 @@ PAYLOAD = {
     "trigger_phrases": [TRIGGER],
     "tool_sequence": [{"tool_name": "search_knowledge_base"}],
 }
+
+
+def _real_snapshot():
+    """生产真实形状：checkpoint v1 信封（步骤在 ctx.steps）。"""
+    ctx = ExecutionContext(query="总结季度财务报告")
+    ctx.complete_step(
+        step_id="s1",
+        description="检索",
+        tool="web_search",
+        status="completed",
+        duration=10.0,
+    )
+    plan = Plan(id="p1", goal="总结季度财务报告", steps=[PlanStep(id="s1", description="检索")])
+    return build_envelope(ctx=ctx, plan=plan, trigger="test")
 
 
 @pytest.fixture
@@ -72,7 +89,7 @@ async def factory(tmp_path):
                 organization_id=ORG,
                 status=TaskStatus.COMPLETED,
                 query="总结季度财务报告",
-                context_snapshot={"steps": [{"step_id": "s1", "tool_used": "web_search"}]},
+                context_snapshot=_real_snapshot(),
             )
         )
         await db.commit()
@@ -315,6 +332,21 @@ async def test_cross_org_source_task_is_404(factory):
             json={"name": "偷任务", "source_task_id": "task-ok"},
         )
         assert resp.status_code == 404, resp.text
+
+
+async def test_source_task_proposal_uses_real_checkpoint_envelope(factory):
+    """真实 checkpoint v1 信封（ctx.steps）→ pending payload；B1 的 API 级判别。"""
+    async with _Ctx(_user(AUTHOR), factory) as ac:
+        resp = await ac.post(
+            "/api/v1/org-skills/proposals",
+            json={"name": "运行沉淀", "source_task_id": "task-ok"},
+        )
+        assert resp.status_code == 200, resp.text
+        data = resp.json()["data"]
+        assert data["version"]["review_status"] == "pending"
+        assert data["version"]["source"] == "run_proposal"
+        assert data["version"]["payload"]["trigger_phrases"] == ["总结季度财务报告"]
+        assert data["version"]["payload"]["tool_sequence"] == [{"tool_name": "web_search"}]
 
 
 async def test_duplicate_review_conflicts(factory):

@@ -1682,7 +1682,7 @@ export default {
     close: 'Close',
     loading: 'Loading replay…',
     emptyTitle: 'No replay data for this task',
-    emptyHint: 'Replays are saved only when a run finishes completely; failed, cancelled or unfinished runs have none.',
+    emptyHint: 'Click "Save as skill" on a completed Agent run. A proposal takes effect only after an organization admin approves and enables it.',
     loadFailed: 'Failed to load replay, please retry later',
     steps: 'steps',
     tokens: 'tokens',

@@ -180,7 +180,7 @@ class AgentConfig:
     enable_memory: bool = True
     enable_thinking: bool = True
     enable_experience: bool = True  # Self-Improving: learn from past failures
-    enable_skills: bool = True  # issue #200：技能索引注入 + load_skill_reference + 学习闭环
+    enable_skills: bool = True  # issue #200：技能索引注入 + load_skill_reference；批次十起自动学习已停用（组织技能库需审核）
     # issue #509：子代理委派工具（delegate_subtask）默认关闭——工具面收敛的
     # 注入门控项之一。开启后该工具才进入 schema；默认配置下 schema 不含它。
     enable_delegation: bool = False
