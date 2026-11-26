@@ -2074,6 +2074,8 @@ export default {
     knowledgeEvalRuns: '評価実行履歴',
     evalRubrics: '回答品質ルーブリック',
     evalRubricRun: 'ルーブリック評価実行',
+    answerQualityRuns: '回答品質評価の実行',
+    answerQualityRun: '回答品質評価の実行詳細',
     knowledgeDocument: 'ドキュメント詳細',
     workflowEditor: 'ワークフローエディタ',
     agentMemory: 'Agent メモリ'
@@ -2665,6 +2667,95 @@ export default {
       missingHint:
         'ケースに gold_verdicts（項目キーから yes/no/unsure へのマッピング）を追加して再実行すると、一致率と混同行列が得られます。',
       unavailableOnFailure: '実行が失敗したため、較正できる判定がありません。'
+    }
+  },
+  answerQualityEval: {
+    navEntry: '回答品質評価',
+    subtitle: '固定3指標のLLM審査員による実行履歴：faithfulness / relevancy / context precision',
+    scopeBanner:
+      '本ページは生成された回答を評価します（LLM審査員による faithfulness / relevancy / context precision）。検索リコール（recall{\'@\'}k / MRR、ナレッジベースの評価実行履歴を参照）でも、ルーブリック評価（編集可能な加重 yes/no、回答品質ルーブリックを参照）でもありません。対象と指標が異なるため、実行記録は共用しません。',
+    common: {
+      retry: '再試行',
+      refresh: '更新',
+      viewDetail: '詳細を見る',
+      loadFailed: '読み込みに失敗しました'
+    },
+    filters: {
+      status: '状態',
+      dateRange: '期間（UTC）',
+      user: '実行ユーザー ID',
+      userPlaceholder: 'ユーザー ID',
+      reset: 'フィルターをリセット',
+      filteredCount: '全 {total} 件'
+    },
+    metrics: {
+      faithfulness: '忠実度',
+      relevancy: '関連性',
+      context_precision: 'コンテキスト精度'
+    },
+    mode: {
+      judge: 'モデル審査員（judge）',
+      fake: '決定論的再生（fake）'
+    },
+    status: {
+      completed: '完了',
+      failed: '失敗',
+      all: 'すべての状態'
+    },
+    list: {
+      title: '実行履歴',
+      empty: '回答品質評価の実行はまだありません',
+      emptyHint:
+        '実行は評価 API（POST /api/v1/eval/answer-quality/runs）で作成します。成功・失敗の両方が保存され、失敗した実行はエラーコードのみを記録してスコアを生成しません（0 点にはしません）。',
+      columns: {
+        time: '日時',
+        status: '状態',
+        mode: 'モード',
+        judgeModel: '審査モデル',
+        promptVersion: 'プロンプト版',
+        cases: 'ケース数',
+        user: 'ユーザー',
+        actions: '操作'
+      },
+      trendTitle: '指標トレンド',
+      trendHint: '実行時刻の昇順。失敗した実行は件数に含みますが、平均には含めません。',
+      trendLoadFailed: 'トレンドデータの読み込みに失敗しました。下の実行履歴には影響しません。',
+      trendRuns: '実行数',
+      trendSucceeded: '成功',
+      trendFailed: '失敗',
+      trendAverage: '平均 {metric}',
+      trendTableTime: '日時',
+      maskedNote:
+        '実行が保存するのは指標、上限付きの審査理由、ソースハッシュ、マスク済みプレビューのみです。元の質問・回答・コンテキストは保存しません。'
+    },
+    detail: {
+      loadFailed: '実行詳細の読み込みに失敗しました',
+      failedTitle: 'この実行は失敗しました：スコアは生成されていません',
+      failedUnavailable:
+        '審査員を利用できませんでした（モデルサービス呼び出しの失敗）。失敗した実行は、マシンコードと使用したモデル/プロンプト版を含めて追跡用に保存されます。しばらくしてから再試行してください。',
+      errorCode: 'エラーコード',
+      noScores: 'この実行にはスコアが記録されていません（0 点ではありません）。',
+      aggregateHint:
+        '各指標は採点対象ケースの算術平均です。faithfulness / relevancy / context_precision は LLM-as-judge の連続スコアであり、人手の正解値ではありません。',
+      casesScored: '採点対象ケース',
+      metaTitle: '実行情報',
+      judgeModel: '審査モデル',
+      promptVersion: 'プロンプト版',
+      mode: 'モード',
+      caseCount: 'ケース数',
+      datasetHash: 'データセットハッシュ',
+      user: '実行ユーザー',
+      createdAt: '作成日時',
+      completedAt: '完了日時',
+      resultsTitle: 'ケース別結果',
+      resultsHint:
+        '表示されるのはマスク済みプレビュー、上限付きの審査理由、ソースハッシュのみです。元の質問・回答・コンテキストは保存も返却もしません。',
+      caseId: 'ケース',
+      reasons: '審査理由',
+      sources: 'ソース参照（マスク）',
+      noReason: '理由の記載なし',
+      noSources: 'ソース参照なし',
+      backToList: '実行履歴に戻る'
     }
   },
   memory: {
