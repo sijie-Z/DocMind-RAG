@@ -1,9 +1,7 @@
 import asyncio
-import hashlib
 import json
 import logging
 import os
-import secrets
 import uuid
 from datetime import UTC, datetime
 
@@ -79,6 +77,7 @@ from app.services.session_service import (
     session_matches_scope,
     session_visibility_conditions,
 )
+from app.services.share_link_service import new_share_token, share_token_digest
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -511,8 +510,12 @@ _PUBLIC_SOURCE_FIELDS = frozenset({"score", "rank", "relevanceScore"})
 
 
 def _share_digest(token: str) -> str:
-    """分享 token 的稳定摘要；不记录原文，避免日志/数据库泄露链接。"""
-    return hashlib.sha256(token.encode("utf-8")).hexdigest()
+    """分享 token 的稳定摘要；不记录原文，避免日志/数据库泄露链接。
+
+    批次八：算法抽到 ``share_link_service``，会话树分享端点复用同一实现，
+    避免两套 token 摘要悄悄漂移。
+    """
+    return share_token_digest(token)
 
 
 async def _load_owned_session(
@@ -544,7 +547,7 @@ async def create_conversation_share(
 ):
     """创建/轮换只读分享链接；原文 token 仅本次响应返回。"""
     session = await _load_owned_session(db, conversation_id, current_user)
-    token = secrets.token_urlsafe(24)
+    token = new_share_token()
     session.share_token_hash = _share_digest(token)
     session.share_created_at = datetime.now(UTC)
     await db.commit()

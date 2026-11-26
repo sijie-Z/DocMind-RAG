@@ -59,10 +59,10 @@ import logging
 import time
 import uuid
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import defer
@@ -71,9 +71,17 @@ from app.agent import checkpoint
 from app.agent.memory_bridge import AgentMemoryBridge
 from app.core.log_safety import log_safe
 from app.core.redis import redis_client
-from app.exceptions import ConflictError, NotFoundError, ValidationError
+from app.exceptions import (
+    ConflictError,
+    NotFoundError,
+    ServiceUnavailableError,
+    ValidationError,
+)
 from app.models.agent_task import AgentTask, TaskStatus
+from app.models.artifact import AgentArtifact
 from app.models.chat import ChatMessage, ChatSession, ChatSessionStatus, MessageType
+from app.services import llm_settings_service
+from app.services.artifact_service import artifact_summary
 from app.services.session_service import (
     SessionAccessScope,
     session_access_conditions,
@@ -104,6 +112,26 @@ _REASON_MAX = 100
 _MAX_LINEAGE_DEPTH = 50
 # 克隆时候选的最近任务行数上限（只挑可解析的已结算快照）。
 _CHECKPOINT_CANDIDATE_LIMIT = 20
+
+# ── 会话树导航（批次八）────────────────────────────────────────────────────
+# 分支标签长度与 DB/API 校验一致（超长 400，不静默截断）。
+BRANCH_LABEL_MAX_CHARS = 100
+# 摘要正文上限（fake 抽取式与 LLM 结果都按此截断，避免把巨量文本写进会话行）。
+BRANCH_SUMMARY_MAX_CHARS = 2000
+# fake 模式抽取上限：足够展示要点，同时保证同一消息序列输出逐字稳定。
+BRANCH_SUMMARY_EXTRACT_CHARS = 280
+# 摘要支持的模式：fake（确定性抽取，测试/离线）与 llm（不可用必须显式失败）。
+BRANCH_SUMMARY_MODES = ("fake", "llm")
+# LLM 摘要超时：模型不可用时端点必须快速返回可判定的失败，而不是悬挂。
+SUMMARY_LLM_TIMEOUT_SECONDS = 30.0
+# 树遍历深度上限：损坏数据（环/超长链）不得让接口无限循环。
+_MAX_TREE_DEPTH = 50
+
+MAX_TREE_BRANCHES = 500
+"""单次树响应最多返回的分支数；超出时置 ``branches_truncated``。"""
+
+MAX_BRANCH_ARTIFACTS = 200
+"""分支上下文最多返回的工件行数；面板只展示计数，超出时置 ``artifacts_truncated``。"""
 
 # "源会话有运行中任务"的判定集合：PAUSED（fork 克隆产物）刻意不在其中；
 # FAILED/CANCELLED 等终态也不在——它们不是正在跑的 run。
@@ -166,6 +194,13 @@ class ForkIdempotencyConflictError(ConflictError):
 
     error_code = "FORK_IDEMPOTENCY_CONFLICT"
     message = "该幂等键已被其他会话占用，请更换幂等键后重试"
+
+
+class BranchSummaryUnavailableError(ServiceUnavailableError):
+    """请求 LLM 摘要但模型不可用/调用失败（503，绝不降级成 fake 假成功）。"""
+
+    error_code = "SUMMARY_MODEL_UNAVAILABLE"
+    message = "摘要模型不可用，未生成摘要"
 
 
 @dataclass
@@ -1034,4 +1069,477 @@ async def get_lineage(
         "children": children,
         "parent_missing": parent_missing,
         "lineage_truncated": lineage_truncated,
+    }
+
+
+# ── 会话树导航（批次八）────────────────────────────────────────────────────
+
+
+def _iso(value: datetime | None) -> str | None:
+    """时间戳的统一序列化（None 保持 None）。"""
+    return value.isoformat() if value is not None else None
+
+
+def _tree_depth(
+    row: ChatSession, by_id: dict[str, ChatSession], *, max_depth: int = _MAX_TREE_DEPTH
+) -> int:
+    """当前行在**可见节点集合**内的深度（根=0）；环/缺失父节点按截断处理。"""
+    depth = 0
+    seen = {row.id}
+    cursor = row
+    while cursor.parent_session_id and depth < max_depth:
+        parent_id = cursor.parent_session_id
+        if parent_id in seen:
+            break  # 环状损坏数据：停止，不伪造深度
+        seen.add(parent_id)
+        parent = by_id.get(parent_id)
+        if parent is None:
+            break  # 父节点不可见/已删除：当前可见子树的深度从此处起算
+        depth += 1
+        cursor = parent
+    return depth
+
+
+async def _artifact_stats(
+    db: AsyncSession, *, session_ids: list[str], user_id: int
+) -> dict[str, tuple[int, int, int]]:
+    """按会话聚合工件行数 / 最新版本号 / 版本号总和。
+
+    只按 ``conversation_id`` + ``user_id`` 限定：会话可见性已由 tree 查询的
+    org+user 口径决定；工件自身可能沿用调用者当前组织（历史 NULL 组织会话），
+    再加组织条件反而会把本人历史工件藏掉。孤儿/他人会话的工件不会进入统计。
+    """
+    if not session_ids:
+        return {}
+    rows = await db.execute(
+        select(
+            AgentArtifact.conversation_id,
+            func.count(AgentArtifact.id),
+            func.max(AgentArtifact.version_no),
+            func.sum(AgentArtifact.version_no),
+        )
+        .where(
+            AgentArtifact.conversation_id.in_(session_ids),
+            AgentArtifact.user_id == user_id,
+            AgentArtifact.status == "ready",
+        )
+        .group_by(AgentArtifact.conversation_id)
+    )
+    return {
+        conversation_id: (int(count or 0), int(latest or 0), int(total or 0))
+        for conversation_id, count, latest, total in rows.all()
+    }
+
+
+def _branch_payload(
+    row: ChatSession,
+    *,
+    current_id: str,
+    root_id: str,
+    depth: int,
+    message_count: int,
+    artifact_stats: tuple[int, int, int],
+    fork_point_preview: str | None,
+    parent_visible: bool,
+) -> dict[str, Any]:
+    count, latest, total = artifact_stats
+    return {
+        "session_id": row.id,
+        "title": row.title,
+        "parent_session_id": row.parent_session_id,
+        "root_session_id": row.root_session_id or row.id,
+        "fork_point_message_id": row.fork_point_message_id,
+        "fork_point_preview": fork_point_preview,
+        "fork_reason": row.fork_reason,
+        "branch_label": row.branch_label,
+        "branch_summary": row.branch_summary,
+        "summary_model": row.summary_model,
+        "summarized_at": _iso(row.summarized_at),
+        "created_at": _iso(row.created_at) or "",
+        "depth": depth,
+        "is_root": row.id == root_id,
+        "is_current": row.id == current_id,
+        "parent_visible": parent_visible,
+        "message_count": message_count,
+        "artifact_count": count,
+        "artifact_latest_version": latest,
+        "artifact_version_total": total,
+    }
+
+
+async def get_session_tree(
+    db: AsyncSession,
+    *,
+    session_id: str,
+    user_id: int,
+    organization_id: int | None = None,
+    scope: SessionAccessScope | None = None,
+) -> dict[str, Any]:
+    """返回会话所在分支树（根 + 全部可见后代），按 depth/创建时间稳定排序。
+
+    - 访问口径复用 ``_load_source``（org+user；越权/跨组织 404，不泄露存在性）；
+    - 树 = ``id == root`` 或 ``root_session_id == root`` 且调用者可见的会话；
+    - 每行带 ``fork_point_message_id``、分支标签/摘要与**按分支**的工件统计
+      （``agent_artifact`` 按 ``conversation_id`` 聚合，绝不跨分支串数）；
+    - 根会话被删除/不可见时返回当前可见子树并置 ``tree_truncated=True``，
+      绝不把不可见行伪装成树节点；
+    - 只读：不写库、不创建会话、不触发任何 fork。
+    """
+    scope = _resolve_scope(scope, organization_id)
+    current = await _load_source(db, session_id, user_id, scope)
+    root_id = current.root_session_id or current.id
+
+    conditions = [
+        ChatSession.user_id == user_id,
+        or_(ChatSession.id == root_id, ChatSession.root_session_id == root_id),
+        *session_access_org_conditions(scope),
+    ]
+    rows = list(
+        (
+            await db.execute(
+                select(ChatSession)
+                .where(*conditions)
+                .order_by(ChatSession.created_at.asc(), ChatSession.id.asc())
+                .limit(MAX_TREE_BRANCHES + 1)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    branches_truncated = len(rows) > MAX_TREE_BRANCHES
+    if branches_truncated:
+        rows = rows[:MAX_TREE_BRANCHES]
+    # 当前会话必须可见且已被上面的条件命中；防御性兜底，避免空树。
+    if not any(row.id == current.id for row in rows):
+        if branches_truncated and rows:
+            rows[-1] = current
+        else:
+            rows.append(current)
+
+    by_id = {row.id: row for row in rows}
+    ids = list(by_id)
+    message_counts: dict[str, int] = {}
+    if ids:
+        count_rows = await db.execute(
+            select(ChatMessage.session_id, func.count(ChatMessage.id))
+            .where(ChatMessage.session_id.in_(ids))
+            .group_by(ChatMessage.session_id)
+        )
+        message_counts = {sid: int(count) for sid, count in count_rows.all()}
+
+    fork_message_ids = [row.fork_point_message_id for row in rows if row.fork_point_message_id]
+    fork_previews: dict[str, str] = {}
+    if fork_message_ids:
+        # 只取前 120 字符（SQL 侧截断），并 join 会话表做 org/user 作用域，
+        # 避免把不可见父会话的正文读进内存。
+        preview_rows = await db.execute(
+            select(ChatMessage.id, func.substr(ChatMessage.content, 1, 120))
+            .join(ChatSession, ChatSession.id == ChatMessage.session_id)
+            .where(
+                ChatMessage.id.in_(fork_message_ids),
+                ChatSession.user_id == user_id,
+                *session_access_org_conditions(scope),
+            )
+        )
+        for message_id, content in preview_rows.all():
+            text = " ".join((content or "").split())
+            if text:
+                fork_previews[message_id] = text[:120]
+
+    stats = await _artifact_stats(db, session_ids=ids, user_id=user_id)
+
+    branches = [
+        _branch_payload(
+            row,
+            current_id=current.id,
+            root_id=root_id,
+            depth=_tree_depth(row, by_id),
+            message_count=message_counts.get(row.id, 0),
+            artifact_stats=stats.get(row.id, (0, 0, 0)),
+            fork_point_preview=fork_previews.get(row.fork_point_message_id or ""),
+            parent_visible=(row.parent_session_id is None or row.parent_session_id in by_id),
+        )
+        for row in rows
+    ]
+    branches.sort(key=lambda node: (node["depth"], node["created_at"], node["session_id"]))
+
+    root_present = root_id in by_id
+    tree_truncated = (not root_present) or any(
+        node["parent_session_id"] and not node["parent_visible"] for node in branches
+    )
+    return {
+        "root_session_id": root_id,
+        "current_session_id": current.id,
+        "root_present": root_present,
+        "branch_count": len(branches),
+        "branches_truncated": branches_truncated,
+        "tree_truncated": tree_truncated,
+        "branches": branches,
+    }
+
+
+def _message_payload(msg: ChatMessage) -> dict[str, Any]:
+    """分支消息投影：与 chat 详情同键（camelCase），前端原位加载可直接复用。"""
+    meta = _message_meta(msg)
+    sources = meta.get("sources")
+    return {
+        "id": msg.id,
+        "seq": msg.seq,
+        "content": msg.content,
+        "messageType": msg.message_type.value,
+        "createdAt": msg.created_at.isoformat() if msg.created_at else "",
+        "sources": sources if isinstance(sources, list) else [],
+        "feedback": msg.feedback or 0,
+        "feedbackNote": msg.feedback_note,
+    }
+
+
+async def get_branch_context(
+    db: AsyncSession,
+    *,
+    session_id: str,
+    user_id: int,
+    organization_id: int | None = None,
+    scope: SessionAccessScope | None = None,
+) -> dict[str, Any]:
+    """读取选中分支的消息 + 摘要 + 工件上下文，**不做任何写入**。
+
+    前端「点击分支原位切换」依赖本函数：切换视图不等于 fork，不得创建新会话、
+    不得复制消息、不得改动母/子会话行。越权/跨组织一律 404。
+    """
+    scope = _resolve_scope(scope, organization_id)
+    session = await _load_source(db, session_id, user_id, scope)
+
+    messages = await _load_messages(db, session.id)
+    artifacts = list(
+        (
+            await db.execute(
+                select(AgentArtifact)
+                .where(
+                    AgentArtifact.conversation_id == session.id,
+                    AgentArtifact.user_id == user_id,
+                    AgentArtifact.status == "ready",
+                )
+                .order_by(AgentArtifact.created_at.desc(), AgentArtifact.version_no.desc())
+                .limit(MAX_BRANCH_ARTIFACTS + 1)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    artifacts_truncated = len(artifacts) > MAX_BRANCH_ARTIFACTS
+    if artifacts_truncated:
+        artifacts = artifacts[:MAX_BRANCH_ARTIFACTS]
+    return {
+        "session_id": session.id,
+        "title": session.title,
+        "root_session_id": session.root_session_id or session.id,
+        "parent_session_id": session.parent_session_id,
+        "fork_point_message_id": session.fork_point_message_id,
+        "fork_reason": session.fork_reason,
+        "branch_label": session.branch_label,
+        "branch_summary": session.branch_summary,
+        "summary_model": session.summary_model,
+        "summarized_at": _iso(session.summarized_at),
+        # 原位切换需要的最小会话元数据（与 chat 详情同口径；不新增写路径）。
+        "created_at": _iso(session.created_at) or "",
+        "updated_at": _iso(session.updated_at),
+        "settings": session.settings if isinstance(session.settings, dict) else None,
+        "message_count": len(messages),
+        "artifact_count": len(artifacts),
+        "messages": [_message_payload(msg) for msg in messages],
+        "artifacts_truncated": artifacts_truncated,
+        "artifacts": [artifact_summary(row) for row in artifacts],
+    }
+
+
+async def set_branch_label(
+    db: AsyncSession,
+    *,
+    session_id: str,
+    user_id: int,
+    label: str | None,
+    organization_id: int | None = None,
+    scope: SessionAccessScope | None = None,
+) -> dict[str, Any]:
+    """设置/清除分支标签（空白视为清除）；只写 ``branch_label`` 一列。"""
+    scope = _resolve_scope(scope, organization_id)
+    session = await _load_source(db, session_id, user_id, scope)
+    clean = label.strip() if isinstance(label, str) else None
+    clean = clean or None
+    if clean is not None and len(clean) > BRANCH_LABEL_MAX_CHARS:
+        raise ValidationError(
+            f"分支标签过长（上限 {BRANCH_LABEL_MAX_CHARS} 字符）",
+            detail={"limit": BRANCH_LABEL_MAX_CHARS, "length": len(clean)},
+        )
+    session.branch_label = clean
+    await db.commit()
+    return {
+        "session_id": session.id,
+        "branch_label": clean,
+        "updated": True,
+    }
+
+
+def _extractive_summary(messages: list[ChatMessage]) -> str | None:
+    """确定性抽取式摘要：按消息顺序取要点，同一输入逐字稳定（fake 模式）。
+
+    这不是「假装 LLM 成功」：``fake`` 是显式模式，返回内容完全来自消息原文，
+    模型字段如实记 ``fake``；生产端点的默认模式是 ``llm``，模型不可用时
+    显式 503，绝不回落到这里冒充模型输出。
+    """
+    parts: list[str] = []
+    for msg in messages:
+        text = " ".join((msg.content or "").split())
+        if not text:
+            continue
+        if msg.message_type == MessageType.USER:
+            speaker = "用户"
+        elif msg.message_type == MessageType.ASSISTANT:
+            speaker = "助手"
+        else:
+            speaker = "系统"
+        parts.append(f"{speaker}: {text}")
+        if len("\n".join(parts)) >= BRANCH_SUMMARY_EXTRACT_CHARS:
+            break
+    joined = "\n".join(parts).strip()
+    if not joined:
+        return None
+    return joined[:BRANCH_SUMMARY_EXTRACT_CHARS].strip() or None
+
+
+def _summary_prompt(messages: list[ChatMessage]) -> str:
+    """把消息压成 LLM 输入（尾部 40 条、总长 8000 字符），避免超长请求。"""
+    lines: list[str] = []
+    for msg in messages[-40:]:
+        text = (msg.content or "").strip()
+        if not text:
+            continue
+        lines.append(f"{msg.message_type.value}: {text[:2000]}")
+    return "\n".join(lines)[:8000]
+
+
+async def _llm_summary(
+    db: AsyncSession, *, user_id: int, messages: list[ChatMessage]
+) -> tuple[str, str]:
+    """调用已配置的 LLM 生成摘要；不可用/失败一律显式抛 503，绝不伪造成功。
+
+    Returns:
+        (summary, model_name)
+    """
+    try:
+        resolution = await llm_settings_service.resolve_for_user(db, user_id=user_id)
+    except Exception as exc:  # noqa: BLE001 - 解析失败等价于模型不可用
+        raise BranchSummaryUnavailableError(
+            detail={"reason": "resolve_failed", "error": type(exc).__name__}
+        ) from exc
+    if resolution.client is None:
+        raise BranchSummaryUnavailableError(detail={"reason": "no_client"})
+    try:
+        response = await asyncio.wait_for(
+            resolution.client.chat.completions.create(
+                model=resolution.model,
+                messages=[
+                    {
+                        "role": "system",
+                        "content": (
+                            "你是会话分支摘要器。只根据给定消息，用简洁中文总结该分支的"
+                            "讨论要点与结论；不得编造消息之外的事实。"
+                        ),
+                    },
+                    {"role": "user", "content": _summary_prompt(messages)},
+                ],
+                temperature=0,
+                max_tokens=300,
+            ),
+            timeout=SUMMARY_LLM_TIMEOUT_SECONDS,
+        )
+        content = (response.choices[0].message.content or "").strip()
+    except Exception as exc:  # noqa: BLE001 - 上游失败必须可判定，不得静默降级
+        raise BranchSummaryUnavailableError(
+            detail={"reason": "llm_call_failed", "error": type(exc).__name__}
+        ) from exc
+    if not content:
+        raise BranchSummaryUnavailableError(detail={"reason": "empty_completion"})
+    return content[:BRANCH_SUMMARY_MAX_CHARS], resolution.model
+
+
+async def _clear_branch_summary(db: AsyncSession, session: ChatSession) -> None:
+    """清空分支摘要三列（空分支/全空正文时调用）。"""
+    session.branch_summary = None
+    session.summary_model = None
+    session.summarized_at = None
+    await db.commit()
+
+
+async def summarize_branch(
+    db: AsyncSession,
+    *,
+    session_id: str,
+    user_id: int,
+    mode: str,
+    organization_id: int | None = None,
+    scope: SessionAccessScope | None = None,
+) -> dict[str, Any]:
+    """生成并持久化分支摘要；无消息时如实返回「无摘要」，不写占位文本。
+
+    - ``fake``：确定性抽取式（同一消息序列输出逐字稳定），``summary_model="fake"``；
+    - ``llm``：调用已配置模型；无客户端/调用失败/空输出 → 503
+      ``SUMMARY_MODEL_UNAVAILABLE``，且**不落任何摘要**（绝不 fake 成功）。
+
+    只写 ``branch_summary`` / ``summary_model`` / ``summarized_at`` 三列；
+    不改消息、不建会话、不触发 fork。
+    """
+    normalized = (mode or "").strip().lower()
+    if normalized not in BRANCH_SUMMARY_MODES:
+        raise ValidationError(
+            "摘要模式非法（仅支持 fake/llm）",
+            detail={"mode": mode, "allowed": list(BRANCH_SUMMARY_MODES)},
+        )
+    scope = _resolve_scope(scope, organization_id)
+    session = await _load_source(db, session_id, user_id, scope)
+    messages = await _load_messages(db, session.id)
+    if not messages:
+        # 空分支：如实返回「没有可摘要内容」，并清掉旧摘要，避免树继续显示
+        # 与本次响应矛盾的陈旧内容。
+        await _clear_branch_summary(db, session)
+        return {
+            "session_id": session.id,
+            "generated": False,
+            "summary": None,
+            "summary_model": None,
+            "summarized_at": None,
+            "message_count": 0,
+        }
+
+    if normalized == "fake":
+        summary = _extractive_summary(messages)
+        model_name = "fake"
+    else:
+        summary, model_name = await _llm_summary(db, user_id=user_id, messages=messages)
+
+    if not summary:
+        # 全部消息正文为空：与「无消息」同口径，清掉旧摘要、不落占位摘要。
+        await _clear_branch_summary(db, session)
+        return {
+            "session_id": session.id,
+            "generated": False,
+            "summary": None,
+            "summary_model": None,
+            "summarized_at": None,
+            "message_count": len(messages),
+        }
+
+    now = datetime.now(UTC)
+    session.branch_summary = summary
+    session.summary_model = model_name
+    session.summarized_at = now
+    await db.commit()
+    return {
+        "session_id": session.id,
+        "generated": True,
+        "summary": summary,
+        "summary_model": model_name,
+        "summarized_at": now.isoformat(),
+        "message_count": len(messages),
     }

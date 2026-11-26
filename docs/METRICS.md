@@ -17,7 +17,7 @@
 | sse_event_types | 25 | live：`EventType = Literal[...]` 闭集（含 agent 事件子集 17；不含 `ThinkingType` 等非事件 Literal；批次七新增 `artifact`） | `cd backend && python scripts/check_doc_facts.py --print-derived` | 2026-11-25 | `docs/facts.json` 同值；源码 `backend/app/agent/events.py` |
 | endpoint_modules | 32 | live：`ROUTER_SPECS` 字典键（声明顺序、去重；不含嵌套 router 内部子模块；批次七新增 artifacts） | `cd backend && python scripts/check_doc_facts.py --print-derived` | 2026-11-25 | `docs/facts.json` 同值；源码 `backend/app/api/v1/router.py` |
 | frontend_routes | 44 | live：`routes` 数组 `path:` 字面量（**含 `children` 嵌套**；注释与 redirect 回调内对象不计） | `cd backend && python scripts/check_doc_facts.py --print-derived` | 2026-11-23 | `docs/facts.json` 同值；13 条顶层 + 28 条页面子路由（批次五新增 `/reviews/templates` 与 `/reviews/templates/:id`）；**36 条具名路由是另一口径** |
-| http_route_decorators | 284 | live：`@router.get/post/put/patch/delete/head/options` 装饰器总数（`app/api/v1/endpoints/**`，含子目录） | `cd backend && python scripts/check_doc_facts.py --print-derived` | 2026-11-25 | `docs/facts.json` 同值；批次四后为 252，批次五新增 1 个 bad-case 捕获端点与 10 个模板库端点，批次六 feature B 新增 4 个对方红线台账端点，批次七新增 4 个工件端点；不与 `endpoint_modules` 混用 |
+| http_route_decorators | 289 | live：`@router.get/post/put/patch/delete/head/options` 装饰器总数（`app/api/v1/endpoints/**`，含子目录） | `cd backend && python scripts/check_doc_facts.py --print-derived` | 2026-11-26 | `docs/facts.json` 同值；批次四后为 252，批次五新增 1 个 bad-case 捕获端点与 10 个模板库端点，批次六 feature B 新增 4 个对方红线台账端点，批次七新增 4 个工件端点，批次八新增 5 个会话树端点（tree/branch-context/branch-label/summary/share）；不与 `endpoint_modules` 混用 |
 | websocket_route_decorators | 3 | live：`@router.websocket` 装饰器数（`app/api/v1/endpoints/**`；与 HTTP 分开计） | `cd backend && python scripts/check_doc_facts.py --print-derived` | 2026-10-24 | `docs/facts.json` 同值 |
 
 ## 2. 检索评测（Eval v1.5）
