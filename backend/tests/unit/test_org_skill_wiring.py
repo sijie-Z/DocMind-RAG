@@ -162,6 +162,33 @@ async def test_reviewed_db_skill_is_injected_and_redis_ignored(factory, monkeypa
 
 
 @pytest.mark.asyncio
+async def test_loop_passes_visible_tool_names_to_matcher(monkeypatch):
+    """loop 必须把当前可见工具集传给 matcher；删掉该参数 → 本用例红。"""
+    from app.agent.loop import PERAgentLoop
+
+    captured: dict = {}
+
+    async def _match(session, **kwargs):
+        captured.update(kwargs)
+        return SimpleNamespace(
+            skill_id="s1",
+            version_no=1,
+            tool_sequence=[{"tool_name": "search_knowledge_base"}],
+        )
+
+    monkeypatch.setattr(svc, "match_skill", _match)
+    loop = PERAgentLoop(MagicMock(), AgentConfig(), organization_id=ORG)
+    monkeypatch.setattr(
+        loop,
+        "_get_tools",
+        lambda: [{"function": {"name": "search_knowledge_base"}}],
+    )
+    plan = Plan(id="p1", goal="g", steps=[PlanStep(id="s1", description="a")])
+    await loop._apply_skill_hints(plan, "总结季度财务报告")
+    assert captured.get("visible_tool_names") == {"search_knowledge_base"}
+
+
+@pytest.mark.asyncio
 async def test_redis_only_skill_is_not_injected(factory, monkeypatch):
     from app.agent import loop as loop_module
     from app.agent.loop import PERAgentLoop

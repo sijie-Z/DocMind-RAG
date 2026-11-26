@@ -822,7 +822,8 @@ async def test_matcher_rejects_forced_pointer_to_pending_rejected_or_archived(fa
         skill.enabled_version_no = pending_v2.version_no
         await db.commit()
     async with factory() as db:
-        assert await svc.match_skill(db, organization_id=ORG, query="总结季度财务报告") is None, (
+        # 触发词必须真正命中（否则删掉 approved 门也会因不匹配而通过）。
+        assert await svc.match_skill(db, organization_id=ORG, query="分析现金流") is None, (
             "指针指向 pending 版本不得注入"
         )
 
@@ -831,7 +832,7 @@ async def test_matcher_rejects_forced_pointer_to_pending_rejected_or_archived(fa
         version.review_status = "rejected"
         await db.commit()
     async with factory() as db:
-        assert await svc.match_skill(db, organization_id=ORG, query="总结季度财务报告") is None, (
+        assert await svc.match_skill(db, organization_id=ORG, query="分析现金流") is None, (
             "指针指向 rejected 版本不得注入"
         )
 
@@ -944,6 +945,11 @@ async def test_list_runtime_skills_only_enabled_approved(factory):
     enabled_id, _, _, enabled_no = await _create_skill(factory, name="已启用")
     await _approve(factory, enabled_id, enabled_no)
     await _enable(factory, enabled_id, enabled_no)
+    # 绕过写入侧，强行把 pending 技能指针指向 pending 版本：运行时列表必须排除。
+    async with factory() as db:
+        pending = await db.get(OrgSkill, pending_id)
+        pending.enabled_version_no = pending.latest_version
+        await db.commit()
     async with factory() as db:
         data = await svc.list_runtime_skills(db, organization_id=ORG)
     assert [row["id"] for row in data] == [enabled_id]
