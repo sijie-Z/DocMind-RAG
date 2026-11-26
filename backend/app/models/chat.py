@@ -133,7 +133,7 @@ class ChatSession(Base):
     branch_label: Mapped[str | None] = mapped_column(String(100), comment="分支展示标签")
     branch_summary: Mapped[str | None] = mapped_column(Text, comment="分支摘要（显式生成）")
     summary_model: Mapped[str | None] = mapped_column(
-        String(128), comment="摘要来源（fake 或模型名）"
+        String(200), comment="摘要来源（fake 或模型名）"
     )
     summarized_at: Mapped[datetime | None] = mapped_column(
         # 与 messages_cleared_at 同口径：MySQL 秒精度会丢摘要生成时间，显式 fsp=6。

@@ -658,6 +658,10 @@ const loadConversation = async (id: string, ownerGeneration?: string) => {
 const handleSelectBranch = async (branchId: string) => {
   if (!branchId || branchId === chatStore.currentConversation?.id) return
   const owner = advanceConversationGeneration()
+  // 切换分支等价于显式切换会话：必须清掉生成/流状态；WS 的 owner 在连接时
+  // 捕获，generation 一变旧 socket 的所有回调都会被丢弃，必须重连。
+  resetSendState()
+  if (!useSSE.value) disconnectWebSocket()
   const ownsResponse = () => conversationViewActive && owner === getConversationOwner()
   isLoadingHistory.value = true
   msgLoadError.value = false
@@ -691,7 +695,10 @@ const handleSelectBranch = async (branchId: string) => {
     message.error(t('chat.historyFailed'))
     msgLoadError.value = true
   } finally {
-    if (ownsResponse()) isLoadingHistory.value = false
+    if (ownsResponse()) {
+      isLoadingHistory.value = false
+      if (!useSSE.value) void connectWebSocket()
+    }
   }
 }
 

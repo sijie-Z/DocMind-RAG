@@ -120,6 +120,7 @@ export interface SessionTreeData {
   current_session_id: string
   root_present: boolean
   branch_count: number
+  branches_truncated: boolean
   tree_truncated: boolean
   branches: SessionTreeBranch[]
 }
@@ -151,6 +152,7 @@ export interface BranchContextData {
   settings: Record<string, unknown> | null
   message_count: number
   artifact_count: number
+  artifacts_truncated: boolean
   messages: BranchContextMessage[]
   artifacts: AgentArtifact[]
 }
@@ -241,7 +243,7 @@ export const sessionsApi = {
   shareTree(
     rootSessionId: string,
   ): Promise<AxiosResponse<ApiResponse<SessionTreeShareData>>> {
-    return request.get(`/sessions/tree/${rootSessionId}/share`, {
+    return request.post(`/sessions/tree/${rootSessionId}/share`, null, {
       headers: { 'X-Silent-Error': '1' },
     })
   },

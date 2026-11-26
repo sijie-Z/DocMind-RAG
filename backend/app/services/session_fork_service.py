@@ -127,6 +127,12 @@ SUMMARY_LLM_TIMEOUT_SECONDS = 30.0
 # 树遍历深度上限：损坏数据（环/超长链）不得让接口无限循环。
 _MAX_TREE_DEPTH = 50
 
+MAX_TREE_BRANCHES = 500
+"""单次树响应最多返回的分支数；超出时置 ``branches_truncated``。"""
+
+MAX_BRANCH_ARTIFACTS = 200
+"""分支上下文最多返回的工件行数；面板只展示计数，超出时置 ``artifacts_truncated``。"""
+
 # "源会话有运行中任务"的判定集合：PAUSED（fork 克隆产物）刻意不在其中；
 # FAILED/CANCELLED 等终态也不在——它们不是正在跑的 run。
 _ACTIVE_TASK_STATUSES = (
@@ -1194,14 +1200,21 @@ async def get_session_tree(
                 select(ChatSession)
                 .where(*conditions)
                 .order_by(ChatSession.created_at.asc(), ChatSession.id.asc())
+                .limit(MAX_TREE_BRANCHES + 1)
             )
         )
         .scalars()
         .all()
     )
+    branches_truncated = len(rows) > MAX_TREE_BRANCHES
+    if branches_truncated:
+        rows = rows[:MAX_TREE_BRANCHES]
     # 当前会话必须可见且已被上面的条件命中；防御性兜底，避免空树。
     if not any(row.id == current.id for row in rows):
-        rows.append(current)
+        if branches_truncated and rows:
+            rows[-1] = current
+        else:
+            rows.append(current)
 
     by_id = {row.id: row for row in rows}
     ids = list(by_id)
@@ -1217,8 +1230,16 @@ async def get_session_tree(
     fork_message_ids = [row.fork_point_message_id for row in rows if row.fork_point_message_id]
     fork_previews: dict[str, str] = {}
     if fork_message_ids:
+        # 只取前 120 字符（SQL 侧截断），并 join 会话表做 org/user 作用域，
+        # 避免把不可见父会话的正文读进内存。
         preview_rows = await db.execute(
-            select(ChatMessage.id, ChatMessage.content).where(ChatMessage.id.in_(fork_message_ids))
+            select(ChatMessage.id, func.substr(ChatMessage.content, 1, 120))
+            .join(ChatSession, ChatSession.id == ChatMessage.session_id)
+            .where(
+                ChatMessage.id.in_(fork_message_ids),
+                ChatSession.user_id == user_id,
+                *session_access_org_conditions(scope),
+            )
         )
         for message_id, content in preview_rows.all():
             text = " ".join((content or "").split())
@@ -1251,6 +1272,7 @@ async def get_session_tree(
         "current_session_id": current.id,
         "root_present": root_present,
         "branch_count": len(branches),
+        "branches_truncated": branches_truncated,
         "tree_truncated": tree_truncated,
         "branches": branches,
     }
@@ -1299,11 +1321,15 @@ async def get_branch_context(
                     AgentArtifact.status == "ready",
                 )
                 .order_by(AgentArtifact.created_at.desc(), AgentArtifact.version_no.desc())
+                .limit(MAX_BRANCH_ARTIFACTS + 1)
             )
         )
         .scalars()
         .all()
     )
+    artifacts_truncated = len(artifacts) > MAX_BRANCH_ARTIFACTS
+    if artifacts_truncated:
+        artifacts = artifacts[:MAX_BRANCH_ARTIFACTS]
     return {
         "session_id": session.id,
         "title": session.title,
@@ -1322,6 +1348,7 @@ async def get_branch_context(
         "message_count": len(messages),
         "artifact_count": len(artifacts),
         "messages": [_message_payload(msg) for msg in messages],
+        "artifacts_truncated": artifacts_truncated,
         "artifacts": [artifact_summary(row) for row in artifacts],
     }
 
@@ -1437,6 +1464,14 @@ async def _llm_summary(
     return content[:BRANCH_SUMMARY_MAX_CHARS], resolution.model
 
 
+async def _clear_branch_summary(db: AsyncSession, session: ChatSession) -> None:
+    """清空分支摘要三列（空分支/全空正文时调用）。"""
+    session.branch_summary = None
+    session.summary_model = None
+    session.summarized_at = None
+    await db.commit()
+
+
 async def summarize_branch(
     db: AsyncSession,
     *,
@@ -1465,7 +1500,9 @@ async def summarize_branch(
     session = await _load_source(db, session_id, user_id, scope)
     messages = await _load_messages(db, session.id)
     if not messages:
-        # 空分支：如实返回「没有可摘要内容」，不写库、不生成空串占位。
+        # 空分支：如实返回「没有可摘要内容」，并清掉旧摘要，避免树继续显示
+        # 与本次响应矛盾的陈旧内容。
+        await _clear_branch_summary(db, session)
         return {
             "session_id": session.id,
             "generated": False,
@@ -1482,7 +1519,8 @@ async def summarize_branch(
         summary, model_name = await _llm_summary(db, user_id=user_id, messages=messages)
 
     if not summary:
-        # 全部消息正文为空：与「无消息」同口径，不落占位摘要。
+        # 全部消息正文为空：与「无消息」同口径，清掉旧摘要、不落占位摘要。
+        await _clear_branch_summary(db, session)
         return {
             "session_id": session.id,
             "generated": False,

@@ -55,7 +55,7 @@ _COLUMNS = (
         "summary_model",
         lambda: sa.Column(
             "summary_model",
-            sa.String(length=128),
+            sa.String(length=200),
             nullable=True,
             comment="摘要来源（fake 或模型名）",
         ),

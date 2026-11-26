@@ -33,7 +33,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.core.security import get_current_user
-from app.exceptions import NotFoundError
+from app.exceptions import NotFoundError, ValidationError
 from app.models.user import User
 from app.schemas.session_fork import SessionForkRequest
 from app.services import session_fork_service
@@ -370,7 +370,7 @@ async def summarize_session_branch_endpoint(
     }
 
 
-@router.get(
+@router.post(
     "/tree/{root_session_id}/share",
     response_model=dict,
     dependencies=[Depends(get_current_user)],
@@ -392,6 +392,9 @@ async def share_session_tree_endpoint(
     session = await load_accessible_session(db, root_session_id, current_user, scope)
     if session is None:
         raise NotFoundError("会话不存在")
+    if session.parent_session_id is not None or session.root_session_id not in (None, session.id):
+        # 只允许分享树根：避免前端在树未加载/竞态时把子分支当根分享出去。
+        raise ValidationError("只能分享会话树的根会话", field="root_session_id")
     token = new_share_token()
     created_at = datetime.now(UTC)
     session.share_token_hash = share_token_digest(token)

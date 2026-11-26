@@ -25,6 +25,7 @@ from app.core.database import Base, get_db
 from app.core.security import get_current_user
 from app.models.artifact import AgentArtifact
 from app.models.chat import ChatMessage, ChatSession, ChatSessionStatus, MessageType
+from app.services import session_fork_service
 
 USER_ID = 1
 ORG_ID = 1
@@ -148,6 +149,23 @@ async def _seed_tree(factory):
         await _mk_session(db, "t-empty", title="空分支")
         await _mk_session(db, "t-foreign-org", title="外组织", org_id=ORG_ID + 1)
         await _mk_session(db, "t-foreign-user", title="他人", user_id=USER_ID + 1)
+        # 行级过滤的判别种子：同 root 但外组织/他人，必须被 tree 排除。
+        await _mk_session(
+            db,
+            "t-foreign-org-branch",
+            title="外组织分支",
+            org_id=ORG_ID + 1,
+            parent_session_id="t-root",
+            root_session_id="t-root",
+        )
+        await _mk_session(
+            db,
+            "t-foreign-user-branch",
+            title="他人分支",
+            user_id=USER_ID + 1,
+            parent_session_id="t-root",
+            root_session_id="t-root",
+        )
         await _mk_msg(db, "t-root", 1, MessageType.USER, "根问题", mid="fp-root")
         await _mk_msg(db, "t-root", 2, MessageType.ASSISTANT, "根回答")
         await _mk_msg(db, "t-child", 1, MessageType.USER, "子问题", mid="fp-child")
@@ -176,6 +194,8 @@ async def test_tree_contract_and_tenant_404(client, db_factory):
     assert branches["t-grand"]["is_current"] is True
     assert branches["t-child"]["artifact_count"] == 2
     assert branches["t-child"]["artifact_latest_version"] == 2
+    assert "t-foreign-org-branch" not in branches, "行级组织过滤失效"
+    assert "t-foreign-user-branch" not in branches, "行级用户过滤失效"
 
     for sid in ("t-foreign-org", "t-foreign-user", "missing"):
         r = client.get(f"/api/v1/sessions/{sid}/tree")
@@ -188,6 +208,8 @@ async def test_branch_context_switch_does_not_create_session(client, db_factory)
     await _seed_tree(db_factory)
     async with db_factory() as db:
         before = (await db.execute(select(func.count(ChatSession.id)))).scalar_one()
+        seq_before = (await db.get(ChatSession, "t-child")).next_message_seq
+        tree_sessions_before = (await db.execute(select(func.count(ChatSession.id)))).scalar_one()
 
     r = client.get("/api/v1/sessions/t-child/branch-context")
     assert r.status_code == 200
@@ -205,7 +227,46 @@ async def test_branch_context_switch_does_not_create_session(client, db_factory)
             )
         ).scalar_one()
     assert after == before, "切换分支不得创建会话（切视图 ≠ fork）"
+    async with db_factory() as db:
+        seq_after = (await db.get(ChatSession, "t-child")).next_message_seq
+        tree_sessions_after = (await db.execute(select(func.count(ChatSession.id)))).scalar_one()
+    assert seq_after == seq_before, "branch-context 不得推进会话消息序号（只读）"
+    assert tree_sessions_after == tree_sessions_before, "读取树上下文不得创建会话"
     assert fork_like == 1, "branch-context 不得隐式 fork（只允许种子里的 t-grand）"
+
+
+@pytest.mark.asyncio
+async def test_empty_summary_clears_previous_summary(client, db_factory):
+    """空分支摘要必须清掉旧摘要，不能 API 说无摘要而树仍显示旧内容。"""
+    await _seed_tree(db_factory)
+    async with db_factory() as db:
+        row = await db.get(ChatSession, "t-empty")
+        row.branch_summary = "旧摘要"
+        row.summary_model = "fake"
+        await db.commit()
+
+    r = client.post("/api/v1/sessions/t-empty/summary", json={"mode": "fake"})
+    assert r.status_code == 200, r.text
+    assert r.json()["data"]["generated"] is False
+
+    tree = client.get("/api/v1/sessions/t-empty/tree").json()["data"]
+    branch = next(node for node in tree["branches"] if node["session_id"] == "t-empty")
+    assert branch["branch_summary"] is None
+    async with db_factory() as db:
+        row = await db.get(ChatSession, "t-empty")
+        assert row.branch_summary is None
+        assert row.summary_model is None
+
+
+@pytest.mark.asyncio
+async def test_tree_response_is_bounded_and_flags_truncation(client, db_factory, monkeypatch):
+    """树宽超限时截断并置 branches_truncated，不能返回无界数组。"""
+    await _seed_tree(db_factory)
+    monkeypatch.setattr(session_fork_service, "MAX_TREE_BRANCHES", 2)
+    data = client.get("/api/v1/sessions/t-grand/tree").json()["data"]
+    assert data["branches_truncated"] is True
+    assert len(data["branches"]) == 2
+    assert any(node["session_id"] == "t-grand" for node in data["branches"]), "当前分支必须保留"
 
 
 @pytest.mark.asyncio
@@ -279,13 +340,14 @@ async def test_llm_summary_unavailable_is_503(client, db_factory, monkeypatch):
 async def test_tree_share_reuses_chat_share_token_and_tenant_404(client, db_factory):
     await _seed_tree(db_factory)
 
-    r = client.get("/api/v1/sessions/tree/t-root/share")
+    r = client.post("/api/v1/sessions/tree/t-root/share")
     assert r.status_code == 200
     data = r.json()["data"]
     assert data["root_session_id"] == "t-root"
     token = data["token"]
     assert data["url"] == f"/share/{token}"
     assert token
+    assert r.headers.get("cache-control") == "no-store", "分享 token 是凭证，响应不得被缓存"
 
     # 既有公开只读端点即可读取根会话快照：证明没有第二套 token/鉴权。
     public = client.get(f"/api/v1/chat/shares/{token}")
@@ -295,13 +357,18 @@ async def test_tree_share_reuses_chat_share_token_and_tenant_404(client, db_fact
     assert [m["content"] for m in snapshot["messages"]] == ["根问题", "根回答"]
 
     # 再次调用轮换 token，旧链接立即失效。
-    rotated = client.get("/api/v1/sessions/tree/t-root/share").json()["data"]["token"]
+    rotated = client.post("/api/v1/sessions/tree/t-root/share").json()["data"]["token"]
     assert rotated != token
     assert client.get(f"/api/v1/chat/shares/{token}").status_code == 404
     assert client.get(f"/api/v1/chat/shares/{rotated}").status_code == 200
 
+    # 只允许分享树根：子分支不得被误分享。
+    child_share = client.post("/api/v1/sessions/tree/t-child/share")
+    assert child_share.status_code == 400
+    assert child_share.json()["error_code"] == "VALIDATION_ERROR"
+
     # 他人组织/他人用户一律 404；不泄露存在性。
     for sid in ("t-foreign-org", "t-foreign-user", "missing"):
-        r = client.get(f"/api/v1/sessions/tree/{sid}/share")
+        r = client.post(f"/api/v1/sessions/tree/{sid}/share")
         assert r.status_code == 404
         assert r.json()["error_code"] == "NOT_FOUND"

@@ -3,15 +3,17 @@
     v-if="show"
     class="fixed inset-0 z-40"
     data-testid="session-tree-panel"
-    @keydown.esc="close"
+    @keydown.esc.stop="close"
   >
     <div class="absolute inset-0 bg-black/30" @click="close"></div>
     <aside
+      ref="dialogRef"
       class="absolute right-0 top-0 flex h-full w-[440px] max-w-full flex-col bg-white shadow-2xl dark:bg-gray-900"
       role="dialog"
       aria-modal="true"
       :aria-label="t('chat.sessionTree.title')"
       tabindex="-1"
+      @keydown.tab="trapFocus"
     >
       <header
         class="flex items-start justify-between gap-3 border-b border-gray-100 px-4 py-3 dark:border-gray-800"
@@ -88,7 +90,7 @@
                 'session-tree-node',
                 node.is_current ? 'session-tree-node--active' : ''
               ]"
-              :style="{ marginLeft: `${node.depth * 14}px` }"
+              :style="{ marginLeft: `${Math.min(node.depth, 20) * 14}px` }"
               :data-session-id="node.session_id"
               :data-active="node.is_current ? 'true' : 'false'"
             >
@@ -195,7 +197,7 @@
                   :aria-label="t('chat.sessionTree.labelInput')"
                   data-testid="session-tree-label-input"
                   @keydown.enter.prevent="saveLabel(node)"
-                  @keydown.esc.prevent="editingId = ''"
+                  @keydown.esc.prevent.stop="editingId = ''"
                 />
                 <button
                   type="button"
@@ -258,7 +260,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { apiUnwrap } from '@/utils/apiUnwrap'
 import { sessionsApi, type SessionTreeBranch, type SessionTreeData } from '@/api/sessions'
@@ -293,7 +295,49 @@ const visibleBranches = computed(() => {
     return label.includes(q) || title.includes(q)
   })
 })
-const shareRootId = computed(() => tree.value?.root_session_id || props.sessionId)
+// 只在树成功加载且根仍可见时允许分享；绝不用当前分支做静默兜底，
+// 否则树未加载/根已删除时会把子分支当根分享出去。
+const shareRootId = computed(() =>
+  tree.value?.root_present ? tree.value.root_session_id : '',
+)
+
+const dialogRef = ref<HTMLElement | null>(null)
+let previousFocus: HTMLElement | null = null
+
+watch(
+  () => props.show,
+  async (visible) => {
+    if (visible) {
+      previousFocus =
+        document.activeElement instanceof HTMLElement ? document.activeElement : null
+      await nextTick()
+      dialogRef.value?.focus()
+    } else {
+      previousFocus?.focus()
+      previousFocus = null
+    }
+  },
+)
+
+function trapFocus(event: KeyboardEvent) {
+  const root = dialogRef.value
+  if (!root) return
+  const focusables = Array.from(
+    root.querySelectorAll<HTMLElement>(
+      'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+    ),
+  ).filter((el) => el.offsetParent !== null)
+  if (!focusables.length) return
+  const first = focusables[0]
+  const last = focusables[focusables.length - 1]
+  if (!event.shiftKey && document.activeElement === last) {
+    event.preventDefault()
+    first.focus()
+  } else if (event.shiftKey && document.activeElement === first) {
+    event.preventDefault()
+    last.focus()
+  }
+}
 
 const close = () => emit('update:show', false)
 
@@ -303,7 +347,10 @@ function summaryErrorText(code: 'unavailable' | 'empty' | 'failed'): string {
   return t('chat.sessionTree.summaryFailedGeneric')
 }
 
+let treeRequestSeq = 0
+
 async function loadTree(sessionId: string = props.sessionId) {
+  const seq = ++treeRequestSeq
   tree.value = null
   error.value = false
   summaryErrors.value = {}
@@ -315,6 +362,7 @@ async function loadTree(sessionId: string = props.sessionId) {
   loading.value = true
   try {
     const res = await sessionsApi.tree(sessionId)
+    if (seq !== treeRequestSeq) return
     const data = apiUnwrap<SessionTreeData | null>(res)
     if (data && Array.isArray(data.branches)) {
       tree.value = data
@@ -322,9 +370,10 @@ async function loadTree(sessionId: string = props.sessionId) {
       error.value = true
     }
   } catch {
+    if (seq !== treeRequestSeq) return
     error.value = true
   } finally {
-    loading.value = false
+    if (seq === treeRequestSeq) loading.value = false
   }
 }
 
@@ -352,6 +401,10 @@ async function generateSummary(node: SessionTreeBranch) {
       summarized_at?: string | null
     } | null>(res)
     if (!data?.generated || !data.summary) {
+      // 空分支：清掉旧摘要，避免树继续显示与本次响应矛盾的陈旧内容。
+      node.branch_summary = null
+      node.summary_model = null
+      node.summarized_at = null
       summaryErrors.value = { ...summaryErrors.value, [node.session_id]: 'empty' }
       return
     }
@@ -415,10 +468,17 @@ async function shareTree() {
     const data = apiUnwrap<{ url?: string } | null>(res)
     if (!data?.url) throw new Error('missing share url')
     shareLink.value = `${window.location.origin}${data.url}`
+  } catch {
+    shareError.value = t('chat.sessionTree.shareFailed')
+    shareBusy.value = false
+    return
+  }
+  try {
+    // 链接已创建成功；复制失败不应显示成「分享失败」。
     await copyLink(shareLink.value)
     shareCopied.value = true
   } catch {
-    shareError.value = t('chat.sessionTree.shareFailed')
+    shareCopied.value = false
   } finally {
     shareBusy.value = false
   }

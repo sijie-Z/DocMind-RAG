@@ -68,6 +68,7 @@ function tree(branches: SessionTreeBranch[]): SessionTreeData {
     current_session_id: branches.find((b) => b.is_current)?.session_id ?? 'root',
     root_present: branches.some((b) => b.session_id === 'root'),
     branch_count: branches.length,
+    branches_truncated: false,
     tree_truncated: false,
     branches,
   }
@@ -250,6 +251,32 @@ describe('SessionTreePanel · 摘要 / 分享 / 标签', () => {
     expect(
       (wrapper.find('[data-testid="session-tree-share-link"]').element as HTMLInputElement).value,
     ).toBe(`${window.location.origin}/share/tok-123`)
+  })
+
+  it('树未加载或根不可见时分享禁用，绝不用当前分支兜底', async () => {
+    mockTree(tree([CHILD]))
+    const wrapper = mountPanel()
+    await flushPromises()
+    const share = wrapper.find('[data-testid="session-tree-share"]')
+    expect(share.attributes('disabled')).toBeDefined()
+    await share.trigger('click')
+    await flushPromises()
+    expect(shareTreeMock).not.toHaveBeenCalled()
+  })
+
+  it('空分支摘要清掉旧摘要，不显示陈旧内容', async () => {
+    mockTree(tree([ROOT, { ...CHILD, branch_summary: '旧摘要', summary_model: 'fake' }]))
+    summarizeMock.mockResolvedValue({
+      data: { success: true, data: { generated: false, summary: null } },
+    })
+    const wrapper = mountPanel()
+    await flushPromises()
+    const child = wrapper.find('[data-session-id="child"]')
+    expect(child.text()).toContain('旧摘要')
+    await child.find('[data-testid="session-tree-summarize"]').trigger('click')
+    await flushPromises()
+    expect(child.text()).not.toContain('旧摘要')
+    expect(wrapper.find('[data-testid="session-tree-summary-error"]').exists()).toBe(true)
   })
 
   it('标签编辑保存后只更新该分支标签', async () => {
