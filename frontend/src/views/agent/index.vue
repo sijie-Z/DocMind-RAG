@@ -97,6 +97,7 @@
             :tasks="recentTasks"
             :loading="tasksLoading"
             @view-replay="handleTaskReplayClick"
+            @save-skill="handleTaskSaveSkill"
           />
         </n-popover>
         <button class="header-btn" @click="showConfig = !showConfig" :class="{ active: showConfig }">
@@ -424,9 +425,18 @@
 
             <!-- 回放入口：本次运行完整结束且确有回放数据（GET task 的 has_replay
                  如实标记；无数据不亮入口，深链/任务列表可达诚实空态） -->
-            <div v-if="showReplayEntry(idx, msg)" class="replay-entry-line">
-              <button class="replay-entry-btn" @click="openReplay(agentStore.taskId!)">
+            <div v-if="showReplayEntry(idx, msg) || canSaveCurrentRun(idx, msg)" class="replay-entry-line">
+              <button v-if="showReplayEntry(idx, msg)" class="replay-entry-btn" @click="openReplay(agentStore.taskId!)">
                 <n-icon size="14" class="mr-1" aria-hidden="true"><TimeOutline /></n-icon>{{ t('agentReplay.entry') }}
+              </button>
+              <!-- 批次十：completed run → 提议为组织技能（pending，需人工审核） -->
+              <button
+                v-if="canSaveCurrentRun(idx, msg)"
+                class="save-skill-entry-btn"
+                data-testid="agent-save-skill"
+                @click="openSaveSkill(agentStore.taskId!)"
+              >
+                {{ t('orgSkills.saveFromRun') }}
               </button>
             </div>
 
@@ -506,6 +516,15 @@
       @close="closeReplay"
     />
 
+    <!-- 批次十：从 completed run 提议组织技能（只写 pending 版本，需人工审核） -->
+    <SaveRunAsSkillModal
+      v-if="saveSkillVisible"
+      v-model:show="saveSkillVisible"
+      :task-id="saveSkillTaskId"
+      :default-name="saveSkillName"
+      @saved="handleSkillSaved"
+    />
+
     <!-- 持久终端抽屉（issue #477）：xterm 面板挂在现有 /agent 页右侧，不新增路由 -->
     <n-drawer v-model:show="showTerminal" placement="right" :width="760">
       <n-drawer-content :title="t('agent.terminal.title')" closable>
@@ -545,6 +564,7 @@ import { sessionsApi, type SessionForkData, type SessionLineageData } from '@/ap
 import { apiUnwrap } from '@/utils/apiUnwrap'
 import { executionStepResultText } from '@/utils/agentPlan'
 import { useDedupedMessage } from '@/utils/message'
+import SaveRunAsSkillModal from '@/components/agent/SaveRunAsSkillModal.vue'
 import { useConfirmDangerousAction } from '@/utils/confirm'
 import type {
   AgentEvent,
@@ -705,6 +725,11 @@ const lastRunHasReplay = ref<boolean | null>(null)
 const showTasks = ref(false)
 const recentTasks = ref<AgentTaskListItem[]>([])
 const tasksLoading = ref(false)
+
+// 批次十：从 completed run 提议组织技能（只写 pending 版本）
+const saveSkillVisible = ref(false)
+const saveSkillTaskId = ref('')
+const saveSkillName = ref('')
 
 const suggestions = computed(() => [
   t('agent.emptySuggestion1'),
@@ -1589,6 +1614,43 @@ function showReplayEntry(idx: number, msg: AgentChatMessage): boolean {
     !msg.loading &&
     !!agentStore.taskId
   )
+}
+
+/** 批次十：completed run 可提议为组织技能（与回放标记解耦）。 */
+function canSaveCurrentRun(idx: number, msg: AgentChatMessage): boolean {
+  return (
+    agentStore.taskState === 'completed' &&
+    idx === agentStore.messages.length - 1 &&
+    msg.role === 'assistant' &&
+    !msg.loading &&
+    !!agentStore.taskId
+  )
+}
+
+/** 默认技能名：本次任务查询（任务列表传入）或最后一条用户消息，压成单行 ≤100。 */
+function defaultSkillName(taskQuery?: string): string {
+  const lastUser = [...agentStore.messages].reverse().find((m) => m.role === 'user')?.content || ''
+  const normalized = (taskQuery || lastUser).replace(/\s+/g, ' ').trim()
+  return normalized.slice(0, 100)
+}
+
+function openSaveSkill(taskId: string, taskQuery?: string) {
+  if (!taskId) return
+  saveSkillTaskId.value = taskId
+  saveSkillName.value = defaultSkillName(taskQuery)
+  saveSkillVisible.value = true
+}
+
+function handleTaskSaveSkill(task: AgentTaskListItem) {
+  showTasks.value = false
+  openSaveSkill(task.task_id, task.query)
+}
+
+async function handleSkillSaved() {
+  saveSkillVisible.value = false
+  if (router) {
+    await router.push('/organization-skills?pending=1')
+  }
 }
 
 /** URL 深链同步：?id=<task_id> 可刷新/分享直达；关闭面板时清掉。 */
@@ -2679,6 +2741,9 @@ async function loadInit() {
 /* 回放入口（完成后入口行；时间线 dock 样式随 ReplayTimeline 组件走） */
 .replay-entry-line {
   margin-top: 8px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 
 .replay-entry-btn {
@@ -2699,6 +2764,26 @@ async function loadInit() {
   color: #93c5fd;
   border-color: rgba(59, 130, 246, 0.5);
   background: rgba(59, 130, 246, 0.12);
+}
+
+.save-skill-entry-btn {
+  border: 1px solid rgba(5, 150, 105, 0.4);
+  color: #047857;
+  background: rgba(5, 150, 105, 0.06);
+  border-radius: 6px;
+  font-size: 12px;
+  padding: 3px 12px;
+  cursor: pointer;
+}
+
+.save-skill-entry-btn:hover {
+  background: rgba(5, 150, 105, 0.14);
+}
+
+.dark .save-skill-entry-btn {
+  color: #6ee7b7;
+  border-color: rgba(16, 185, 129, 0.5);
+  background: rgba(16, 185, 129, 0.12);
 }
 
 /* Status bar */
