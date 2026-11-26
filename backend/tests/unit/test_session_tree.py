@@ -154,12 +154,12 @@ def _columns(db_path: Path, table: str = "chat_sessions") -> dict[str, tuple]:
 
 
 def test_043_single_head_migration_source_guard():
-    """043 接在 042 之后；批次九集成后唯一 head 是 045。DDL 无 server_default、无逐条 drop_index。"""
+    """043 接在 042 之后；批次十集成后唯一 head 是 046。DDL 无 server_default、无逐条 drop_index。"""
     script = ScriptDirectory.from_config(_cfg())
     rev = script.get_revision(MIGRATION)
     assert rev is not None and rev.down_revision == PREVIOUS
     assert len(MIGRATION) <= 32, "MySQL alembic_version.version_num 是 VARCHAR(32)"
-    assert set(script.get_heads()) == {"045_artifact_share"}
+    assert set(script.get_heads()) == {"046_org_skill"}
 
     migration = (BACKEND_ROOT / "alembic" / "versions" / f"{MIGRATION}.py").read_text(
         encoding="utf-8"
@@ -195,7 +195,7 @@ def test_043_roundtrip_preserves_historical_rows(tmp_path, monkeypatch):
         conn.commit()
 
     command.upgrade(cfg, "head")
-    assert _revision(db_path) == {"045_artifact_share"}
+    assert _revision(db_path) == {"046_org_skill"}
     columns = _columns(db_path)
     assert set(NEW_COLUMNS) <= set(columns)
     for name in NEW_COLUMNS:
@@ -232,7 +232,7 @@ def test_043_roundtrip_preserves_historical_rows(tmp_path, monkeypatch):
 
     # 再次升级仍幂等成功，历史行不受影响。
     command.upgrade(cfg, "head")
-    assert _revision(db_path) == {"045_artifact_share"}
+    assert _revision(db_path) == {"046_org_skill"}
     assert set(NEW_COLUMNS) <= set(_columns(db_path))
 
 

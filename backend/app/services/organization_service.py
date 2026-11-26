@@ -26,6 +26,7 @@ from app.models.document import Document
 from app.models.eval_rubric import EvalRubric, EvalRubricRun, EvalRubricVersion
 from app.models.knowledge_base import KnowledgeBase
 from app.models.knowledge_job import KnowledgeProcessingJob
+from app.models.org_skill import OrgSkill, OrgSkillVersion
 from app.models.organization import Organization, user_organization
 from app.models.organization_settings import OrganizationSettings
 from app.models.prompt import PromptTemplate
@@ -416,6 +417,10 @@ class OrganizationService:
         # 批次九：工件分享记录同样以 organization_id 外键引用 organizations；
         # 未纳入清理会触发 MySQL 1451。分享是工件的附属审计资产，一起转移。
         ("工件分享", AgentArtifactShare),
+        # 批次十：组织技能与版本都以 organization_id 外键引用 organizations；
+        # 技能是组织资产（只归档、不删除），组织删除必须先转移，否则 1451。
+        ("组织技能", OrgSkill),
+        ("组织技能版本", OrgSkillVersion),
     )
 
     async def _assert_org_has_no_attached_data(self, db: AsyncSession, org_ids: list[int]) -> None:

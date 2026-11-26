@@ -54,7 +54,7 @@ def test_045_revision_chain():
     rev = script.get_revision(HEAD)
     assert rev.down_revision == PREVIOUS
     assert len(HEAD) <= 32, "MySQL alembic_version.version_num 是 VARCHAR(32)"
-    assert set(script.get_heads()) == {HEAD}, "045 必须是当前唯一 head"
+    assert set(script.get_heads()) == {"046_org_skill"}, "批次十后唯一 head 是 046"
 
 
 def test_045_downgrade_does_not_drop_indexes_before_tables():

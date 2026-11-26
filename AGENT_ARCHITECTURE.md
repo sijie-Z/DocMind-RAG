@@ -432,7 +432,7 @@ backend/app/agent/
   ├── loop.py            # PERAgentLoop 主循环
   ├── memory_bridge.py   # 记忆系统桥接
   ├── context.py         # 上下文压缩
-  ├── skills.py          # 技能学习
+  ├── skills.py          # 旧技能模块（仅基准/测试；生产已停用自动学习）
   ├── subagent.py        # 子代理委托
   ├── service.py         # AgentService 入口
   ├── core_tools.py      # 核心工具（11 个）

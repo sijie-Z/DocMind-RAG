@@ -1,9 +1,14 @@
 <template>
   <div class="min-h-screen bg-gradient-to-br from-slate-50 via-white to-blue-50 dark:from-gray-950 dark:via-gray-900 dark:to-slate-950 p-6">
     <div class="max-w-5xl mx-auto">
-      <div class="mb-6">
-        <h1 class="text-3xl font-bold text-gray-800 dark:text-white">{{ t('menu.organizationSettings') }}</h1>
-        <p class="text-gray-500 dark:text-gray-400 mt-1 text-sm">{{ t('orgSettings.subtitle') }}</p>
+      <div class="mb-6 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+        <div>
+          <h1 class="text-3xl font-bold text-gray-800 dark:text-white">{{ t('menu.organizationSettings') }}</h1>
+          <p class="text-gray-500 dark:text-gray-400 mt-1 text-sm">{{ t('orgSettings.subtitle') }}</p>
+        </div>
+        <n-button secondary round tag="a" href="/organization-skills" data-testid="open-org-skills">
+          {{ t('orgSkills.openLibrary') }}
+        </n-button>
       </div>
 
       <n-alert v-if="!orgId" type="warning" :show-icon="true">

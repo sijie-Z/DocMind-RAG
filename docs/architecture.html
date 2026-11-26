@@ -146,7 +146,7 @@ code,.mono{font-family:'SF Mono','Fira Code','JetBrains Mono','Cascadia Code',mo
   <div class="badge-row">
     <span class="badge"><span class="dot g"></span><a href="index.html" style="color:var(--text2);text-decoration:none;">← 返回首页</a></span>
     <span class="badge"><span class="dot g"></span>3084 个测试</span>
-    <span class="badge"><span class="dot b"></span>34 API 模块</span>
+    <span class="badge"><span class="dot b"></span>35 API 模块</span>
     <span class="badge"><span class="dot a"></span>32 Agent 工具</span>
     <span class="badge"><span class="dot a"></span>32 Agent 工具</span>
     <span class="badge">100,000+ LOC</span>
@@ -159,7 +159,7 @@ code,.mono{font-family:'SF Mono','Fira Code','JetBrains Mono','Cascadia Code',mo
   <div class="sec-head"><span class="sec-num">01</span><h2>系统总览</h2><span class="meta">2026.05</span></div>
 
   <div class="g3" style="margin-bottom:14px">
-    <div class="card" style="text-align:center;padding:24px"><div class="big">34</div><div class="sl">后端 API 模块</div></div>
+    <div class="card" style="text-align:center;padding:24px"><div class="big">35</div><div class="sl">后端 API 模块</div></div>
     <div class="card" style="text-align:center;padding:24px"><div class="big">20+</div><div class="sl">前端视图</div></div>
     <div class="card" style="text-align:center;padding:24px"><div class="big">4</div><div class="sl">语言支持</div></div>
     <div class="card" style="text-align:center;padding:24px"><div class="big">32</div><div class="sl">Agent 工具</div></div>
@@ -250,7 +250,7 @@ code,.mono{font-family:'SF Mono','Fira Code','JetBrains Mono','Cascadia Code',mo
       <rect x="85" y="361" width="130" height="26" rx="5" fill="#0F1221" stroke="#F59E0B" stroke-width="1.2"/>
       <text x="150" y="378" text-anchor="middle" font-size="8" fill="#E8EAF6">上下文引擎</text>
       <rect x="85" y="394" width="130" height="26" rx="5" fill="#0F1221" stroke="#F59E0B" stroke-width="1.2"/>
-      <text x="150" y="411" text-anchor="middle" font-size="8" fill="#E8EAF6">技能学习</text>
+      <text x="150" y="411" text-anchor="middle" font-size="8" fill="#E8EAF6">组织技能库</text>
 
       <!-- RAG 管道 -->
       <rect x="270" y="270" width="360" height="170" rx="7" fill="none" stroke="#3B82F6" stroke-width="1" stroke-dasharray="5,3" opacity=".5"/>
@@ -415,20 +415,20 @@ code,.mono{font-family:'SF Mono','Fira Code','JetBrains Mono','Cascadia Code',mo
 
 <!-- ═══ 03. 后端架构 ═══ -->
 <div class="sec" id="backend">
-  <div class="sec-head"><span class="sec-num">03</span><h2>后端架构</h2><span class="meta">FastAPI · 34 路由模块</span></div>
+  <div class="sec-head"><span class="sec-num">03</span><h2>后端架构</h2><span class="meta">FastAPI · 35 路由模块</span></div>
 
   <div class="card">
     <div class="card-title"><span class="arrow" onclick="toggle(this)">▶</span> 📦 模块结构</div>
     <div class="card-body show">
       <pre style="font-size:.72rem;color:var(--text2);line-height:1.8;background:var(--bg3);padding:14px;border-radius:8px;overflow-x:auto"><code>backend/app/
 ├── api/v1/          # REST 端点 (auth, chat, documents, agent, knowledge...)
-│   └── endpoints/   # 34 个路由模块
+│   └── endpoints/   # 35 个路由模块
 ├── agent/           # PER Agent 系统
 │   ├── loop.py      # Agent 主循环
 │   ├── registry.py  # 工具注册中心
 │   ├── context.py   # 上下文引擎
 │   ├── events.py    # SSE 事件模型
-│   ├── skills.py    # 技能学习
+│   ├── skills.py    # 旧技能模块（仅基准/测试）
 │   ├── core_tools.py # 基础工具（11 个）
 │   └── tools/       # 扩展工具（与 core_tools 合计 32 个内置工具）
 ├── core/            # 基础设施 (config, database, redis, security, tracing)

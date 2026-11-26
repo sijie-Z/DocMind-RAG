@@ -302,6 +302,18 @@ export const routes: RouteRecordRaw[] = [
         }
       },
       {
+        // 批次十：评审门控的组织技能库（列表/版本/结构化 diff/审核/启用回滚归档）。
+        // 从组织设置与「保存为技能」入口进入；菜单面无独立项 → 高亮归属组织设置。
+        path: 'organization-skills',
+        name: 'OrganizationSkills',
+        component: () => import('@/views/organizations/skills.vue'),
+        meta: {
+          title: 'router.orgSkills',
+          activeMenu: 'OrganizationSettings',
+          icon: 'organization'
+        }
+      },
+      {
         path: 'users',
         name: 'Users',
         component: () => import('@/views/users/index.vue'),

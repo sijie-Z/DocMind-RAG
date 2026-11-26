@@ -86,18 +86,15 @@ class TestTenantWiring:
 
     @pytest.mark.asyncio
     async def test_loop_sets_ctx_organization_id(self):
-        from types import SimpleNamespace
         from unittest.mock import MagicMock
 
         from app.agent.config import AgentConfig
         from app.agent.loop import PERAgentLoop
 
         loop = PERAgentLoop(MagicMock(), AgentConfig(), organization_id=77, user_id=1)
-        ctx = SimpleNamespace(task_id="t", query="q", organization_id=None)
-        with patch("app.agent.exec_context.ExecutionContext", return_value=ctx):
-            # run() 内的赋值点在首段：直接断言 loop 侧维护的组织字段与取 store 口径
-            assert loop.skill_manager.organization_id == 77
-            assert loop.skill_manager.redis_key == "agent:skills:org:77"
+        # 批次十：Redis SkillManager 已移出生产 loop；租户字段仍必须按构造参数落账。
+        assert loop.organization_id == 77
+        assert not hasattr(loop, "skill_manager"), "生产 loop 不得再持有 Redis SkillManager"
 
     def test_get_experience_store_uses_org_for_redis_key(self):
         a = get_experience_store(101)
