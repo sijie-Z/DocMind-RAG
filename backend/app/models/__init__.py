@@ -4,6 +4,7 @@ from app.models.agent_tool_call import AgentToolCall, AgentToolResult, ToolCallS
 from app.models.answer_quality_eval import AnswerQualityEvalRun
 from app.models.api_key import ApiKey
 from app.models.artifact import ARTIFACT_KINDS, ARTIFACT_STATUSES, AgentArtifact
+from app.models.artifact_share import AgentArtifactShare
 from app.models.chat import ChatMessage, ChatSession, DeletedChatSession
 from app.models.document import Document
 from app.models.eval_rubric import EvalRubric, EvalRubricRun, EvalRubricVersion
@@ -59,6 +60,7 @@ __all__ = [
     "AgentArtifact",
     "ARTIFACT_KINDS",
     "ARTIFACT_STATUSES",
+    "AgentArtifactShare",
     "Organization",
     "OrganizationSettings",
     "user_organization",
