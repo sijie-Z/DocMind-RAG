@@ -477,6 +477,32 @@ async def test_poison_payload_read_paths_fail_closed(factory):
             )
 
 
+@pytest.mark.asyncio
+async def test_poison_rollback_default_target_fails_closed(factory):
+    """默认回滚目标的直查也读 payload_json：损坏行必须 409，不得 500。"""
+    skill_id, _, v1_id, _ = await _create_skill(factory)
+    async with factory() as db:
+        _, v2 = await svc.create_proposal(
+            db,
+            organization_id=ORG,
+            user_id=AUTHOR,
+            skill_id=skill_id,
+            payload=_payload(trigger_phrases=["分析现金流"]),
+        )
+    await _approve(factory, skill_id, 1)
+    await _approve(factory, skill_id, v2.version_no)
+    await _enable(factory, skill_id, v2.version_no)
+    async with factory() as db:
+        await db.execute(
+            text("UPDATE org_skill_version SET payload_json = '{broken' WHERE id = :id"),
+            {"id": v1_id},
+        )
+        await db.commit()
+    async with factory() as db:
+        with pytest.raises(ConflictError):
+            await svc.rollback_skill(db, organization_id=ORG, skill_id=skill_id, user_id=REVIEWER)
+
+
 # ── 审核 ────────────────────────────────────────────────────────────────────
 
 

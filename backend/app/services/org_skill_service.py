@@ -985,7 +985,15 @@ async def rollback_skill(
             .order_by(OrgSkillVersion.version_no.desc())
             .limit(1)
         )
-        target = (await session.execute(stmt)).scalar_one_or_none()
+        try:
+            target = (await session.execute(stmt)).scalar_one_or_none()
+        except (TypeError, ValueError) as exc:
+            logger.warning(
+                "Org skill rollback target payload deserialization failed (skill=%s)", skill.id
+            )
+            raise ConflictError(
+                "技能版本数据损坏，请联系管理员", error_code="ORG_SKILL_VERSION_CORRUPT"
+            ) from exc
         if target is None:
             raise ConflictError(
                 "没有可回滚的历史批准版本", error_code="ORG_SKILL_NO_ROLLBACK_TARGET"
