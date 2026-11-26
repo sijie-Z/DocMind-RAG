@@ -12,10 +12,11 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import i18n from '@/locales'
 
-const { listMock, getMock, fetchContentMock } = vi.hoisted(() => ({
+const { listMock, getMock, fetchContentMock, getShareMock } = vi.hoisted(() => ({
   listMock: vi.fn(),
   getMock: vi.fn(),
   fetchContentMock: vi.fn(),
+  getShareMock: vi.fn(),
 }))
 
 vi.mock('@/api/artifacts', () => ({
@@ -24,6 +25,9 @@ vi.mock('@/api/artifacts', () => ({
     get: getMock,
     fetchContent: fetchContentMock,
     create: vi.fn(),
+    getShare: getShareMock,
+    createShare: vi.fn(),
+    revokeShare: vi.fn(),
   },
 }))
 
@@ -78,6 +82,9 @@ beforeEach(() => {
     data: { success: true, data: artifact({ versions: [artifact()] }) },
   })
   fetchContentMock.mockResolvedValue(textResponse('# 报告正文'))
+  getShareMock.mockResolvedValue({
+    data: { success: true, data: { shared: false, created_at: null, expires_at: null, revoked_at: null } },
+  })
 })
 
 describe('ArtifactRail · 真实工件列表', () => {
@@ -191,5 +198,17 @@ describe('ArtifactRail · 真实工件列表', () => {
     const w = mountRail()
     await flushPromises()
     expect(w.find('[data-testid="artifact-rail-error"]').exists()).toBe(true)
+  })
+
+  it('详情区分享按钮打开对话框并拉取该工件的分享状态', async () => {
+    const w = mountRail()
+    await flushPromises()
+    await w.find('[data-testid="artifact-item-art-1"]').trigger('click')
+    await flushPromises()
+    await w.find('[data-testid="artifact-share-open"]').trigger('click')
+    await flushPromises()
+    expect(getShareMock).toHaveBeenCalledWith('art-1')
+    expect(w.find('[data-testid="artifact-share-panel"]').exists()).toBe(true)
+    expect(w.find('[data-testid="artifact-share-warning"]').exists()).toBe(true)
   })
 })

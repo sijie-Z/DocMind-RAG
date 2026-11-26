@@ -112,7 +112,7 @@ DocMind 不是一个「聊天框套壳」：它把企业知识库当成一套**�
 1. **评测门禁进 CI（Eval Gate）** — 检索质量由零容差门禁逐 PR 守护：Eval v1.5 共 **80 条 golden set（60 正例 + 20 负例）**，ClauseHit@1/@3/@5、MRR、EmptyAcc、NearMiss@5、errors 七项指标容差为 0，任何下跌即红、fail-closed。`make eval-ci`（`mode=fake`，2026-10-24，语料 commit `d867a2b3`）实测 ClauseHit@1 **70.0%** / @3 **76.7%** / @5 **80.0%**、NearMiss@5 **25.0%**、MRR **0.74**、EmptyAcc **100%**、errors **0**（来源 PR #525，已合并，squash 552efaad；与 v1 的 28 条基线不可混比）。基线更新是显式 PR 行为（规则见 `backend/docs/eval-gate-phase1.md`，数字口径见 `docs/METRICS.md`）。
 2. **静默假成功清零（#301）** — 全仓 ~551 处异常捕获全量审计，32 条静默假成功全部闭环（登出 fail-closed、检索三态、文档状态机诚实化、统计端点降级身份……），每条修复都带回归测试。
 3. **先红后绿 + 变异验证** — 每笔修复先写失败测试；修复后注入缺陷必须「精确变红」，证明测试真的有判别力，而不是顺手写个能过的断言。
-4. **文档数字不变量** — SSE 事件数、端点模块数、前端路由数、工具数由源码派生，期望值统一放在 `docs/facts.json`，对外口径（值/口径/命令/日期/备注）登记在 `docs/METRICS.md`；`backend/scripts/check_doc_facts.py` 在 CI 逐 PR 校验「代码 ↔ facts JSON ↔ METRICS ↔ 文档」一致。前端路由按两种口径记录：46 条路由记录（41 条具名路由，含顶层与 redirect 记录）。
+4. **文档数字不变量** — SSE 事件数、端点模块数、前端路由数、工具数由源码派生，期望值统一放在 `docs/facts.json`，对外口径（值/口径/命令/日期/备注）登记在 `docs/METRICS.md`；`backend/scripts/check_doc_facts.py` 在 CI 逐 PR 校验「代码 ↔ facts JSON ↔ METRICS ↔ 文档」一致。前端路由按两种口径记录：47 条路由记录（42 条具名路由，含顶层与 redirect 记录）。
 5. **棘轮只缩不涨** — 后端覆盖率下限 `--cov-fail-under=42` + 前端四道基线棘轮（硬编码中文 / i18n 完备性 / 命名一致 / 用键定义）：只拦下滑、不追高分，新增长即红。
 
 加固收口（已完成）：Agent 记忆接口按用户隔离、`/files` 代理鉴权（非公开对象需登录 + 组织归属校验）、纯 ASGI 监控与限流中间件、移除 legacy `ci.yml`；另有工作流归属隔离、API Key 掩码、Web 抓取 SSRF 防护、上传路径穿越与 MinIO 删除、Agent 沙箱逃逸封堵、`execute_sql` 租户过滤、MCP 子进程环境变量白名单、登录失败锁定 + 用户枚举时序防护、PII 全链路掩码等安全修复。
@@ -219,10 +219,10 @@ DocMind/
 │   │   │   └── tools/               #   扩展工具（21 个；合计 32 个内置工具）
 │   │   ├── rag/                     # 检索管线：retriever / reranker / pipeline / cache
 │   │   ├── api/v1/
-│   │   │   ├── router.py            # 主路由（注册 33 个模块）
-│   │   │   └── endpoints/           # 端点实现（32 个文件）
-│   │   ├── services/                # 业务服务层（46 个服务）
-│   │   ├── models/                  # ORM 模型（26 个模型文件）
+│   │   │   ├── router.py            # 主路由（注册 34 个模块）
+│   │   │   └── endpoints/           # 端点实现（33 个文件）
+│   │   ├── services/                # 业务服务层（47 个服务）
+│   │   ├── models/                  # ORM 模型（27 个模型文件）
 │   │   ├── core/                    # 配置 / DB / Redis / ES / MinIO / Kafka / JWT
 │   │   └── worker/                  # Kafka 消费者（解析 → 分块 → 嵌入 → 索引）
 │   ├── tests/                       # 后端测试（单测 + API + 集成）
@@ -231,14 +231,14 @@ DocMind/
 │   └── docker-compose.yml           # 基础设施与全量编排
 ├── frontend/
 │   └── src/
-│       ├── views/                   # 页面（26 个页面模块，46 条路由记录 / 41 条具名路由）
+│       ├── views/                   # 页面（26 个页面模块，47 条路由记录 / 42 条具名路由）
 │       ├── components/ · api/ · stores/ · router/ · composables/ · locales/
 └── docs/                            # 架构页 / 使用手册 / 决策记录 / 指标口径
 ```
 
 ### 🌐 API 层 (`backend/app/api/v1/`)
 
-33 个端点模块，统一 `/api/v1` 前缀：
+34 个端点模块，统一 `/api/v1` 前缀：
 
 | 模块 | 路由前缀 | 说明 |
 |------|----------|------|
@@ -251,8 +251,10 @@ DocMind/
 | 知识库 | `/knowledge` | 知识库文档检索、统计、设置、检索评测用例/运行历史（bad case 捕获） |
 | 知识库管理 | `/knowledge-bases` | 多知识库实体 CRUD（组织隔离） |
 | Rubric 评测 | `/eval` | 回答级 rubric 评分表（加权 yes/no + NEUTRAL/STRICT/LENIENT 重映射）、不可变版本与只读 diff、judge/fake 运行与 judge 人工金标校准（一致率 + 混淆矩阵）；评的是**答案**，与 `/knowledge/eval` 的检索 recall@k 不同口径 |
+| 答案质量评测 | `/eval/answer-quality` | 固定维度连续分评委运行的不可变历史快照与趋势；与 rubric（用户评分表）和检索 recall@k 是三套判定对象 |
 | 合同核验 | `/reviews` | 核验案件/核验项/证据快照 + 确定性抽取与 V1/V2 对齐 + 逐项决策与核验单导出（原文证据 + 版本哈希）；组织级模板库（不可变版本 + 只读 diff）；对方红线事实台账（DOCX 修订/批注解析、显式 unparsed、append-only、乐观锁 disposition） |
-| Agent 工件 | `/artifacts` | 工件列举/详情/内容流（内容寻址 sha256、版本链、组织+用户隔离）；HTML/SVG 内容响应带 CSP sandbox，仅允许在无同源沙箱中渲染 |
+| Agent 工件 | `/artifacts` | 工件列举/详情/内容流（内容寻址 sha256、版本链、组织+用户隔离）；创建/查询/撤销只读分享链接（绑定具体版本、owner-only，token 只存摘要）；HTML/SVG 内容响应带 CSP sandbox，仅允许在无同源沙箱中渲染 |
+| 公开工件 | `/public` | 工件只读分享的公开面（凭 token 免登录）：元数据与正文；字段白名单不含内部标识；撤销/过期/开关关闭一律 404，带限流与安全响应头 |
 | 组织管理 | `/organizations` | 组织 CRUD、成员管理、角色分配 |
 | 组织设置 | `/organizations` | 组织级设置读写与审计（与组织管理共用前缀） |
 | 系统监控 | `/monitoring` | 性能指标、健康检查、告警、RAG 质量评估 |

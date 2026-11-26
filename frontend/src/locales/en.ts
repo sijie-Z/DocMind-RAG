@@ -1984,6 +1984,40 @@ export default {
       versions: 'Versions',
       badge: 'Artifact',
       view: 'View'
+    },
+    share: {
+      button: 'Share',
+      title: 'Share artifact',
+      warning: 'Anyone with this link can view this artifact version without signing in.',
+      loading: 'Loading share status…',
+      loadFailed: 'Failed to load share status.',
+      inactiveNotice: 'Not shared yet',
+      activeNotice: 'Share link is active (the link itself cannot be read back; regenerate to get a new one)',
+      expiredNotice: 'Share link has expired; create a new one',
+      revokedNotice: 'Share has been revoked; create a new one',
+      linkLabel: 'Share link',
+      onceNotice: 'The link is shown only once — copy it now. Regenerating invalidates the old link immediately.',
+      expiryLabel: 'Expires',
+      expiryNever: 'Never',
+      expiryDays: '{days} days',
+      expiresAt: 'Expires at: {time}',
+      revokedAt: 'Revoked at: {time}',
+      create: 'Create link',
+      regenerate: 'Regenerate link',
+      copy: 'Copy link',
+      revoke: 'Revoke',
+      copied: 'Copied',
+      copyFailed: 'Copy failed; select the link manually',
+      createFailed: 'Failed to create share link.',
+      revokeFailed: 'Failed to revoke share.'
+    },
+    public: {
+      title: 'Shared artifact',
+      notice: 'Read-only share · anyone with the link can view',
+      loading: 'Loading shared content…',
+      unavailable: 'This share link does not exist or has expired.',
+      download: 'Download',
+      expiresAt: 'This link expires at {time}'
     }
   },
   help: {

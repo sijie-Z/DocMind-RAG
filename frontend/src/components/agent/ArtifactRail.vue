@@ -72,6 +72,13 @@
             >
               {{ t('artifacts.download') }}
             </button>
+            <button
+              class="detail-btn"
+              data-testid="artifact-share-open"
+              @click="shareOpen = true"
+            >
+              {{ t('artifacts.share.button') }}
+            </button>
           </div>
         </div>
 
@@ -119,6 +126,13 @@
         </div>
       </div>
     </template>
+
+    <!-- 分享对话框（批次九）：展示层覆盖在右栏之上；token 只在创建时可见一次。 -->
+    <ArtifactSharePanel
+      :show="shareOpen"
+      :artifact="selected"
+      @update:show="shareOpen = $event"
+    />
   </div>
 </template>
 
@@ -127,6 +141,7 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import Markdown from '@/components/common/Markdown.vue'
 import DiffView from '@/components/agent/DiffView.vue'
+import ArtifactSharePanel from '@/components/agent/ArtifactSharePanel.vue'
 import { artifactsApi } from '@/api/artifacts'
 import { apiUnwrap } from '@/utils/apiUnwrap'
 import type { AgentArtifact } from '@/types/artifact'
@@ -152,6 +167,7 @@ const content = ref('')
 const contentLoading = ref(false)
 const contentError = ref(false)
 const mode = ref<'preview' | 'source'>('preview')
+const shareOpen = ref(false)
 
 const prettyJson = computed(() => {
   try {

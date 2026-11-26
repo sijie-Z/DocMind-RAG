@@ -121,6 +121,13 @@ class BaseAppSettings(BaseSettings):
     # Workflow safety: code nodes run in-process unless explicitly enabled.
     ENABLE_WORKFLOW_CODE_NODES: bool = False
 
+    # ── 工件公开分享（批次九）──────────────────────────────────────────────
+    # 默认关闭：关闭时**创建分享**与**公开读取**一律 404（功能不可见）。
+    # 状态查询与撤销不受开关影响——撤下已发出的链接是安全操作，必须始终可用。
+    ARTIFACT_PUBLIC_SHARE_ENABLED: bool = False
+    # 公开分享端点限流：每 IP / 每 token 每分钟上限（进程内固定窗口桶）。
+    ARTIFACT_PUBLIC_RATE_LIMIT_PER_MINUTE: int = 60
+
     # User Commands（issue #475）kill-switch：关闭后命令通道整体回退——
     # GET /commands 返回 enabled=false + 空清单（前端回退本地模板），
     # POST /commands/execute 返回 503 SERVICE_UNAVAILABLE，聊天入口不再拦截 "/"
