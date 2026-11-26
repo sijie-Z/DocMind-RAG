@@ -1315,6 +1315,10 @@ async def get_branch_context(
         "branch_summary": session.branch_summary,
         "summary_model": session.summary_model,
         "summarized_at": _iso(session.summarized_at),
+        # 原位切换需要的最小会话元数据（与 chat 详情同口径；不新增写路径）。
+        "created_at": _iso(session.created_at) or "",
+        "updated_at": _iso(session.updated_at),
+        "settings": session.settings if isinstance(session.settings, dict) else None,
         "message_count": len(messages),
         "artifact_count": len(artifacts),
         "messages": [_message_payload(msg) for msg in messages],

@@ -18,6 +18,12 @@
     :conversation-id="String(currentConversationId || '')"
   />
 
+  <SessionTreePanel
+    v-model:show="sessionTreeOpen"
+    :session-id="String(currentConversationId || '')"
+    @select="handleSelectBranch"
+  />
+
   <div class="flex h-full w-full bg-gray-50 dark:bg-gray-950 overflow-hidden transition-colors duration-300">
     <!-- Mobile overlay for sidebar -->
     <div
@@ -43,11 +49,13 @@
       :convLoadError="convLoadError"
       :currentConversationId="currentConversationId"
       :conversationSearch="conversationSearch"
+      :hasCurrentConversation="!!currentConversationId"
       @newConversation="newConversation"
       @refresh="onConversationRefresh"
       @selectConversation="handleSelectConversation"
       @deleteConversation="handleDeleteConversation"
       @close="closeSidebar"
+      @openSessionTree="sessionTreeOpen = true"
       @searchChange="onConversationSearchChange"
       @searchClear="onConversationSearchClear"
     />
@@ -167,10 +175,12 @@ import { getOrganizationSettings } from '@/api/organization'
 import type { Conversation } from '@/api/conversation'
 import { getDocumentDetail, getDocumentContent, getDocumentChunk, getDocumentDownloadUrl } from '@/api/knowledge'
 import type { DocumentContent, DocumentDetail, DocumentDownloadUrl, DocumentChunkPreview } from '@/api/knowledge'
+import { sessionsApi, type BranchContextData } from '@/api/sessions'
 import type { ChatMessage, KnowledgeSource } from '@/types/chat'
 import { getToken } from '@/utils/auth'
+import { apiUnwrap } from '@/utils/apiUnwrap'
 
-import { ChatSidebar, ChatMessages, ChatInput, ChatHeader, DocumentPreviewModal, DebugPanel, SharePanel } from './components'
+import { ChatSidebar, ChatMessages, ChatInput, ChatHeader, DocumentPreviewModal, DebugPanel, SharePanel, SessionTreePanel } from './components'
 import { citationRank } from './utils/citations'
 import { parseTrustedDownloadUrl } from './utils/downloadUrl'
 import { useChatAttachments, useChatMessages, useChatSessions, useChatConnection, useChatSend } from './composables'
@@ -208,6 +218,8 @@ onBeforeUnmount(() => {
 
 const chatMessagesRef = ref()
 const sharePanelOpen = ref(false)
+// 批次八：会话树面板（从侧栏入口打开；点击分支原位切换，不 fork）
+const sessionTreeOpen = ref(false)
 const msgLoadError = ref(false)
 const windowWidth = ref(window.innerWidth)
 const handleWindowResize = () => { windowWidth.value = window.innerWidth }
@@ -634,6 +646,52 @@ const loadConversation = async (id: string, ownerGeneration?: string) => {
       if (ownerGeneration === undefined && !useSSE.value) void connectWebSocket()
       scrollToBottom('auto', true)
     }
+  }
+}
+
+// 批次八：点击会话树中的分支 → 原位加载该分支（branch-context 只读）。
+// 关键点：
+// - 不调用 fork、不创建会话；branch-context 只返回消息/摘要/工件；
+// - 先写 store 再 push query，route watcher 看到 store 已是该分支会跳过二次
+//   历史请求（避免同一分支双拉，也避免 watcher 又走普通 loadConversation）；
+// - owner 只绑定页面 generation（不要求 route 已是目标 id——此刻 route 还是旧值）。
+const handleSelectBranch = async (branchId: string) => {
+  if (!branchId || branchId === chatStore.currentConversation?.id) return
+  const owner = advanceConversationGeneration()
+  const ownsResponse = () => conversationViewActive && owner === getConversationOwner()
+  isLoadingHistory.value = true
+  msgLoadError.value = false
+  try {
+    const res = await sessionsApi.branchContext(branchId)
+    if (!ownsResponse()) return
+    const data = apiUnwrap<BranchContextData | null>(res)
+    if (!data || !Array.isArray(data.messages)) throw new Error('invalid branch context')
+    chatStore.setCurrentConversation({
+      id: data.session_id,
+      title: data.title || t('chat.defaultTitle'),
+      userId: userStore.userInfo?.id || 0,
+      createdAt: data.created_at || '',
+      updatedAt: data.updated_at || data.created_at || '',
+      settings: data.settings as { bound_document_ids?: string[] } | undefined,
+    })
+    messages.value = data.messages.map((m) => ({
+      id: m.id,
+      content: m.content,
+      messageType: m.messageType === 'user' ? 'user' : 'assistant',
+      conversationId: data.session_id,
+      createdAt: m.createdAt,
+      feedback: m.feedback ?? undefined,
+      feedbackNote: m.feedbackNote ?? undefined,
+      sources: m.sources as ChatMessage['sources'],
+    }))
+    await router.push({ query: { conversation_id: data.session_id } })
+    scrollToBottom('auto', true)
+  } catch {
+    if (!ownsResponse()) return
+    message.error(t('chat.historyFailed'))
+    msgLoadError.value = true
+  } finally {
+    if (ownsResponse()) isLoadingHistory.value = false
   }
 }
 
