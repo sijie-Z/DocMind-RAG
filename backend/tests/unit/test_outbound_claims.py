@@ -184,8 +184,7 @@ def test_product_definition_image_capability_matches_code():
 
 
 def test_architecture_numbers_match_code():
-    """架构页数字与代码一致：32 个内置工具（默认注入 10 个）、31 个路由模块，且不得虚报 Celery。"""
-    """架构页数字与代码一致：31 个内置工具（默认注入 10 个）、31 个路由模块，且不得虚报 Celery。"""
+    """架构页数字与代码一致：32 个内置工具（默认注入 10 个）、34 个路由模块，且不得虚报 Celery。"""
     _assert_absent(
         "docs/architecture.html",
         [
@@ -206,6 +205,8 @@ def test_architecture_numbers_match_code():
             "30 个路由模块",
             "29 个路由模块",
             "30 API 模块",
+            "33 API 模块",
+            "33 个路由模块",
             "39 个内置工具",
             "FastAPI · 19 模块",
             "Celery",
@@ -217,8 +218,8 @@ def test_architecture_numbers_match_code():
             "32 个内置工具",
             "默认注入 10 个工具",
             "基础工具（11 个）",
-            "33 API 模块",
-            "33 个路由模块",
+            "34 API 模块",
+            "34 个路由模块",
         ],
     )
     # 静态注册数 = 非隐藏 @register_tool 数（issue #509：hidden=True 的合并旧名
@@ -258,9 +259,10 @@ def test_index_page_stats_are_current():
             'stat-num">26<',
             'stat-num">28<',
             'stat-num">29<',
+            'stat-num">33<',
         ],
     )
-    _assert_present("docs/index.html", ["v1.22", "3084", "冻结快照", 'stat-num">32<'])
+    _assert_present("docs/index.html", ["v1.22", "3084", "冻结快照", 'stat-num">32<', 'stat-num">34<'])
 
 
 def test_readme_module_counts_match_code():
@@ -296,13 +298,13 @@ def test_readme_module_counts_match_code():
         "route_names": len(route_names),
     }
     assert counts == {
-        "endpoints": 32,
-        "routers": 33,
-        "services": 46,
-        "models": 26,
+        "endpoints": 33,
+        "routers": 34,
+        "services": 47,
+        "models": 27,
         "views": 26,
-        "route_records": 46,
-        "route_names": 41,
+        "route_records": 47,
+        "route_names": 42,
     }, f"代码侧计数已漂移: {counts}；请同步 README 与本测试"
 
     def _api_table_data_rows(rel: str, start: str) -> int:
@@ -310,9 +312,9 @@ def test_readme_module_counts_match_code():
         rows = [line for line in block.splitlines() if line.startswith("|")]
         return len(rows) - 2  # 去掉表头与分隔行
 
-    assert _api_table_data_rows("README.md", "### 🌐 API 层") == 32, "README API 表行数应为 32"
-    assert _api_table_data_rows("README_EN.md", "### 🌐 API Layer") == 32, (
-        "README_EN API 表行数应为 32"
+    assert _api_table_data_rows("README.md", "### 🌐 API 层") == 33, "README API 表行数应为 33"
+    assert _api_table_data_rows("README_EN.md", "### 🌐 API Layer") == 33, (
+        "README_EN API 表行数应为 33"
     )
 
     _assert_absent(
@@ -327,8 +329,10 @@ def test_readme_module_counts_match_code():
             "28 个端点模块",
             "29 个端点模块",
             "30 个端点模块",
+            "33 个端点模块",
             "注册 29 个模块",
             "注册 30 个模块",
+            "注册 33 个模块",
             "19 个文件",
             "注册 22 个模块",
             "注册 24 个模块",
@@ -345,6 +349,7 @@ def test_readme_module_counts_match_code():
             "28 个文件",
             "29 个文件",
             "30 个文件",
+            "32 个文件",
             "14 个服务",
             "20 个服务",
             "21 个服务",
@@ -368,6 +373,7 @@ def test_readme_module_counts_match_code():
             "40 个服务",
             "41 个服务",
             "42 个服务",
+            "46 个服务",
             "14 个实体",
             "18 个实体",
             "18 个模型文件",
@@ -375,25 +381,28 @@ def test_readme_module_counts_match_code():
             "21 个模型文件",
             "22 个模型文件",
             "23 个模型文件",
+            "26 个模型文件",
             "19 个模块，21 条路由",
             "24 个页面模块，36 条路由记录 / 31 条具名路由",
             "24 个页面模块，37 条路由记录 / 32 条具名路由",
+            "26 个页面模块，46 条路由记录 / 41 条具名路由",
             "36 条路由记录（31 条具名路由",
             "37 条路由记录（32 条具名路由",
+            "46 条路由记录（41 条具名路由",
         ],
     )
     _assert_present(
         "README.md",
         [
-            "33 个端点模块",
-            "注册 33 个模块",
-            "32 个文件",
-            "46 个服务",
-            "26 个模型文件",
-            "26 个页面模块，46 条路由记录 / 41 条具名路由",
-            "46 条路由记录（41 条具名路由",
-            "26 个页面模块，46 条路由记录 / 41 条具名路由",
-            "46 条路由记录（41 条具名路由",
+            "34 个端点模块",
+            "注册 34 个模块",
+            "33 个文件",
+            "47 个服务",
+            "27 个模型文件",
+            "26 个页面模块，47 条路由记录 / 42 条具名路由",
+            "47 条路由记录（42 条具名路由",
+            "26 个页面模块，47 条路由记录 / 42 条具名路由",
+            "47 条路由记录（42 条具名路由",
         ],
     )
     _assert_absent(
@@ -404,6 +413,7 @@ def test_readme_module_counts_match_code():
             "26 endpoint modules",
             "24 endpoint modules",
             "25 endpoint modules",
+            "33 endpoint modules",
             "19 modules registered",
             "22 modules registered",
             "24 modules registered",
@@ -413,6 +423,7 @@ def test_readme_module_counts_match_code():
             "28 modules registered",
             "29 modules registered",
             "30 modules registered",
+            "33 modules registered",
             "19 files",
             "22 files",
             "24 files",
@@ -422,6 +433,7 @@ def test_readme_module_counts_match_code():
             "28 files",
             "29 files",
             "30 files",
+            "32 files",
             "14 services",
             "20 services",
             "21 services",
@@ -445,6 +457,7 @@ def test_readme_module_counts_match_code():
             "40 services",
             "41 services",
             "42 services",
+            "46 services",
             "14 entities",
             "18 entities",
             "18 model files",
@@ -452,25 +465,28 @@ def test_readme_module_counts_match_code():
             "21 model files",
             "22 model files",
             "23 model files",
+            "26 model files",
             "19 modules, 21 routes",
             "24 page modules, 36 route records / 31 named routes",
             "24 page modules, 37 route records / 32 named routes",
+            "26 page modules, 46 route records / 41 named routes",
             "36 route records (31 named routes",
             "37 route records (32 named routes",
+            "46 route records (41 named routes",
         ],
     )
     _assert_present(
         "README_EN.md",
         [
-            "33 endpoint modules",
-            "33 modules registered",
-            "32 files",
-            "46 services",
-            "26 model files",
-            "26 page modules, 46 route records / 41 named routes",
-            "46 route records (41 named routes",
-            "26 page modules, 46 route records / 41 named routes",
-            "46 route records (41 named routes",
+            "34 endpoint modules",
+            "34 modules registered",
+            "33 files",
+            "47 services",
+            "27 model files",
+            "26 page modules, 47 route records / 42 named routes",
+            "47 route records (42 named routes",
+            "26 page modules, 47 route records / 42 named routes",
+            "47 route records (42 named routes",
         ],
     )
 

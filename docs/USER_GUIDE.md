@@ -4,8 +4,8 @@
 >
 > 本文只做**引述**，不做第二套真源：
 > - 端口、凭据、服务编排以 `backend/docker-compose.yml` 与 `backend/.env.docker.example` 为准；
-> - 关键数字（32 个内置工具 / 默认注入 10 个工具 / 33 个端点模块 / 46 条前端路由 / 25 种 SSE 事件）以 `docs/facts.json` 为单一事实源；README、架构页等既有锚点由 `backend/scripts/check_doc_facts.py` 在 CI 逐 PR 校验，本文数字与之一致（工具/端点/路由/SSE 锚点已纳入 CI 校验）；
-> - 关键数字（32 个内置工具 / 默认注入 10 个工具 / 33 个端点模块 / 46 条前端路由 / 24 种 SSE 事件）以 `docs/facts.json` 为单一事实源；README、架构页等既有锚点由 `backend/scripts/check_doc_facts.py` 在 CI 逐 PR 校验，本文数字与之一致（工具/端点/路由/SSE 锚点已纳入 CI 校验）；
+> - 关键数字（32 个内置工具 / 默认注入 10 个工具 / 34 个端点模块 / 47 条前端路由 / 25 种 SSE 事件）以 `docs/facts.json` 为单一事实源；README、架构页等既有锚点由 `backend/scripts/check_doc_facts.py` 在 CI 逐 PR 校验，本文数字与之一致（工具/端点/路由/SSE 锚点已纳入 CI 校验）；
+> - 关键数字（32 个内置工具 / 默认注入 10 个工具 / 34 个端点模块 / 47 条前端路由 / 24 种 SSE 事件）以 `docs/facts.json` 为单一事实源；README、架构页等既有锚点由 `backend/scripts/check_doc_facts.py` 在 CI 逐 PR 校验，本文数字与之一致（工具/端点/路由/SSE 锚点已纳入 CI 校验）；
 > - 架构与设计动机见 `README.md`、`AGENT_ARCHITECTURE.md`、`docs/decisions/`。
 >
 > 英文版：[USER_GUIDE_EN.md](USER_GUIDE_EN.md)
@@ -697,7 +697,7 @@ API 前缀 `/api/v1/workflows`：工作流 CRUD、执行、调试、节点定义
 
 ### 5.2 端点模块清单
 
-当前共 **33 个端点模块**（`docs/facts.json` 的 `endpoint_modules`，由 `backend/app/api/v1/router.py` 的 `ROUTER_SPECS` 路由表派生）：
+当前共 **34 个端点模块**（`docs/facts.json` 的 `endpoint_modules`，由 `backend/app/api/v1/router.py` 的 `ROUTER_SPECS` 路由表派生）：
 
 | 模块 | 前缀 | 说明 |
 |------|------|------|
@@ -710,7 +710,10 @@ API 前缀 `/api/v1/workflows`：工作流 CRUD、执行、调试、节点定义
 | knowledge | `/api/v1/knowledge` | 知识检索、统计、重建、图谱 |
 | knowledge_bases | `/api/v1/knowledge-bases` | 多知识库实体 CRUD（组织隔离） |
 | eval_rubrics | `/api/v1/eval` | Rubric 评测：回答级评分表（加权 yes/no + NEUTRAL/STRICT/LENIENT 重映射）、不可变版本与只读 diff、judge/fake 运行与人工金标校准（一致率 + 混淆矩阵）；`/eval/rubrics*` 管理评分表，`/eval/runs*` 查看运行 |
+| answer_quality_eval | `/api/v1/eval/answer-quality` | 答案质量评测历史：固定维度连续分评委运行的不可变快照与趋势（与 rubric/检索评测是不同判定对象） |
 | reviews | `/api/v1/reviews` | 合同核验：案件/核验项/证据快照（parser 原文 + 版本哈希）；组织级模板库 `/reviews/templates`（不可变版本 + 只读 diff）；对方红线台账 `/reviews/{id}/redlines`（上传/列表/明细/乐观锁 disposition） |
+| artifacts | `/api/v1/artifacts` | Agent 工件：列表/详情/正文（内容寻址、版本链、组织+用户隔离）；创建/查询/撤销只读分享链接（绑定具体版本、owner-only） |
+| public_artifacts | `/api/v1/public` | 工件只读分享公开面（凭 token 免登录）：元数据与正文；字段白名单、撤销/过期/开关关闭一律 404、限流与安全响应头 |
 | organizations | `/api/v1/organizations` | 组织 CRUD、成员与角色 |
 | organization_settings | `/api/v1/organizations` | 组织级设置（与组织管理共用前缀） |
 | monitoring | `/api/v1/monitoring` | 性能指标、健康、告警、RAG 质量 |
