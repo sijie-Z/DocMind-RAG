@@ -48,6 +48,22 @@ class TestExtractScore:
     def test_empty_string_returns_none(self):
         assert _extract_score("") is None
 
+    @pytest.mark.parametrize(
+        "reply",
+        [
+            '{"score": null}',
+            "[]",
+            "{}",
+            '{"score": true}',
+            '{"score": false}',
+            '{"score": NaN}',
+            '{"score": Infinity}',
+        ],
+    )
+    def test_invalid_json_score_returns_none(self, reply):
+        """null/bool/NaN/Infinity/无分数键都不是有效分数，不能伪造 1.0 或崩溃。"""
+        assert _extract_score(reply) is None
+
     def test_score_100_percent(self):
         assert _extract_score("100%") == pytest.approx(1.0)
 

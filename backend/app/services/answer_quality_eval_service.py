@@ -10,9 +10,10 @@
 - 与 ``retrieval_eval``（检索 recall）、``eval_rubric``（加权 yes/no 评分表）
   不共用运行表；本模块是固定维度连续分评委的运行历史。
 
-隐私：落库结果只含指标、有界评审理由、来源哈希与固定占位预览；原始
-query/answer/context 文本绝不写入 DB 或 API 响应。评委理由在落库前会做
-敏感片段筛查（命中任一 12 字符片段即整条丢弃），避免模型转述原文。
+隐私：落库结果只含指标、有界评审理由、来源哈希与固定占位预览。评委理由
+在落库前会做敏感片段筛查：与输入重合的 ≥12 字符片段、或 ≥4 字符的 ASCII
+token（数字/ID/邮箱等）命中即整条丢弃。**残余风险**：2-3 字的中文片段仍
+可能被模型转述；如需绝对不入库，应关闭理由持久化。
 
 失败：评委不可用/输出不符合契约 → 运行 ``status='failed'`` +
 ``error_code``（``JUDGE_UNAVAILABLE`` / ``JUDGE_CONTRACT_VIOLATION``），
@@ -31,6 +32,7 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import re
 import uuid
 from datetime import UTC, date, datetime, time, timedelta
 from typing import Any
@@ -284,14 +286,26 @@ _REASON_SENSITIVE_WINDOW = 12
 """理由中任一 12 字符片段命中原始输入即整条丢弃（防模型转述原文）。"""
 
 
+_SENSITIVE_ASCII_TOKEN_RE = re.compile(r"[A-Za-z0-9_@.\-]{4,}")
+"""≥4 字符的 ASCII token：覆盖 PIN/手机号/邮箱/密钥等短秘密。"""
+
+
 def _contains_sensitive_fragment(text: str, sensitive_texts: list[str]) -> bool:
     joined = "\n".join(item for item in sensitive_texts if item)
     if not joined:
         return False
-    if len(text) <= _REASON_SENSITIVE_WINDOW:
-        return text in joined
     window = _REASON_SENSITIVE_WINDOW
-    return any(text[i : i + window] in joined for i in range(len(text) - window + 1))
+    if len(text) <= window:
+        if text in joined:
+            return True
+    elif any(text[i : i + window] in joined for i in range(len(text) - window + 1)):
+        return True
+    lowered = text.lower()
+    for sensitive in sensitive_texts:
+        for token in _SENSITIVE_ASCII_TOKEN_RE.findall(sensitive):
+            if token.lower() in lowered:
+                return True
+    return False
 
 
 def _bounded_reason(raw: Any, sensitive_texts: list[str]) -> str | None:
@@ -310,7 +324,7 @@ def _numeric_metric(value: Any) -> float | None:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         return None
     number = float(value)
-    if not math.isfinite(number):
+    if not math.isfinite(number) or number < 0.0 or number > 1.0:
         return None
     return number
 

@@ -5,6 +5,7 @@ Uses LLM-as-judge for scoring. Each metric returns a float in [0, 1].
 
 import json
 import logging
+import math
 import re
 from dataclasses import dataclass, field
 from typing import Any
@@ -74,6 +75,20 @@ class BatchEvalResult:
     failures: list[dict[str, Any]] = field(default_factory=list)
 
 
+def _coerce_score(value: object) -> float | None:
+    """把 JSON 分数值归一为 0..1；bool/None/NaN/Infinity/非数字一律 None。
+
+    布尔值在 Python 里是 int 的子类，``true`` 会被 ``float()`` 变成 1.0，
+    这正是「伪造满分」的来源，必须显式排除。
+    """
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    number = float(value)
+    if not math.isfinite(number):
+        return None
+    return max(0.0, min(1.0, number))
+
+
 def _extract_score(text: str) -> float | None:
     """Extract a 0-1 float score from LLM response text.
 
@@ -83,12 +98,19 @@ def _extract_score(text: str) -> float | None:
     # Try JSON first
     try:
         data = json.loads(text)
-        if isinstance(data, dict):
-            for key in ("score", "faithfulness", "relevancy", "precision"):
-                if key in data:
-                    return max(0.0, min(1.0, float(data[key])))
-    except (json.JSONDecodeError, ValueError):
-        pass
+    except (json.JSONDecodeError, TypeError, ValueError):
+        data = None
+
+    if isinstance(data, dict):
+        for key in ("score", "faithfulness", "relevancy", "precision"):
+            if key in data:
+                return _coerce_score(data[key])
+        # JSON 对象但没有可识别分数键：不回落正则，避免从 reason 里的数字
+        # 臆造一个分数。
+        return None
+    if isinstance(data, list):
+        # 数组不是评分契约；同样不回落正则。
+        return None
 
     # Try regex — order matters: specific patterns first, generic last
     # "8/10" style
