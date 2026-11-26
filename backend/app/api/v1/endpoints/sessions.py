@@ -25,18 +25,24 @@ checkpoint（避免"伪历史"无法追溯）。
 
 import json
 import logging
+from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, Header, Request, Response
-from pydantic import Field
+from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.core.security import get_current_user
+from app.exceptions import NotFoundError
 from app.models.user import User
 from app.schemas.session_fork import SessionForkRequest
 from app.services import session_fork_service
 from app.services.audit_service import audit_service
-from app.services.session_service import resolve_session_access_scope
+from app.services.session_service import (
+    load_accessible_session,
+    resolve_session_access_scope,
+)
+from app.services.share_link_service import new_share_token, share_token_digest
 
 router = APIRouter()
 compat_router = APIRouter()
@@ -69,6 +75,25 @@ class ForkRequest(SessionForkRequest):
         None,
         max_length=128,
         description="幂等键（优先于 Idempotency-Key 头）：同一用户重复请求返回同一子会话",
+    )
+
+
+class BranchLabelRequest(BaseModel):
+    """分支标签写入：空白/None 清除标签。"""
+
+    branch_label: str | None = Field(
+        None,
+        max_length=session_fork_service.BRANCH_LABEL_MAX_CHARS,
+        description="分支展示标签；空/null 清除",
+    )
+
+
+class BranchSummaryRequest(BaseModel):
+    """分支摘要生成：fake=确定性抽取（测试/离线），llm=调用已配置模型。"""
+
+    mode: str = Field(
+        "llm",
+        description="fake / llm；llm 不可用时显式 503 SUMMARY_MODEL_UNAVAILABLE",
     )
 
 
@@ -237,6 +262,153 @@ async def get_session_lineage(
 ):
     """会话谱系：祖先链 / 直接子级 / 切点元数据（父会话删除后仍可查）。"""
     return await _execute_lineage(session_id=session_id, current_user=current_user, db=db)
+
+
+# ── 会话树导航（批次八）────────────────────────────────────────────────────
+# 只读树/分支上下文与显式标签/摘要写入；既有 fork/lineage 端点保持不动。
+
+
+@router.get("/{session_id}/tree", response_model=dict, dependencies=[Depends(get_current_user)])
+async def get_session_tree_endpoint(
+    session_id: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """会话树：根 + 可见分支（切点、标签、摘要、按分支工件统计）。
+
+    越权/跨组织 404（不泄露存在性）；只读，不创建任何会话。
+    """
+    scope = await resolve_session_access_scope(current_user, db)
+    data = await session_fork_service.get_session_tree(
+        db,
+        session_id=session_id,
+        user_id=current_user.id,
+        organization_id=scope.org_id,
+        scope=scope,
+    )
+    return {"success": True, "message": "获取成功", "data": data}
+
+
+@router.get(
+    "/{session_id}/branch-context",
+    response_model=dict,
+    dependencies=[Depends(get_current_user)],
+)
+async def get_session_branch_context_endpoint(
+    session_id: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """选中分支的消息 + 摘要 + 工件上下文（**只读**，原位切换不 fork）。"""
+    scope = await resolve_session_access_scope(current_user, db)
+    data = await session_fork_service.get_branch_context(
+        db,
+        session_id=session_id,
+        user_id=current_user.id,
+        organization_id=scope.org_id,
+        scope=scope,
+    )
+    return {"success": True, "message": "获取成功", "data": data}
+
+
+@router.put(
+    "/{session_id}/branch-label",
+    response_model=dict,
+    dependencies=[Depends(get_current_user)],
+)
+async def set_session_branch_label_endpoint(
+    session_id: str,
+    body: BranchLabelRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """设置/清除分支标签（空白/null 清除；超长 400）。"""
+    scope = await resolve_session_access_scope(current_user, db)
+    data = await session_fork_service.set_branch_label(
+        db,
+        session_id=session_id,
+        user_id=current_user.id,
+        label=body.branch_label,
+        organization_id=scope.org_id,
+        scope=scope,
+    )
+    return {"success": True, "message": "更新成功", "data": data}
+
+
+@router.post(
+    "/{session_id}/summary",
+    response_model=dict,
+    dependencies=[Depends(get_current_user)],
+)
+async def summarize_session_branch_endpoint(
+    session_id: str,
+    body: BranchSummaryRequest | None = None,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """生成并持久化分支摘要。
+
+    - 200：已生成（或空分支如实返回 ``generated=false``，无摘要）；
+    - 400：模式非法；
+    - 404：会话不存在/他人/跨组织；
+    - 503 ``SUMMARY_MODEL_UNAVAILABLE``：LLM 未配置或调用失败（**绝不 fake 成功**）。
+    """
+    scope = await resolve_session_access_scope(current_user, db)
+    payload = body or BranchSummaryRequest()
+    data = await session_fork_service.summarize_branch(
+        db,
+        session_id=session_id,
+        user_id=current_user.id,
+        mode=payload.mode,
+        organization_id=scope.org_id,
+        scope=scope,
+    )
+    return {
+        "success": True,
+        "message": "摘要已生成" if data.get("generated") else "没有可摘要的消息",
+        "data": data,
+    }
+
+
+@router.get(
+    "/tree/{root_session_id}/share",
+    response_model=dict,
+    dependencies=[Depends(get_current_user)],
+)
+async def share_session_tree_endpoint(
+    root_session_id: str,
+    response: Response,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """为会话树根会话创建/轮换只读分享链接。
+
+    复用既有分享机制（``share_token_hash`` + 公开端点
+    ``GET /api/v1/chat/shares/{token}``）：不新增第二套 token/鉴权模型。
+    token 原文只在本次响应返回；再次调用会轮换（旧链接立即失效）。
+    越权/跨组织 404（不泄露存在性）。
+    """
+    scope = await resolve_session_access_scope(current_user, db)
+    session = await load_accessible_session(db, root_session_id, current_user, scope)
+    if session is None:
+        raise NotFoundError("会话不存在")
+    token = new_share_token()
+    created_at = datetime.now(UTC)
+    session.share_token_hash = share_token_digest(token)
+    session.share_created_at = created_at
+    await db.commit()
+    # token 属于凭证：响应不得被任何中间缓存留存。
+    response.headers["Cache-Control"] = "no-store"
+    return {
+        "success": True,
+        "message": "分享链接已创建",
+        "data": {
+            "root_session_id": session.id,
+            "token": token,
+            "url": f"/share/{token}",
+            "createdAt": created_at.isoformat(),
+        },
+    }
 
 
 # ── 兼容别名（issue #499）：/api/v1/agent/sessions/{id}/fork|lineage ──────────

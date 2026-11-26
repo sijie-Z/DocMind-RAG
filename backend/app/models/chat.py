@@ -128,6 +128,19 @@ class ChatSession(Base):
     )
     fork_reason: Mapped[str | None] = mapped_column(String(100), comment="分叉原因标签")
 
+    # 会话树导航（批次八）：分支展示信息，纯派生、可空，不参与 fork/鉴权语义。
+    # 历史行保持 NULL；摘要只在用户显式生成时写入，绝不因迁移/读取而回填。
+    branch_label: Mapped[str | None] = mapped_column(String(100), comment="分支展示标签")
+    branch_summary: Mapped[str | None] = mapped_column(Text, comment="分支摘要（显式生成）")
+    summary_model: Mapped[str | None] = mapped_column(
+        String(128), comment="摘要来源（fake 或模型名）"
+    )
+    summarized_at: Mapped[datetime | None] = mapped_column(
+        # 与 messages_cleared_at 同口径：MySQL 秒精度会丢摘要生成时间，显式 fsp=6。
+        DateTime(timezone=True).with_variant(mysql.DATETIME(fsp=6), "mysql"),
+        comment="摘要生成时间",
+    )
+
     # Webhook 来源（issue #478）：source 默认 user；webhook 投递建的会话记录
     # 规则与投递 id，reuse 模式另有 session_key（payload 顶层字段）。
     source: Mapped[str] = mapped_column(
