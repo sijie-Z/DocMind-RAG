@@ -358,7 +358,10 @@ async function loadTree(sessionId: string = props.sessionId) {
   shareLink.value = ''
   shareCopied.value = false
   shareError.value = ''
-  if (!sessionId) return
+  if (!sessionId) {
+    loading.value = false
+    return
+  }
   loading.value = true
   try {
     const res = await sessionsApi.tree(sessionId)
