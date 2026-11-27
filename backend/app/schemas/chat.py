@@ -58,6 +58,21 @@ class ChatSessionCreate(BaseModel):
     organization_id: str | None = Field(None, description="组织ID")
 
 
+class ChatShareCreate(BaseModel):
+    """创建/轮换会话分享链接请求（批次十二）。
+
+    ``expires_in_days`` 缺省或显式 null 都表示永不过期：旧客户端不传 body
+    时行为与批次十一完全一致，不强制过期。
+    """
+
+    expires_in_days: int | None = Field(
+        None,
+        ge=1,
+        le=90,
+        description="过期天数（1-90）；缺省/null 表示永不过期",
+    )
+
+
 class ChatSessionResponse(BaseModel):
     """聊天会话响应"""
 

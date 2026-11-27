@@ -55,7 +55,7 @@ def test_041_revision_chain():
     assert script.get_revision("043_session_tree").down_revision == HEAD
     assert script.get_revision(LATEST).down_revision == "043_session_tree"
     assert script.get_revision("045_artifact_share").down_revision == LATEST
-    assert set(script.get_heads()) == {"047_artifact_share_analytics"}
+    assert set(script.get_heads()) == {"048_session_share_expiry"}
 
 
 def test_041_downgrade_does_not_drop_indexes_before_tables():

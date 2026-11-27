@@ -25,7 +25,7 @@ checkpoint（避免"伪历史"无法追溯）。
 
 import json
 import logging
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from fastapi import APIRouter, Depends, Header, Request, Response
 from pydantic import BaseModel, Field
@@ -35,6 +35,7 @@ from app.core.database import get_db
 from app.core.security import get_current_user
 from app.exceptions import NotFoundError, ValidationError
 from app.models.user import User
+from app.schemas.chat import ChatShareCreate
 from app.schemas.session_fork import SessionForkRequest
 from app.services import session_fork_service
 from app.services.audit_service import audit_service
@@ -378,6 +379,7 @@ async def summarize_session_branch_endpoint(
 async def share_session_tree_endpoint(
     root_session_id: str,
     response: Response,
+    body: ChatShareCreate | None = None,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -387,6 +389,9 @@ async def share_session_tree_endpoint(
     ``GET /api/v1/chat/shares/{token}``）：不新增第二套 token/鉴权模型。
     token 原文只在本次响应返回；再次调用会轮换（旧链接立即失效）。
     越权/跨组织 404（不泄露存在性）。
+
+    批次十二：可选 ``expires_in_days``（1-90）；缺省/null = 永不过期。
+    过期后公开读取与撤销同一 404；审计只记根会话 id 与过期时间，不落 token。
     """
     scope = await resolve_session_access_scope(current_user, db)
     session = await load_accessible_session(db, root_session_id, current_user, scope)
@@ -395,11 +400,24 @@ async def share_session_tree_endpoint(
     if session.parent_session_id is not None or session.root_session_id not in (None, session.id):
         # 只允许分享树根：避免前端在树未加载/竞态时把子分支当根分享出去。
         raise ValidationError("只能分享会话树的根会话", field="root_session_id")
+    rotated = session.share_token_hash is not None
     token = new_share_token()
     created_at = datetime.now(UTC)
+    expires_at = (
+        created_at + timedelta(days=body.expires_in_days)
+        if body is not None and body.expires_in_days is not None
+        else None
+    )
     session.share_token_hash = share_token_digest(token)
     session.share_created_at = created_at
+    session.share_expires_at = expires_at
     await db.commit()
+    await _audit_tree_share_action(
+        user_id=current_user.id,
+        action="rotate_session_tree_share" if rotated else "share_session_tree",
+        root_session_id=session.id,
+        expires_at=expires_at,
+    )
     # token 属于凭证：响应不得被任何中间缓存留存。
     response.headers["Cache-Control"] = "no-store"
     return {
@@ -410,8 +428,36 @@ async def share_session_tree_endpoint(
             "token": token,
             "url": f"/share/{token}",
             "createdAt": created_at.isoformat(),
+            "expiresAt": expires_at.isoformat() if expires_at else None,
         },
     }
+
+
+async def _audit_tree_share_action(
+    *,
+    user_id: int,
+    action: str,
+    root_session_id: str,
+    expires_at: datetime | None,
+) -> None:
+    """会话树分享审计（best-effort）：detail 只含根会话与过期时间，不落 token。"""
+    try:
+        await audit_service.log_activity(
+            user_id=user_id,
+            action=action,
+            target_type="chat_session",
+            target_id=root_session_id,
+            detail=json.dumps(
+                {
+                    "conversation_id": root_session_id,
+                    "expires_at": expires_at.isoformat() if expires_at else None,
+                },
+                ensure_ascii=False,
+                sort_keys=True,
+            ),
+        )
+    except Exception as e:  # noqa: BLE001 — 审计是旁路，任何失败都不得反噬请求
+        logger.warning(f"Audit session tree share action failed: {type(e).__name__}: {e}")
 
 
 # ── 兼容别名（issue #499）：/api/v1/agent/sessions/{id}/fork|lineage ──────────

@@ -83,3 +83,17 @@ describe('sessionsApi · 端点契约', () => {
     })
   })
 })
+
+describe('sessionsApi.shareTree contract', () => {
+  beforeEach(() => vi.clearAllMocks())
+  it('POST /sessions/tree/{root}/share with expires_in_days and silent header', async () => {
+    postMock.mockResolvedValue({ data: { success: true, data: { url: '/share/t', token: 't' } } })
+    await sessionsApi.shareTree('root-1', 7)
+    expect(postMock).toHaveBeenCalledWith(
+      '/sessions/tree/root-1/share',
+      { expires_in_days: 7 },
+      { headers: { 'X-Silent-Error': '1' } },
+    )
+  })
+})
+

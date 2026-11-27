@@ -222,7 +222,7 @@ describe('SessionTreePanel · 摘要 / 分享 / 标签', () => {
     expect(wrapper.find('[data-session-id="child"]').find('[data-testid="session-tree-summary"]').exists()).toBe(false)
   })
 
-  it('分享按钮复制 origin + 既有 /share/{token} 只读链接', async () => {
+  it('分享按钮复制 origin + 既有 /share/{token} 只读链接（默认 7 天）', async () => {
     const writeText = vi.fn().mockResolvedValue(undefined)
     Object.defineProperty(navigator, 'clipboard', {
       configurable: true,
@@ -236,6 +236,7 @@ describe('SessionTreePanel · 摘要 / 分享 / 标签', () => {
           token: 'tok-123',
           url: '/share/tok-123',
           createdAt: '2026-11-26T00:00:00Z',
+          expiresAt: '2026-12-03T00:00:00+00:00',
         },
       },
     })
@@ -245,12 +246,83 @@ describe('SessionTreePanel · 摘要 / 分享 / 标签', () => {
     await wrapper.find('[data-testid="session-tree-share"]').trigger('click')
     await flushPromises()
 
-    expect(shareTreeMock).toHaveBeenCalledWith('root')
+    // 树分享默认 7 天（任务书口径）。
+    expect(shareTreeMock).toHaveBeenCalledWith('root', 7)
     expect(writeText).toHaveBeenCalledWith(`${window.location.origin}/share/tok-123`)
     expect(wrapper.find('[data-testid="session-tree-share-copied"]').exists()).toBe(true)
     expect(
       (wrapper.find('[data-testid="session-tree-share-link"]').element as HTMLInputElement).value,
     ).toBe(`${window.location.origin}/share/tok-123`)
+    expect(wrapper.find('[data-testid="session-tree-share-expires-at"]').text()).toContain(
+      '过期时间：',
+    )
+  })
+
+  it('树分享有效期选择传给 API（永不过期 → null）', async () => {
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText: vi.fn().mockResolvedValue(undefined) },
+    })
+    shareTreeMock.mockResolvedValue({
+      data: {
+        success: true,
+        data: {
+          root_session_id: 'root',
+          token: 'tok-perm',
+          url: '/share/tok-perm',
+          createdAt: '2026-11-26T00:00:00Z',
+          expiresAt: null,
+        },
+      },
+    })
+    const wrapper = mountPanel()
+    await flushPromises()
+    await wrapper.find('[data-testid="session-tree-share-expiry"]').setValue('0')
+    await wrapper.find('[data-testid="session-tree-share"]').trigger('click')
+    await flushPromises()
+    expect(shareTreeMock).toHaveBeenCalledWith('root', null)
+    expect(wrapper.find('[data-testid="session-tree-share-expires-at"]').exists()).toBe(false)
+  })
+
+  it('树分享失败显示错误态，不残留旧链接', async () => {
+    shareTreeMock.mockRejectedValue(new Error('boom'))
+    const wrapper = mountPanel()
+    await flushPromises()
+    await wrapper.find('[data-testid="session-tree-share"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('[data-testid="session-tree-share-error"]').text()).toBe(
+      '分享链接生成失败',
+    )
+    expect(wrapper.find('[data-testid="session-tree-share-link"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="session-tree-share-expires-at"]').exists()).toBe(false)
+  })
+
+  it('切换会话/重载树时清空上一棵树的分享链接与过期时间', async () => {
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText: vi.fn().mockResolvedValue(undefined) },
+    })
+    shareTreeMock.mockResolvedValue({
+      data: {
+        success: true,
+        data: {
+          root_session_id: 'root',
+          token: 'tok-stale',
+          url: '/share/tok-stale',
+          createdAt: '2026-11-26T00:00:00Z',
+          expiresAt: '2026-12-03T00:00:00+00:00',
+        },
+      },
+    })
+    const wrapper = mountPanel()
+    await flushPromises()
+    await wrapper.find('[data-testid="session-tree-share"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('[data-testid="session-tree-share-link"]').exists()).toBe(true)
+    await wrapper.setProps({ sessionId: 'child' })
+    await flushPromises()
+    expect(wrapper.find('[data-testid="session-tree-share-link"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="session-tree-share-expires-at"]').exists()).toBe(false)
   })
 
   it('树未加载或根不可见时分享禁用，绝不用当前分支兜底', async () => {

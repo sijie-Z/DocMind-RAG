@@ -3,7 +3,7 @@ import json
 import logging
 import os
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from fastapi import (
     APIRouter,
@@ -12,6 +12,7 @@ from fastapi import (
     Form,
     Query,
     Request,
+    Response,
     UploadFile,
     WebSocket,
     WebSocketDisconnect,
@@ -62,7 +63,8 @@ from app.rag.source_provenance import (
     PARSER_ORIGINAL,
     original_text_of,
 )
-from app.schemas.chat import ChatSessionCreate, ChatStreamRequest, FeedbackRequest
+from app.schemas.chat import ChatSessionCreate, ChatShareCreate, ChatStreamRequest, FeedbackRequest
+from app.services.audit_service import audit_service
 from app.services.chat_service import RAGEvent, run_rag_pipeline
 from app.services.document_preview import TEXT_PROVENANCE_MIXED
 from app.services.llm_settings_service import cache_scope, resolve_for_user
@@ -535,6 +537,62 @@ async def _load_owned_session(
     return session
 
 
+def _as_utc(value: datetime | None) -> datetime | None:
+    """时间统一按 UTC 解释。
+
+    SQLite / MySQL ``DATETIME`` 回读可能是 naive；若不归一，过期比较会因
+    naive/aware 混用抛 TypeError，或按本地时区误判。
+    """
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        return value.replace(tzinfo=UTC)
+    return value.astimezone(UTC)
+
+
+def _share_expires_at_iso(expires_at: datetime | None) -> str | None:
+    normalized = _as_utc(expires_at)
+    return normalized.isoformat() if normalized else None
+
+
+def _share_is_expired(session: ChatSession, now: datetime) -> bool:
+    """token 命中但已过期：公开端点与撤销/不存在同一 404，不泄露失效原因。"""
+    expires_at = _as_utc(session.share_expires_at)
+    return expires_at is not None and expires_at <= now
+
+
+def _share_audit_detail(conversation_id: str, expires_at: datetime | None) -> str:
+    """审计 detail：只含会话定位与过期时间；绝不落 token 原文/摘要。"""
+    return json.dumps(
+        {
+            "conversation_id": conversation_id,
+            "expires_at": _share_expires_at_iso(expires_at),
+        },
+        ensure_ascii=False,
+        sort_keys=True,
+    )
+
+
+async def _audit_share_action(
+    *,
+    user_id: int,
+    action: str,
+    conversation_id: str,
+    expires_at: datetime | None,
+) -> None:
+    """分享审计（best-effort）：失败只告警，不影响业务响应。"""
+    try:
+        await audit_service.log_activity(
+            user_id=user_id,
+            action=action,
+            target_type="chat_session",
+            target_id=conversation_id,
+            detail=_share_audit_detail(conversation_id, expires_at),
+        )
+    except Exception as e:  # noqa: BLE001 — 审计是旁路，任何失败都不得反噬请求
+        logger.warning(f"Audit conversation share action failed: {type(e).__name__}: {e}")
+
+
 @router.post(
     "/conversations/{conversation_id}/share",
     response_model=dict,
@@ -542,22 +600,45 @@ async def _load_owned_session(
 )
 async def create_conversation_share(
     conversation_id: str,
+    response: Response,
+    body: ChatShareCreate | None = None,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """创建/轮换只读分享链接；原文 token 仅本次响应返回。"""
+    """创建/轮换只读分享链接；原文 token 仅本次响应返回。
+
+    批次十二：可选 ``expires_in_days``（1-90）；缺省/null = 永不过期，
+    与批次十一及更早的旧链接语义一致。再次调用即轮换，过期时间随新链接重置。
+    """
     session = await _load_owned_session(db, conversation_id, current_user)
+    rotated = session.share_token_hash is not None
+    now = datetime.now(UTC)
+    expires_at = (
+        now + timedelta(days=body.expires_in_days)
+        if body is not None and body.expires_in_days is not None
+        else None
+    )
     token = new_share_token()
     session.share_token_hash = _share_digest(token)
-    session.share_created_at = datetime.now(UTC)
+    session.share_created_at = now
+    session.share_expires_at = expires_at
     await db.commit()
+    await _audit_share_action(
+        user_id=current_user.id,
+        action="rotate_conversation_share" if rotated else "share_conversation",
+        conversation_id=session.id,
+        expires_at=expires_at,
+    )
+    # token 属于凭证：响应不得被任何中间缓存留存。
+    response.headers["Cache-Control"] = "no-store"
     return {
         "success": True,
         "message": "分享链接已创建",
         "data": {
             "token": token,
             "url": f"/share/{token}",
-            "createdAt": session.share_created_at.isoformat(),
+            "createdAt": now.isoformat(),
+            "expiresAt": _share_expires_at_iso(expires_at),
         },
     }
 
@@ -569,17 +650,26 @@ async def create_conversation_share(
 )
 async def get_conversation_share_status(
     conversation_id: str,
+    response: Response,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """查询本人会话的分享状态（不返回 token，token 仅在创建时给一次）。"""
+    """查询本人会话的分享状态（不返回 token，token 仅在创建时给一次）。
+
+    ``shared`` 表示 token 仍存在（含已过期）；``expired`` 由服务端时钟判定，
+    前端不必依赖本机时钟。状态响应同样 ``no-store``。
+    """
     session = await _load_owned_session(db, conversation_id, current_user)
+    shared = session.share_token_hash is not None
+    response.headers["Cache-Control"] = "no-store"
     return {
         "success": True,
         "message": "获取成功",
         "data": {
-            "shared": session.share_token_hash is not None,
+            "shared": shared,
             "createdAt": session.share_created_at.isoformat() if session.share_created_at else None,
+            "expiresAt": _share_expires_at_iso(session.share_expires_at),
+            "expired": bool(shared and _share_is_expired(session, datetime.now(UTC))),
         },
     }
 
@@ -594,11 +684,22 @@ async def revoke_conversation_share(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """撤销分享；撤销后旧 token 立即失效（包括已打开的页面刷新时）。"""
+    """撤销分享；撤销后旧 token 立即失效（包括已打开的页面刷新时）。
+
+    撤销必须同时清空 token/created/expires 三列：只清 token 会留下过期时间
+    残值，后续状态查询可能把「已撤销」误报成「已过期」。
+    """
     session = await _load_owned_session(db, conversation_id, current_user)
     session.share_token_hash = None
     session.share_created_at = None
+    session.share_expires_at = None
     await db.commit()
+    await _audit_share_action(
+        user_id=current_user.id,
+        action="revoke_conversation_share",
+        conversation_id=session.id,
+        expires_at=None,
+    )
     return {"success": True, "message": "分享已撤销", "data": {"shared": False}}
 
 
@@ -610,7 +711,7 @@ async def get_shared_conversation(
     token: str,
     db: AsyncSession = Depends(get_db),
 ):
-    """匿名只读快照。唯一入口是 token；不存在/已撤销/会话已删除均为 404。"""
+    """匿名只读快照。唯一入口是 token；不存在/已撤销/已过期/会话已删除均为 404。"""
     if not token or len(token) > 128:
         raise NotFoundError("分享链接不存在或已失效")
     # 只对摘要做等值查询，token 原文不进入 SQL 绑定参数以外的任何位置。
@@ -620,6 +721,9 @@ async def get_shared_conversation(
         )
     ).scalar_one_or_none()
     if not session:
+        raise NotFoundError("分享链接不存在或已失效")
+    # 变异点：删除本检查 → 过期链接仍返回 200，批次十二判别测试必须红。
+    if _share_is_expired(session, datetime.now(UTC)):
         raise NotFoundError("分享链接不存在或已失效")
 
     messages = (
