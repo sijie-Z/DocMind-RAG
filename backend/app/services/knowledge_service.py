@@ -25,6 +25,7 @@ from app.models.document import (
     DocumentTag,
 )
 from app.models.knowledge_job import KnowledgeProcessingJob
+from app.models.public_kb import DocumentPublication
 from app.models.review import ReviewCase, ReviewDocumentMeta
 from app.rag.errors import RetrievalUnavailableError
 from app.rag.source_provenance import SourceProvenanceUnavailableError
@@ -107,6 +108,10 @@ _DOCUMENT_CHILD_MODELS: tuple[type, ...] = (
     DocumentTag,
     KnowledgeProcessingJob,
     ReviewDocumentMeta,
+    # 批次十三：公开知识库白名单行也引用 documents.id（FK 无 ON DELETE
+    # CASCADE）。漏掉会让「彻底删除文档」被 MySQL 1451 挡住，集成测试
+    # （test_delete_document_children）会用 information_schema 核对本清单。
+    DocumentPublication,
 )
 
 

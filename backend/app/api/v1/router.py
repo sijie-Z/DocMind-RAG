@@ -43,6 +43,7 @@ from app.api.v1.endpoints import (
     organizations,
     prompts,
     public_artifacts,
+    public_kb,
     reviews,
     scheduled_tasks,
     sessions,
@@ -112,6 +113,10 @@ ROUTER_SPECS: dict[str, tuple[APIRouter, str, list[str], str]] = {
     # 批次九：工件只读分享的公开面（凭 token，无 JWT）。management 端点仍在
     # /artifacts/{id}/share；公开读取独立前缀 /public，语义上不属于登录用户 API。
     "public_artifacts": (public_artifacts.router, "/public", ["公开工件"], "agent"),
+    # 批次十三：公开知识库只读检索。管理面（发布/轮换/撤销/白名单）仍属登录
+    # 用户 API；公开面同挂 /public（与 public_artifacts 共存，路径再带 /kb）。
+    "public_kb": (public_kb.router, "/kb-publications", ["公开知识库"], "rag"),
+    "public_kb_public": (public_kb.public_router, "/public", ["公开知识库"], "rag"),
     # issue #477：容器持久终端（HTTP 会话管理 + 一次性票据 + PTY WebSocket）。
     "terminal": (terminal.router, "/terminal", ["终端"], "agent"),
     # issue #476：会话 fork / 谱系。与 /agent/sessions 共用同一批数据行与可见范围

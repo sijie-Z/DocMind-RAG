@@ -30,6 +30,7 @@ from app.models.org_skill import OrgSkill, OrgSkillVersion
 from app.models.organization import Organization, user_organization
 from app.models.organization_settings import OrganizationSettings
 from app.models.prompt import PromptTemplate
+from app.models.public_kb import DocumentPublication, KbPublication
 from app.models.rbac import ORG_ADMIN_ROLE_NAME, Role, user_organization_role_association
 from app.models.retrieval_eval import RetrievalEvalCase, RetrievalEvalRun
 from app.models.review import (
@@ -421,6 +422,11 @@ class OrganizationService:
         # 技能是组织资产（只归档、不删除），组织删除必须先转移，否则 1451。
         ("组织技能", OrgSkill),
         ("组织技能版本", OrgSkillVersion),
+        # 批次十三：公开知识库发布头与白名单行都以 organization_id 外键引用
+        # organizations；未纳入清理会触发 MySQL 1451。公开链接是组织资产，
+        # 组织删除必须先转移/撤销，白名单行随发布头一并视为挂载数据。
+        ("公开知识库发布", KbPublication),
+        ("公开知识库文档", DocumentPublication),
     )
 
     async def _assert_org_has_no_attached_data(self, db: AsyncSession, org_ids: list[int]) -> None:

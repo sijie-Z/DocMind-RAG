@@ -17,6 +17,7 @@ from app.models.organization import Organization, user_organization
 from app.models.organization_settings import OrganizationSettings
 from app.models.prompt import PromptTemplate
 from app.models.prompt_version import PromptTemplateVersion
+from app.models.public_kb import DocumentPublication, KbPublication
 from app.models.rbac import (
     Permission,
     Role,
@@ -74,6 +75,8 @@ __all__ = [
     "Notification",
     "PromptTemplate",
     "PromptTemplateVersion",
+    "KbPublication",
+    "DocumentPublication",
     "ReviewDocumentMeta",
     "ReviewCase",
     "ReviewItem",

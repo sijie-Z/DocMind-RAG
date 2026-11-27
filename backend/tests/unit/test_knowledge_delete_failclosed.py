@@ -36,6 +36,7 @@ from app.models.document import (
     DocumentType,
 )
 from app.models.knowledge_job import KnowledgeProcessingJob
+from app.models.public_kb import DocumentPublication
 from app.models.review import ReviewCase, ReviewDocumentMeta
 from app.rag.cache import RetrievalCache, SemanticCache
 from app.services.document_status import require_delete_by_query_response
@@ -214,6 +215,8 @@ async def delete_harness(monkeypatch):
         DocumentTag.__table__,
         KnowledgeProcessingJob.__table__,
         ReviewDocumentMeta.__table__,
+        # 批次十三：公开知识库白名单行引用 documents.id，删除链会先清它
+        DocumentPublication.__table__,
         # Batch 5：删除前会检查核验案件引用
         ReviewCase.__table__,
     ]

@@ -161,18 +161,18 @@ def test_web_app_health_endpoint(client):
 
 
 def test_build_router_all_bundles_covers_every_router_spec():
-    """全量 bundle：35 个模块全部挂载（含 knowledge_bases、rubric、答案质量评测、
-    工件公开分享与组织技能库），前缀集合与 ROUTER_SPECS 一致。"""
+    """全量 bundle：37 个模块全部挂载（含 knowledge_bases、rubric、答案质量评测、
+    工件公开分享、组织技能库与批次十三公开知识库），前缀集合与 ROUTER_SPECS 一致。"""
     from app.api.v1.router import ALL_BUNDLES, ROUTER_SPECS, build_router
 
-    assert len(ROUTER_SPECS) == 35
+    assert len(ROUTER_SPECS) == 37
     all_router = build_router(ALL_BUNDLES)
     expected_prefixes = {prefix for _, prefix, _, _ in ROUTER_SPECS.values()}
     assert _mounted_prefixes(all_router) == expected_prefixes
 
     lazy_nodes = [route for route in all_router.routes if hasattr(route, "include_context")]
     if lazy_nodes:  # FastAPI ≥0.142 惰性 include：每个模块一个节点
-        assert len(lazy_nodes) == 35
+        assert len(lazy_nodes) == 37
 
 
 def test_headless_error_event_exits_1_with_log_safe_stderr(monkeypatch, capsys):

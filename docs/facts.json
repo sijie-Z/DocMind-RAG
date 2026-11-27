@@ -3,12 +3,12 @@
   "description": "文档关键数字的单一事实源（W0-8）。由 backend/scripts/check_doc_facts.py 从源码派生并逐 PR 校验；代码演进导致数字变化时，必须同步本文件与引用它的文档。对外口径（值/口径/命令/日期/备注）见 docs/METRICS.md，本文件各项与 METRICS.md 必须同值。",
   "facts": {
     "sse_event_types": 25,
-    "endpoint_modules": 35,
-    "endpoint_files": 34,
-    "frontend_routes": 48,
+    "endpoint_modules": 37,
+    "endpoint_files": 35,
+    "frontend_routes": 49,
     "registered_tools": 32,
     "default_tools": 10,
-    "http_route_decorators": 311,
+    "http_route_decorators": 321,
     "websocket_route_decorators": 3
   },
   "sources": {

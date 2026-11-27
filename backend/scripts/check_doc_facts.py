@@ -591,7 +591,13 @@ def derive_default_tool_names(agent_dir: Path, config_path: Path) -> list[str]:
 
 
 def derive_route_decorators(endpoints_dir: Path) -> tuple[list[str], list[str]]:
-    """返回 (HTTP 装饰器列表, WebSocket 装饰器列表)，元素形如 ``get:handler``。"""
+    """返回 (HTTP 装饰器列表, WebSocket 装饰器列表)，元素形如 ``get:handler``。
+
+    口径覆盖端点模块内的公开 APIRouter 载体：主 ``router`` 以及
+    ``public_router``（批次十三公开知识库）这类显式公开面。只认 ``router``
+    会静默漏算公开端点，让「HTTP 装饰器总数」偏小；``compat_router`` 等
+    兼容别名（include_in_schema=False）刻意不计，与既口径保持一致。
+    """
     if not endpoints_dir.is_dir():
         raise DerivationError(f"端点评点目录不存在: {endpoints_dir}")
     http: list[str] = []
@@ -606,7 +612,7 @@ def derive_route_decorators(endpoints_dir: Path) -> tuple[list[str], list[str]]:
                 if not isinstance(target, ast.Attribute):
                     continue
                 owner = target.value
-                if not (isinstance(owner, ast.Name) and owner.id == "router"):
+                if not (isinstance(owner, ast.Name) and owner.id in {"router", "public_router"}):
                     continue
                 if target.attr in _HTTP_METHODS:
                     http.append(f"{target.attr}:{node.name}")

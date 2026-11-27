@@ -481,6 +481,16 @@ export const routes: RouteRecordRaw[] = [
     }
   },
   {
+    // 公开知识库只读检索（批次十三）：token 即能力凭证；无登录、无生成、无上传。
+    path: '/public/kb/:token',
+    name: 'PublicKb',
+    component: () => import('@/views/public/kb.vue'),
+    meta: {
+      title: 'publicKb.public.title',
+      requiresAuth: false
+    }
+  },
+  {
     // 工件只读分享（批次九）：公开页，token 即能力凭证；必须先于 /share/:token。
     path: '/share/artifact/:token',
     name: 'SharedArtifact',

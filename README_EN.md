@@ -113,7 +113,7 @@ register document identity → readiness gate → create case (blocked/ready + r
 1. **Evaluation gate in CI** — retrieval quality is guarded per PR with zero tolerance: Eval v1.5 ships **80 golden cases (60 positive + 20 negative)**; ClauseHit@1/@3/@5, MRR, EmptyAcc, NearMiss@5 and errors are all zero-tolerance, fail-closed. `make eval-ci` (`mode=fake`, 2026-10-24, corpus commit `d867a2b3`) measured ClauseHit@1 **70.0%** / @3 **76.7%** / @5 **80.0%**, NearMiss@5 **25.0%**, MRR **0.74**, EmptyAcc **100%**, errors **0** (PR #525, squash 552efaad; not comparable with the 28-case v1 baseline). Baseline updates are explicit PRs (`backend/docs/eval-gate-phase1.md`; method in `docs/METRICS.md`).
 2. **Silent false-success cleanup (#301)** — ~551 exception handlers audited, 32 silent false-success paths closed (logout fail-closed, three-state retrieval, honest document state machine, degraded stats identity…), each with a regression test.
 3. **Red first, then green + mutation checks** — every fix starts with a failing test; after the fix, injecting the defect back must fail *that* test — proof the test has discriminating power.
-4. **Documented-number invariants** — SSE event count, endpoint-module count, frontend-route count and tool count are derived from source; expected values live in `docs/facts.json`, the public method for every metric (value / method / command / date / note) lives in `docs/METRICS.md`, and `backend/scripts/check_doc_facts.py` verifies code ↔ facts JSON ↔ METRICS.md ↔ docs on every PR. Frontend routes are recorded in two ways: 48 route records (43 named routes, including top-level and redirect records).
+4. **Documented-number invariants** — SSE event count, endpoint-module count, frontend-route count and tool count are derived from source; expected values live in `docs/facts.json`, the public method for every metric (value / method / command / date / note) lives in `docs/METRICS.md`, and `backend/scripts/check_doc_facts.py` verifies code ↔ facts JSON ↔ METRICS.md ↔ docs on every PR. Frontend routes are recorded in two ways: 49 route records (44 named routes, including top-level and redirect records).
 5. **Ratchet only tightens** — backend coverage floor `--cov-fail-under=42` plus four frontend baseline ratchets (hardcoded Chinese / i18n completeness / naming consistency / key usage): they block drops, never chase scores.
 
 Hardening closed (completed): user-scoped agent memory, `/files` proxy authorization (auth + org ownership for non-public objects), pure-ASGI metrics and rate-limit middleware, legacy `ci.yml` removed; plus workflow ownership isolation, API-key masking, SSRF protection for web fetch, upload path traversal and MinIO delete fixes, agent sandbox escape closure, `execute_sql` tenant filtering, MCP subprocess env allow-list, login-failure lockout + enumeration timing defense, and end-to-end PII masking.
@@ -220,10 +220,10 @@ DocMind/
 │   │   │   └── tools/               #   extended tools (21; 32 built-in tools total)
 │   │   ├── rag/                     # retriever / reranker / pipeline / cache
 │   │   ├── api/v1/
-│   │   │   ├── router.py            # main router (35 modules registered)
-│   │   │   └── endpoints/           # Endpoint implementations (34 files)
-│   │   ├── services/                # business services (48 services)
-│   │   ├── models/                  # ORM models (28 model files)
+│   │   │   ├── router.py            # main router (37 modules registered)
+│   │   │   └── endpoints/           # Endpoint implementations (35 files)
+│   │   ├── services/                # business services (49 services)
+│   │   ├── models/                  # ORM models (29 model files)
 │   │   ├── core/                    # config / DB / Redis / ES / MinIO / Kafka / JWT
 │   │   └── worker/                  # Kafka consumer (parse → chunk → embed → index)
 │   ├── tests/                       # backend tests (unit + API + integration)
@@ -232,14 +232,14 @@ DocMind/
 │   └── docker-compose.yml
 ├── frontend/
 │   └── src/
-│       ├── views/                   # pages (26 page modules, 48 route records / 43 named routes)
+│       ├── views/                   # pages (27 page modules, 49 route records / 44 named routes)
 │       ├── components/ · api/ · stores/ · router/ · composables/ · locales/
 └── docs/                            # architecture page / user guide / ADRs / metrics
 ```
 
 ### 🌐 API Layer (`backend/app/api/v1/`)
 
-35 endpoint modules under `/api/v1`:
+37 endpoint modules under `/api/v1`:
 
 | Module | Prefix | Description |
 |--------|--------|-------------|
@@ -256,6 +256,8 @@ DocMind/
 | Contract Review | `/reviews` | Review cases / items / evidence snapshots + deterministic extraction and V1/V2 alignment + per-item decisions and report export (parser-original quotes + version hashes); org template library (immutable versions + read-only diff); inbound counterparty redline fact ledger (DOCX revisions/comments parsed, explicit unparsed rows, append-only, optimistic-locking disposition) |
 | Agent Artifacts | `/artifacts` | Artifact list / detail / content (content-addressed sha256, version chain, org+user isolation); create/read/revoke read-only share links bound to a specific version (owner-only, token stored as digest); HTML/SVG responses carry a CSP sandbox |
 | Public Artifacts | `/public` | Public face of artifact share links (token-only, no sign-in): metadata and content; field allowlist with no internal identifiers; revoked/expired/disabled all 404, with rate limiting and security headers |
+| Public KB (admin) | `/kb-publications` | Org admins publish/rotate/revoke read-only knowledge-base links with an explicit document allow-list (token stored as digest, shown once; org-deletion protection) |
+| Public KB (anonymous read) | `/public` | Knowledge-base public face at `/kb/{token}` (shares the `/public` prefix with artifacts): token-only read-only search over the explicit allow-list only, returning title/snippet/score with no internal identifiers; revoked/expired/disabled all 404, rate-limited |
 | Organizations | `/organizations` | Org CRUD, member management, role assignment |
 | Organization skills | `/org-skills` | Reviewed org skill library: proposals, review, enable, rollback, archive |
 | Organization Settings | `/organizations` | Org-level settings and audit (shared prefix with Organizations) |

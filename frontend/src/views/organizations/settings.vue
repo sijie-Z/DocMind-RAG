@@ -79,6 +79,9 @@
             </template>
           </n-card>
 
+          <!-- 批次十三：公开知识库只读检索（显式白名单 + token 发布）。 -->
+          <PublicKbPanel />
+
           <n-card :title="t('orgSettings.effectiveTitle')" class="mb-6" :bordered="false">
             <n-table :bordered="false" :single-line="false">
               <thead>
@@ -171,6 +174,7 @@ import type {
 } from '@/api/organization'
 import { providerLabelKey } from '@/utils/providerLabels'
 import { formatDateTime } from '@/utils/format'
+import PublicKbPanel from '@/components/knowledge/PublicKbPanel.vue'
 
 const { t, locale } = useI18n()
 const message = useDedupedMessage()

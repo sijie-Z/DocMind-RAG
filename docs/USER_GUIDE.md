@@ -4,7 +4,7 @@
 >
 > 本文只做**引述**，不做第二套真源：
 > - 端口、凭据、服务编排以 `backend/docker-compose.yml` 与 `backend/.env.docker.example` 为准；
-> - 关键数字（32 个内置工具 / 默认注入 10 个工具 / 35 个端点模块 / 48 条前端路由 / 25 种 SSE 事件）以 `docs/facts.json` 为单一事实源；README、架构页等既有锚点由 `backend/scripts/check_doc_facts.py` 在 CI 逐 PR 校验，本文数字与之一致（工具/端点/路由/SSE 锚点已纳入 CI 校验）；
+> - 关键数字（32 个内置工具 / 默认注入 10 个工具 / 37 个端点模块 / 49 条前端路由 / 25 种 SSE 事件）以 `docs/facts.json` 为单一事实源；README、架构页等既有锚点由 `backend/scripts/check_doc_facts.py` 在 CI 逐 PR 校验，本文数字与之一致（工具/端点/路由/SSE 锚点已纳入 CI 校验）；
 > - 架构与设计动机见 `README.md`、`AGENT_ARCHITECTURE.md`、`docs/decisions/`。
 >
 > 英文版：[USER_GUIDE_EN.md](USER_GUIDE_EN.md)
@@ -696,7 +696,7 @@ API 前缀 `/api/v1/workflows`：工作流 CRUD、执行、调试、节点定义
 
 ### 5.2 端点模块清单
 
-当前共 **35 个端点模块**（`docs/facts.json` 的 `endpoint_modules`，由 `backend/app/api/v1/router.py` 的 `ROUTER_SPECS` 路由表派生）：
+当前共 **37 个端点模块**（`docs/facts.json` 的 `endpoint_modules`，由 `backend/app/api/v1/router.py` 的 `ROUTER_SPECS` 路由表派生）：
 
 | 模块 | 前缀 | 说明 |
 |------|------|------|
@@ -713,6 +713,8 @@ API 前缀 `/api/v1/workflows`：工作流 CRUD、执行、调试、节点定义
 | reviews | `/api/v1/reviews` | 合同核验：案件/核验项/证据快照（parser 原文 + 版本哈希）；组织级模板库 `/reviews/templates`（不可变版本 + 只读 diff）；对方红线台账 `/reviews/{id}/redlines`（上传/列表/明细/乐观锁 disposition） |
 | artifacts | `/api/v1/artifacts` | Agent 工件：列表/详情/正文（内容寻址、版本链、组织+用户隔离）；创建/查询/撤销只读分享链接（绑定具体版本、owner-only） |
 | public_artifacts | `/api/v1/public` | 工件只读分享公开面（凭 token 免登录）：元数据与正文；字段白名单、撤销/过期/开关关闭一律 404、限流与安全响应头 |
+| public_kb | `/api/v1/kb-publications` | 公开知识库管理面（登录 + 组织管理员）：发布/轮换/撤销/白名单；token 只存摘要、只展示一次 |
+| public_kb_public | `/api/v1/public` | 公开知识库检索面 `/kb/{token}`（匿名）：只查显式白名单文档，返回 title/snippet/score；撤销/过期/开关关闭一律 404 |
 | organizations | `/api/v1/organizations` | 组织 CRUD、成员与角色 |
 | organization_settings | `/api/v1/organizations` | 组织级设置（与组织管理共用前缀） |
 | org_skills | `/api/v1/org-skills` | 评审门控的组织技能库：提议 / 审核 / 启用 / 回滚 / 归档 |

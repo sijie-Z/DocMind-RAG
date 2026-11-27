@@ -4,7 +4,7 @@
 >
 > This guide only *references* the sources of truth:
 > - ports, credentials, and service orchestration: `backend/docker-compose.yml` and `backend/.env.docker.example`;
-> - headline numbers (32 built-in tools / 10 tools injected by default / 35 endpoint modules / 48 frontend routes / 25 SSE event types): `docs/facts.json`; existing anchors in README/architecture pages are checked on every PR by `backend/scripts/check_doc_facts.py`, and this guide mirrors them (its tool/endpoint/route/SSE anchors are now also checked);
+> - headline numbers (32 built-in tools / 10 tools injected by default / 37 endpoint modules / 49 frontend routes / 25 SSE event types): `docs/facts.json`; existing anchors in README/architecture pages are checked on every PR by `backend/scripts/check_doc_facts.py`, and this guide mirrors them (its tool/endpoint/route/SSE anchors are now also checked);
 > - architecture and design rationale: `README.md`, `AGENT_ARCHITECTURE.md`, `docs/decisions/`.
 >
 > 中文版：[USER_GUIDE.md](USER_GUIDE.md)
@@ -689,7 +689,7 @@ Successful login returns an envelope:
 
 ### 5.2 Endpoint modules
 
-There are **35 endpoint modules** (`docs/facts.json` → `endpoint_modules`, derived from the `ROUTER_SPECS` table in `backend/app/api/v1/router.py`):
+There are **37 endpoint modules** (`docs/facts.json` → `endpoint_modules`, derived from the `ROUTER_SPECS` table in `backend/app/api/v1/router.py`):
 
 | Module | Prefix | Purpose |
 |--------|--------|---------|
@@ -706,6 +706,8 @@ There are **35 endpoint modules** (`docs/facts.json` → `endpoint_modules`, der
 | reviews | `/api/v1/reviews` | contract review: cases, items, evidence snapshots (parser original + version hashes); org template library at `/reviews/templates` (immutable versions + read-only diff); inbound redline ledger at `/reviews/{id}/redlines` (upload/list/ledger/optimistic-locking disposition) |
 | artifacts | `/api/v1/artifacts` | agent artifacts: list/detail/content (content-addressed, version chain, org+user isolation); create/read/revoke read-only share links bound to a specific version (owner-only) |
 | public_artifacts | `/api/v1/public` | public face of artifact share links (token-only, no sign-in): metadata and content; field allowlist, revoked/expired/disabled all 404, rate limiting and security headers |
+| public_kb | `/api/v1/kb-publications` | public knowledge-base admin surface (signed-in org admins): publish/rotate/revoke/allow-list; token stored as digest and shown once |
+| public_kb_public | `/api/v1/public` | public knowledge-base search face `/kb/{token}` (anonymous): explicit allow-list only, returning title/snippet/score; revoked/expired/disabled all 404 |
 | organizations | `/api/v1/organizations` | org CRUD, members, roles |
 | organization_settings | `/api/v1/organizations` | org-level settings (shared prefix) |
 | org_skills | `/api/v1/org-skills` | Reviewed org skill library: proposals, review, enable, rollback, archive |
