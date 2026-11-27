@@ -2009,7 +2009,17 @@ export default {
       copied: 'Copied',
       copyFailed: 'Copy failed; select the link manually',
       createFailed: 'Failed to create share link.',
-      revokeFailed: 'Failed to revoke share.'
+      revokeFailed: 'Failed to revoke share.',
+      accessCount: 'Views: {count}',
+      lastAccessed: 'Last accessed: {time}',
+      neverAccessed: 'Never accessed',
+      mySharesTitle: 'My active shares',
+      mySharesEmpty: 'No active share links.',
+      mySharesLoadFailed: 'Failed to load active shares.',
+      mySharesCreatedAt: 'Created {time}',
+      mySharesExpiresAt: 'Expires {time}',
+      mySharesNeverExpires: 'Never expires',
+      mySharesRevokeFailed: 'Failed to revoke share.'
     },
     public: {
       title: 'Shared artifact',

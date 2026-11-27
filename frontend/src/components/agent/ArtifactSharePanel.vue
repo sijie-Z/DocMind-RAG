@@ -69,6 +69,20 @@
           {{ t('artifacts.share.inactiveNotice') }}
         </div>
 
+        <!-- 访问统计（批次十一）：只显示聚合次数与最后访问时间，不暴露访问者。 -->
+        <div v-if="hasShare" class="artifact-share-stats" data-testid="artifact-share-stats">
+          <span data-testid="artifact-share-access-count">
+            {{ t('artifacts.share.accessCount', { count: accessCount }) }}
+          </span>
+          <span data-testid="artifact-share-last-accessed">
+            {{
+              lastAccessedAt
+                ? t('artifacts.share.lastAccessed', { time: formatTime(lastAccessedAt) })
+                : t('artifacts.share.neverAccessed')
+            }}
+          </span>
+        </div>
+
         <div class="artifact-share-expiry-row">
           <label class="artifact-share-label" for="artifact-share-expiry">
             {{ t('artifacts.share.expiryLabel') }}
@@ -133,6 +147,92 @@
           {{ error }}
         </p>
       </template>
+
+      <!-- 我的有效分享（批次十一）：跨工件的当前链接列表；只显示展示字段。 -->
+      <section class="artifact-share-list" data-testid="artifact-share-list">
+        <div class="artifact-share-list-header">
+          <span class="artifact-share-label">{{ t('artifacts.share.mySharesTitle') }}</span>
+          <button
+            class="artifact-share-list-refresh"
+            data-testid="artifact-share-list-refresh"
+            :disabled="sharesLoading"
+            @click="loadShares"
+          >
+            {{ t('common.refresh') }}
+          </button>
+        </div>
+        <div v-if="sharesLoading" class="artifact-share-state" data-testid="artifact-share-list-loading">
+          {{ t('common.loading') }}
+        </div>
+        <template v-else>
+          <div
+            v-if="sharesError"
+            class="artifact-share-error"
+            data-testid="artifact-share-list-error"
+            role="alert"
+          >
+            {{ sharesError }}
+          </div>
+          <div
+            v-if="shares.length === 0 && !sharesError"
+            class="artifact-share-state"
+            data-testid="artifact-share-list-empty"
+          >
+            {{ t('artifacts.share.mySharesEmpty') }}
+          </div>
+          <ul v-if="shares.length > 0" class="artifact-share-list-items">
+            <li
+              v-for="item in shares"
+              :key="item.share_id"
+              class="artifact-share-list-item"
+              :data-testid="`artifact-share-list-item-${item.artifact_id}`"
+            >
+              <div class="artifact-share-list-main">
+                <span class="artifact-share-list-title">{{ item.title }}</span>
+                <span class="artifact-share-list-meta">
+                  v{{ item.version_no }} · {{ formatSize(item.file_size) }}
+                </span>
+              </div>
+              <div class="artifact-share-list-meta">
+                <span data-testid="artifact-share-list-created">
+                  {{ t('artifacts.share.mySharesCreatedAt', { time: formatTime(item.created_at) }) }}
+                </span>
+                <span data-testid="artifact-share-list-expires">
+                  {{
+                    item.expires_at
+                      ? t('artifacts.share.mySharesExpiresAt', {
+                          time: formatTime(item.expires_at),
+                        })
+                      : t('artifacts.share.mySharesNeverExpires')
+                  }}
+                </span>
+              </div>
+              <div class="artifact-share-list-meta">
+                <span data-testid="artifact-share-list-access-count">
+                  {{ t('artifacts.share.accessCount', { count: item.access_count }) }}
+                </span>
+                <span data-testid="artifact-share-list-last-accessed">
+                  {{
+                    item.last_accessed_at
+                      ? t('artifacts.share.lastAccessed', {
+                          time: formatTime(item.last_accessed_at),
+                        })
+                      : t('artifacts.share.neverAccessed')
+                  }}
+                </span>
+                <button
+                  class="artifact-share-btn danger"
+                  :data-testid="`artifact-share-list-revoke-${item.artifact_id}`"
+                  :disabled="revokingId === item.share_id"
+                  @click="revokeFromList(item)"
+                >
+                  {{ t('artifacts.share.revoke') }}
+                </button>
+              </div>
+            </li>
+          </ul>
+        </template>
+      </section>
     </div>
   </div>
 </template>
@@ -141,7 +241,7 @@
 import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { artifactsApi } from '@/api/artifacts'
-import type { AgentArtifact } from '@/types/artifact'
+import type { AgentArtifact, ArtifactActiveShare } from '@/types/artifact'
 
 const props = defineProps<{
   show: boolean
@@ -154,13 +254,23 @@ const { t } = useI18n()
 
 const shared = ref(false)
 const token = ref('')
+const createdAt = ref<string | null>(null)
 const expiresAt = ref<string | null>(null)
 const revokedAt = ref<string | null>(null)
+const accessCount = ref(0)
+const lastAccessedAt = ref<string | null>(null)
 const expiryChoice = ref(0)
 const loading = ref(false)
 const busy = ref(false)
 const error = ref('')
 const copyState = ref<'idle' | 'copied' | 'failed'>('idle')
+const shares = ref<ArtifactActiveShare[]>([])
+const sharesLoading = ref(false)
+const sharesError = ref('')
+const revokingId = ref('')
+
+/** 是否存在分享行（含已过期/已撤销）：决定是否显示访问统计。 */
+const hasShare = computed(() => !!createdAt.value || shared.value)
 
 const link = computed(() =>
   token.value ? `${window.location.origin}/share/artifact/${token.value}` : '',
@@ -188,10 +298,16 @@ function expiryChoiceFrom(value: string | null): number {
   return 90
 }
 
-function formatTime(value: string | null): string {
+function formatTime(value: string | null | undefined): string {
   if (!value) return ''
   const date = new Date(value)
   return Number.isNaN(date.getTime()) ? value : date.toLocaleString()
+}
+
+function formatSize(bytes: number): string {
+  if (!bytes || bytes < 1024) return `${bytes || 0} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
 }
 
 async function loadStatus() {
@@ -204,22 +320,44 @@ async function loadStatus() {
     const res = await artifactsApi.getShare(props.artifact.id)
     const data = res.data?.data
     shared.value = !!data?.shared
+    createdAt.value = data?.created_at ?? null
     expiresAt.value = data?.expires_at ?? null
     revokedAt.value = data?.revoked_at ?? null
+    accessCount.value = data?.access_count ?? 0
+    lastAccessedAt.value = data?.last_accessed_at ?? null
     expiryChoice.value = expiryChoiceFrom(expiresAt.value)
   } catch {
     // 状态拉取失败不等于未分享：保留错误提示，禁用依赖状态的推断。
     shared.value = false
+    createdAt.value = null
     error.value = t('artifacts.share.loadFailed')
   } finally {
     loading.value = false
   }
 }
 
+/** 我的有效分享列表：跨工件；失败只影响列表区，不影响当前工件状态。 */
+async function loadShares() {
+  sharesLoading.value = true
+  sharesError.value = ''
+  try {
+    const res = await artifactsApi.listShares()
+    shares.value = res.data?.data?.items || []
+  } catch {
+    shares.value = []
+    sharesError.value = t('artifacts.share.mySharesLoadFailed')
+  } finally {
+    sharesLoading.value = false
+  }
+}
+
 watch(
   () => [props.show, props.artifact?.id],
   ([show]) => {
-    if (show) void loadStatus()
+    if (show) {
+      void loadStatus()
+      void loadShares()
+    }
   },
   { immediate: true },
 )
@@ -237,8 +375,13 @@ async function createShare() {
     const data = res.data?.data
     token.value = data?.token || ''
     shared.value = true
+    createdAt.value = data?.created_at ?? createdAt.value
     expiresAt.value = data?.expires_at ?? null
     revokedAt.value = data?.revoked_at ?? null
+    accessCount.value = data?.access_count ?? 0
+    lastAccessedAt.value = data?.last_accessed_at ?? null
+    // 列表里该工件的条目/过期时间可能已变化（创建 vs 轮换）。
+    void loadShares()
   } catch {
     error.value = t('artifacts.share.createFailed')
   } finally {
@@ -262,16 +405,50 @@ async function revokeShare() {
   error.value = ''
   try {
     const res = await artifactsApi.revokeShare(props.artifact.id)
-    const data = res.data?.data
-    shared.value = false
-    token.value = ''
-    expiresAt.value = data?.expires_at ?? null
-    revokedAt.value = data?.revoked_at ?? null
+    applyRevoked(res.data?.data)
     copyState.value = 'idle'
+    void loadShares()
   } catch {
     error.value = t('artifacts.share.revokeFailed')
   } finally {
     busy.value = false
+  }
+}
+
+/** 撤销响应落回当前工件状态（计数保留，仅失效）。 */
+function applyRevoked(
+  data:
+    | {
+        access_count?: number
+        last_accessed_at?: string | null
+        expires_at?: string | null
+        revoked_at?: string | null
+      }
+    | undefined,
+) {
+  shared.value = false
+  token.value = ''
+  expiresAt.value = data?.expires_at ?? null
+  revokedAt.value = data?.revoked_at ?? null
+  accessCount.value = data?.access_count ?? accessCount.value
+  lastAccessedAt.value = data?.last_accessed_at ?? lastAccessedAt.value
+}
+
+/** 从「我的分享」列表撤销；若正好是当前工件，同步上方状态。 */
+async function revokeFromList(item: ArtifactActiveShare) {
+  revokingId.value = item.share_id
+  sharesError.value = ''
+  try {
+    const res = await artifactsApi.revokeShare(item.artifact_id)
+    if (props.artifact?.id === item.artifact_id) {
+      applyRevoked(res.data?.data)
+      copyState.value = 'idle'
+    }
+    await loadShares()
+  } catch {
+    sharesError.value = t('artifacts.share.mySharesRevokeFailed')
+  } finally {
+    revokingId.value = ''
   }
 }
 </script>
@@ -353,6 +530,99 @@ async function revokeShare() {
   font-size: 12px;
   color: var(--text-tertiary, #9ca3af);
   margin-bottom: 12px;
+}
+
+.artifact-share-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  margin-bottom: 10px;
+  font-size: 11px;
+  color: var(--text-secondary, #4b5563);
+}
+
+.artifact-share-list {
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border-color, #e5e7eb);
+}
+
+.dark .artifact-share-list {
+  border-color: var(--border-color-dark, #374151);
+}
+
+.artifact-share-list-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.artifact-share-list-header .artifact-share-label {
+  margin-bottom: 0;
+}
+
+.artifact-share-list-refresh {
+  padding: 1px 6px;
+  border: 1px solid var(--border-color, #e5e7eb);
+  border-radius: 4px;
+  background: none;
+  cursor: pointer;
+  font-size: 10px;
+  color: var(--text-secondary, #4b5563);
+}
+
+.artifact-share-list-refresh:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.artifact-share-list-items {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.artifact-share-list-item {
+  padding: 8px;
+  border: 1px solid var(--border-color, #e5e7eb);
+  border-radius: 6px;
+}
+
+.dark .artifact-share-list-item {
+  border-color: var(--border-color-dark, #374151);
+}
+
+.artifact-share-list-main {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.artifact-share-list-title {
+  font-size: 12px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.artifact-share-list-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 10px;
+  font-size: 10px;
+  color: var(--text-tertiary, #9ca3af);
+}
+
+.artifact-share-list-meta + .artifact-share-list-meta {
+  margin-top: 4px;
 }
 
 .artifact-share-link-box {

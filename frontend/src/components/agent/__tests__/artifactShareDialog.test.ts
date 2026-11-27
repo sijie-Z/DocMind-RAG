@@ -12,10 +12,11 @@ import { mount, flushPromises } from '@vue/test-utils'
 import { createI18n } from 'vue-i18n'
 import en from '@/locales/en'
 
-const { getShareMock, createShareMock, revokeShareMock } = vi.hoisted(() => ({
+const { getShareMock, createShareMock, revokeShareMock, listSharesMock } = vi.hoisted(() => ({
   getShareMock: vi.fn(),
   createShareMock: vi.fn(),
   revokeShareMock: vi.fn(),
+  listSharesMock: vi.fn(),
 }))
 
 vi.mock('@/api/artifacts', () => ({
@@ -27,6 +28,7 @@ vi.mock('@/api/artifacts', () => ({
     getShare: getShareMock,
     createShare: createShareMock,
     revokeShare: revokeShareMock,
+    listShares: listSharesMock,
   },
 }))
 
@@ -69,16 +71,48 @@ function mountPanel() {
 beforeEach(() => {
   vi.clearAllMocks()
   getShareMock.mockResolvedValue({
-    data: { success: true, data: { shared: false, created_at: null, expires_at: null, revoked_at: null } },
+    data: {
+      success: true,
+      data: {
+        shared: false,
+        created_at: null,
+        expires_at: null,
+        revoked_at: null,
+        access_count: 0,
+        last_accessed_at: null,
+      },
+    },
+  })
+  listSharesMock.mockResolvedValue({
+    data: { success: true, data: { items: [], total: 0 } },
   })
   createShareMock.mockResolvedValue({
     data: {
       success: true,
-      data: { token: 'share-token-1', url: '/share/artifact/share-token-1', shared: true, expires_at: null },
+      data: {
+        token: 'share-token-1',
+        url: '/share/artifact/share-token-1',
+        shared: true,
+        created_at: '2026-11-27T10:00:00+00:00',
+        expires_at: null,
+        revoked_at: null,
+        access_count: 0,
+        last_accessed_at: null,
+      },
     },
   })
   revokeShareMock.mockResolvedValue({
-    data: { success: true, data: { shared: false, revoked_at: '2026-11-27T10:00:00' } },
+    data: {
+      success: true,
+      data: {
+        shared: false,
+        created_at: '2026-11-26T10:00:00+00:00',
+        expires_at: null,
+        revoked_at: '2026-11-27T10:00:00+00:00',
+        access_count: 0,
+        last_accessed_at: null,
+      },
+    },
   })
   Object.defineProperty(navigator, 'clipboard', {
     value: { writeText: vi.fn().mockResolvedValue(undefined) },
@@ -214,5 +248,165 @@ describe('ArtifactSharePanel', () => {
     expect(w.find('[data-testid="artifact-share-error"]').text()).toContain(
       'Failed to load share status',
     )
+  })
+
+  // ── 批次十一：访问统计 / 我的分享列表 ────────────────────────────────────
+
+  it('状态返回访问次数与最后访问时间时正确渲染', async () => {
+    getShareMock.mockResolvedValue({
+      data: {
+        success: true,
+        data: {
+          shared: true,
+          created_at: '2026-11-26T10:00:00+00:00',
+          expires_at: null,
+          revoked_at: null,
+          access_count: 7,
+          last_accessed_at: '2026-11-27T09:00:00+00:00',
+        },
+      },
+    })
+    const w = mountPanel()
+    await flushPromises()
+    expect(w.find('[data-testid="artifact-share-access-count"]').text()).toContain('Views: 7')
+    expect(w.find('[data-testid="artifact-share-last-accessed"]').text()).toContain(
+      'Last accessed',
+    )
+  })
+
+  it('从未访问时显示 never accessed（而不是空白）', async () => {
+    getShareMock.mockResolvedValue({
+      data: {
+        success: true,
+        data: {
+          shared: true,
+          created_at: '2026-11-26T10:00:00+00:00',
+          expires_at: null,
+          revoked_at: null,
+          access_count: 0,
+          last_accessed_at: null,
+        },
+      },
+    })
+    const w = mountPanel()
+    await flushPromises()
+    expect(w.find('[data-testid="artifact-share-access-count"]').text()).toContain('Views: 0')
+    expect(w.find('[data-testid="artifact-share-last-accessed"]').text()).toContain(
+      'Never accessed',
+    )
+  })
+
+  it('已撤销的分享仍显示保留的访问统计', async () => {
+    getShareMock.mockResolvedValue({
+      data: {
+        success: true,
+        data: {
+          shared: false,
+          created_at: '2026-11-26T10:00:00+00:00',
+          expires_at: null,
+          revoked_at: '2026-11-27T10:00:00+00:00',
+          access_count: 5,
+          last_accessed_at: '2026-11-27T09:00:00+00:00',
+        },
+      },
+    })
+    const w = mountPanel()
+    await flushPromises()
+    expect(w.find('[data-testid="artifact-share-revoked"]').exists()).toBe(true)
+    expect(w.find('[data-testid="artifact-share-access-count"]').text()).toContain('Views: 5')
+  })
+
+  it('我的分享列表渲染标题/版本/次数/过期，并可撤销后移除', async () => {
+    listSharesMock
+      .mockResolvedValueOnce({
+        data: {
+          success: true,
+          data: {
+            items: [
+              {
+                share_id: 'share-1',
+                artifact_id: 'art-1',
+                title: '季度报告',
+                kind: 'markdown',
+                version_no: 2,
+                file_size: 2048,
+                created_at: '2026-11-26T10:00:00+00:00',
+                expires_at: null,
+                access_count: 3,
+                last_accessed_at: '2026-11-27T09:00:00+00:00',
+              },
+            ],
+            total: 1,
+          },
+        },
+      })
+      .mockResolvedValueOnce({ data: { success: true, data: { items: [], total: 0 } } })
+    const w = mountPanel()
+    await flushPromises()
+
+    const item = w.find('[data-testid="artifact-share-list-item-art-1"]')
+    expect(item.exists()).toBe(true)
+    expect(item.text()).toContain('季度报告')
+    expect(item.text()).toContain('v2')
+    expect(item.text()).toContain('Views: 3')
+    expect(item.text()).toContain('Never expires')
+
+    await w.find('[data-testid="artifact-share-list-revoke-art-1"]').trigger('click')
+    await flushPromises()
+    expect(revokeShareMock).toHaveBeenCalledWith('art-1')
+    expect(listSharesMock).toHaveBeenCalledTimes(2)
+    expect(w.find('[data-testid="artifact-share-list-item-art-1"]').exists()).toBe(false)
+    expect(w.find('[data-testid="artifact-share-list-empty"]').exists()).toBe(true)
+  })
+
+  it('我的分享列表空态', async () => {
+    const w = mountPanel()
+    await flushPromises()
+    expect(w.find('[data-testid="artifact-share-list-empty"]').text()).toContain(
+      'No active share links',
+    )
+  })
+
+  it('我的分享列表加载失败显示错误态', async () => {
+    listSharesMock.mockRejectedValue(new Error('boom'))
+    const w = mountPanel()
+    await flushPromises()
+    expect(w.find('[data-testid="artifact-share-list-error"]').text()).toContain(
+      'Failed to load active shares',
+    )
+  })
+
+  it('从列表撤销失败显示列表错误，且不移除条目', async () => {
+    listSharesMock.mockResolvedValue({
+      data: {
+        success: true,
+        data: {
+          items: [
+            {
+              share_id: 'share-1',
+              artifact_id: 'art-2',
+              title: '他工件',
+              kind: 'text',
+              version_no: 1,
+              file_size: 10,
+              created_at: '2026-11-26T10:00:00+00:00',
+              expires_at: null,
+              access_count: 0,
+              last_accessed_at: null,
+            },
+          ],
+          total: 1,
+        },
+      },
+    })
+    revokeShareMock.mockRejectedValue(new Error('boom'))
+    const w = mountPanel()
+    await flushPromises()
+    await w.find('[data-testid="artifact-share-list-revoke-art-2"]').trigger('click')
+    await flushPromises()
+    expect(w.find('[data-testid="artifact-share-list-error"]').text()).toContain(
+      'Failed to revoke share',
+    )
+    expect(w.find('[data-testid="artifact-share-list-item-art-2"]').exists()).toBe(true)
   })
 })
