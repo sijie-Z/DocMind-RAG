@@ -47,7 +47,7 @@ def test_039_revision_chain_and_id_length():
     assert script.get_revision("043_session_tree").down_revision == "042_rubric_eval"
     assert script.get_revision(HEAD).down_revision == "043_session_tree"
     assert script.get_revision("045_artifact_share").down_revision == HEAD
-    assert set(script.get_heads()) == {"046_org_skill"}, "批次十后唯一 head 是 046"
+    assert set(script.get_heads()) == {"047_artifact_share_analytics"}, "批次十一后唯一 head 是 047"
 
 
 def test_040_revision_chain(tmp_path, monkeypatch):

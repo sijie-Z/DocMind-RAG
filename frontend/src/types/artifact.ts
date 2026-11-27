@@ -40,12 +40,35 @@ export interface ArtifactListResponse {
   total: number
 }
 
-/** 工件分享状态（管理面；token 不在状态响应中回传）。 */
+/** 工件分享状态（管理面；token 不在状态响应中回传）。
+ *  批次十一：access_count 由后端 NULL→0 归一；last_accessed_at 为空 = 从未被读取。 */
 export interface ArtifactShareStatus {
   shared: boolean
   created_at?: string | null
   expires_at?: string | null
   revoked_at?: string | null
+  access_count: number
+  last_accessed_at?: string | null
+}
+
+/** 当前用户的一条有效分享（列表投影；不含 token/内部组织/用户/会话字段）。 */
+export interface ArtifactActiveShare {
+  share_id: string
+  /** 撤销端点按工件 id 定位；仅用于所有者自己的列表。 */
+  artifact_id: string
+  title: string
+  kind: ArtifactKind
+  version_no: number
+  file_size: number
+  created_at?: string | null
+  expires_at?: string | null
+  access_count: number
+  last_accessed_at?: string | null
+}
+
+export interface ArtifactShareListResponse {
+  items: ArtifactActiveShare[]
+  total: number
 }
 
 /** 创建/轮换分享的响应：token 原文只在本次响应出现一次。 */

@@ -62,7 +62,9 @@ def test_046_revision_chain():
     rev = script.get_revision(HEAD)
     assert rev.down_revision == PREVIOUS
     assert len(HEAD) <= 32, "MySQL alembic_version.version_num 是 VARCHAR(32)"
-    assert set(script.get_heads()) == {HEAD}, "046 必须是当前唯一 head"
+    assert set(script.get_heads()) == {"047_artifact_share_analytics"}, (
+        "批次十一后唯一 head 是 047（046 本身仍是本用例的被测迁移）"
+    )
 
 
 def test_046_downgrade_does_not_drop_indexes_before_tables():

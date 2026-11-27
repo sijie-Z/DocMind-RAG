@@ -1995,7 +1995,17 @@ export default {
       copied: 'コピーしました',
       copyFailed: 'コピーに失敗しました。リンクを手動で選択してください',
       createFailed: '共有リンクの作成に失敗しました。',
-      revokeFailed: '共有の無効化に失敗しました。'
+      revokeFailed: '共有の無効化に失敗しました。',
+      accessCount: '閲覧回数：{count}',
+      lastAccessed: '最終アクセス：{time}',
+      neverAccessed: 'まだ閲覧されていません',
+      mySharesTitle: '有効な共有',
+      mySharesEmpty: '有効な共有リンクはありません。',
+      mySharesLoadFailed: '共有一覧の読み込みに失敗しました。',
+      mySharesCreatedAt: '作成日時：{time}',
+      mySharesExpiresAt: '有効期限：{time}',
+      mySharesNeverExpires: '無期限',
+      mySharesRevokeFailed: '共有の無効化に失敗しました。'
     },
     public: {
       title: '共有された成果物',

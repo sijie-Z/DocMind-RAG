@@ -6,6 +6,7 @@ import type {
   AgentArtifact,
   ArtifactListResponse,
   ArtifactShareCreation,
+  ArtifactShareListResponse,
   ArtifactShareStatus,
   PublicArtifactMeta,
 } from '@/types/artifact'
@@ -67,6 +68,13 @@ export const artifactsApi = {
   /** 查询分享状态（不返回 token）。 */
   getShare(artifactId: string): Promise<AxiosResponse<ApiResponse<ArtifactShareStatus>>> {
     return request.get(`/artifacts/${encodeURIComponent(artifactId)}/share`, {
+      headers: { 'X-Silent-Error': '1' },
+    })
+  },
+
+  /** 当前用户所有有效分享（未撤销、未过期）；列表不含 token。 */
+  listShares(): Promise<AxiosResponse<ApiResponse<ArtifactShareListResponse>>> {
+    return request.get('/artifacts/shares', {
       headers: { 'X-Silent-Error': '1' },
     })
   },
