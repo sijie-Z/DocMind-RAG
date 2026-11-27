@@ -62,3 +62,6 @@ b0324c14ec457608ad70012a3dc149ccb8ab4daa:派聪明AI知识库系统开发文档.
 67946e9b6e56147d394f99eb970842e6c616e128:backend/tests/unit/test_otel_genai_export.py:generic-api-key:105
 # 示例值·用户级 LLM 设置缓存轮换测试的断言值（非真实凭据；后续提交已换成 rotated-value-*）
 f61e164beb114705ae2aeb96726c83fc6bac5980:backend/tests/unit/test_user_llm_settings.py:generic-api-key:216
+
+# 测试夹具·示例 JWT（验证 payload 拒绝规则），非凭据
+1e3c81922dff468da2194073f57ca451d2289526:backend/tests/unit/test_org_skill_service.py:jwt:215
