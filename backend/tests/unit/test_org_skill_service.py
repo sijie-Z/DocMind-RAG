@@ -212,7 +212,9 @@ def test_payload_normalizes_and_dedupes_triggers():
         _payload(trigger_phrases=["AIza" + "a" * 35]),
         _payload(trigger_phrases=["sk_live_" + "a" * 24]),
         _payload(
-            trigger_phrases=["eyJ" + "hbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.signature123456"]
+            trigger_phrases=[
+                "eyJ" + "hbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.signature123456"
+            ]
         ),
         _payload(trigger_phrases=["powershell -enc AAAA"]),
         _payload(trigger_phrases=["C:\\秘密\\文件.txt"]),
