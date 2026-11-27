@@ -22,6 +22,8 @@ export const getSharedConversation = (token: string): Promise<{ data: ApiRespons
 export interface ShareStatus {
   shared: boolean
   createdAt: string | null
+  expiresAt: string | null
+  expired?: boolean
 }
 
 export const getConversationShareStatus = (conversationId: string) =>
@@ -31,11 +33,20 @@ export interface ShareCreation {
   token: string
   url: string
   createdAt: string
+  expiresAt: string | null
 }
 
-/** 创建/轮换；token 原文只在本次响应可见。 */
-export const createConversationShare = (conversationId: string) =>
-  request.post<ApiResponse<ShareCreation>>(`/chat/conversations/${conversationId}/share`)
+/**
+ * 创建/轮换；token 原文只在本次响应可见。
+ * `expiresInDays` 为 null（缺省）时链接永不过期；1-90 有效（后端校验）。
+ */
+export const createConversationShare = (
+  conversationId: string,
+  expiresInDays: number | null = null,
+) =>
+  request.post<ApiResponse<ShareCreation>>(`/chat/conversations/${conversationId}/share`, {
+    expires_in_days: expiresInDays,
+  })
 
 export const revokeConversationShare = (conversationId: string) =>
   request.delete<ApiResponse<{ shared: boolean }>>(`/chat/conversations/${conversationId}/share`)
