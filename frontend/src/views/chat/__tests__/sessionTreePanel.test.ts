@@ -297,6 +297,34 @@ describe('SessionTreePanel · 摘要 / 分享 / 标签', () => {
     expect(wrapper.find('[data-testid="session-tree-share-expires-at"]').exists()).toBe(false)
   })
 
+  it('切换会话/重载树时清空上一棵树的分享链接与过期时间', async () => {
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText: vi.fn().mockResolvedValue(undefined) },
+    })
+    shareTreeMock.mockResolvedValue({
+      data: {
+        success: true,
+        data: {
+          root_session_id: 'root',
+          token: 'tok-stale',
+          url: '/share/tok-stale',
+          createdAt: '2026-11-26T00:00:00Z',
+          expiresAt: '2026-12-03T00:00:00+00:00',
+        },
+      },
+    })
+    const wrapper = mountPanel()
+    await flushPromises()
+    await wrapper.find('[data-testid="session-tree-share"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('[data-testid="session-tree-share-link"]').exists()).toBe(true)
+    await wrapper.setProps({ sessionId: 'child' })
+    await flushPromises()
+    expect(wrapper.find('[data-testid="session-tree-share-link"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="session-tree-share-expires-at"]').exists()).toBe(false)
+  })
+
   it('树未加载或根不可见时分享禁用，绝不用当前分支兜底', async () => {
     mockTree(tree([CHILD]))
     const wrapper = mountPanel()

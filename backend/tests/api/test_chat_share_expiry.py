@@ -494,3 +494,18 @@ async def test_tree_share_writes_audit_without_token(monkeypatch, share_env):
     assert payload["expires_at"] == first["expiresAt"]
     for call, token in zip(calls, (first["token"], second.json()["data"]["token"]), strict=True):
         assert token not in str(call["detail"])
+
+
+def test_share_is_expired_boundary_is_inclusive():
+    """expires_at == now 必须算过期（<= 而非 <）；变异点：<=→< 本用例红。"""
+    from types import SimpleNamespace
+
+    from app.api.v1.endpoints.chat import _share_is_expired
+
+    now = datetime.now(UTC)
+    assert _share_is_expired(SimpleNamespace(share_expires_at=now), now) is True
+    assert (
+        _share_is_expired(SimpleNamespace(share_expires_at=now + timedelta(microseconds=1)), now)
+        is False
+    )
+    assert _share_is_expired(SimpleNamespace(share_expires_at=None), now) is False

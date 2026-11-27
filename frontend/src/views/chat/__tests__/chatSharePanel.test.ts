@@ -170,6 +170,22 @@ describe('SharePanel', () => {
     expect(create).toHaveBeenCalledWith('conv-1', 30)
   })
 
+  it('服务端 expired=true 时即使本地时间未到也显示过期态', async () => {
+    status.mockResolvedValue({
+      data: {
+        data: {
+          shared: true,
+          createdAt: '2026-11-01T00:00:00+00:00',
+          expiresAt: new Date(Date.now() + 86_400_000).toISOString(),
+          expired: true,
+        },
+      },
+    })
+    const wrapper = mountPanel()
+    await flushPromises()
+    expect(wrapper.find('[data-testid="share-expired"]').exists()).toBe(true)
+  })
+
   it('revokes via API, clears token and updates the panel state', async () => {
     status.mockResolvedValue({
       data: { data: { shared: true, createdAt: null, expiresAt: null, expired: false } },
@@ -184,6 +200,19 @@ describe('SharePanel', () => {
     expect(wrapper.find('[data-testid="share-token"]').exists()).toBe(false)
     expect(wrapper.text()).toContain('inactive')
     expect(wrapper.emitted('revoked')).toBeTruthy()
+  })
+
+  it('撤销后有效期选择重置为 7 天', async () => {
+    status.mockResolvedValue({
+      data: { data: { shared: true, createdAt: null, expiresAt: null, expired: false } },
+    })
+    revoke.mockResolvedValue({ data: { data: { shared: false } } })
+    const wrapper = mountPanel()
+    await flushPromises()
+    await wrapper.get('[data-testid="share-expiry"]').setValue('30')
+    await wrapper.get('[data-testid="share-revoke"]').trigger('click')
+    await flushPromises()
+    expect((wrapper.get('[data-testid="share-expiry"]').element as HTMLSelectElement).value).toBe('7')
   })
 
   it('创建失败显示错误态且不显示 token', async () => {

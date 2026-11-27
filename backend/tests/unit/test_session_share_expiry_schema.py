@@ -137,3 +137,14 @@ def test_048_upgrade_is_idempotent(tmp_path, monkeypatch):
     command.upgrade(cfg, HEAD)
     assert _revision(db_path) == {HEAD}
     assert NEW_COLUMN in _columns(db_path)
+
+
+def test_share_expires_at_uses_mysql_fsp6():
+    """ORM 类型必须保留 DATETIME(fsp=6) 变体；删掉变体本用例红。"""
+    from sqlalchemy.dialects import mysql
+
+    from app.models.chat import ChatSession
+
+    column = ChatSession.__table__.c.share_expires_at
+    compiled = str(column.type.compile(dialect=mysql.dialect())).upper()
+    assert "DATETIME(6)" in compiled, compiled
