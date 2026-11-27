@@ -136,6 +136,9 @@ const HIDDEN_PAGES: Record<string, string> = {
   // 答案质量评测从核验页入口进入，菜单面无独立项 → 高亮归属合同核验。
   AnswerQualityRuns: 'Reviews',
   AnswerQualityRunDetail: 'Reviews',
+  // 批次十：组织技能库从组织设置/「保存为技能」入口进入，菜单面无独立项
+  // → 高亮归属组织设置。
+  OrganizationSkills: 'OrganizationSettings',
   WorkflowEditor: 'Workflow',
   AgentMemory: 'Workflow',
   Notifications: 'Notifications',

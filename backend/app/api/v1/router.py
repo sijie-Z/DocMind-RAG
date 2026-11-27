@@ -38,6 +38,7 @@ from app.api.v1.endpoints import (
     memory,
     monitoring,
     notifications,
+    org_skills,
     organization_settings,
     organizations,
     prompts,
@@ -88,6 +89,8 @@ ROUTER_SPECS: dict[str, tuple[APIRouter, str, list[str], str]] = {
         "rag",
     ),
     "organizations": (organizations.router, "/organizations", ["组织管理"], "core"),
+    # 批次十：评审门控的组织技能库（提议/审核/启用/回滚/归档）。
+    "org_skills": (org_skills.router, "/org-skills", ["组织技能"], "agent"),
     "organization_settings": (
         organization_settings.router,
         "/organizations",

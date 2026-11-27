@@ -1,15 +1,15 @@
-"""issue #200 接线验收：技能系统三件套。
+"""技能系统接线验收（批次十起：reviewed-only 组织技能库）。
 
 - **索引进提示词**：`build_skills_index` 含仓库真实技能；executor 提示词按开关注入
   （受限工具上下文除外——评审 B1）；
 - **真工具**：`list_skills` / `load_skill_reference`（指南与参考两种形态、错误显式）；
-- **学习闭环（读/写/反馈/清理侧）**：`_apply_skill_hints` 只补空缺不覆盖；
-  `_learn_skills` 质检全 A 才学；使用结果反馈（B2）；过期清理（B2）；同 query 去重（m3）；
-  触发词重复记账去重。
+- **运行时读侧**：`_apply_skill_hints` 只读 `org_skill_service.match_skill`
+  （approved + enabled + 哈希通过 + 工具可见），只补空缺不覆盖；
+- **自动学习已停用**：loop 不再持有 Redis SkillManager，不 load/prune/learn；
+  `SkillManager` 仅作为基准/测试工具保留（下方仍锁住其自身行为）。
 """
 
 import asyncio
-from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -155,88 +155,115 @@ async def test_executor_prompt_injects_skills_index_per_switch():
 
 
 @pytest.mark.asyncio
-async def test_apply_skill_hints_only_fills_missing():
+async def test_apply_skill_hints_only_fills_missing(monkeypatch):
+    """批次十：读侧改为 org_skill_service.match_skill（reviewed-only）。
+
+    变异点：`_apply_skill_hints` 改回 `SkillManager.match` / 不复核可见工具集
+    → 本用例与 test_org_skill_wiring 的 Redis 预置用例红。
+    """
     from app.agent.loop import PERAgentLoop
+    from app.services import org_skill_service
 
     loop = PERAgentLoop(MagicMock(), AgentConfig(), organization_id=1)
-    loop.skill_manager = MagicMock()
-    loop.skill_manager.match.return_value = SimpleNamespace(
-        id="sk-1",
-        tool_sequence=[
-            {"tool_name": "search_knowledge_base", "description": "x"},
-            {"tool_name": "web_search", "description": "y"},
-        ],
+    matched = org_skill_service.MatchedSkill(
+        skill_id="sk-1",
+        version_no=3,
+        tool_sequence=(
+            {"tool_name": "search_knowledge_base"},
+            {"tool_name": "web_search"},
+        ),
     )
+
+    async def _match(_session, **_kwargs):
+        return matched
+
+    monkeypatch.setattr(org_skill_service, "match_skill", _match)
     steps = [
         PlanStep(id="s1", description="a"),
         PlanStep(id="s2", description="b", tool_hint="execute_python"),
     ]
     plan = Plan(id="p1", goal="g", steps=steps)
 
-    matched_id = loop._apply_skill_hints(plan, "查一下")
+    matched_id = await loop._apply_skill_hints(plan, "查一下")
 
     assert steps[0].tool_hint == "search_knowledge_base", "空缺应被技能提示补上"
     assert steps[1].tool_hint == "execute_python", "已有提示不得被覆盖"
-    assert matched_id == "sk-1", "应返回实际被应用的 skill_id（B2 反馈边的输入）"
+    assert matched_id == "sk-1", "应返回实际被应用的 skill_id"
 
 
 @pytest.mark.asyncio
-async def test_apply_skill_hints_skips_tools_not_visible_in_context():
+async def test_apply_skill_hints_skips_tools_not_visible_in_context(monkeypatch):
     """#245 第 5/6 条：跨会话工具配置漂移——技能记的工具名不在当前可见集（tool_tags
     受限）时跳过应用，不得写进步骤诱导模型调用被执行层拒绝的工具。
 
     变异点：_apply_skill_hints 里 `hint and hint in visible` 还原为 `hint` → 红。
     """
     from app.agent.loop import PERAgentLoop
+    from app.services import org_skill_service
 
     loop = PERAgentLoop(
         MagicMock(), AgentConfig(tool_tags=["search", "analysis"]), organization_id=1
     )
-    loop.skill_manager = MagicMock()
-    loop.skill_manager.match.return_value = SimpleNamespace(
-        id="sk-9",
-        tool_sequence=[
-            {"tool_name": "delegate_subtask", "description": "漂移前学到的（不在白名单）"},
-            {"tool_name": "search_knowledge_base", "description": "当前可见"},
-        ],
+    matched = org_skill_service.MatchedSkill(
+        skill_id="sk-9",
+        version_no=1,
+        tool_sequence=(
+            {"tool_name": "delegate_subtask"},
+            {"tool_name": "search_knowledge_base"},
+        ),
     )
+
+    async def _match(_session, **_kwargs):
+        return matched
+
+    monkeypatch.setattr(org_skill_service, "match_skill", _match)
     steps = [PlanStep(id="s1", description="a"), PlanStep(id="s2", description="b")]
     plan = Plan(id="p1", goal="g", steps=steps)
 
-    matched_id = loop._apply_skill_hints(plan, "查一下")
+    matched_id = await loop._apply_skill_hints(plan, "查一下")
 
     assert steps[0].tool_hint is None, "不在当前可见集的 hint 必须跳过（不为不可见工具背书）"
     assert steps[1].tool_hint == "search_knowledge_base", "可见 hint 仍按位置配对应用"
     assert matched_id == "sk-9"
 
-    # 全部不可见 → 一条都没应用上 → None：反馈边不得把"没真正用上"算作使用。
-    loop.skill_manager.match.return_value = SimpleNamespace(
-        id="sk-10",
-        tool_sequence=[{"tool_name": "delegate_subtask", "description": "不可见"}],
+    # 全部不可见 → 一条都没应用上 → None。
+    matched_too = org_skill_service.MatchedSkill(
+        skill_id="sk-10", version_no=1, tool_sequence=({"tool_name": "delegate_subtask"},)
     )
+
+    async def _match_too(_session, **_kwargs):
+        return matched_too
+
+    monkeypatch.setattr(org_skill_service, "match_skill", _match_too)
     plan2 = Plan(id="p2", goal="g", steps=[PlanStep(id="s1", description="a")])
-    assert loop._apply_skill_hints(plan2, "查一下") is None
+    assert await loop._apply_skill_hints(plan2, "查一下") is None
     assert plan2.steps[0].tool_hint is None
 
 
 @pytest.mark.asyncio
-async def test_apply_skill_hints_respects_disabled_tools():
+async def test_apply_skill_hints_respects_disabled_tools(monkeypatch):
     """#245 第 5/6 条（disabled_tools 侧）：被 disabled_tools 过滤掉的工具同样
     不可见——hint 跳过应用。
 
     变异点：同 test_apply_skill_hints_skips_tools_not_visible_in_context。
     """
     from app.agent.loop import PERAgentLoop
+    from app.services import org_skill_service
 
     loop = PERAgentLoop(MagicMock(), AgentConfig(disabled_tools=["web_search"]), organization_id=1)
-    loop.skill_manager = MagicMock()
-    loop.skill_manager.match.return_value = SimpleNamespace(
-        id="sk-11",
-        tool_sequence=[{"tool_name": "web_search", "description": "已被禁用"}],
+    matched = org_skill_service.MatchedSkill(
+        skill_id="sk-11",
+        version_no=1,
+        tool_sequence=({"tool_name": "web_search"},),
     )
+
+    async def _match(_session, **_kwargs):
+        return matched
+
+    monkeypatch.setattr(org_skill_service, "match_skill", _match)
     plan = Plan(id="p1", goal="g", steps=[PlanStep(id="s1", description="a")])
 
-    assert loop._apply_skill_hints(plan, "查一下") is None
+    assert await loop._apply_skill_hints(plan, "查一下") is None
     assert plan.steps[0].tool_hint is None, "disabled_tools 里的工具不得被 hint 复活"
 
 
@@ -266,14 +293,12 @@ def test_build_messages_skill_index_gates():
 
 
 @pytest.mark.asyncio
-async def test_learn_skills_gated_by_all_a_grades():
+async def test_auto_learning_is_disabled():
+    """批次十：loop 不得再持有/调用 Redis SkillManager 的自动学习闭环。"""
     from app.agent.loop import PERAgentLoop
 
     loop = PERAgentLoop(MagicMock(), AgentConfig(), organization_id=1)
-    loop.skill_manager = MagicMock()
-    loop.skill_manager.learn_from_plan_success = AsyncMock(
-        return_value=SimpleNamespace(name="Auto: x")
-    )
+    assert not hasattr(loop, "skill_manager"), "生产 loop 不得再持有 Redis SkillManager"
     plan = Plan(
         id="p1",
         goal="g",
@@ -283,13 +308,8 @@ async def test_learn_skills_gated_by_all_a_grades():
         ],
     )
     ctx = ExecutionContext(query="q")
-
-    await loop._learn_skills(ctx, plan, {"grades": {"s1": ("A", ""), "s2": ("A", "")}})
-    assert loop.skill_manager.learn_from_plan_success.await_count == 1
-
-    loop.skill_manager.learn_from_plan_success.reset_mock()
-    await loop._learn_skills(ctx, plan, {"grades": {"s1": ("A", ""), "s2": ("C", "")}})
-    assert loop.skill_manager.learn_from_plan_success.await_count == 0, "非全 A 不学习"
+    # 空操作：不抛异常、不创建任何技能记录（完整断言见 test_org_skill_wiring）。
+    assert await loop._learn_skills(ctx, plan, {"grades": {"s1": ("A", "")}}) is None
 
 
 # ── 评审 B1：子代理上下文全隔离 ─────────────────────────────────────────────
@@ -324,34 +344,29 @@ async def test_delegate_child_config_disables_skills(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_skill_outcome_feedback_success_failure_and_no_evidence():
+async def test_skill_outcome_feedback_is_noop():
+    """批次十：使用结果回报已停用（v1 无成功率字段），且 loop 不持有 SkillManager。"""
     from app.agent.loop import PERAgentLoop
 
     loop = PERAgentLoop(MagicMock(), AgentConfig(), organization_id=1)
-    loop.skill_manager = MagicMock()
-    loop.skill_manager.record_success = AsyncMock()
-    loop.skill_manager.record_failure = AsyncMock()
-
-    await loop._record_skill_outcome("sk-1", {"grades": {"s1": ("A", ""), "s2": ("A", "")}})
-    assert loop.skill_manager.record_success.await_count == 1
-    assert loop.skill_manager.record_failure.await_count == 0
-
-    await loop._record_skill_outcome("sk-1", {"grades": {"s1": ("C", "")}})
-    assert loop.skill_manager.record_failure.await_count == 1
-
-    loop.skill_manager.record_success.reset_mock()
-    await loop._record_skill_outcome(None, {"grades": {"s1": ("A", "")}})  # 未命中
-    await loop._record_skill_outcome("sk-1", {})  # 无证据
-    assert loop.skill_manager.record_success.await_count == 0
+    assert not hasattr(loop, "skill_manager")
+    assert (
+        await loop._record_skill_outcome("sk-1", {"grades": {"s1": ("A", ""), "s2": ("A", "")}})
+        is None
+    )
+    assert await loop._record_skill_outcome("sk-1", {"grades": {"s1": ("C", "")}}) is None
+    assert await loop._record_skill_outcome(None, {"grades": {"s1": ("A", "")}}) is None
+    assert await loop._record_skill_outcome("sk-1", {}) is None
 
 
 @pytest.mark.asyncio
 async def test_skill_feedback_strengthens_matching_and_refreshes():
-    """B2 复现的反面：用一次且全 A → success_count=1、last_used_at 刷新、
-    近似改写（只命中一个触发模式）从命不中变为命得中。"""
+    """保留模块（基准/测试用）自洽性：SkillManager 仍可独立工作。
+
+    批次十起生产 loop 不再调用它；这里只锁住被保留模块自身不回归。
+    """
     import time as _time
 
-    from app.agent.loop import PERAgentLoop
     from app.agent.skills import SkillManager
 
     mgr = SkillManager()
@@ -367,9 +382,7 @@ async def test_skill_feedback_strengthens_matching_and_refreshes():
     # 冷启动（success_rate=0 → 乘数 0.5）：单模式近似改写命不中
     assert mgr.match("帮我生成播客脚本就行") is None
 
-    loop = PERAgentLoop(MagicMock(), AgentConfig(), organization_id=1)
-    loop.skill_manager = mgr
-    await loop._record_skill_outcome(skill.id, {"grades": {"s1": ("A", "")}})
+    await mgr.record_success(skill.id)
 
     assert skill.success_count == 1
     assert skill.last_used_at > fresh - 3600 + 3599, "使用后 last_used_at 必须刷新（不再 7 天过期）"
@@ -579,10 +592,15 @@ class _FakeReviewer:
 
 
 @pytest.mark.asyncio
-async def test_run_records_skill_feedback_and_prunes(monkeypatch):
-    """run 级见证（评审 B2 的变异点全在这条链上）：删掉 load / prune / 反馈任一
-    处接线（loop.run 开头与 Phase 2c），本测试精确红。"""
+async def test_run_uses_reviewed_skill_and_never_redis(monkeypatch):
+    """run 级见证（批次十）：命中 reviewed 技能时补 tool_hint；loop 不再
+    load/prune/learn 或记录 Redis 技能使用结果。
+
+    变异点：把 `_apply_skill_hints` 改回 `SkillManager.match`、或在 run 起点
+    恢复 `skill_manager.load()/prune_stale()` → 本用例红。
+    """
     from app.agent.loop import PERAgentLoop
+    from app.services import org_skill_service
 
     async def _no_save(self, ttl=86400 * 7):
         return False
@@ -603,32 +621,24 @@ async def test_run_records_skill_feedback_and_prunes(monkeypatch):
     loop._reviewer = _FakeReviewer()
     loop._write_experiences = AsyncMock()
 
-    mgr = MagicMock()
-    mgr.load = AsyncMock()
-    mgr.prune_stale = AsyncMock()
-    mgr.learn_from_plan_success = AsyncMock(return_value=None)
-    mgr.record_success = AsyncMock()
-    mgr.record_failure = AsyncMock()
-    mgr.match.return_value = SimpleNamespace(
-        id="sk-1",
-        tool_sequence=[{"tool_name": "search_knowledge_base", "description": "x"}],
-    )
-    loop.skill_manager = mgr
+    async def _match(_session, **_kwargs):
+        return org_skill_service.MatchedSkill(
+            skill_id="sk-reviewed",
+            version_no=2,
+            tool_sequence=({"tool_name": "search_knowledge_base"},),
+        )
+
+    monkeypatch.setattr(org_skill_service, "match_skill", _match)
 
     events = await asyncio.wait_for(
         _collect(loop),
         timeout=15.0,
     )
 
-    assert mgr.load.await_count == 1, "run 开头应懒加载技能"
-    assert mgr.prune_stale.await_count == 1, "run 开头应清理过期技能（B2）"
+    assert not hasattr(loop, "skill_manager"), "run 不得再持有 Redis SkillManager"
     assert loop._executor.seen_tool_hints == ["search_knowledge_base"], (
-        "读侧应把命中技能的工具补上空缺的 tool_hint"
+        "读侧应把 reviewed 技能的工具补上空缺的 tool_hint"
     )
-    total = mgr.record_success.await_count + mgr.record_failure.await_count
-    assert total == 1, "命中且应用的技能必须在回合结束时回报使用结果（B2 反馈边）"
-    recorded = mgr.record_success.await_args or mgr.record_failure.await_args
-    assert recorded.args[0] == "sk-1"
     assert any(e.type == "done" for e in events), "run 应正常收尾"
 
 

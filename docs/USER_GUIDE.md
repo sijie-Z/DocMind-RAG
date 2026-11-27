@@ -4,7 +4,7 @@
 >
 > 本文只做**引述**，不做第二套真源：
 > - 端口、凭据、服务编排以 `backend/docker-compose.yml` 与 `backend/.env.docker.example` 为准；
-> - 关键数字（32 个内置工具 / 默认注入 10 个工具 / 34 个端点模块 / 47 条前端路由 / 25 种 SSE 事件）以 `docs/facts.json` 为单一事实源；README、架构页等既有锚点由 `backend/scripts/check_doc_facts.py` 在 CI 逐 PR 校验，本文数字与之一致（工具/端点/路由/SSE 锚点已纳入 CI 校验）；
+> - 关键数字（32 个内置工具 / 默认注入 10 个工具 / 35 个端点模块 / 48 条前端路由 / 25 种 SSE 事件）以 `docs/facts.json` 为单一事实源；README、架构页等既有锚点由 `backend/scripts/check_doc_facts.py` 在 CI 逐 PR 校验，本文数字与之一致（工具/端点/路由/SSE 锚点已纳入 CI 校验）；
 > - 架构与设计动机见 `README.md`、`AGENT_ARCHITECTURE.md`、`docs/decisions/`。
 >
 > 英文版：[USER_GUIDE_EN.md](USER_GUIDE_EN.md)
@@ -696,7 +696,7 @@ API 前缀 `/api/v1/workflows`：工作流 CRUD、执行、调试、节点定义
 
 ### 5.2 端点模块清单
 
-当前共 **34 个端点模块**（`docs/facts.json` 的 `endpoint_modules`，由 `backend/app/api/v1/router.py` 的 `ROUTER_SPECS` 路由表派生）：
+当前共 **35 个端点模块**（`docs/facts.json` 的 `endpoint_modules`，由 `backend/app/api/v1/router.py` 的 `ROUTER_SPECS` 路由表派生）：
 
 | 模块 | 前缀 | 说明 |
 |------|------|------|
@@ -715,6 +715,7 @@ API 前缀 `/api/v1/workflows`：工作流 CRUD、执行、调试、节点定义
 | public_artifacts | `/api/v1/public` | 工件只读分享公开面（凭 token 免登录）：元数据与正文；字段白名单、撤销/过期/开关关闭一律 404、限流与安全响应头 |
 | organizations | `/api/v1/organizations` | 组织 CRUD、成员与角色 |
 | organization_settings | `/api/v1/organizations` | 组织级设置（与组织管理共用前缀） |
+| org_skills | `/api/v1/org-skills` | 评审门控的组织技能库：提议 / 审核 / 启用 / 回滚 / 归档 |
 | monitoring | `/api/v1/monitoring` | 性能指标、健康、告警、RAG 质量 |
 | notifications | `/api/v1/notifications` | 通知 CRUD 与 WebSocket |
 | prompts | `/api/v1/prompts` | 提示词模板与版本；三层 scope |

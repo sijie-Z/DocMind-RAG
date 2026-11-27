@@ -13,6 +13,14 @@
           </div>
         </div>
         <button
+          v-if="task.state === 'completed'"
+          class="task-save-btn"
+          data-testid="task-save-skill"
+          @click="emit('save-skill', task)"
+        >
+          {{ t('orgSkills.saveFromRun') }}
+        </button>
+        <button
           v-if="task.has_replay"
           class="task-replay-btn"
           @click="emit('view-replay', task.task_id)"
@@ -35,7 +43,10 @@ defineProps<{
   loading?: boolean
 }>()
 
-const emit = defineEmits<{ 'view-replay': [taskId: string] }>()
+const emit = defineEmits<{
+  'view-replay': [taskId: string]
+  'save-skill': [task: AgentTaskListItem]
+}>()
 
 const { t } = useI18n()
 
@@ -153,6 +164,17 @@ function fmtTime(iso: string): string {
   border: 1px solid rgba(37, 99, 235, 0.4);
   color: #2563eb;
   background: rgba(37, 99, 235, 0.06);
+  border-radius: 6px;
+  font-size: 12px;
+  padding: 2px 10px;
+  cursor: pointer;
+}
+
+.task-save-btn {
+  flex-shrink: 0;
+  border: 1px solid rgba(5, 150, 105, 0.4);
+  color: #047857;
+  background: rgba(5, 150, 105, 0.06);
   border-radius: 6px;
   font-size: 12px;
   padding: 2px 10px;

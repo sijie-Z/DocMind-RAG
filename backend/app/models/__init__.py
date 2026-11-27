@@ -12,6 +12,7 @@ from app.models.knowledge_base import KnowledgeBase
 from app.models.knowledge_job import KnowledgeJobStatus, KnowledgeProcessingJob
 from app.models.manual import SystemManual
 from app.models.notification import Notification
+from app.models.org_skill import OrgSkill, OrgSkillVersion
 from app.models.organization import Organization, user_organization
 from app.models.organization_settings import OrganizationSettings
 from app.models.prompt import PromptTemplate
@@ -61,6 +62,8 @@ __all__ = [
     "ARTIFACT_KINDS",
     "ARTIFACT_STATUSES",
     "AgentArtifactShare",
+    "OrgSkill",
+    "OrgSkillVersion",
     "Organization",
     "OrganizationSettings",
     "user_organization",

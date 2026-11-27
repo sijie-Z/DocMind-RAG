@@ -59,6 +59,19 @@ describe('RecentTaskList · 任务记录', () => {
     w.unmount()
   })
 
+  it('已完成任务提供「保存为技能」入口（批次十）；未完成不提供', async () => {
+    const completed = task({ task_id: 't-done', state: 'completed', query: '季度财务总结' })
+    const running = task({ task_id: 't-run', state: 'running' })
+    const w = mountC([completed, running])
+    const rows = w.findAll('.task-row')
+    expect(rows[0].find('[data-testid="task-save-skill"]').exists()).toBe(true)
+    expect(rows[1].find('[data-testid="task-save-skill"]').exists()).toBe(false)
+
+    await rows[0].find('[data-testid="task-save-skill"]').trigger('click')
+    expect(w.emitted('save-skill')).toEqual([[completed]])
+    w.unmount()
+  })
+
   it('空列表 / 加载中：诚实状态文案', () => {
     const empty = mountC([])
     expect(empty.text()).toContain('暂无任务记录')
