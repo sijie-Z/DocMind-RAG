@@ -8,6 +8,8 @@ import logging
 from collections.abc import AsyncGenerator
 from typing import Any
 
+import anyio
+
 from app.dependencies import get_rag_pipeline
 
 logger = logging.getLogger(__name__)
@@ -76,7 +78,11 @@ class RagServiceFacade:
         client_override=None,
         raise_user_errors: bool = False,
     ) -> AsyncGenerator[str, None]:
-        async for chunk in self._pipeline.chat_stream(
+        # 批次十五：显式关闭内层 pipeline 生成器。async for 在 GeneratorExit/
+        # 取消时不会自动 aclose 迭代器；不透传关闭会让 pipeline 的 finally
+        # （上游 close + report_tokens）拖到 GC，且用量 ContextVar 落在另一
+        # 份 context 里，调用方读不到。shield 保证关闭链不被取消打断。
+        stream = self._pipeline.chat_stream(
             query,
             context,
             history,
@@ -87,8 +93,13 @@ class RagServiceFacade:
             model_override=model_override,
             client_override=client_override,
             raise_user_errors=raise_user_errors,
-        ):
-            yield chunk
+        )
+        try:
+            async for chunk in stream:
+                yield chunk
+        finally:
+            with anyio.CancelScope(shield=True):
+                await stream.aclose()
 
     # Legacy compatibility — these are no-ops or delegations
     def reset_metrics(self) -> None:

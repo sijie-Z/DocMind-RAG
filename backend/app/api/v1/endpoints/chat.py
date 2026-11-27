@@ -22,6 +22,7 @@ from sqlalchemy import delete, desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.attributes import flag_modified
 
+from app.api.v1.endpoints.openai_compat import register_openai_compat_routes
 from app.core.config import settings
 from app.core.database import AsyncSessionLocal, get_db
 from app.core.error_mapping import (
@@ -2058,3 +2059,8 @@ async def chat_stream_endpoint(
         keepalive_stream(event_generator(), ttl_seconds=orphan_ttl),
         media_type="text/event-stream",
     )
+
+
+# 批次十五：OpenAI 兼容入口。与既有 chat 路由共用 /chat 前缀与模块，
+# 不新增 ROUTER_SPECS 模块（issue #479 的 37 模块结构契约保持不变）。
+register_openai_compat_routes(router)

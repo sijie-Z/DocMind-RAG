@@ -221,8 +221,8 @@ DocMind/
 │   │   ├── rag/                     # retriever / reranker / pipeline / cache
 │   │   ├── api/v1/
 │   │   │   ├── router.py            # main router (37 modules registered)
-│   │   │   └── endpoints/           # Endpoint implementations (35 files)
-│   │   ├── services/                # business services (49 services)
+│   │   │   └── endpoints/           # Endpoint implementations (36 files)
+│   │   ├── services/                # business services (50 services)
 │   │   ├── models/                  # ORM models (29 model files)
 │   │   ├── core/                    # config / DB / Redis / ES / MinIO / Kafka / JWT
 │   │   └── worker/                  # Kafka consumer (parse → chunk → embed → index)
@@ -248,7 +248,7 @@ DocMind/
 | API Keys | `/api-keys` | Create/list/revoke `dm_` API keys (bcrypt hash, scopes; issue #480) |
 | Files | `/files` | Upload/download/delete, MinIO storage, chunked upload |
 | Documents | `/documents` | Document parsing, vectorization, knowledge base indexing, status tracking, paginated chunk browsing, manual correction and chunk-level enable/disable |
-| Chat | `/chat` | Session CRUD, SSE streaming Q&A, strict mode, debug endpoints |
+| Chat | `/chat` | Session CRUD, SSE streaming Q&A, strict mode, debug endpoints, OpenAI-compatible `/chat/completions` |
 | Knowledge | `/knowledge` | Knowledge retrieval, statistics, settings, retrieval eval cases and run history (bad case capture) |
 | Knowledge Bases | `/knowledge-bases` | Multi-knowledge-base entity CRUD (organization-scoped) |
 | Rubric Eval | `/eval` | Answer-level rubric specs (weighted yes/no with NEUTRAL/STRICT/LENIENT remapping), immutable versions and read-only diff, judge/fake runs with judge-vs-human-gold calibration (agreement + confusion matrix); scores **answers**, distinct from retrieval recall@k under `/knowledge/eval` |
@@ -280,6 +280,21 @@ DocMind/
 | User Settings | `/user` | Personal UI preferences |
 | Webhooks | `/webhooks` | Inbound webhook rule management, HMAC-verified delivery, outbox processing (issue #478) |
 | Demo Data | `/demo` | Seed demo documents & data |
+
+**OpenAI-compatible entry**: `POST /api/v1/chat/completions`. Point the OpenAI
+Python / JS SDK `base_url` at `http://localhost:8000/api/v1`; authenticate with
+`Authorization: Bearer dm_...` (requires the `chat:write` scope). `model` accepts
+only `docmind` (all knowledge bases visible to the organization) and
+`docmind:<knowledge_base_id>` (one knowledge base; cross-org and missing KBs both
+return 404); any other model returns 400 `MODEL_NOT_SUPPORTED`. Both non-streaming
+and SSE streaming (`chat.completion.chunk` + `[DONE]`) are supported; citations are
+a non-breaking extension (non-streaming `choices[0].message.docmind_citations`,
+streaming final-chunk `docmind_citations`) with public id / title / score only.
+
+**v1 semantics**: `temperature` / `max_tokens` are accepted (never 422) but do
+**not** change the actual generation parameters (server defaults are used);
+`finish_reason` is always `stop`; `usage` is a server-side token estimate derived
+from input/output text length, not a value returned by the upstream model.
 
 Swagger docs: `http://localhost:8000/docs` (OpenAPI: `/api/v1/openapi.json`).
 

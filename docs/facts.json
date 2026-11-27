@@ -4,7 +4,7 @@
   "facts": {
     "sse_event_types": 25,
     "endpoint_modules": 37,
-    "endpoint_files": 35,
+    "endpoint_files": 36,
     "frontend_routes": 49,
     "registered_tools": 32,
     "default_tools": 10,
