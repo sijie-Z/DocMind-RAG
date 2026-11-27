@@ -54,6 +54,9 @@ class WsUserState:
     id: int
     is_active: bool
     organization_id: int | None
+    # 批次十四 C4：配额超管旁路按**每条消息**的实时角色判定（握手后降权
+    # 不应继续旁路）。默认 False 保持既有构造点/测试替身的安全默认。
+    is_superuser: bool = False
 
 
 def _clean_token(raw: str) -> str:
@@ -107,7 +110,9 @@ async def _load_user_state(db: AsyncSession, user_id: int) -> WsUserState | None
     """
     row = (
         await db.execute(
-            select(User.id, User.is_active, User.organization_id).where(User.id == user_id)
+            select(User.id, User.is_active, User.organization_id, User.is_superuser).where(
+                User.id == user_id
+            )
         )
     ).first()
     if row is None:
@@ -116,6 +121,7 @@ async def _load_user_state(db: AsyncSession, user_id: int) -> WsUserState | None
         id=int(row.id),
         is_active=bool(row.is_active),
         organization_id=row.organization_id,
+        is_superuser=bool(getattr(row, "is_superuser", False)),
     )
 
 

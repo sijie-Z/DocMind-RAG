@@ -2131,9 +2131,15 @@ class Executor:
         # 执行并逐级递归）。主代理 tool_tags=None → 不设限，行为不变。
         # issue #509：白名单与 schema 同源（list_active_tools：tag ∩ disabled ∩
         # enabled_predicate），不再手工复制过滤逻辑。
+        # 批次十四 C4：组织工具白名单同样启用执行层白名单（tool_whitelist
+        # 非 None 即受限，[] = 明确无工具）；planner 幻觉/提示注入发出名单外
+        # 工具在此被结构化拒绝（tool_not_allowed），不触达 registry。
+        restricted_tool_surface = bool(self.config.tool_tags) or (
+            getattr(self.config, "tool_whitelist", None) is not None
+        )
         allowed_tool_names = (
             {t.name for t in tool_registry.list_active_tools(self.config)}
-            if self.config.tool_tags
+            if restricted_tool_surface
             else None
         )
         # ── HITL：取消检查 + 审批预检（工具前检查点）────────────────────────
@@ -2462,6 +2468,9 @@ class Executor:
                     # 预检与执行层同源（见 tools/skills.py::_consume_tool_output）。
                     extra={
                         "disabled_tools": sorted(self._disabled_tool_names()),
+                        # 批次十四 C4：组织工具白名单随运行上下文下传给委派工具，
+                        # 子代理据此继承“永不比父更宽”的工具面。
+                        "tool_whitelist": getattr(self.config, "tool_whitelist", None),
                         **({"exec_ctx": ctx} if ctx is not None else {}),
                         # ACL P0（issue #511）：唯一允许无 viewer 走组织级可读的
                         # 通道是调用方显式声明的内部系统任务；缺省 0 不再等价。

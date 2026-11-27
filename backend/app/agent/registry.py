@@ -595,18 +595,27 @@ class ToolRegistry:
         return set(getattr(config, "disabled_tools", None) or [])
 
     def list_active_tools(self, config: Any) -> list[ToolEntry]:
-        """默认注入面（issue #509 单一事实源）：tag ∩ 配置禁用 ∩ enabled_predicate。
+        """默认注入面（issue #509 单一事实源）：tag ∩ 白名单 ∩ 禁用 ∩
+        enabled_predicate。
 
         四个消费方（loop / executor / planner / ``/agent/tools``）都走这里或
         ``build_tool_schemas``，不再各自复制「过滤 disabled_tools」的逻辑。
+
+        批次十四 C4：``config.tool_whitelist`` 非 None 时只保留名单内的**规范
+        名**（``None`` = 不限制；``[]`` = 明确无工具）。旧名/别名写进名单不生效
+        （与 #509 只广告规范名的口径一致）；执行层用同一结果构造
+        ``allowed_tool_names``，schema 与执行不漂移。
         """
         tags = getattr(config, "tool_tags", None)
+        whitelist = getattr(config, "tool_whitelist", None)
         disabled = self._disabled_names(config)
         active: list[ToolEntry] = []
         for entry in self._tools.values():
             if entry.hidden:
                 continue
             if tags and not any(tag in entry.tags for tag in tags):
+                continue
+            if whitelist is not None and entry.name not in whitelist:
                 continue
             if entry.name in disabled:
                 continue

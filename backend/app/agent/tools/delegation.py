@@ -100,6 +100,17 @@ async def delegate_subtask(
     internal_system_task = bool(
         run_context is not None and run_context.extra.get("internal_system_task", False)
     )
+    # 批次十四 C4：父运行的组织工具白名单随 RunContext 下传；子代理在
+    # SUBAGENT_ALLOWED_TAGS 之上再叠加该名单（永不比父更宽）。
+    tool_whitelist: list[str] | None = None
+    if run_context is not None:
+        extra = getattr(run_context, "extra", None)
+        if isinstance(extra, dict):
+            raw_whitelist = extra.get("tool_whitelist")
+            if isinstance(raw_whitelist, list) and all(
+                isinstance(name, str) for name in raw_whitelist
+            ):
+                tool_whitelist = raw_whitelist
     if not user_id and not internal_system_task:
         return ToolResult.fail(
             code="auth_required",
@@ -130,6 +141,7 @@ async def delegate_subtask(
         internal_system_task=internal_system_task,
         parent_context=context,
         per_task_timeout=PER_TASK_TIMEOUT,
+        tool_whitelist=tool_whitelist,
     )
     elapsed = time.perf_counter() - start
 

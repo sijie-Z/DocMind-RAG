@@ -48,7 +48,13 @@ from app.core.ws_auth import (
     extract_ws_subprotocol,
     load_active_ws_user,
 )
-from app.exceptions import AppError, AuthorizationError, NotFoundError, ValidationError
+from app.exceptions import (
+    AppError,
+    AuthorizationError,
+    NotFoundError,
+    QuotaExceededError,
+    ValidationError,
+)
 from app.models.chat import (
     ChatMessage,
     ChatSession,
@@ -68,6 +74,7 @@ from app.services.audit_service import audit_service
 from app.services.chat_service import RAGEvent, run_rag_pipeline
 from app.services.document_preview import TEXT_PROVENANCE_MIXED
 from app.services.llm_settings_service import cache_scope, resolve_for_user
+from app.services.organization_settings_service import organization_settings_service
 from app.services.rag_service import rag_service
 from app.services.session_service import (
     SessionAccessScope,
@@ -1068,6 +1075,28 @@ async def websocket_endpoint(
                     search_org_id = user_state.organization_id
                     org_id = user_state.organization_id or None
 
+                    # 批次十四 C4：月度 token 配额在**任何 LLM 调用之前**检查。
+                    # WS 没有 HTTP 状态码：超限用结构化 error 帧（code +
+                    # detail）告知并继续循环，绝不让异常逃逸成未处理错误/断连。
+                    try:
+                        await organization_settings_service.ensure_monthly_quota(
+                            session, org_id, user=user_state
+                        )
+                    except QuotaExceededError as quota_exc:
+                        await manager.send_personal_message(
+                            json.dumps(
+                                {
+                                    "type": "error",
+                                    "code": quota_exc.error_code,
+                                    "content": quota_exc.message,
+                                    "detail": quota_exc.detail,
+                                },
+                                ensure_ascii=False,
+                            ),
+                            websocket,
+                        )
+                        continue
+
                     # 个人 AI 模型设置（本批）：WS 与 SSE 同源解析；未配置/无效
                     # 时 source=server，传 None 保持全局默认行为。
                     llm_resolution = await resolve_for_user(session, user_state)
@@ -1370,6 +1399,27 @@ async def chat_stream_endpoint(
     current_user: User = Depends(require_scope("chat:write")),
     db: AsyncSession = Depends(get_db),
 ):
+    # 批次十四 C4：月度 token 配额在**返回 StreamingResponse 之前**检查——
+    # 一旦开始 SSE 就只剩 200，配额拒绝必须是真正的 HTTP 429（前端据此提示，
+    # 不产生半截流）。组织口径与下方持久化/检索共用 get_user_org_id。
+    #
+    # 两类请求不调用 LLM，不应被配额拦截：
+    # - Last-Event-ID 续传：只回放缓冲帧，零 token 成本（会话归属/连续性校验
+    #   仍在生成器内照常执行）；
+    # - 旧客户端 useAgent 重定向：只返回 DEEP_ANALYSIS_MOVED_TO_AGENT 指引，
+    #   应得到该错误码而不是配额错误。
+    # 防御式读取：直接调用端点的测试替身可能没有 headers 属性。
+    replay_headers = getattr(request, "headers", None)
+    is_replay_request = bool(replay_headers.get("Last-Event-ID") if replay_headers else None)
+    is_deep_analysis_redirect = DEEP_ANALYSIS_GUARD_ENABLED and body.useAgent
+    if not is_replay_request and not is_deep_analysis_redirect:
+        await organization_settings_service.ensure_monthly_quota(
+            db,
+            get_user_org_id(current_user),
+            user=current_user,
+            request=request,
+        )
+
     async def event_generator():
         # 安全加固：跟踪 pipeline 任务；断连时按 SSE_KEEPALIVE_ON_DISCONNECT 决定
         # 立即取消还是保留到 SSE_ORPHAN_TTL_SECONDS（issue #480 §5.2）。
@@ -1616,6 +1666,8 @@ async def chat_stream_endpoint(
                     config=config,
                     llm_client=(llm_resolution.client if llm_resolution.source == "user" else None),
                     llm_model=(llm_resolution.model if llm_resolution.source == "user" else None),
+                    # 批次十四 C4：复用请求会话读取组织工具白名单
+                    db=db,
                 ):
                     last_event_type = agent_event.type
                     if agent_event.type == "chunk":

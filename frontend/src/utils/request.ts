@@ -10,6 +10,13 @@ import i18n from '@/locales'
 const t = (key: string, params: Record<string, string | number> = {}): string =>
   (i18n.global.t as (k: string, p?: Record<string, string | number>) => string)(key, params)
 
+/** 配额重置时间：ISO 字符串 → 本地可读时间；坏值原样显示（不吞排障线索）。 */
+const formatQuotaResetAt = (value: unknown): string => {
+  if (typeof value !== 'string' || !value) return '-'
+  const date = new Date(value)
+  return Number.isNaN(date.getTime()) ? value : date.toLocaleString()
+}
+
 declare module 'axios' {
   interface AxiosRequestConfig {
     /**
@@ -390,9 +397,22 @@ request.interceptors.response.use(
             } catch (_) { /* store 未就绪 */ }
           }
           break
-        case 429:
-          errorMsg = t('errors.rateLimited')
+        case 429: {
+          // 批次十四：组织配额用尽 = 本周期不再放行，必须有别于「稍后重试」
+          // 的普通限流文案（并按后端 detail 给出真实用量 / 重置时间）。
+          if (data?.error_code === 'ORG_TOKEN_QUOTA_EXCEEDED') {
+            const rawDetail = data?.detail
+            const detail = rawDetail && typeof rawDetail === 'object' ? rawDetail : {}
+            errorMsg = t('errors.orgTokenQuotaExceeded', {
+              used: Number(detail.used ?? 0),
+              quota: Number(detail.quota ?? 0),
+              resetAt: formatQuotaResetAt(detail.reset_at),
+            })
+          } else {
+            errorMsg = t('errors.rateLimited')
+          }
           break
+        }
         case 500:
           // 安全加固：5xx 不向用户展示内部异常细节（可能含堆栈/内部路径），详情仅进日志
           errorMsg = t('errors.serverError')

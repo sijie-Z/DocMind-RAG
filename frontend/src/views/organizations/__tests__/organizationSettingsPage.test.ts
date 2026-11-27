@@ -297,8 +297,43 @@ describe('organization settings page', () => {
     wrapper.unmount()
   })
 
-  it('同一组织乱序刷新：旧请求晚到不覆盖新结果，加载态只跟随最新请求', async () => {
-    const loadAudit = deferred<unknown>()
+  it('配额旁显示本月用量；达到配额时显示超限提示（批次十四）', async () => {
+    const exceeded = structuredClone(baseSettings) as any
+    exceeded.settings.monthly_token_quota = {
+      value: 100,
+      source: 'organization',
+      requires_restart: false,
+    }
+    exceeded.usage = { month_tokens: 150, monthly_token_quota: 100 }
+    mockedGet.mockResolvedValue({ data: exceeded } as never)
+
+    const wrapper = await mountPage()
+    const usageText = wrapper.find('[data-testid="quota-usage"]').text()
+    expect(usageText).toContain('150')
+    expect(usageText).toContain('100')
+    const hint = wrapper.find('[data-testid="quota-exceeded-hint"]')
+    expect(hint.exists()).toBe(true)
+    expect(hint.text()).toBe(zh.orgSettings.quotaExceededHint)
+    wrapper.unmount()
+  })
+
+  it('未超限/不限额时不显示超限提示（批次十四）', async () => {
+    const under = structuredClone(baseSettings) as any
+    under.settings.monthly_token_quota = {
+      value: 100,
+      source: 'organization',
+      requires_restart: false,
+    }
+    under.usage = { month_tokens: 99, monthly_token_quota: 100 }
+    mockedGet.mockResolvedValue({ data: under } as never)
+
+    const wrapper = await mountPage()
+    expect(wrapper.find('[data-testid="quota-usage"]').text()).toContain('99')
+    expect(wrapper.find('[data-testid="quota-exceeded-hint"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('同一组织乱序刷新：旧请求晚到不覆盖新结果，加载态只跟随最新请求', async () => {    const loadAudit = deferred<unknown>()
     const saveAudit = deferred<unknown>()
     mockedAudit.mockReturnValueOnce(loadAudit.promise as never)
     const wrapper = await mountPage() // 加载触发的审计 A 挂起

@@ -57,13 +57,29 @@
                 <span class="ml-3 text-xs text-gray-400">{{ t('orgSettings.allowPrivacyModeHint') }}</span>
               </n-form-item>
               <n-form-item :label="t('orgSettings.fields.monthlyTokenQuota')">
-                <n-input-number
-                  v-model:value="form.monthlyTokenQuota"
-                  :min="0"
-                  clearable
-                  class="w-48"
-                  :placeholder="t('orgSettings.unlimited')"
-                />
+                <div class="flex flex-col gap-1">
+                  <n-input-number
+                    v-model:value="form.monthlyTokenQuota"
+                    :min="0"
+                    clearable
+                    class="w-48"
+                    :placeholder="t('orgSettings.unlimited')"
+                  />
+                  <!-- 批次十四：配额旁如实显示本月用量；超限给出明确提示。 -->
+                  <span class="text-xs text-gray-400" data-testid="quota-usage">
+                    {{ t('orgSettings.usage', {
+                      used: usage.month_tokens,
+                      quota: usage.monthly_token_quota === null ? t('orgSettings.unlimited') : usage.monthly_token_quota,
+                    }) }}
+                  </span>
+                  <span
+                    v-if="quotaExceeded"
+                    class="text-xs text-red-500 dark:text-red-400"
+                    data-testid="quota-exceeded-hint"
+                  >
+                    {{ t('orgSettings.quotaExceededHint') }}
+                  </span>
+                </div>
               </n-form-item>
               <n-form-item :label="t('orgSettings.fields.toolWhitelist')">
                 <n-dynamic-tags v-model:value="form.toolWhitelist" />
@@ -109,12 +125,6 @@
                 </tr>
               </tbody>
             </n-table>
-            <p class="text-xs text-gray-500 mt-3">
-              {{ t('orgSettings.usage', {
-                used: usage.month_tokens,
-                quota: usage.monthly_token_quota === null ? t('orgSettings.unlimited') : usage.monthly_token_quota,
-              }) }}
-            </p>
           </n-card>
 
           <n-card :title="t('orgSettings.auditTitle')" :bordered="false">
@@ -189,6 +199,11 @@ const auditError = ref('')
 const auditLoading = ref(false)
 const settings = ref<Record<string, EffectiveOrganizationSetting>>({})
 const usage = ref<OrganizationSettingsUsage>({ month_tokens: 0, monthly_token_quota: null })
+// 配额超限提示：配额 NULL = 不限额；used >= quota 与后端判定同口径（>=）。
+const quotaExceeded = computed(() => {
+  const quota = usage.value.monthly_token_quota
+  return typeof quota === 'number' && usage.value.month_tokens >= quota
+})
 const auditItems = ref<OrganizationSettingsAuditItem[]>([])
 
 const form = reactive<{

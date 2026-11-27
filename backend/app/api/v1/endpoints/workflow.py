@@ -7,12 +7,13 @@ import json
 import logging
 from typing import Any
 
+import anyio
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import StreamingResponse
 from sqlalchemy import desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.database import get_db
+from app.core.database import AsyncSessionLocal, get_db
 from app.core.security import (
     get_current_user,
     get_user_org_id,
@@ -28,6 +29,7 @@ from app.schemas.workflow import (
     WorkflowCreate,
     WorkflowUpdate,
 )
+from app.services.organization_settings_service import organization_settings_service
 from app.services.workflow_engine import WorkflowEngine
 
 router = APIRouter()
@@ -47,6 +49,74 @@ async def _apply_workflow_scope(db: AsyncSession, stmt, current_user: User, org_
     if not await is_org_admin(db, current_user, org_id):
         stmt = stmt.where(Workflow.created_by == current_user.id)
     return stmt
+
+
+async def _record_workflow_token_usage(
+    *,
+    engine: WorkflowEngine | None,
+    db: AsyncSession,
+    organization_id: int | None,
+    user_id: int,
+    request: Request | None,
+) -> None:
+    """把本次工作流所有 LLM 节点的真实用量写入 ``token_usage_records``。
+
+    批次十四 B1：否则配额对 workflow 入口空转。只汇总
+    ``NodeResult.tokens_in/out``（provider 未给 usage 的节点为 None，不按字符数
+    估算），按 model 合并为一次记录；失败节点已完成的 LLM 调用同样计入。
+    记账是旁路：任何异常只 warning，绝不影响工作流结果。
+    """
+    if engine is None:
+        return
+    try:
+        node_results = engine.get_node_results()
+    except Exception:  # noqa: BLE001 — 记账旁路
+        # CodeQL：完全固定文案、无参数。
+        logger.warning("工作流 token 记账读取节点结果失败（不影响执行）")
+        return
+
+    totals: dict[str, list[int]] = {}
+    for node_result in node_results:
+        if not str(getattr(node_result, "node_type", "")).startswith("llm_"):
+            continue
+        tokens_in = getattr(node_result, "tokens_in", None)
+        tokens_out = getattr(node_result, "tokens_out", None)
+        if tokens_in is None and tokens_out is None:
+            continue
+        if type(tokens_in) is not int:
+            tokens_in = 0
+        if type(tokens_out) is not int:
+            tokens_out = 0
+        if tokens_in <= 0 and tokens_out <= 0:
+            continue
+        raw_model = getattr(node_result, "model", None)
+        model = raw_model if isinstance(raw_model, str) and raw_model else "unknown"
+        bucket = totals.setdefault(model, [0, 0])
+        bucket[0] += tokens_in
+        bucket[1] += tokens_out
+
+    if not totals:
+        return
+    try:
+        from app.api.v1.endpoints.token_usage import record_token_usage
+        from app.core.error_mapping import resolve_request_id
+
+        request_id = resolve_request_id(request) if request is not None else None
+        for model, (tokens_in, tokens_out) in totals.items():
+            await record_token_usage(
+                db=db,
+                user_id=user_id,
+                organization_id=organization_id,
+                model=model,
+                source="workflow",
+                input_tokens=tokens_in,
+                output_tokens=tokens_out,
+                feature="workflow",
+                request_id=request_id,
+            )
+    except Exception:  # noqa: BLE001 — 记账旁路
+        # CodeQL：完全固定文案、无参数。
+        logger.warning("工作流 token 记账失败（不影响执行结果）")
 
 
 @router.get("/", response_model=dict[str, Any])
@@ -310,6 +380,13 @@ async def execute_workflow(
     if not workflow.flow_data:
         raise ValidationError(detail="工作流配置为空")
 
+    # 批次十四 C4：工作流执行会真实调用 LLM——配额必须在建执行记录 / 返回
+    # StreamingResponse 之前检查（429 是 HTTP 语义，不能塞进 SSE 首帧）。
+    # 放在 404/400 校验之后：无效请求仍得到原来的状态码，不被配额掩盖。
+    await organization_settings_service.ensure_monthly_quota(
+        db, effective_org_id, user=current_user, request=request
+    )
+
     # 从请求体获取输入数据
     input_data = body if body else {}
 
@@ -346,6 +423,74 @@ async def execute_workflow(
                 logger.warning(f"执行记录（id={execution.id}）failed 收尾失败: {finalize_err}")
 
         async def event_generator():
+            # 批次十四 B1：每次执行只记一次账（成功/失败/异常出口共用此闸）。
+            engine: WorkflowEngine | None = None
+            usage_recorded = False
+            run_task: asyncio.Task | None = None
+
+            async def record_usage_once() -> None:
+                nonlocal usage_recorded
+                if usage_recorded:
+                    return
+                usage_recorded = True
+                await _record_workflow_token_usage(
+                    engine=engine,
+                    db=db,
+                    organization_id=effective_org_id,
+                    user_id=current_user.id,
+                    request=request,
+                )
+
+            async def finalize_stream_abort() -> None:
+                """断连/取消收口：停后台任务 + 独立 session 落终态 + 补记账。
+
+                客户端断开后请求 ``db`` 可能已被关闭，必须用独立
+                ``AsyncSessionLocal``；否则执行记录永卡 running、后台
+                ``run_workflow`` 继续烧 LLM 且 token 不入账（可被反复
+                “启动→断连”无限消耗）。
+                """
+                nonlocal usage_recorded
+                # 1) 先取消并等待后台执行，避免断连后继续消耗 LLM。
+                if run_task is not None:
+                    if not run_task.done():
+                        run_task.cancel()
+                    try:
+                        await asyncio.gather(run_task, return_exceptions=True)
+                    except asyncio.CancelledError:
+                        pass
+
+                # 2) 独立 session 收口（正常完成/已失败的行不覆盖）。
+                try:
+                    async with AsyncSessionLocal() as final_db:
+                        row = await final_db.get(WorkflowExecution, execution.id)
+                        if row is not None and row.status in ("pending", "running"):
+                            row.status = "failed"
+                            row.error_message = "客户端断开或取消，工作流执行已中止"
+                            row.completed_at = utcnow()
+                            if engine is not None:
+                                row.node_results = [
+                                    r.model_dump(mode="json") for r in engine.get_node_results()
+                                ]
+                            await final_db.commit()
+                        # 3) 已发生但尚未记账的 LLM 用量补记（成功路径已记则跳过）。
+                        if not usage_recorded:
+                            usage_recorded = True
+                            await _record_workflow_token_usage(
+                                engine=engine,
+                                db=final_db,
+                                organization_id=effective_org_id,
+                                user_id=current_user.id,
+                                request=request,
+                            )
+                except asyncio.CancelledError:
+                    # shield 内理论上不应被外层取消打断；若仍发生（驱动实现差异），
+                    # 记录后继续让外层取消在 shield 退出后传播，绝不半途主动退出
+                    # 收口（否则 execution 会停在 running、账本为 0）。
+                    logger.warning("流式工作流断连收口期间收到取消，已尽力完成的部分保持不变")
+                except Exception:  # noqa: BLE001 — 收口尽力而为
+                    # CodeQL：完全固定文案、无参数。
+                    logger.warning("流式工作流断连收口失败")
+
             try:
                 from app.schemas.workflow import WorkflowConfig as WConfig
 
@@ -381,8 +526,8 @@ async def execute_workflow(
                             {"event": "workflow_error", "data": {"error": str(e)}}
                         )
 
-                # 启动执行任务
-                task = asyncio.create_task(run_workflow())
+                # 启动执行任务（保存引用：断连时由 finally 取消）
+                run_task = asyncio.create_task(run_workflow())
 
                 # 实时发送事件
                 while True:
@@ -412,6 +557,8 @@ async def execute_workflow(
                                 r.model_dump(mode="json") for r in engine.get_node_results()
                             ]
                             await db.commit()
+                            # 成功/节点失败都真实消耗了 LLM token：落账一次。
+                            await record_usage_once()
 
                             # 发送节点结果
                             for node_result in engine.get_node_results():
@@ -422,6 +569,8 @@ async def execute_workflow(
                             break
                         elif event_type == "workflow_error":
                             await mark_execution_failed(event_data.get("error"))
+                            # 引擎异常前已完成的 LLM 节点用量同样要记账。
+                            await record_usage_once()
 
                             yield f"event: error\ndata: {json.dumps(event_data, ensure_ascii=False)}\n\n"
                             # #281：错误路径与 /chat 的 SSE 契约对齐（agent.py 错误路径
@@ -441,20 +590,33 @@ async def execute_workflow(
                         # break，执行记录永卡 running、node_results 不落库（评审 #280
                         # §7）。现在统一收尾：落 failed + error 后补 done。
                         await mark_execution_failed(str(e))
+                        await record_usage_once()
                         yield f"event: error\ndata: {json.dumps({'error': str(e)}, ensure_ascii=False)}\n\n"
                         yield f"event: done\ndata: {json.dumps({'success': False, 'execution_id': execution.id}, ensure_ascii=False)}\n\n"
                         break
 
                 # 等待执行任务完成
-                await task
+                await run_task
 
             except Exception as e:
                 # #281：开流前/开流中的装配类异常同样按"落 failed + error 后补 done"
                 # 收口（与 /chat 错误路径同模式）。
                 await mark_execution_failed(str(e))
+                await record_usage_once()
 
                 yield f"event: error\ndata: {json.dumps({'error': str(e)}, ensure_ascii=False)}\n\n"
                 yield f"event: done\ndata: {json.dumps({'success': False, 'execution_id': execution.id}, ensure_ascii=False)}\n\n"
+            finally:
+                # 断连（GeneratorExit）/取消/正常结束统一收口。ASGI 2.3 的
+                # http.disconnect 会让 StreamingResponse 在 anyio 已取消的
+                # cancel scope 中关闭生成器：先 cancel 后台任务（取消本身立即
+                # 生效），再用 shield 包住 DB 终态 + 记账的全部 await——
+                # 否则 await AsyncSessionLocal() 会立刻再抛 CancelledError，
+                # execution 永卡 running、账本为 0（复审 blocker）。
+                if run_task is not None and not run_task.done():
+                    run_task.cancel()
+                with anyio.CancelScope(shield=True):
+                    await finalize_stream_abort()
 
         return StreamingResponse(
             event_generator(),
@@ -466,6 +628,7 @@ async def execute_workflow(
             },
         )
     # 非流式执行
+    engine: WorkflowEngine | None = None
     try:
         from app.schemas.workflow import WorkflowConfig as WConfig
 
@@ -513,6 +676,15 @@ async def execute_workflow(
         await db.commit()
 
         raise AppError(detail=str(e))
+    finally:
+        # 批次十四 B1：成功/失败出口都按真实 LLM 节点用量落账一次。
+        await _record_workflow_token_usage(
+            engine=engine,
+            db=db,
+            organization_id=effective_org_id,
+            user_id=current_user.id,
+            request=request,
+        )
 
 
 @router.get("/executions/{execution_id}", response_model=dict[str, Any])

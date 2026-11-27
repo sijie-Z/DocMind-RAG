@@ -106,6 +106,7 @@ _CONFIG_FIELD_SPECS: dict[str, Callable[[Any], bool]] = {
     "enable_delegation": _is_bool,
     "planning_mode": _is_str,  # Literal 域值由 planner 的默认分支兜底（类型级闸门）
     "tool_tags": _is_opt_list_of_str,
+    "tool_whitelist": _is_opt_list_of_str,
     # disabled_tools 拒斥 None/坏形状（不是 _is_opt_*）：消费方按"非空才过滤"
     # 语义读它——漂移成 None 会静默放开 DEFAULT_DISABLED_TOOLS 的兜底禁单；
     # 删键 → 数据类默认值（含服务端强制禁用项），安全性恢复。
@@ -191,6 +192,10 @@ class AgentConfig:
 
     # ── Tool filtering ──
     tool_tags: list[str] | None = None
+    # 组织级工具白名单（批次十四 C4）：规范工具名；None = 不限制，[] = 无工具。
+    # 由 AgentService 从组织设置解析后经 dataclasses.replace 注入本次运行，
+    # **不得**写回会话持久化配置（组织策略不是用户的会话偏好）。
+    tool_whitelist: list[str] | None = None
     disabled_tools: list[str] = field(default_factory=lambda: list(DEFAULT_DISABLED_TOOLS))
 
     # ── System prompt ──
@@ -279,6 +284,7 @@ class AgentConfig:
                 "enable_skills": self.enable_skills,
                 "enable_delegation": self.enable_delegation,
                 "tool_tags": self.tool_tags,
+                "tool_whitelist": self.tool_whitelist,
                 "disabled_tools": self.disabled_tools,
                 "system_prompt_override": self.system_prompt_override,
                 "personality": self.personality,

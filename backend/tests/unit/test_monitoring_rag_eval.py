@@ -6,6 +6,8 @@
 """
 
 import asyncio
+from types import SimpleNamespace
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -41,7 +43,16 @@ def test_rag_eval_single_uses_defined_settings_field(monkeypatch):
     monkeypatch.setattr(rag_evaluator, "RAGEvaluator", _FakeEvaluator)
 
     item = monitoring.EvalItem(question="q", answer="a", context=[{"text": "c"}])
-    result = asyncio.run(monitoring.rag_eval_single(item))
+    # 批次十四起端点多出 request/current_user/db（配额与 token 记账）；直接调用
+    # 时显式给替身（org 配额读取失败会 fail-open，不影响本用例聚焦的 base_url）。
+    result = asyncio.run(
+        monitoring.rag_eval_single(
+            item,
+            request=None,
+            current_user=SimpleNamespace(id=1, organization_id=1, is_superuser=False),
+            db=MagicMock(),
+        )
+    )
 
     assert "error" not in (result.get("details") or {}), (
         f"端点不得因配置字段名错误抛异常：{result.get('details')}"

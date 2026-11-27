@@ -11,13 +11,13 @@
 
 import logging
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.database import get_db
-from app.core.security import get_current_user, require_organization
+from app.core.security import get_current_user, get_user_org_id, require_organization
 from app.exceptions import ConflictError, NotFoundError, ValidationError
 from app.models.agent_task import AgentTask
 from app.models.scheduled_task import ScheduledTask, ScheduleType
@@ -29,6 +29,7 @@ from app.schemas.scheduled_task import (
     ScheduledTaskRunNowResponse,
     ScheduledTaskUpdate,
 )
+from app.services.organization_settings_service import organization_settings_service
 from app.services.scheduler.cron import CronError, load_timezone
 from app.services.scheduler.engine import scheduler_engine
 from app.services.scheduler.schedule import (
@@ -323,6 +324,7 @@ async def resume_scheduled_task(
 @router.post("/{task_id}/run-now", response_model=ScheduledTaskRunNowResponse)
 async def run_now_scheduled_task(
     task_id: str,
+    request: Request,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -330,8 +332,17 @@ async def run_now_scheduled_task(
     - 不改变时刻表（next_run_at / enabled 不动）；
     - 上一跑未完时跳过（triggered=False, reason=overlap），不排队；
     - 暂停中的任务也允许手动触发（显式动作）。
-    运行在后台继续，完成后同样发站内通知。"""
+    运行在后台继续，完成后同样发站内通知。
+
+    批次十四 C4：触发即会真实调用 LLM——超限组织在触发前返回 HTTP 429，
+    不推进 run_count、不启动后台运行。"""
     task = await _get_owned_task(db, task_id, current_user)
+    await organization_settings_service.ensure_monthly_quota(
+        db,
+        task.organization_id or get_user_org_id(current_user),
+        user=current_user,
+        request=request,
+    )
     result = await scheduler_engine.run_now(task.id)
     return ScheduledTaskRunNowResponse(**result)
 

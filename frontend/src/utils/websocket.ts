@@ -17,6 +17,8 @@ interface WebSocketMessage {
   // 与 SSE 同口径：后端 error 帧可带机器码（如 USER_LLM_REQUEST_FAILED），
   // 前端据此本地化，不把中文诊断当成用户语言的提示。
   code?: string
+  /** 后端结构化错误明细（如配额 429 的 used/quota/reset_at）。 */
+  detail?: Record<string, unknown>
   conversationId?: number | string
   messageId?: string
   sources?: WebSocketSource[]

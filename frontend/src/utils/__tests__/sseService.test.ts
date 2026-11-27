@@ -188,3 +188,66 @@ describe('sseService · HTTP 错误文案跟随语言（en）', () => {
     expect(errors[0].content).toBe('HTTP error: 500')
   })
 })
+
+// ── 批次十四：组织配额 429（不是可退避重试的限流）─────────────────────────
+describe('sseService · ORG_TOKEN_QUOTA_EXCEEDED', () => {
+  beforeEach(() => {
+    localStorage.setItem('docmind_token', 'tok')
+    sseService.setRetryOptions({ maxRetries: 3, retryDelay: 5 })
+    ;(i18n.global.locale as unknown as { value: string }).value = 'zh'
+    sseService.off('error')
+  })
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
+    localStorage.clear()
+    sseService.off('error')
+  })
+
+  it('配额 429：不重试，error 事件带 code/detail 与四语文案', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 429,
+      headers: { get: () => null },
+      json: async () => ({
+        success: false,
+        error_code: 'ORG_TOKEN_QUOTA_EXCEEDED',
+        detail: { used: 150, quota: 100, reset_at: '2026-12-01T00:00:00+00:00' },
+      }),
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    const errors: SSEMessage[] = []
+    sseService.on('error', (d: SSEMessage) => errors.push(d))
+
+    const ok = await sseService.post('stream', {})
+
+    expect(ok).toBe(false)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(errors).toHaveLength(1)
+    expect(errors[0].code).toBe('ORG_TOKEN_QUOTA_EXCEEDED')
+    expect(errors[0].content).toContain('150')
+    expect(errors[0].content).toContain('100')
+    expect(errors[0].content).not.toContain('请求过于频繁')
+    expect(errors[0].detail).toMatchObject({ used: 150, quota: 100 })
+  })
+
+  it('普通 429（非配额）仍按限流退避重试，不被配额分支吞掉', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 429,
+        headers: { get: () => null },
+        json: async () => ({ success: false, error_code: 'RATE_LIMIT_EXCEEDED' }),
+      })
+      .mockResolvedValueOnce(makeStreamResponse([
+        'event: chunk\ndata: {"type":"chunk","content":"补上"}\n\n',
+      ]))
+    vi.stubGlobal('fetch', fetchMock)
+    sseService.off('retry')
+
+    const ok = await sseService.post('stream', {})
+    expect(ok).toBe(true)
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    sseService.off('retry')
+  })
+})

@@ -7,8 +7,9 @@ ONCE 耗尽 / 失败如实落库与通知 / 通知失败不回滚 / run-now 语�
 """
 
 import asyncio
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
@@ -17,7 +18,9 @@ from sqlalchemy.pool import StaticPool
 import app.models  # noqa: F401  # 注册全部表供 create_all
 from app.core.database import Base
 from app.models.agent_task import AgentTask, TaskStatus
+from app.models.organization_settings import OrganizationSettings
 from app.models.scheduled_task import ScheduledTask, ScheduleType
+from app.models.token_usage import TokenUsageRecord
 from app.models.user import User
 from app.services.scheduler import engine as engine_mod
 from app.services.scheduler.engine import (
@@ -650,3 +653,43 @@ class TestDefaultNotifier:
         await send_run_notification(task, RunOutcome("failed", "at-9", error="模型超时"))
         assert "失败" in captured["title"]
         assert "模型超时" in captured["content"]
+
+
+# ── 批次十四 C4：组织配额耗尽时定时循环跳过（不调用 Agent）────────────────
+
+
+class TestQuotaGate:
+    @pytest.mark.asyncio
+    async def test_due_run_skipped_and_failed_when_quota_exhausted(self, factory, monkeypatch):
+        """到点任务在 Agent 调用前检查配额；超限不执行，last_status/last_error 如实落盘。"""
+        await _add_task(factory)
+        async with factory() as db:
+            db.add(OrganizationSettings(organization_id=1, monthly_token_quota=100))
+            db.add(
+                TokenUsageRecord(
+                    user_id=1,
+                    organization_id=1,
+                    model="m",
+                    source="rag_chat",
+                    input_tokens=150,
+                    output_tokens=0,
+                    created_at=datetime.now(UTC),
+                )
+            )
+            await db.commit()
+
+        monkeypatch.setattr(engine_mod, "AsyncSessionLocal", factory)
+        import app.agent.service as svc_mod
+
+        chat = AsyncMock()
+        monkeypatch.setattr(svc_mod.agent_service, "chat", chat)
+
+        eng = _engine(factory, _Clock(), notify=_RecordingNotifier())
+        fired = await eng.tick_once()
+        await eng.wait_for_idle()
+
+        assert fired == ["task1"], "到点仍应登记一次触发（随后以失败收尾）"
+        row = await _row(factory)
+        assert row.last_status == "failed"
+        assert "配额" in (row.last_error or ""), "last_error 必须写明跳过原因"
+        chat.assert_not_called()

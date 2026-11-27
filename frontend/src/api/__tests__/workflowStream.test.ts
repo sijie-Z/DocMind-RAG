@@ -11,6 +11,7 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { createWorkflowSSEFrameParser, executeWorkflowStream } from '../workflow'
+import i18n from '@/locales'
 
 function makeStreamResponse(chunks: string[]) {
   const encoder = new TextEncoder()
@@ -71,6 +72,7 @@ describe('createWorkflowSSEFrameParser（issue #289 纯函数解析）', () => {
 describe('executeWorkflowStream（issue #289 接线前置件）', () => {
   beforeEach(() => {
     localStorage.setItem('docmind_token', '"tok-123"')
+    ;(i18n.global.locale as unknown as { value: string }).value = 'zh'
   })
 
   afterEach(() => {
@@ -137,5 +139,49 @@ describe('executeWorkflowStream（issue #289 接线前置件）', () => {
     await vi.waitFor(() => expect(events).toHaveLength(1))
     expect(events[0][0]).toBe('error')
     expect(events[0][1]).toEqual({ error: 'HTTP 403' })
+  })
+
+  it('429 ORG_TOKEN_QUOTA_EXCEEDED → 配额文案（used/quota），不是 HTTP 429', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: false,
+        status: 429,
+        json: async () => ({
+          success: false,
+          error_code: 'ORG_TOKEN_QUOTA_EXCEEDED',
+          detail: { used: 150, quota: 100, reset_at: '2026-12-01T00:00:00+00:00' },
+        }),
+      }),
+    )
+
+    const events: Array<[string, unknown]> = []
+    executeWorkflowStream(7, {}, (event, data) => events.push([event, data]))
+    await vi.waitFor(() => expect(events).toHaveLength(1))
+    const [eventName, payload] = events[0] as [
+      string,
+      { error: string; error_code: string; detail: Record<string, unknown> },
+    ]
+    expect(eventName).toBe('error')
+    expect(payload.error_code).toBe('ORG_TOKEN_QUOTA_EXCEEDED')
+    expect(payload.error).toContain('150')
+    expect(payload.error).toContain('100')
+    expect(payload.error).not.toContain('HTTP 429')
+    expect(payload.detail).toMatchObject({ used: 150, quota: 100 })
+  })
+
+  it('非配额 429 JSON 仍回退 HTTP 429 文案（不误标为配额）', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: false,
+        status: 429,
+        json: async () => ({ success: false, error_code: 'RATE_LIMIT_EXCEEDED' }),
+      }),
+    )
+    const events: Array<[string, unknown]> = []
+    executeWorkflowStream(7, {}, (event, data) => events.push([event, data]))
+    await vi.waitFor(() => expect(events).toHaveLength(1))
+    expect(events[0][1]).toEqual({ error: 'HTTP 429' })
   })
 })

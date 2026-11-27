@@ -10,6 +10,7 @@ Supports:
 """
 
 import asyncio
+import dataclasses
 import functools
 import json
 import logging
@@ -17,6 +18,7 @@ from collections.abc import AsyncGenerator
 from typing import Any
 
 from openai import AsyncOpenAI
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agent import checkpoint
 from app.agent.config import AgentConfig
@@ -45,6 +47,7 @@ from app.rag.source_provenance import (
     provenance_of,
 )
 from app.services.notification_service import create_notification
+from app.services.organization_settings_service import organization_settings_service
 
 logger = logging.getLogger(__name__)
 
@@ -402,6 +405,30 @@ class AgentService:
         if task_id:
             agent.cancel_check = functools.partial(checkpoint.is_cancel_requested, task_id)
 
+    async def _resolve_tool_whitelist(
+        self, db: AsyncSession | None, organization_id: int
+    ) -> list[str] | None:
+        """读取组织工具白名单（批次十四 C4）。
+
+        ``db`` 由端点/上层传入时复用请求会话；后台调用（scheduler / RPC /
+        headless / ACP）没有请求会话，则自建短生命周期 session——组织策略必须
+        对所有 chat 入口生效，不能只覆盖 HTTP。
+
+        读取/解析失败按「未设置」（None = 不限制）处理并 warning：策略库抖动
+        不得把正常聊天打死（与配额 fail-open 同一纪律）。
+        """
+        try:
+            if db is not None:
+                return await organization_settings_service.get_tool_whitelist(db, organization_id)
+            async with AsyncSessionLocal() as own_session:
+                return await organization_settings_service.get_tool_whitelist(
+                    own_session, organization_id
+                )
+        except Exception:  # noqa: BLE001 — fail-open 是显式策略
+            # CodeQL：异常消息可能含查询值/凭据——完全固定文案、无参数。
+            logger.warning("组织工具白名单读取失败（按未设置处理，fail-open）")
+            return None
+
     async def chat(
         self,
         query: str,
@@ -414,6 +441,7 @@ class AgentService:
         request_id: str | None = None,
         llm_client: AsyncOpenAI | None = None,
         llm_model: str | None = None,
+        db: AsyncSession | None = None,
     ) -> AsyncGenerator[AgentEvent, None]:
         """Run the PER agent loop and yield events.
 
@@ -437,6 +465,8 @@ class AgentService:
                 PER loop 的 planner/executor/reflector/reviewer 全部使用它。
             llm_model: 个人模型名；给出时覆盖本次运行的 AgentConfig.model
                 （个人设置 > Agent 会话配置默认值）。
+            db: 调用方请求会话（可选）。给出时复用读取组织工具白名单；未给出
+                （后台/RPC/scheduler 等）时自建短会话，保证组织策略仍然生效。
         """
         # issue #510：request_id 是"这次请求"的属性。端点显式传入优先；直接调用
         # 本服务（测试 / 后台）时回退到 RequestIDMiddleware 的 contextvar。
@@ -477,6 +507,20 @@ class AgentService:
         # （reviewer/reflector 的 deep/quick 模型在未显式配置时回退到 model）。
         if llm_model:
             agent_config.model = llm_model
+
+        # 批次十四 C4：组织工具白名单注入**本次运行**的配置副本。用
+        # dataclasses.replace 而不是改写 agent_config：会话 Redis 持久化 /
+        # checkpoint 之外的配置面仍保存用户自己的偏好，组织策略不得被回写；
+        # checkpoint 快照记录的是 run 起点规则（含合并后的白名单），resume 语义不变。
+        # 合并语义「永不比任一方更宽」：org None 保留调用方名单、caller None
+        # 采用组织名单、两者都有取交集（组织策略不得放宽调用方更严格的限制）。
+        run_config = dataclasses.replace(
+            agent_config,
+            tool_whitelist=organization_settings_service.merge_tool_whitelists(
+                await self._resolve_tool_whitelist(db, organization_id),
+                agent_config.tool_whitelist,
+            ),
+        )
 
         # 任务行（issue #201 最小版）：一次 run 一行，checkpoint 的快照载体。
         # 建行失败不影响聊天（fail-open：整个 checkpoint 面静默缺席）。
@@ -541,7 +585,7 @@ class AgentService:
             # Create the PER loop
             agent = PERAgentLoop(
                 openai_client=active_client,
-                config=agent_config,
+                config=run_config,
                 organization_id=organization_id,
                 user_id=user_id,
             )

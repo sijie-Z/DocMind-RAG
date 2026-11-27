@@ -1,5 +1,6 @@
 import request from '@/utils/request'
 import { getToken } from '@/utils/auth'
+import i18n from '@/locales'
 import type { AxiosResponse } from 'axios'
 import type { ApiResponse } from '@/types/common'
 import type {
@@ -21,6 +22,41 @@ import type {
 export type PlanApprovalOutcome =
   | { streamed: true; abort: () => void }
   | { streamed: false; state: string; rejections?: number; message?: string }
+
+const t = (key: string, params: Record<string, string | number> = {}): string =>
+  (i18n.global.t as (k: string, p?: Record<string, string | number>) => string)(key, params)
+
+/** 配额重置时间：ISO → 本地可读；坏值原样保留。 */
+const formatQuotaResetAt = (value: unknown): string => {
+  if (typeof value !== 'string' || !value) return '-'
+  const date = new Date(value)
+  return Number.isNaN(date.getTime()) ? value : date.toLocaleString()
+}
+
+/**
+ * 批次十四：429 配额用尽 → 明确四语文案（不是「网络错误」，也不是可重试限流）。
+ * 返回 null 表示不是配额错误，由调用方走既有分支。
+ */
+async function quotaExceededError(response: Response): Promise<Error | null> {
+  if (response.status !== 429) return null
+  let body: Record<string, unknown> | null = null
+  try {
+    body = (await response.json()) as Record<string, unknown>
+  } catch {
+    return null
+  }
+  if (body?.error_code !== 'ORG_TOKEN_QUOTA_EXCEEDED') return null
+  const rawDetail = body.detail
+  const detail =
+    rawDetail && typeof rawDetail === 'object' ? (rawDetail as Record<string, unknown>) : {}
+  return new Error(
+    t('errors.orgTokenQuotaExceeded', {
+      used: Number(detail.used ?? 0),
+      quota: Number(detail.quota ?? 0),
+      resetAt: formatQuotaResetAt(detail.reset_at),
+    }),
+  )
+}
 
 interface ChatOptions {
   sessionId?: string
@@ -138,6 +174,8 @@ export const agentApi = {
     })
 
     if (!response.ok) {
+      const quotaError = await quotaExceededError(response)
+      if (quotaError) throw quotaError
       throw new Error(`Agent request failed: ${response.status}`)
     }
 
@@ -252,6 +290,8 @@ export const agentApi = {
 
     if (!response.ok) {
       // 409/404：任务不再处于待审批（已被应答/取消/终态）——由调用方刷新现场
+      const quotaError = await quotaExceededError(response)
+      if (quotaError) throw quotaError
       throw new Error(`Approval request failed: ${response.status}`)
     }
 
@@ -299,6 +339,8 @@ export const agentApi = {
     })
 
     if (!response.ok) {
+      const quotaError = await quotaExceededError(response)
+      if (quotaError) throw quotaError
       const failure = new Error(`Plan approval request failed: ${response.status}`) as Error & {
         status?: number
         detail?: string

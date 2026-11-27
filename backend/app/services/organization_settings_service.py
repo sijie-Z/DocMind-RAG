@@ -13,14 +13,16 @@
 - 配额：默认 NULL（不限额）；工具白名单：默认 NULL（不限制）。
 
 本期真实消费点：检索 top_k（知识库搜索 + RAG 聊天）、隐私策略（聊天）、
-默认模型（RAG 聊天）。配额与工具白名单的强制执行由 C4 的 SettingsService
-承接，本服务先把「生效值 / 来源 / 是否需重启」如实暴露给管理端。
+默认模型（RAG 聊天）；**月度 token 配额与工具白名单的强制执行**由本服务
+（批次十四 C4 运行策略）承接：配额在各 LLM 入口开流前检查（超管旁路并
+审计），白名单经 ``AgentConfig.tool_whitelist`` 注入 schema 与执行层。
 """
 
 import json
 import logging
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from decimal import Decimal
 from typing import Any, Callable
 
 from sqlalchemy import func, select
@@ -28,10 +30,32 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
+from app.exceptions import QuotaExceededError
 from app.models.organization_settings import OrganizationSettings
 from app.models.token_usage import TokenUsageRecord
+from app.services.audit_service import audit_service
 
 logger = logging.getLogger(__name__)
+
+
+def _as_integer_scalar(value: Any) -> int | None:
+    """DB 标量 → int；只接受真实 int 或**整数值 Decimal**。
+
+    MySQL 的 ``SUM()`` / ``COALESCE(SUM(), 0)`` 经 aiomysql 返回 ``Decimal``
+    （本机 MySQL 8 实测），SQLite 返回 int——两者都必须参与配额判定，否则生产
+    配额永不触发。bool / float / 非整数 Decimal / 其它类型一律返回 ``None``，
+    由调用方按读取失败（fail-open + warning）处理；绝不 ``int(value)`` 静默
+    转换任意类型。
+    """
+    if type(value) is int:
+        return value
+    if isinstance(value, Decimal):
+        if not value.is_finite():
+            return None
+        if value != value.to_integral_value():
+            return None
+        return int(value)
+    return None
 
 
 @dataclass(frozen=True)
@@ -151,7 +175,7 @@ class OrganizationSettingsService:
         )
 
     async def get_monthly_usage(self, db: AsyncSession, organization_id: int | None) -> int:
-        """本月已用 token（input + output）；仅用于管理端展示配额进度。"""
+        """本月已用 token（input + output）；管理端展示 + 配额判定共用。"""
         if organization_id is None:
             return 0
         month_start = datetime.now(UTC).replace(day=1, hour=0, minute=0, second=0, microsecond=0)
@@ -164,7 +188,148 @@ class OrganizationSettingsService:
             TokenUsageRecord.organization_id == int(organization_id),
             TokenUsageRecord.created_at >= month_start,
         )
-        return int((await db.execute(stmt)).scalar() or 0)
+        value = (await db.execute(stmt)).scalar()
+        if value is None:
+            return 0
+        # 值级闸门（与 AgentConfig #319 同族）：MySQL 返回 Decimal、SQLite 返回
+        # int；只接受真实 int / 整数值 Decimal。其它类型（替身/驱动漂移）不得
+        # 被 int() 静默转成 1 而误判配额；如实按 0 处理并留 warning。
+        coerced = _as_integer_scalar(value)
+        if coerced is None:
+            # CodeQL：DB 标量类型（派生值）按敏感数据处理——完全固定文案、无参数。
+            logger.warning("组织月度用量读取值类型漂移，按 0 处理")
+            return 0
+        return max(0, coerced)
+
+    async def get_tool_whitelist(
+        self, db: AsyncSession, organization_id: int | None
+    ) -> list[str] | None:
+        """组织工具白名单（规范名，``None`` = 不限制）。
+
+        解析失败按「未设置」处理并留 warning（与 ``parse_tool_whitelist`` 同一
+        口径）；NULL / 空数组语义严格区分：``None`` 不限制，``[]`` = 无工具。
+        """
+        row = await self.get_row(db, organization_id)
+        raw = getattr(row, "tool_whitelist", None) if row is not None else None
+        return self.parse_tool_whitelist(raw)
+
+    @staticmethod
+    def merge_tool_whitelists(
+        organization: list[str] | None, caller: list[str] | None
+    ) -> list[str] | None:
+        """合并组织白名单与调用方白名单：结果**永不比任一方更宽**。
+
+        - 组织 None（未限制）→ 保留调用方现有名单（调用方更严格）；
+        - 调用方 None（未限制）→ 采用组织名单（组织是唯一限制）；
+        - 两者都非 None → 交集（按调用方顺序，规范名精确匹配）；
+        - 任一方为 ``[]`` → 交集为空（显式「无工具」不得被另一方放宽）。
+        """
+        if organization is None:
+            return caller
+        if caller is None:
+            return organization
+        allowed = set(organization)
+        return [name for name in caller if name in allowed]
+
+    # ── 运行期策略强制执行 ──────────────────────────────────────────────
+
+    @staticmethod
+    def _next_month_start_utc(now: datetime | None = None) -> datetime:
+        """下月 1 日 00:00 UTC（配额重置时点）。"""
+        current = now or datetime.now(UTC)
+        if current.month == 12:
+            return datetime(current.year + 1, 1, 1, tzinfo=UTC)
+        return datetime(current.year, current.month + 1, 1, tzinfo=UTC)
+
+    async def ensure_monthly_quota(
+        self,
+        db: AsyncSession,
+        organization_id: int | None,
+        *,
+        user: Any = None,
+        request: Any = None,
+    ) -> None:
+        """入口级月度 token 配额检查（批次十四 C4）。
+
+        语义（与计划书一致）：
+        - 无组织上下文 / 配额 NULL → 放行（旧行为不变：不限额）；
+        - 本月 ``used >= quota`` → ``QuotaExceededError``（429，
+          ``ORG_TOKEN_QUOTA_EXCEEDED``，detail 带 used/quota/reset_at）；
+        - 显式 ``user.is_superuser`` → 放行，并写审计
+          ``org_token_quota_bypass``（审计失败只 warning，不反噬请求）；
+        - **读取失败 fail-open**：管理面策略库抖动不得把正常聊天打死；配额
+          按 NULL（不限额）处理并留 warning 供观测。
+
+        v1 **不预扣**：并发请求只在进入时各读一次 SUM，允许短暂超限（计划书
+        明确接受）。本方法必须在任何 LLM 调用 / SSE 首帧之前调用。
+        """
+        if organization_id is None:
+            return
+        try:
+            row = await self.get_row(db, organization_id)
+            raw_quota = getattr(row, "monthly_token_quota", None) if row is not None else None
+            if raw_quota is None:
+                return
+            # 值级闸门：接受真实 int 与整数值 Decimal（MySQL 驱动口径）；
+            # bool / float / 非整数 Decimal 等一律按未设置 fail-open，绝不
+            # int() 静默转换成 1 而误判「已超限」。
+            quota = _as_integer_scalar(raw_quota)
+            if quota is None:
+                # CodeQL：同 get_monthly_usage——完全固定文案、无参数。
+                logger.warning("组织月度配额值类型漂移，按未设置处理")
+                return
+            used = await self.get_monthly_usage(db, organization_id)
+        except Exception:  # noqa: BLE001 — fail-open 是显式策略
+            # CodeQL：异常消息可能含查询值/凭据——完全固定文案、无参数。
+            logger.warning("组织月度配额读取失败（fail-open，按不限额处理）")
+            return
+
+        if used < quota:
+            return
+
+        if user is not None and bool(getattr(user, "is_superuser", False)):
+            await self._audit_quota_bypass(
+                organization_id=organization_id,
+                user=user,
+                used=used,
+                quota=quota,
+                request=request,
+            )
+            return
+
+        raise QuotaExceededError(
+            detail={
+                "used": used,
+                "quota": quota,
+                "reset_at": self._next_month_start_utc().isoformat(),
+            }
+        )
+
+    @staticmethod
+    async def _audit_quota_bypass(
+        *,
+        organization_id: int,
+        user: Any,
+        used: int,
+        quota: int,
+        request: Any = None,
+    ) -> None:
+        """超管旁路审计（best-effort：审计失败只 warning）。"""
+        try:
+            await audit_service.log_activity(
+                int(getattr(user, "id", 0) or 0),
+                "org_token_quota_bypass",
+                target_type="organization_settings",
+                target_id=str(organization_id),
+                detail=json.dumps(
+                    {"organization_id": int(organization_id), "used": used, "quota": quota},
+                    ensure_ascii=False,
+                ),
+                request=request,
+            )
+        except Exception:  # noqa: BLE001 — 审计是旁路，不反噬请求
+            # CodeQL：不记录异常消息/对象——完全固定文案、无参数。
+            logger.warning("超管配额旁路审计写入失败")
 
     # ── 序列化 / 解析 ─────────────────────────────────────────────────
 

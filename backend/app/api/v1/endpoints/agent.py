@@ -74,6 +74,7 @@ from app.models.chat import (
 )
 from app.models.user import User
 from app.services.llm_settings_service import resolve_for_user
+from app.services.organization_settings_service import organization_settings_service
 from app.services.session_service import (
     SessionAccessScope,
     load_accessible_session,
@@ -297,6 +298,17 @@ async def agent_chat(
     # 无组织的超管解析到库里真实存在的组织（无组织则 403，issue #168）
     effective_org_id = await require_organization(current_user, db)
 
+    # 批次十四 C4：配额检查必须在返回 StreamingResponse 之前——开流后只剩 200，
+    # 超限必须是真正的 HTTP 429（不产生半截 SSE）。`Last-Event-ID` 纯回放只
+    # 消费缓冲帧、不调用 LLM，与 chat /stream 同源跳过配额（会话归属校验仍
+    # 在生成器内照常执行）。
+    # 防御式读取：直接调用端点的测试替身可能没有 headers 属性。
+    replay_headers = getattr(request, "headers", None)
+    if not (replay_headers.get("Last-Event-ID") if replay_headers else None):
+        await organization_settings_service.ensure_monthly_quota(
+            db, effective_org_id, user=current_user, request=request
+        )
+
     async def event_stream():
         assistant_message_id = None
         save_error: str | None = None
@@ -419,6 +431,8 @@ async def agent_chat(
                 request_id=resolve_request_id(request),
                 llm_client=(llm_resolution.client if llm_resolution.source == "user" else None),
                 llm_model=(llm_resolution.model if llm_resolution.source == "user" else None),
+                # 批次十四 C4：复用请求会话读取组织工具白名单（不污染持久化配置）
+                db=db,
             ):
                 last_event_type = event.type
                 sse_data = public_agent_event_data(event)
@@ -684,6 +698,11 @@ async def resume_agent_task(
     )
     if replay_response is not None:
         return replay_response
+    # 批次十四 C4：续跑会在流内真实调用 LLM——配额必须在认领/开流前以 HTTP 429
+    # 拒绝（回放请求已在上面短路：只回放缓冲，不消耗 token）。
+    await organization_settings_service.ensure_monthly_quota(
+        db, effective_org_id, user=current_user, request=request
+    )
     task, payload = await agent_service.prepare_resume(
         task_id,
         user_id=current_user.id,
@@ -868,6 +887,11 @@ async def decide_agent_task_approval(
     )
     if replay_response is not None:
         return replay_response
+    # 批次十四 C4：审批续跑会真实调用 LLM——与 resume 同口径，在记账/认领/
+    # 开流前以 HTTP 429 拒绝（纯回放已在上方短路，不受配额影响）。
+    await organization_settings_service.ensure_monthly_quota(
+        db, effective_org_id, user=current_user, request=request
+    )
     task, payload, decision_record = await checkpoint.apply_approval_decision(
         task_id=task_id,
         user_id=current_user.id,
@@ -1085,6 +1109,11 @@ async def decide_agent_task_plan_approval(
     )
     if replay_response is not None:
         return replay_response
+    # 批次十四 C4：计划审批续跑同样会调用 LLM——记账/认领前先过配额（429），
+    # 纯回放已在上面短路。
+    await organization_settings_service.ensure_monthly_quota(
+        db, effective_org_id, user=current_user, request=request
+    )
     task, payload, record = await checkpoint.apply_plan_approval_decision(
         task_id=task_id,
         user_id=current_user.id,
