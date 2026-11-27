@@ -220,8 +220,8 @@ DocMind/
 │   │   ├── rag/                     # 检索管线：retriever / reranker / pipeline / cache
 │   │   ├── api/v1/
 │   │   │   ├── router.py            # 主路由（注册 37 个模块）
-│   │   │   └── endpoints/           # 端点实现（35 个文件）
-│   │   ├── services/                # 业务服务层（49 个服务）
+│   │   │   └── endpoints/           # 端点实现（36 个文件）
+│   │   ├── services/                # 业务服务层（50 个服务）
 │   │   ├── models/                  # ORM 模型（29 个模型文件）
 │   │   ├── core/                    # 配置 / DB / Redis / ES / MinIO / Kafka / JWT
 │   │   └── worker/                  # Kafka 消费者（解析 → 分块 → 嵌入 → 索引）
@@ -247,7 +247,7 @@ DocMind/
 | API Key | `/api-keys` | `dm_` API Key 创建/列表/吊销（bcrypt 哈希、scope；issue #480） |
 | 文件管理 | `/files` | 上传/下载/删除，MinIO 存储，分块上传 |
 | 文档管理 | `/documents` | 文档解析、向量化、知识库索引、状态追踪、分块分页浏览、人工修正与分块级启停 |
-| 聊天 | `/chat` | 会话 CRUD、SSE 流式问答、严格模式、调试端点 |
+| 聊天 | `/chat` | 会话 CRUD、SSE 流式问答、严格模式、调试端点、OpenAI 兼容 `/chat/completions` |
 | 知识库 | `/knowledge` | 知识库文档检索、统计、设置、检索评测用例/运行历史（bad case 捕获） |
 | 知识库管理 | `/knowledge-bases` | 多知识库实体 CRUD（组织隔离） |
 | Rubric 评测 | `/eval` | 回答级 rubric 评分表（加权 yes/no + NEUTRAL/STRICT/LENIENT 重映射）、不可变版本与只读 diff、judge/fake 运行与 judge 人工金标校准（一致率 + 混淆矩阵）；评的是**答案**，与 `/knowledge/eval` 的检索 recall@k 不同口径 |
@@ -279,6 +279,19 @@ DocMind/
 | 用户设置 | `/user` | 个人 UI 偏好 |
 | Webhook 规则 | `/webhooks` | 入站 Webhook 规则管理、HMAC 验签投递与 outbox 处理（issue #478） |
 | 示例数据 | `/demo` | 演示文档与数据填充 |
+
+**OpenAI 兼容入口**：`POST /api/v1/chat/completions`。OpenAI Python / JS SDK 把
+`base_url` 设为 `http://localhost:8000/api/v1` 即可接入；认证使用
+`Authorization: Bearer dm_...`（需 `chat:write` scope）。`model` 仅支持
+`docmind`（组织可见全部知识库）与 `docmind:<knowledge_base_id>`（指定知识库；
+跨组织/不存在统一 404）；其它模型 400 `MODEL_NOT_SUPPORTED`。支持非流式与
+SSE 流式（标准 `chat.completion.chunk` + `[DONE]`）；引用作为非破坏性扩展返回
+（非流式 `choices[0].message.docmind_citations`，流式最终 chunk 的
+`docmind_citations`），仅含公开 id / 标题 / 分数。
+
+**v1 口径说明**：`temperature` / `max_tokens` 会被接受（不触发 422），但当前
+**不改变**实际生成参数（仍使用服务端默认值）；`finish_reason` 恒为 `stop`；
+`usage` 是服务端按输入/输出文本长度估算的 token 数，不是上游模型返回值。
 
 Swagger 文档：`http://localhost:8000/docs`（OpenAPI：`/api/v1/openapi.json`）。
 

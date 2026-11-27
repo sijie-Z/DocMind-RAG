@@ -2,11 +2,13 @@
 
 import asyncio
 import contextvars
+import inspect
 import logging
 import time
 from collections.abc import AsyncGenerator
 from typing import Any, cast
 
+import anyio
 from openai import AsyncOpenAI
 from openai.types.chat import ChatCompletionMessageParam
 
@@ -100,6 +102,23 @@ def _gate_source_provenance(results: list[dict[str, Any]], *, query: str) -> lis
         query=query,
         snippet_builder=HybridRetriever._build_snippet,
     )
+
+
+async def _close_async_stream(stream: Any) -> None:
+    """关闭上游 LLM 流（断连/取消时释放连接，不把异常反噬调用方）。
+
+    OpenAI SDK 的 ``AsyncStream`` 暴露 ``close()``；测试替身常见为 async
+    generator（``aclose()``）。两者都兼容，缺失时静默跳过。
+    """
+    close_method = getattr(stream, "close", None) or getattr(stream, "aclose", None)
+    if close_method is None:
+        return
+    try:
+        result = close_method()
+        if inspect.isawaitable(result):
+            await result
+    except Exception:  # noqa: BLE001 — 收尾失败不得覆盖已生成的回答/原始异常
+        logger.debug("closing LLM stream failed", exc_info=True)
 
 
 class RAGPipeline:
@@ -901,6 +920,14 @@ class RAGPipeline:
                 query, start_index=len(context_mask_mapping)
             )
 
+        # 批次十五：把已确定的 context/query 占位符映射尽早交给调用方，供
+        # 流式逐 chunk 还原「引用型」占位符（如 OpenAI 兼容入口）。既有调用方
+        # 只在流结束后整体还原，提前写入同一 dict 不改变其最终结果。
+        if mask_mapping_sink is not None and (context_mask_mapping or query_mask_mapping):
+            mask_mapping_sink.clear()
+            mask_mapping_sink.update(context_mask_mapping)
+            mask_mapping_sink.update(query_mask_mapping)
+
         # issue #186：提示词正文只读 prompt_text（完整 chunk 正文）——snippet 仅为
         # 展示层片段，`snippet or text` 的短路会让全文压缩器形同虚设。超过
         # RAG_PROMPT_TEXT_MAX_CHARS 时走 compress() 的规则式句子抽取（保留开头少量
@@ -991,26 +1018,46 @@ class RAGPipeline:
             # 安全加固：流式输出前对 chunk 掩码（编号继续递增，PII 不离开服务器）；
             # 模型新生成的 PII 占位符不参与最终还原，仅 context/query 的占位符可还原。
             response_mask_mapping: dict[str, str] = {}
-            async for chunk in stream:
-                if chunk.choices and chunk.choices[0].delta.content:
-                    content = chunk.choices[0].delta.content
-                    full_response += content
-                    if first_token:
-                        LLM_LATENCY.observe(time.perf_counter() - llm_start)
-                        first_token = False
-                    if masking_enabled:
-                        masked_chunk, cm = masking_service.mask_text(
-                            content,
-                            start_index=(
-                                len(context_mask_mapping)
-                                + len(query_mask_mapping)
-                                + len(response_mask_mapping)
-                            ),
-                        )
-                        response_mask_mapping.update(cm)
-                        yield masked_chunk
-                    else:
-                        yield content
+            try:
+                async for chunk in stream:
+                    if chunk.choices and chunk.choices[0].delta.content:
+                        content = chunk.choices[0].delta.content
+                        full_response += content
+                        if first_token:
+                            LLM_LATENCY.observe(time.perf_counter() - llm_start)
+                            first_token = False
+                        if masking_enabled:
+                            masked_chunk, cm = masking_service.mask_text(
+                                content,
+                                start_index=(
+                                    len(context_mask_mapping)
+                                    + len(query_mask_mapping)
+                                    + len(response_mask_mapping)
+                                ),
+                            )
+                            response_mask_mapping.update(cm)
+                            yield masked_chunk
+                        else:
+                            yield content
+            finally:
+                # 批次十五：断连/取消时显式关闭上游流，确保底层 HTTP 连接
+                # 与生成都被取消，而不是等 GC。Starlette 在 ASGI 2.3 断连时
+                # 处于已取消的 cancel scope 中，必须 shield 收尾，否则
+                # close 的 await 会被立即取消、连接继续在后台生成。
+                with anyio.CancelScope(shield=True):
+                    await _close_async_stream(stream)
+                # 用量记账也放进 finally：正常完成、上游失败、客户端断连都
+                # 会得到一次（且仅一次）token 估算，避免断连绕过配额计量。
+                try:
+                    input_text = "".join(
+                        str(m.get("content", "")) for m in messages if m.get("content")
+                    )
+                    self.report_tokens(
+                        max(1, int(len(input_text) / 1.5)),
+                        max(1, int(len(full_response) / 1.5)),
+                    )
+                except Exception:
+                    logger.exception("post-stream token bookkeeping failed after stream end")
 
         except Exception as e:
             LLM_REQUEST_ERRORS.inc()
@@ -1026,15 +1073,9 @@ class RAGPipeline:
                 yield "系统处理异常，请重试"
             return
 
-        # 流完成后的记账/掩码回传不属于「上游调用失败」：这里即使出错，也不能
-        # 把已经生成完的回答丢弃，更不能误报成个人模型配置问题。
+        # 流完成后的掩码回传不属于「上游调用失败」：这里即使出错，也不能
+        # 把已经生成完的回答丢弃；token 记账已在上面 finally 中完成。
         try:
-            # Token estimation
-            input_text = "".join(str(m.get("content", "")) for m in messages if m.get("content"))
-            self.report_tokens(
-                max(1, int(len(input_text) / 1.5)), max(1, int(len(full_response) / 1.5))
-            )
-
             # 将 context/query 占位符映射交给调用方（供最终消息还原"引用型"占位符）
             if mask_mapping_sink is not None:
                 mask_mapping_sink.clear()
