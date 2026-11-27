@@ -225,6 +225,22 @@
       </div>
 
       <footer class="border-t border-gray-100 px-4 py-3 dark:border-gray-800">
+        <div class="mb-2 flex items-center gap-2">
+          <label class="text-[11px] text-gray-500 dark:text-gray-400" for="session-tree-share-expiry">
+            {{ t('chat.share.expiryLabel') }}
+          </label>
+          <select
+            id="session-tree-share-expiry"
+            v-model.number="shareExpiryChoice"
+            data-testid="session-tree-share-expiry"
+            class="rounded border border-gray-200 bg-white px-2 py-1 text-[11px] dark:border-gray-700 dark:bg-gray-900"
+          >
+            <option :value="0">{{ t('chat.share.expiryNever') }}</option>
+            <option :value="7">{{ t('chat.share.expiryDays', { days: 7 }) }}</option>
+            <option :value="30">{{ t('chat.share.expiryDays', { days: 30 }) }}</option>
+            <option :value="90">{{ t('chat.share.expiryDays', { days: 90 }) }}</option>
+          </select>
+        </div>
         <button
           type="button"
           class="w-full rounded-lg bg-slate-600 px-3 py-2 text-sm font-medium text-white hover:bg-slate-700 disabled:opacity-50"
@@ -251,6 +267,13 @@
           class="mt-2 w-full rounded border border-gray-200 bg-gray-50 px-2 py-1 text-[11px] text-gray-600 dark:border-gray-700 dark:bg-gray-950 dark:text-gray-300"
           data-testid="session-tree-share-link"
         />
+        <p
+          v-if="shareExpiresAt"
+          class="mt-1 text-[11px] text-gray-500 dark:text-gray-400"
+          data-testid="session-tree-share-expires-at"
+        >
+          {{ t('chat.share.expiresAt', { time: formatShareTime(shareExpiresAt) }) }}
+        </p>
         <p class="mt-2 text-[11px] text-gray-400 dark:text-gray-500">
           {{ t('chat.sessionTree.shareHint') }}
         </p>
@@ -284,6 +307,8 @@ const shareBusy = ref(false)
 const shareLink = ref('')
 const shareCopied = ref(false)
 const shareError = ref('')
+const shareExpiryChoice = ref(7)
+const shareExpiresAt = ref<string | null>(null)
 
 const branches = computed(() => tree.value?.branches ?? [])
 const visibleBranches = computed(() => {
@@ -358,6 +383,8 @@ async function loadTree(sessionId: string = props.sessionId) {
   shareLink.value = ''
   shareCopied.value = false
   shareError.value = ''
+  shareExpiresAt.value = null
+  shareExpiryChoice.value = 7
   if (!sessionId) {
     loading.value = false
     return
@@ -461,18 +488,30 @@ async function copyLink(value: string) {
   document.body.removeChild(textarea)
 }
 
+function formatShareTime(value: string): string {
+  const date = new Date(value)
+  return Number.isNaN(date.getTime()) ? value : date.toLocaleString()
+}
+
 async function shareTree() {
   if (shareBusy.value || !shareRootId.value) return
   shareBusy.value = true
   shareError.value = ''
   shareCopied.value = false
+  shareExpiresAt.value = null
   try {
-    const res = await sessionsApi.shareTree(shareRootId.value)
-    const data = apiUnwrap<{ url?: string } | null>(res)
+    const res = await sessionsApi.shareTree(
+      shareRootId.value,
+      shareExpiryChoice.value > 0 ? shareExpiryChoice.value : null,
+    )
+    const data = apiUnwrap<{ url?: string; expiresAt?: string | null } | null>(res)
     if (!data?.url) throw new Error('missing share url')
     shareLink.value = `${window.location.origin}${data.url}`
+    shareExpiresAt.value = data.expiresAt ?? null
   } catch {
     shareError.value = t('chat.sessionTree.shareFailed')
+    shareLink.value = ''
+    shareCopied.value = false
     shareBusy.value = false
     return
   }

@@ -179,6 +179,7 @@ export interface SessionTreeShareData {
   token: string
   url: string
   createdAt: string
+  expiresAt: string | null
 }
 
 export const sessionsApi = {
@@ -239,12 +240,16 @@ export const sessionsApi = {
     )
   },
 
-  /** 复制只读分享链接（复用既有分享 token；每次调用轮换）。 */
+  /** 复制只读分享链接（复用既有分享 token；每次调用轮换）。
+   * `expiresInDays` 为 null 时永不过期；1-90 有效（后端校验）。 */
   shareTree(
     rootSessionId: string,
+    expiresInDays: number | null = null,
   ): Promise<AxiosResponse<ApiResponse<SessionTreeShareData>>> {
-    return request.post(`/sessions/tree/${rootSessionId}/share`, null, {
-      headers: { 'X-Silent-Error': '1' },
-    })
+    return request.post(
+      `/sessions/tree/${rootSessionId}/share`,
+      { expires_in_days: expiresInDays },
+      { headers: { 'X-Silent-Error': '1' } },
+    )
   },
 }

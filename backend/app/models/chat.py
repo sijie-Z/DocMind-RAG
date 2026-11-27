@@ -162,6 +162,12 @@ class ChatSession(Base):
     share_created_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), comment="分享链接创建时间"
     )
+    # 批次十二：NULL = 永不过期（历史链接保持永久有效）；到期后公开读取 404。
+    # 与 messages_cleared_at 同口径：MySQL 秒精度会丢过期时间，显式 fsp=6。
+    share_expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True).with_variant(mysql.DATETIME(fsp=6), "mysql"),
+        comment="分享链接过期时间（NULL=永不过期）",
+    )
 
     # 时间戳
     created_at: Mapped[datetime] = mapped_column(

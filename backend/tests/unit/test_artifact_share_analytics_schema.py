@@ -57,7 +57,7 @@ def test_047_revision_chain():
     rev = script.get_revision(HEAD)
     assert rev.down_revision == PREVIOUS
     assert len(HEAD) <= 32, "MySQL alembic_version.version_num 是 VARCHAR(32)"
-    assert set(script.get_heads()) == {HEAD}, "047 必须是当前唯一 head"
+    assert set(script.get_heads()) == {"048_session_share_expiry"}, "048 必须是当前唯一 head"
 
 
 def test_047_migration_source_guard():

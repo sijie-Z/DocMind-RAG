@@ -290,6 +290,28 @@ async def test_tree_response_is_bounded_and_flags_truncation(client, db_factory,
 
 
 @pytest.mark.asyncio
+async def test_tree_share_rejects_out_of_range_expiry(client, db_factory):
+    """树分享过期天数必须在 1–90；越界 422，不写库。"""
+    await _seed_tree(db_factory)
+    r = client.post("/api/v1/sessions/tree/t-root/share", json={"expires_in_days": 91})
+    assert r.status_code == 422
+    r0 = client.post("/api/v1/sessions/tree/t-root/share", json={"expires_in_days": 0})
+    assert r0.status_code == 422
+
+
+async def test_tree_share_survives_audit_failure(client, db_factory, monkeypatch):
+    """审计失败不得让分享创建失败。"""
+    await _seed_tree(db_factory)
+
+    async def _boom(*args, **kwargs):
+        raise RuntimeError("audit db down")
+
+    monkeypatch.setattr("app.services.audit_service.AuditService.log_activity", _boom)
+    r = client.post("/api/v1/sessions/tree/t-root/share", json={"expires_in_days": 7})
+    assert r.status_code == 200, r.text
+    assert r.json()["data"]["expiresAt"]
+
+
 async def test_branch_label_put_reflected_in_tree(client, db_factory):
     await _seed_tree(db_factory)
 
