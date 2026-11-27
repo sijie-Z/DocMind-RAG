@@ -9,17 +9,21 @@
 - owner-only：同组织他人与跨组织创建/状态/撤销全 404；
 - 开关关闭：创建与公开读取 404；撤销仍可用（安全操作）；
 - 公开正文安全头逐项断言；限流超限 429。
+- 批次十一：正文读取计数 +1、元数据不计数；计数失败仍 200；NULL 计数按 0
+  披露；所有者分享列表只含有效项且无 token/内部字段；create/rotate/revoke
+  各写一条审计且 detail 无 token/正文；审计失败不影响接口。
 """
 
 from __future__ import annotations
 
 import hashlib
+import json
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 
 import pytest
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 import app.models  # noqa: F401
@@ -403,6 +407,7 @@ async def test_missing_scope_is_403(factory):
         assert resp.status_code == 403, resp.text
         assert (await ac.get(f"/api/v1/artifacts/{created['id']}/share")).status_code == 403
         assert (await ac.delete(f"/api/v1/artifacts/{created['id']}/share")).status_code == 403
+        assert (await ac.get("/api/v1/artifacts/shares")).status_code == 403
 
 
 async def test_share_timestamps_stay_utc_across_reads(factory):
@@ -534,3 +539,375 @@ async def test_rate_limit_returns_429(monkeypatch, factory):
         second = await ac.get(f"/api/v1/public/artifacts/{token}")
         assert second.status_code == 429, second.text
         assert second.json()["error_code"] == "RATE_LIMIT_EXCEEDED"
+
+
+# ── 批次十一：访问统计 / 所有者列表 / 审计 ──────────────────────────────────
+
+
+async def test_public_content_counts_access_but_metadata_does_not(factory):
+    """正文成功读取才 +1；元数据读取不计数（一次浏览只算一次）。"""
+    async with _Ctx(_user(), factory) as ac:
+        created = await _create(ac, content="计数正文")
+        token = (await _share(ac, created["id"])).json()["data"]["token"]
+
+        before = (await ac.get(f"/api/v1/artifacts/{created['id']}/share")).json()["data"]
+        assert before["access_count"] == 0
+        assert before["last_accessed_at"] is None
+
+        # 元数据端点读两次：不得改变计数。
+        assert (await ac.get(f"/api/v1/public/artifacts/{token}")).status_code == 200
+        assert (await ac.get(f"/api/v1/public/artifacts/{token}")).status_code == 200
+        mid = (await ac.get(f"/api/v1/artifacts/{created['id']}/share")).json()["data"]
+        assert mid["access_count"] == 0, "元数据读取不得计数"
+        assert mid["last_accessed_at"] is None
+
+        # 正文读取两次：计数 +2，最后访问时间带 UTC 偏移。
+        for _ in range(2):
+            content = await ac.get(f"/api/v1/public/artifacts/{token}/content")
+            assert content.status_code == 200, content.text
+            assert content.content.decode("utf-8") == "计数正文"
+        after = (await ac.get(f"/api/v1/artifacts/{created['id']}/share")).json()["data"]
+        assert after["access_count"] == 2
+        assert after["last_accessed_at"].endswith("+00:00")
+
+
+async def test_access_count_failure_still_returns_content(monkeypatch, factory):
+    """计数是旁路：record_public_access 意外抛错也不得影响正文 200。"""
+    from app.services import artifact_share_service
+
+    async def _boom(*_args, **_kwargs):
+        raise RuntimeError("count storage down")
+
+    monkeypatch.setattr(artifact_share_service, "record_public_access", _boom)
+    async with _Ctx(_user(), factory) as ac:
+        created = await _create(ac, content="计数失败正文")
+        token = (await _share(ac, created["id"])).json()["data"]["token"]
+        content = await ac.get(f"/api/v1/public/artifacts/{token}/content")
+        assert content.status_code == 200, content.text
+        assert content.content.decode("utf-8") == "计数失败正文"
+
+
+async def test_legacy_null_count_is_reported_as_zero(factory):
+    """历史行 access_count/last_accessed_at 为 NULL → 状态与列表按 0/None 披露。"""
+    async with _Ctx(_user(), factory) as ac:
+        created = await _create(ac, content="历史行正文")
+        token = (await _share(ac, created["id"])).json()["data"]["token"]
+
+    async with factory() as db:
+        row = (
+            await db.execute(
+                select(AgentArtifactShare).where(AgentArtifactShare.artifact_id == created["id"])
+            )
+        ).scalar_one()
+        row.access_count = None
+        row.last_accessed_at = None
+        await db.commit()
+
+    async with _Ctx(_user(), factory) as ac:
+        status = (await ac.get(f"/api/v1/artifacts/{created['id']}/share")).json()["data"]
+        assert status["access_count"] == 0
+        assert status["last_accessed_at"] is None
+        listed = (await ac.get("/api/v1/artifacts/shares")).json()["data"]
+        assert listed["total"] == 1
+        assert listed["items"][0]["access_count"] == 0
+        assert listed["items"][0]["last_accessed_at"] is None
+        # 计数按 0 处理后，首次正文读取仍能正确 +1（COALESCE 路径）。
+        assert (await ac.get(f"/api/v1/public/artifacts/{token}/content")).status_code == 200
+        status = (await ac.get(f"/api/v1/artifacts/{created['id']}/share")).json()["data"]
+        assert status["access_count"] == 1
+
+
+async def test_list_excludes_artifact_from_other_org(factory):
+    """列表必须同时校验 artifact 的 organization_id（防御越权/脏数据行）。"""
+    async with _Ctx(_user(), factory) as ac:
+        created = await _create(ac, title="跨组织工件", content="正文")
+        await _share(ac, created["id"])
+    async with factory() as db:
+        artifact = await db.get(AgentArtifact, created["id"])
+        artifact.organization_id = OTHER_ORG
+        await db.commit()
+    async with _Ctx(_user(), factory) as ac:
+        data = (await ac.get("/api/v1/artifacts/shares")).json()["data"]
+        assert all(item["artifact_id"] != created["id"] for item in data["items"])
+
+
+async def test_list_excludes_artifact_owned_by_another_user(factory):
+    """同组织但 artifact 属主不是当前用户：列表也必须排除（user 过滤守卫）。"""
+    async with _Ctx(_user(), factory) as ac:
+        created = await _create(ac, title="他人工件", content="正文")
+        await _share(ac, created["id"])
+    async with factory() as db:
+        artifact = await db.get(AgentArtifact, created["id"])
+        artifact.user_id = OTHER_USER
+        await db.commit()
+    async with _Ctx(_user(), factory) as ac:
+        data = (await ac.get("/api/v1/artifacts/shares")).json()["data"]
+        assert all(item["artifact_id"] != created["id"] for item in data["items"])
+
+
+async def test_record_public_access_never_raises_on_db_failure():
+    """服务契约：计数失败只记 warning，绝不向调用方抛出。"""
+    from types import SimpleNamespace
+
+    from app.services import artifact_share_service
+
+    class _BrokenSession:
+        async def execute(self, *args, **kwargs):
+            raise RuntimeError("db down")
+
+        async def commit(self):
+            raise AssertionError("commit must not be reached")
+
+        async def rollback(self):
+            return None
+
+    await artifact_share_service.record_public_access(
+        _BrokenSession(), SimpleNamespace(id="share-1")
+    )
+
+
+async def test_list_active_shares_owner_only_filtered_and_leak_free(factory):
+    """列表：owner-only；只含未撤销未过期；字段白名单；无 token/内部字段。"""
+    async with _Ctx(_user(), factory) as ac:
+        created = await _create(
+            ac, title="列表工件", content="列表正文", conversation_id="conv-list-secret"
+        )
+        token = (await _share(ac, created["id"], expires_in_days=30)).json()["data"]["token"]
+        await _create(ac, title="未分享工件", content="另一正文")
+        assert (await ac.get(f"/api/v1/public/artifacts/{token}/content")).status_code == 200
+
+    # 同组织他人与跨组织用户的分享都不得出现在当前用户列表里。
+    for other in (_user(user_id=OTHER_USER), _user(org=OTHER_ORG, user_id=OTHER_USER)):
+        async with _Ctx(other, factory) as ac:
+            other_created = await _create(ac, title="他人工件", content="他人正文")
+            await _share(ac, other_created["id"])
+
+    async with _Ctx(_user(), factory) as ac:
+        resp = await ac.get("/api/v1/artifacts/shares")
+        assert resp.status_code == 200, resp.text
+        data = resp.json()["data"]
+        assert data["total"] == 1
+        item = data["items"][0]
+        assert set(item) == {
+            "share_id",
+            "artifact_id",
+            "title",
+            "kind",
+            "version_no",
+            "file_size",
+            "created_at",
+            "expires_at",
+            "access_count",
+            "last_accessed_at",
+        }
+        assert item["artifact_id"] == created["id"]
+        assert item["title"] == "列表工件"
+        assert item["kind"] == "markdown"
+        assert item["version_no"] == 1
+        assert item["file_size"] > 0
+        assert item["access_count"] == 1
+        assert item["last_accessed_at"].endswith("+00:00")
+        # 明文 token、摘要与内部定位字段都不得出现在列表响应里。
+        for secret in (
+            token,
+            "token_hash",
+            "organization_id",
+            "user_id",
+            "conversation_id",
+            "conv-list-secret",
+            "task_id",
+            "agent_id",
+            "source_tool",
+        ):
+            assert secret not in resp.text, f"分享列表泄露 {secret}"
+
+    # 过期分享不出现在列表；撤销后同样消失（计数保留但不可读）。
+    async with factory() as db:
+        row = (
+            await db.execute(
+                select(AgentArtifactShare).where(AgentArtifactShare.artifact_id == created["id"])
+            )
+        ).scalar_one()
+        row.expires_at = datetime.now(UTC) - timedelta(minutes=1)
+        await db.commit()
+    async with _Ctx(_user(), factory) as ac:
+        assert (await ac.get("/api/v1/artifacts/shares")).json()["data"]["total"] == 0
+
+    async with factory() as db:
+        row = (
+            await db.execute(
+                select(AgentArtifactShare).where(AgentArtifactShare.artifact_id == created["id"])
+            )
+        ).scalar_one()
+        row.expires_at = None
+        await db.commit()
+    async with _Ctx(_user(), factory) as ac:
+        assert (await ac.get("/api/v1/artifacts/shares")).json()["data"]["total"] == 1
+        revoked = await ac.delete(f"/api/v1/artifacts/{created['id']}/share")
+        assert revoked.status_code == 200, revoked.text
+        assert revoked.json()["data"]["access_count"] == 1, "撤销后计数保留"
+        assert (await ac.get(f"/api/v1/public/artifacts/{token}/content")).status_code == 404
+        assert (await ac.get("/api/v1/artifacts/shares")).json()["data"]["total"] == 0
+
+
+async def test_share_actions_write_audit_without_secrets(monkeypatch, factory):
+    """create/rotate/revoke 各一条审计；detail 只含定位/过期，不含 token/正文。"""
+    from app.api.v1.endpoints import artifacts as artifacts_endpoint
+
+    calls: list[dict[str, object]] = []
+
+    async def _fake(
+        user_id,
+        action,
+        target_type=None,
+        target_id=None,
+        detail=None,
+        request=None,
+        db=None,
+    ):
+        calls.append(
+            {
+                "user_id": user_id,
+                "action": action,
+                "target_type": target_type,
+                "target_id": target_id,
+                "detail": detail,
+            }
+        )
+
+    monkeypatch.setattr(artifacts_endpoint.audit_service, "log_activity", _fake)
+    async with _Ctx(_user(), factory) as ac:
+        created = await _create(ac, content="审计正文")
+        first = (await _share(ac, created["id"])).json()["data"]
+        second = (await _share(ac, created["id"])).json()["data"]
+        revoked = await ac.delete(f"/api/v1/artifacts/{created['id']}/share")
+        assert revoked.status_code == 200, revoked.text
+
+    assert [call["action"] for call in calls] == [
+        "share_artifact",
+        "rotate_artifact_share",
+        "revoke_artifact_share",
+    ]
+    assert all(call["target_type"] == "artifact_share" for call in calls)
+    assert all(call["user_id"] == USER for call in calls)
+    for call, token in zip(calls, (first["token"], second["token"], None), strict=True):
+        detail = str(call["detail"])
+        if token is not None:
+            assert token not in detail, "审计 detail 不得含 token 明文"
+        assert "审计正文" not in detail, "审计 detail 不得含正文"
+        payload = json.loads(detail)
+        assert set(payload) == {
+            "organization_id",
+            "user_id",
+            "artifact_id",
+            "share_id",
+            "expires_at",
+        }
+        assert payload["organization_id"] == ORG
+        assert payload["user_id"] == USER
+        assert payload["artifact_id"] == created["id"]
+        assert payload["share_id"] == call["target_id"]
+
+
+async def test_audit_failure_does_not_break_share_endpoints(monkeypatch, factory):
+    """审计服务故障不得反噬 create/rotate/revoke。"""
+    from app.api.v1.endpoints import artifacts as artifacts_endpoint
+
+    async def _boom(*_args, **_kwargs):
+        raise RuntimeError("audit down")
+
+    monkeypatch.setattr(artifacts_endpoint.audit_service, "log_activity", _boom)
+    async with _Ctx(_user(), factory) as ac:
+        created = await _create(ac, content="审计故障正文")
+        assert (await _share(ac, created["id"])).status_code == 200
+        assert (await _share(ac, created["id"])).status_code == 200
+        assert (await ac.delete(f"/api/v1/artifacts/{created['id']}/share")).status_code == 200
+
+
+async def test_access_count_db_failure_still_returns_content(factory):
+    """真实 DB 写入失败（SQLite 触发器）时正文仍 200。
+
+    变异点：计数失败后 rollback 过期请求会话中的 artifact，端点再同步读取
+    mime_type/filename → MissingGreenlet → 500。响应必须在计数前固化。
+    """
+    async with _Ctx(_user(), factory) as ac:
+        created = await _create(ac, content="DB 计数失败正文")
+        token = (await _share(ac, created["id"])).json()["data"]["token"]
+
+    async with factory() as db:
+        await db.execute(
+            text(
+                "CREATE TRIGGER fail_share_count BEFORE UPDATE OF access_count "
+                "ON agent_artifact_share BEGIN SELECT RAISE(ABORT, 'count storage down'); END"
+            )
+        )
+        await db.commit()
+
+    async with _Ctx(_user(), factory) as ac:
+        content = await ac.get(f"/api/v1/public/artifacts/{token}/content")
+        assert content.status_code == 200, content.text
+        assert content.content.decode("utf-8") == "DB 计数失败正文"
+        assert content.headers["content-disposition"].startswith("inline;")
+        status = (await ac.get(f"/api/v1/artifacts/{created['id']}/share")).json()["data"]
+        assert status["access_count"] == 0, "计数失败不得伪装成已累加"
+
+
+async def test_list_excludes_non_ready_artifacts(factory):
+    """列表只列可读工件：status != ready 的分享不出现（公开面同样 404）。"""
+    async with _Ctx(_user(), factory) as ac:
+        created = await _create(ac, content="未就绪列表正文")
+        token = (await _share(ac, created["id"])).json()["data"]["token"]
+        assert (await ac.get("/api/v1/artifacts/shares")).json()["data"]["total"] == 1
+
+    async with factory() as db:
+        artifact = await db.get(AgentArtifact, created["id"])
+        artifact.status = "pending"
+        await db.commit()
+
+    async with _Ctx(_user(), factory) as ac:
+        assert (await ac.get("/api/v1/artifacts/shares")).json()["data"]["total"] == 0
+        assert (await ac.get(f"/api/v1/public/artifacts/{token}/content")).status_code == 404
+
+
+async def test_concurrent_first_create_is_classified_as_rotation(monkeypatch, factory):
+    """并发首建：IntegrityError 分支覆盖的是对方刚生效的 token，审计应按轮换。"""
+    from app.services import artifact_share_service
+
+    async with _Ctx(_user(), factory) as ac:
+        created = await _create(ac, content="并发首建正文")
+
+    async with factory() as db:
+        db.add(
+            AgentArtifactShare(
+                id="winner-share",
+                organization_id=ORG,
+                user_id=USER,
+                artifact_id=created["id"],
+                token_hash="b" * 64,
+                created_by=USER,
+                created_at=datetime.now(UTC),
+            )
+        )
+        await db.commit()
+
+    real_lookup = artifact_share_service._share_for_artifact
+    calls = {"count": 0}
+
+    async def _racy_lookup(session, artifact_id):
+        calls["count"] += 1
+        if calls["count"] == 1:
+            return None  # 竞赛失败方先看到「不存在」，插入时撞唯一约束
+        return await real_lookup(session, artifact_id)
+
+    monkeypatch.setattr(artifact_share_service, "_share_for_artifact", _racy_lookup)
+    async with factory() as db:
+        share, token, rotated = await artifact_share_service.create_or_rotate_share(
+            db,
+            artifact_id=created["id"],
+            organization_id=ORG,
+            user_id=USER,
+        )
+        await db.commit()
+        assert rotated is True, "并发首建的失败方实际是在轮换对方的 token"
+        assert share.id == "winner-share"
+        assert share.token_hash == hashlib.sha256(token.encode("utf-8")).hexdigest()

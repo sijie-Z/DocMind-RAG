@@ -78,3 +78,15 @@ class AgentArtifactShare(Base):
         nullable=True,
         comment="撤销时间（非空即失效；行保留供审计）",
     )
+    # 访问统计（批次十一）：只存聚合值，不存访问者身份/IP/UA/正文。
+    # 历史行保持 NULL，服务层统一按 0 处理（不 backfill）。
+    access_count: Mapped[int | None] = mapped_column(
+        Integer,
+        nullable=True,
+        comment="公开正文成功读取的累计次数（NULL 视为 0）",
+    )
+    last_accessed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True).with_variant(mysql.DATETIME(fsp=6), "mysql"),
+        nullable=True,
+        comment="最近一次成功读取公开正文的时间",
+    )

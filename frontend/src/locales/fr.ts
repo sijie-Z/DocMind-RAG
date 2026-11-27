@@ -1996,7 +1996,17 @@ export default {
       copied: 'Copié',
       copyFailed: 'Échec de la copie ; sélectionnez le lien manuellement',
       createFailed: 'Échec de la création du lien de partage.',
-      revokeFailed: 'Échec de la révocation du partage.'
+      revokeFailed: 'Échec de la révocation du partage.',
+      accessCount: 'Vues : {count}',
+      lastAccessed: 'Dernier accès : {time}',
+      neverAccessed: 'Jamais consulté',
+      mySharesTitle: 'Mes partages actifs',
+      mySharesEmpty: 'Aucun lien de partage actif.',
+      mySharesLoadFailed: 'Échec du chargement des partages actifs.',
+      mySharesCreatedAt: 'Créé le {time}',
+      mySharesExpiresAt: 'Expire le {time}',
+      mySharesNeverExpires: 'N’expire jamais',
+      mySharesRevokeFailed: 'Échec de la révocation du partage.'
     },
     public: {
       title: 'Artefact partagé',

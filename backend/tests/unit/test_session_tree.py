@@ -159,7 +159,7 @@ def test_043_single_head_migration_source_guard():
     rev = script.get_revision(MIGRATION)
     assert rev is not None and rev.down_revision == PREVIOUS
     assert len(MIGRATION) <= 32, "MySQL alembic_version.version_num 是 VARCHAR(32)"
-    assert set(script.get_heads()) == {"046_org_skill"}
+    assert set(script.get_heads()) == {"047_artifact_share_analytics"}
 
     migration = (BACKEND_ROOT / "alembic" / "versions" / f"{MIGRATION}.py").read_text(
         encoding="utf-8"
@@ -195,7 +195,7 @@ def test_043_roundtrip_preserves_historical_rows(tmp_path, monkeypatch):
         conn.commit()
 
     command.upgrade(cfg, "head")
-    assert _revision(db_path) == {"046_org_skill"}
+    assert _revision(db_path) == {"047_artifact_share_analytics"}
     columns = _columns(db_path)
     assert set(NEW_COLUMNS) <= set(columns)
     for name in NEW_COLUMNS:
@@ -232,7 +232,7 @@ def test_043_roundtrip_preserves_historical_rows(tmp_path, monkeypatch):
 
     # 再次升级仍幂等成功，历史行不受影响。
     command.upgrade(cfg, "head")
-    assert _revision(db_path) == {"046_org_skill"}
+    assert _revision(db_path) == {"047_artifact_share_analytics"}
     assert set(NEW_COLUMNS) <= set(_columns(db_path))
 
 

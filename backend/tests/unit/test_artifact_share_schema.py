@@ -54,7 +54,7 @@ def test_045_revision_chain():
     rev = script.get_revision(HEAD)
     assert rev.down_revision == PREVIOUS
     assert len(HEAD) <= 32, "MySQL alembic_version.version_num 是 VARCHAR(32)"
-    assert set(script.get_heads()) == {"046_org_skill"}, "批次十后唯一 head 是 046"
+    assert set(script.get_heads()) == {"047_artifact_share_analytics"}, "批次十一后唯一 head 是 047"
 
 
 def test_045_downgrade_does_not_drop_indexes_before_tables():
@@ -92,7 +92,10 @@ def test_045_schema_and_downgrade_roundtrip(tmp_path, monkeypatch):
 
     with sqlite3.connect(str(db_path)) as conn:
         cols = {row[1]: row for row in conn.execute(f"PRAGMA table_info({TABLE})")}
-        assert set(cols) == {c.name for c in Base.metadata.tables[TABLE].columns}, (
+        # 045 只建本表当时的列；047 起 ORM 又追加了访问统计两列。这里比较
+        # 「045 建出的列 == ORM 列 - 后续迁移追加列」，保持列级漂移护栏有效。
+        later_columns = {"access_count", "last_accessed_at"}
+        assert set(cols) == {c.name for c in Base.metadata.tables[TABLE].columns} - later_columns, (
             "agent_artifact_share 迁移列与 ORM 模型漂移"
         )
         for name in ("id", "organization_id", "user_id", "artifact_id", "token_hash", "created_by"):

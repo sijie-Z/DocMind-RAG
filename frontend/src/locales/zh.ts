@@ -2018,7 +2018,17 @@ export default {
       copied: '已复制',
       copyFailed: '复制失败，请手动选择链接',
       createFailed: '创建分享链接失败。',
-      revokeFailed: '撤销分享失败。'
+      revokeFailed: '撤销分享失败。',
+      accessCount: '访问次数：{count}',
+      lastAccessed: '最后访问：{time}',
+      neverAccessed: '从未被访问',
+      mySharesTitle: '我的有效分享',
+      mySharesEmpty: '暂无有效分享链接。',
+      mySharesLoadFailed: '加载分享列表失败。',
+      mySharesCreatedAt: '创建于 {time}',
+      mySharesExpiresAt: '过期时间：{time}',
+      mySharesNeverExpires: '永不过期',
+      mySharesRevokeFailed: '撤销分享失败。'
     },
     public: {
       title: '分享工件',

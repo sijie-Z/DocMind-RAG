@@ -13,6 +13,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 from urllib.parse import quote
 
@@ -37,6 +38,7 @@ from app.exceptions import (
 from app.models.rbac import PermissionType
 from app.models.user import User
 from app.services import artifact_service, artifact_share_service
+from app.services.audit_service import audit_service
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -146,6 +148,34 @@ async def list_artifacts(
         raise AppError("获取工件列表失败") from e
 
 
+@router.get("/shares", response_model=dict, dependencies=_READ_DEPS)
+async def list_active_artifact_shares(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """当前用户所有有效分享（未撤销、未过期；owner-only）。
+
+    必须声明在 ``/{artifact_id}`` **之前**：FastAPI 按注册顺序匹配，否则
+    ``shares`` 会被当成工件 id 吞掉。响应不含 token 明文/摘要或内部组织/用户/
+    会话字段；``artifact_id`` 仅用于所有者从列表发起撤销。
+    """
+    try:
+        org_id = await require_organization(current_user, db)
+        items = await artifact_share_service.list_active_shares(
+            db,
+            organization_id=org_id,
+            user_id=current_user.id,
+        )
+        return {"success": True, "data": {"items": items, "total": len(items)}}
+    except (NotFoundError, AuthorizationError):
+        raise
+    except AppError:
+        raise
+    except Exception as e:
+        logger.error(f"List artifact shares failed: {type(e).__name__}: {e}")
+        raise AppError("获取分享列表失败") from e
+
+
 @router.get("/{artifact_id}", response_model=dict, dependencies=_READ_DEPS)
 async def get_artifact(
     artifact_id: str,
@@ -236,6 +266,43 @@ async def get_artifact_content(
 # 管理面严格 owner-only：不是「组织内任意成员」，超管也不绕过（服务层按
 # organization_id + user_id 双限定，跨组织/他人 404）。
 # 开关只门控「创建」与公开读取：撤销/状态查询必须始终可用（撤链接是安全操作）。
+# 审计（批次十一）：create/rotate/revoke 各记一条；detail 只含定位与过期信息，
+# 绝不记 token/正文；审计失败不反噬请求。
+
+
+def _share_audit_detail(
+    share,
+    *,
+    organization_id: int,
+    user_id: int,
+    artifact_id: str,
+) -> str:
+    """审计 detail：组织/用户/工件/分享定位 + 过期时间；不含 token/正文。"""
+    return json.dumps(
+        {
+            "organization_id": organization_id,
+            "user_id": user_id,
+            "artifact_id": artifact_id,
+            "share_id": share.id,
+            "expires_at": artifact_share_service.share_status(share)["expires_at"],
+        },
+        ensure_ascii=False,
+        sort_keys=True,
+    )
+
+
+async def _audit_share_action(*, user_id: int, action: str, share_id: str, detail: str) -> None:
+    """写分享审计（best-effort）：失败只告警，不影响业务响应。"""
+    try:
+        await audit_service.log_activity(
+            user_id=user_id,
+            action=action,
+            target_type="artifact_share",
+            target_id=share_id,
+            detail=detail,
+        )
+    except Exception as e:  # noqa: BLE001 — 审计是旁路，任何失败都不得反噬请求
+        logger.warning(f"Audit artifact share action failed: {type(e).__name__}: {e}")
 
 
 @router.post("/{artifact_id}/share", response_model=dict, dependencies=_WRITE_DEPS)
@@ -251,7 +318,7 @@ async def create_artifact_share(
         raise NotFoundError("工件不存在")
     try:
         org_id = await require_organization(current_user, db)
-        share, token = await artifact_share_service.create_or_rotate_share(
+        share, token, rotated = await artifact_share_service.create_or_rotate_share(
             db,
             artifact_id=artifact_id,
             organization_id=org_id,
@@ -261,7 +328,20 @@ async def create_artifact_share(
         data = artifact_share_service.share_status(share)
         data["token"] = token
         data["url"] = f"/share/artifact/{token}"
+        # 审计细节必须在 commit 前从内存行取值（commit 后仍可用，但顺序更稳）。
+        detail = _share_audit_detail(
+            share,
+            organization_id=org_id,
+            user_id=current_user.id,
+            artifact_id=artifact_id,
+        )
         await db.commit()
+        await _audit_share_action(
+            user_id=current_user.id,
+            action="rotate_artifact_share" if rotated else "share_artifact",
+            share_id=share.id,
+            detail=detail,
+        )
         return {"success": True, "data": data}
     except (ValidationError, NotFoundError, AuthorizationError):
         await db.rollback()
@@ -309,13 +389,25 @@ async def revoke_artifact_share(
     """撤销分享：撤销后旧 token 立即失效（包括已打开的页面刷新时）。"""
     try:
         org_id = await require_organization(current_user, db)
-        data = await artifact_share_service.revoke_share(
+        share, data = await artifact_share_service.revoke_share(
             db,
             artifact_id=artifact_id,
             organization_id=org_id,
             user_id=current_user.id,
         )
+        detail = _share_audit_detail(
+            share,
+            organization_id=org_id,
+            user_id=current_user.id,
+            artifact_id=artifact_id,
+        )
         await db.commit()
+        await _audit_share_action(
+            user_id=current_user.id,
+            action="revoke_artifact_share",
+            share_id=share.id,
+            detail=detail,
+        )
         return {"success": True, "data": data}
     except (NotFoundError, AuthorizationError):
         await db.rollback()
