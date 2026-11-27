@@ -139,6 +139,14 @@ describe('SharePanel', () => {
     expect(wrapper.text()).not.toContain('inactive')
     // 过期链接仍可撤销（token 还在）。
     expect(wrapper.get('[data-testid="share-revoke"]').attributes('disabled')).toBeUndefined()
+
+    // 过期后重新生成必须给出安全默认 7 天，而不是静默变回永久链接。
+    create.mockResolvedValue({
+      data: { data: { token: 'tok-new', url: '/share/tok-new', createdAt: '', expiresAt: null } },
+    })
+    await wrapper.get('[data-testid="share-create"]').trigger('click')
+    await flushPromises()
+    expect(create).toHaveBeenCalledWith('conv-1', 7)
   })
 
   it('重新生成时回填现有过期档位，不会静默改成永久链接', async () => {
@@ -176,5 +184,29 @@ describe('SharePanel', () => {
     expect(wrapper.find('[data-testid="share-token"]').exists()).toBe(false)
     expect(wrapper.text()).toContain('inactive')
     expect(wrapper.emitted('revoked')).toBeTruthy()
+  })
+
+  it('创建失败显示错误态且不显示 token', async () => {
+    create.mockRejectedValue(new Error('boom'))
+    const wrapper = mountPanel()
+    await flushPromises()
+    await wrapper.get('[data-testid="share-create"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.get('[data-testid="share-error"]').text()).toBe('create failed')
+    expect(wrapper.find('[data-testid="share-token"]').exists()).toBe(false)
+  })
+
+  it('撤销失败显示错误态且保持已分享状态', async () => {
+    status.mockResolvedValue({
+      data: { data: { shared: true, createdAt: null, expiresAt: null, expired: false } },
+    })
+    revoke.mockRejectedValue(new Error('boom'))
+    const wrapper = mountPanel()
+    await flushPromises()
+    await wrapper.get('[data-testid="share-revoke"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.get('[data-testid="share-error"]').text()).toBe('revoke failed')
+    expect(wrapper.text()).toContain('active')
+    expect(wrapper.find('[data-testid="share-token"]').exists()).toBe(false)
   })
 })

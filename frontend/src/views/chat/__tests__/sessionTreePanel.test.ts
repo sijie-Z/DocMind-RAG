@@ -284,6 +284,19 @@ describe('SessionTreePanel · 摘要 / 分享 / 标签', () => {
     expect(wrapper.find('[data-testid="session-tree-share-expires-at"]').exists()).toBe(false)
   })
 
+  it('树分享失败显示错误态，不残留旧链接', async () => {
+    shareTreeMock.mockRejectedValue(new Error('boom'))
+    const wrapper = mountPanel()
+    await flushPromises()
+    await wrapper.find('[data-testid="session-tree-share"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('[data-testid="session-tree-share-error"]').text()).toBe(
+      '分享链接生成失败',
+    )
+    expect(wrapper.find('[data-testid="session-tree-share-link"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="session-tree-share-expires-at"]').exists()).toBe(false)
+  })
+
   it('树未加载或根不可见时分享禁用，绝不用当前分支兜底', async () => {
     mockTree(tree([CHILD]))
     const wrapper = mountPanel()

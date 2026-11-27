@@ -46,7 +46,7 @@
           <n-button data-testid="share-copy" :disabled="!token" @click="copyLink">{{ t('chat.share.copyLink') }}</n-button>
           <n-button data-testid="share-revoke" :disabled="!shared" :loading="busy" @click="revokeShare">{{ t('chat.share.revoke') }}</n-button>
         </div>
-        <p v-if="error" class="mt-3 text-sm text-red-600 dark:text-red-400" role="alert">{{ error }}</p>
+        <p v-if="error" data-testid="share-error" class="mt-3 text-sm text-red-600 dark:text-red-400" role="alert">{{ error }}</p>
       </template>
     </n-card>
   </n-modal>
@@ -90,11 +90,14 @@ function formatTime(value: string | null | undefined): string {
   return Number.isNaN(date.getTime()) ? value : date.toLocaleString()
 }
 
-/** 从现有过期时间回填档位；已过期/无过期（旧永久链接）回填「永不过期」。 */
+/** 从现有过期时间回填档位。
+ * 已过期 → 7 天（重新生成时给出安全默认，而不是静默变回永久链接）；
+ * 无过期（旧永久链接）→ 0（保持用户既有语义）。 */
 function expiryChoiceFrom(value: string | null): number {
   if (!value) return 0
   const remaining = new Date(value).getTime() - Date.now()
-  if (Number.isNaN(remaining) || remaining <= 0) return 0
+  if (Number.isNaN(remaining)) return 0
+  if (remaining <= 0) return 7
   const days = Math.ceil(remaining / 86_400_000)
   if (days <= 7) return 7
   if (days <= 30) return 30
