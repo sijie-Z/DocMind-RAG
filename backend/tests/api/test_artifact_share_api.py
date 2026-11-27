@@ -631,6 +631,20 @@ async def test_list_excludes_artifact_from_other_org(factory):
         assert all(item["artifact_id"] != created["id"] for item in data["items"])
 
 
+async def test_list_excludes_artifact_owned_by_another_user(factory):
+    """同组织但 artifact 属主不是当前用户：列表也必须排除（user 过滤守卫）。"""
+    async with _Ctx(_user(), factory) as ac:
+        created = await _create(ac, title="他人工件", content="正文")
+        await _share(ac, created["id"])
+    async with factory() as db:
+        artifact = await db.get(AgentArtifact, created["id"])
+        artifact.user_id = OTHER_USER
+        await db.commit()
+    async with _Ctx(_user(), factory) as ac:
+        data = (await ac.get("/api/v1/artifacts/shares")).json()["data"]
+        assert all(item["artifact_id"] != created["id"] for item in data["items"])
+
+
 async def test_record_public_access_never_raises_on_db_failure():
     """服务契约：计数失败只记 warning，绝不向调用方抛出。"""
     from types import SimpleNamespace
