@@ -241,6 +241,15 @@ async def test_expired_token_returns_same_404_as_missing_and_revoked(share_env):
         status = await owner.get(f"{BASE}/conversations/{SESSION_OWNED}/share")
         assert status.json()["data"]["shared"] is True, "token 仍在，只是已过期"
         assert status.json()["data"]["expired"] is True
+        # 再撤销：已过期 token 与已撤销 token 的 404 也必须同形。
+        assert (
+            await owner.delete(f"{BASE}/conversations/{SESSION_OWNED}/share")
+        ).status_code == 200
+    async with _client(share_env) as anon2:
+        revoked = await anon2.get(f"{BASE}/shares/{token}")
+    assert revoked.status_code == 404
+    revoked_body = {k: v for k, v in revoked.json().items() if k != "request_id"}
+    assert revoked_body == missing_body
 
 
 async def test_revoke_clears_three_columns(share_env):

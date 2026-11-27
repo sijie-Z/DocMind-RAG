@@ -510,6 +510,8 @@ async function shareTree() {
     shareExpiresAt.value = data.expiresAt ?? null
   } catch {
     shareError.value = t('chat.sessionTree.shareFailed')
+    shareLink.value = ''
+    shareCopied.value = false
     shareBusy.value = false
     return
   }

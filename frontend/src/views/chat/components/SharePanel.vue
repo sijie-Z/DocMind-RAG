@@ -120,6 +120,7 @@ const loadStatus = async () => {
     shared.value = false
     expiresAt.value = null
     serverExpired.value = false
+    token.value = ''
     error.value = t('chat.share.loadFailed')
   } finally {
     loading.value = false
