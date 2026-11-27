@@ -83,6 +83,22 @@ describe('响应拦截器 · 全局错误 toast 跟随语言（en）', () => {
     expect(lastToast()).toBe('Too many requests. Please try again later.')
   })
 
+  it('429 ORG_TOKEN_QUOTA_EXCEEDED → 英文配额文案（used/quota/reset_at）', async () => {
+    await reject(429, {
+      data: {
+        error_code: 'ORG_TOKEN_QUOTA_EXCEEDED',
+        detail: { used: 150, quota: 100, reset_at: '2026-12-01T00:00:00+00:00' },
+      },
+    })
+    const toast = lastToast()
+    expect(toast).toContain('150')
+    expect(toast).toContain('100')
+    expect(toast).toContain('token quota')
+    expect(toast).not.toBe('Too many requests. Please try again later.')
+    // reset_at 必须被渲染为本地时间（不再是原始 ISO 字符串）
+    expect(toast).not.toContain('2026-12-01T00:00:00+00:00')
+  })
+
   it('400 后端 detail 原样展示（不被通用文案覆盖）', async () => {
     await reject(400, { data: { detail: 'field is required' } })
     expect(lastToast()).toBe('field is required')

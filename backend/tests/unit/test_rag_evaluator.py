@@ -129,6 +129,64 @@ class _CapturingJudge:
         )
 
 
+class _UsageJudge:
+    """Fake judge returning usage (object or dict) and a fixed reply."""
+
+    def __init__(self, reply: str = '{"score": 0.8}', usage=None, model: str = "judge-model"):
+        self._reply = reply
+        self._usage = usage
+        self._model = model
+        self.chat = SimpleNamespace(completions=self)
+
+    async def create(self, *args, **kwargs):
+        response = SimpleNamespace(
+            choices=[SimpleNamespace(message=SimpleNamespace(content=self._reply))],
+            model=self._model,
+        )
+        if self._usage is not None:
+            response.usage = self._usage
+        return response
+
+
+class TestUsageAccumulator:
+    """批次十四 B1：评委调用消耗的 token 必须累计（配额/eval 记账的数据源）。"""
+
+    def test_accumulates_across_three_scores(self):
+        judge = _UsageJudge(usage=SimpleNamespace(prompt_tokens=11, completion_tokens=5))
+        evaluator = RAGEvaluator(client=judge, model="fallback-model")
+        asyncio.run(evaluator.evaluate(question="q", answer="a", context=[]))
+        assert evaluator.usage_by_model == {"judge-model": (33, 15)}
+
+    def test_usage_counted_even_on_contract_error(self):
+        """调用成功但输出不可解析：token 已真实消耗，契约错误也必须保留用量。"""
+        judge = _UsageJudge(
+            reply="no parseable score",
+            usage=SimpleNamespace(prompt_tokens=7, completion_tokens=2),
+        )
+        evaluator = RAGEvaluator(client=judge, model="m")
+        with pytest.raises(EvalJudgeContractError):
+            asyncio.run(evaluator.evaluate(question="q", answer="a", context=[]))
+        assert evaluator.usage_by_model == {"judge-model": (7, 2)}
+
+    def test_usage_accepts_dict_shape(self):
+        judge = _UsageJudge(usage={"prompt_tokens": 3, "completion_tokens": 4})
+        evaluator = RAGEvaluator(client=judge, model="m")
+        asyncio.run(evaluator.evaluate_relevancy(question="q", answer="a"))
+        assert evaluator.usage_by_model == {"judge-model": (3, 4)}
+
+    def test_missing_usage_is_ignored(self):
+        judge = _UsageJudge(usage=None)
+        evaluator = RAGEvaluator(client=judge, model="m")
+        asyncio.run(evaluator.evaluate_relevancy(question="q", answer="a"))
+        assert evaluator.usage_by_model == {}
+
+    def test_invalid_usage_values_are_ignored(self):
+        judge = _UsageJudge(usage={"prompt_tokens": "x", "completion_tokens": True})
+        evaluator = RAGEvaluator(client=judge, model="m")
+        asyncio.run(evaluator.evaluate_relevancy(question="q", answer="a"))
+        assert evaluator.usage_by_model == {}
+
+
 def _call_context_method(evaluator: RAGEvaluator, method: str, context: list[dict]) -> None:
     if method == "faithfulness":
         asyncio.run(evaluator.evaluate_faithfulness(question="q", answer="a", context=context))

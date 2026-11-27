@@ -8,6 +8,13 @@ import { sseService } from '@/utils/sseService'
 import type { ChatMessage, AttachedFile, KnowledgeSource, RetrievalDebugData } from '@/types/chat'
 import type { SSEMessage } from '@/types/api'
 
+/** 配额重置时间：ISO → 本地可读；坏值原样保留。 */
+const formatQuotaResetAt = (value: unknown): string => {
+  if (typeof value !== 'string' || !value) return '-'
+  const date = new Date(value)
+  return Number.isNaN(date.getTime()) ? value : date.toLocaleString()
+}
+
 export function useChatSend(
   messages: { value: ChatMessage[] },
   attachedFiles: { value: AttachedFile[] },
@@ -289,6 +296,18 @@ export function useChatSend(
       if (!wasRegenerate && !fullContent) {
         const placeholderIdx = messages.value.findIndex(m => m.id === aiMsgId)
         if (placeholderIdx >= 0) messages.value.splice(placeholderIdx, 1)
+      }
+      // 批次十四：组织配额用尽（WS 错误帧）按四语文案呈现，不当网络错误。
+      if (data.code === 'ORG_TOKEN_QUOTA_EXCEEDED') {
+        const detail = data.detail || {}
+        message.error(
+          t('errors.orgTokenQuotaExceeded', {
+            used: Number(detail.used ?? 0),
+            quota: Number(detail.quota ?? 0),
+            resetAt: formatQuotaResetAt(detail.reset_at),
+          })
+        )
+        return
       }
       message.error(
         data.code === 'USER_LLM_REQUEST_FAILED'

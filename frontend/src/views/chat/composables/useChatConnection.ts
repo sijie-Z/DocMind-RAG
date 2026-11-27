@@ -7,6 +7,13 @@ import { wsService } from '@/utils/websocket'
 import type { ChatMessage, KnowledgeSource } from '@/types/chat'
 import type { WebSocketMessage } from '@/utils/websocket'
 
+/** 配额重置时间：ISO → 本地可读；坏值原样保留。 */
+const formatQuotaResetAt = (value: unknown): string => {
+  if (typeof value !== 'string' || !value) return '-'
+  const date = new Date(value)
+  return Number.isNaN(date.getTime()) ? value : date.toLocaleString()
+}
+
 export function useChatConnection(
   messages: { value: ChatMessage[] },
   scrollToBottom: (_behavior?: ScrollBehavior, _force?: boolean) => void,
@@ -66,7 +73,18 @@ export function useChatConnection(
     wsService.on('error', (data: WebSocketMessage) => {
       if (!ownsGeneration()) return
       connectionStatus.value = 'error'
-      if (data.code === 'USER_LLM_REQUEST_FAILED') {
+      if (data.code === 'ORG_TOKEN_QUOTA_EXCEEDED') {
+        // 批次十四：WS 配额错误帧（后端 code + detail）按四语文案呈现，
+        // 不回退成后端中文 content，也不当网络错误。
+        const detail = data.detail || {}
+        message.error(
+          t('errors.orgTokenQuotaExceeded', {
+            used: Number(detail.used ?? 0),
+            quota: Number(detail.quota ?? 0),
+            resetAt: formatQuotaResetAt(detail.reset_at),
+          })
+        )
+      } else if (data.code === 'USER_LLM_REQUEST_FAILED') {
         message.error(t('chat.userLlmRequestFailed'))
       } else if (data.content) {
         message.error(data.content)

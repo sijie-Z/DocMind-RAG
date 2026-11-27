@@ -196,6 +196,39 @@ class RAGEvaluator:
     def __init__(self, client: AsyncOpenAI | None = None, model: str | None = None):
         self.client = client
         self.model = model
+        # 批次十四 B1：评委调用的真实 token 用量（model → (prompt, completion)）。
+        # 端点评估后据此写 token_usage_records(source="rag_eval")；此前
+        # `_score` 丢弃 `response.usage`，配额对 eval 入口空转。
+        self.usage_by_model: dict[str, tuple[int, int]] = {}
+
+    @staticmethod
+    def _usage_counts(usage: Any) -> tuple[int, int]:
+        """从 OpenAI usage（对象或 dict）提取 prompt/completion；坏值按 0。"""
+
+        def _count(name: str) -> int:
+            if isinstance(usage, dict):
+                raw = usage.get(name)
+            else:
+                raw = getattr(usage, name, None)
+            return raw if type(raw) is int and raw >= 0 else 0
+
+        return _count("prompt_tokens"), _count("completion_tokens")
+
+    def _accumulate_usage(self, response: Any) -> None:
+        """累计本次评委调用用量；usage 缺失/形状漂移时静默跳过（不估算）。"""
+        usage = getattr(response, "usage", None)
+        if usage is None:
+            return
+        prompt_tokens, completion_tokens = self._usage_counts(usage)
+        if prompt_tokens <= 0 and completion_tokens <= 0:
+            return
+        raw_model = getattr(response, "model", None)
+        model = raw_model if isinstance(raw_model, str) and raw_model else (self.model or "unknown")
+        previous_in, previous_out = self.usage_by_model.get(model, (0, 0))
+        self.usage_by_model[model] = (
+            previous_in + prompt_tokens,
+            previous_out + completion_tokens,
+        )
 
     async def _score(self, prompt: str) -> tuple[float, str]:
         """Call LLM to score, return (score, raw_response).
@@ -214,6 +247,9 @@ class RAGEvaluator:
                 max_tokens=200,
                 timeout=30,
             )
+            # 先记账再解析：即使输出不可解析（契约违规）甚至 choices 形状异常，
+            # 这次真实调用消耗的 token 也必须计入（失败条目同样计费）。
+            self._accumulate_usage(response)
             text = response.choices[0].message.content or ""
         except Exception as e:
             logger.warning(f"RAG eval LLM call failed: {e}")

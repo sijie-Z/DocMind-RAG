@@ -1,5 +1,16 @@
 import request from '@/utils/request'
 import { getToken } from '@/utils/auth'
+import i18n from '@/locales'
+
+const t = (key: string, params: Record<string, string | number> = {}): string =>
+  (i18n.global.t as (k: string, p?: Record<string, string | number>) => string)(key, params)
+
+/** 配额重置时间：ISO → 本地可读；坏值原样保留。 */
+const formatQuotaResetAt = (value: unknown): string => {
+  if (typeof value !== 'string' || !value) return '-'
+  const date = new Date(value)
+  return Number.isNaN(date.getTime()) ? value : date.toLocaleString()
+}
 
 // 工作流节点类型
 export interface WorkflowNodeData {
@@ -210,6 +221,33 @@ export const executeWorkflowStream = (
       })
 
       if (!response.ok) {
+        // 批次十四：429 配额用尽不是普通 HTTP 错误——解析后端 error_code/detail，
+        // 给编辑器调试面板与聊天同源的四语配额文案。
+        if (response.status === 429 && typeof response.json === 'function') {
+          let body: Record<string, unknown> | null = null
+          try {
+            body = (await response.json()) as Record<string, unknown>
+          } catch {
+            body = null
+          }
+          if (body?.error_code === 'ORG_TOKEN_QUOTA_EXCEEDED') {
+            const rawDetail = body.detail
+            const detail =
+              rawDetail && typeof rawDetail === 'object'
+                ? (rawDetail as Record<string, unknown>)
+                : {}
+            onEvent('error', {
+              error: t('errors.orgTokenQuotaExceeded', {
+                used: Number(detail.used ?? 0),
+                quota: Number(detail.quota ?? 0),
+                resetAt: formatQuotaResetAt(detail.reset_at),
+              }),
+              error_code: 'ORG_TOKEN_QUOTA_EXCEEDED',
+              detail,
+            })
+            return
+          }
+        }
         onEvent('error', { error: `HTTP ${response.status}` })
         return
       }

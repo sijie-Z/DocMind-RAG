@@ -115,6 +115,20 @@ class RateLimitError(AppError):
     message = "请求过于频繁，请稍后再试"
 
 
+class QuotaExceededError(AppError):
+    """429 — organization monthly token quota exhausted（批次十四 C4）。
+
+    ``detail`` 必须携带 ``used`` / ``quota`` / ``reset_at``：调用方（前端
+    i18n、管理端排障）需要给出真实用量与重置时间，而不是只看到一句「超限」。
+    与 ``RateLimitError`` 分开：限流是「稍后重试」，配额是「本月不再放行」，
+    客户端不得把两者都当作退避重试信号。
+    """
+
+    status_code = 429
+    error_code = "ORG_TOKEN_QUOTA_EXCEEDED"
+    message = "组织本月 token 配额已用尽"
+
+
 # ---- 5xx Server Errors ----
 
 

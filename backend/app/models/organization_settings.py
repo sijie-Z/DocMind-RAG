@@ -13,8 +13,9 @@
 - ``tool_whitelist``：工具白名单 JSON 数组（NULL = 不限制）。
 
 运行期消费落地节奏：``retrieval_top_k``、``allow_privacy_mode``、
-``default_model`` 由 B4 接线；配额展示与工具白名单的强制执行由后续
-SettingsService（C4）承接。
+``default_model`` 由 B4 接线；月度配额与工具白名单的强制执行为批次十四
+C4 运行策略（配额在 LLM 入口前检查；白名单经 AgentConfig 注入 schema
+与执行层）。
 """
 
 from datetime import datetime

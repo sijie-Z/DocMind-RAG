@@ -85,10 +85,33 @@ async def execute_agent_run(request: RunRequest) -> RunOutcome:
 
     终态以 agent_tasks 行的状态为唯一事实源（service 内部负责把任务行收口到
     COMPLETED/FAILED）；生成器事件里的 error 仅作补充说明。
+
+    批次十四 C4：真正调用 Agent 之前按任务的 org/user 检查月度配额；超限
+    不执行（不创建 agent task），返回带明确原因的失败终态，由
+    ``_execute_and_finalize`` 落 last_status=last_error（到点/run-now 共用）。
     """
     from app.agent.config import AgentConfig
     from app.agent.service import agent_service
+    from app.exceptions import QuotaExceededError
     from app.models.agent_task import AgentTask, TaskStatus
+    from app.services.organization_settings_service import organization_settings_service
+
+    # 配额闸门：放在任何 Agent/LLM 调用之前。
+    try:
+        async with AsyncSessionLocal() as quota_db:
+            quota_user = await quota_db.get(User, request.created_by)
+            await organization_settings_service.ensure_monthly_quota(
+                quota_db, request.organization_id, user=quota_user
+            )
+    except QuotaExceededError as exc:
+        detail = exc.detail if isinstance(exc.detail, dict) else {}
+        reason = (
+            "组织 token 配额已用尽，本次未执行"
+            f"（used={detail.get('used')} / quota={detail.get('quota')}）"
+        )
+        # CodeQL：完全不记录任务 id / 配额数值等派生数据（固定文案、无参数）。
+        logger.warning("定时任务因组织 token 配额已用尽而跳过执行")
+        return RunOutcome(ScheduleRunStatus.FAILED.value, None, error=reason)
 
     agent_task_id: str | None = None
     error_hint: str | None = None

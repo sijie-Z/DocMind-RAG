@@ -47,6 +47,7 @@ from app.models.rbac import PermissionType
 from app.models.user import User
 from app.rag.errors import EvalJudgeContractError, EvalJudgeUnavailableError
 from app.services.organization_service import organization_service
+from app.services.organization_settings_service import organization_settings_service
 
 router = APIRouter()
 _recent_external_alerts: deque = deque(maxlen=max(50, int(settings.ALERT_RECENT_BUFFER_SIZE)))
@@ -1102,9 +1103,64 @@ class BatchEvalRequest(BaseModel):
     items: list[EvalItem] = Field(..., min_length=1, max_length=20)
 
 
+async def _record_rag_eval_token_usage(
+    evaluator: Any, db: AsyncSession, current_user: User
+) -> None:
+    """把本次评委调用的真实 token 用量写 ``token_usage_records``（source=rag_eval）。
+
+    批次十四 B1：``RAGEvaluator._score`` 此前丢弃 ``response.usage``，配额对
+    eval 入口空转。失败条目（契约违规/部分批量失败）已产生的 token 也由
+    evaluator 累加器保留，因此这里在 finally 调用可覆盖失败路径。
+    记账是旁路：任何异常只 warning，绝不覆盖评估结果/错误码。
+    """
+    usage = getattr(evaluator, "usage_by_model", None)
+    if not isinstance(usage, dict) or not usage:
+        return
+    try:
+        from app.api.v1.endpoints.token_usage import record_token_usage
+
+        user_id = getattr(current_user, "id", 0)
+        if type(user_id) is not int:
+            return
+        organization_id = get_user_org_id(current_user)
+        for model, counts in usage.items():
+            if not isinstance(model, str) or not model:
+                continue
+            try:
+                tokens_in, tokens_out = counts
+            except (TypeError, ValueError):
+                continue
+            if type(tokens_in) is not int or type(tokens_out) is not int:
+                continue
+            if tokens_in <= 0 and tokens_out <= 0:
+                continue
+            await record_token_usage(
+                db=db,
+                user_id=user_id,
+                organization_id=organization_id,
+                model=model,
+                source="rag_eval",
+                input_tokens=tokens_in,
+                output_tokens=tokens_out,
+                feature="rag_eval",
+            )
+    except Exception:  # noqa: BLE001 — 记账旁路
+        # CodeQL：完全固定文案、无参数。
+        logger.warning("RAG eval token 记账失败（不影响评估结果）")
+
+
 @router.post("/rag-eval", summary="RAG 质量评估（单条）", dependencies=[Depends(get_current_user)])
-async def rag_eval_single(item: EvalItem):
+async def rag_eval_single(
+    item: EvalItem,
+    request: Request,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
     """评估单条 RAG 回答的 Faithfulness / Relevancy / Context Precision。"""
+    # 批次十四 C4：评测是真实 LLM 成本面——配额在评委调用前检查（429）。
+    await organization_settings_service.ensure_monthly_quota(
+        db, get_user_org_id(current_user), user=current_user, request=request
+    )
     try:
         from openai import AsyncOpenAI
 
@@ -1129,12 +1185,16 @@ async def rag_eval_single(item: EvalItem):
             base_url=settings.DEEPSEEK_API_URL,
         )
         evaluator = RAGEvaluator(client=client, model=settings.DEEPSEEK_MODEL)
-        result = await eval_service.evaluate_single(
-            evaluator,
-            question=item.question,
-            answer=item.answer,
-            context=item.context,
-        )
+        try:
+            result = await eval_service.evaluate_single(
+                evaluator,
+                question=item.question,
+                answer=item.answer,
+                context=item.context,
+            )
+        finally:
+            # 成功/契约失败/评委不可用：已发生的 token 都要落账。
+            await _record_rag_eval_token_usage(evaluator, db, current_user)
 
         RAG_EVAL_TOTAL.inc()
         RAG_EVAL_FAITHFULNESS.observe(result["faithfulness"])
@@ -1162,8 +1222,17 @@ async def rag_eval_single(item: EvalItem):
 @router.post(
     "/rag-eval-batch", summary="RAG 质量批量评估", dependencies=[Depends(get_current_user)]
 )
-async def rag_eval_batch(body: BatchEvalRequest):
+async def rag_eval_batch(
+    body: BatchEvalRequest,
+    request: Request,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
     """批量评估多条 RAG 回答，返回聚合指标。"""
+    # 批次十四 C4：批量评测同样在评委调用前检查配额（429，不消耗 token）。
+    await organization_settings_service.ensure_monthly_quota(
+        db, get_user_org_id(current_user), user=current_user, request=request
+    )
     # 限制批量条目数，防止成本 DoS
     if len(body.items) > 20:
         raise ValidationError("批量评估条目数不能超过 20 条")
@@ -1184,9 +1253,13 @@ async def rag_eval_batch(body: BatchEvalRequest):
             base_url=settings.DEEPSEEK_API_URL,
         )
         evaluator = RAGEvaluator(client=client, model=settings.DEEPSEEK_MODEL)
-        batch_result = await eval_service.evaluate_batch(
-            evaluator, [item.model_dump() for item in body.items]
-        )
+        try:
+            batch_result = await eval_service.evaluate_batch(
+                evaluator, [item.model_dump() for item in body.items]
+            )
+        finally:
+            # 部分/全部条目失败时，已发生的评委 token 同样落账。
+            await _record_rag_eval_token_usage(evaluator, db, current_user)
         return {
             "count": batch_result.count,
             "avg_faithfulness": batch_result.avg_faithfulness,

@@ -3,6 +3,21 @@ import i18n from '@/locales'
 
 const t = (key: string, params: Record<string, string | number> = {}): string =>
   (i18n.global.t as (k: string, p?: Record<string, string | number>) => string)(key, params)
+
+/** 配额重置时间：ISO → 本地可读；坏值原样保留（不丢排障线索）。 */
+const formatQuotaResetAt = (value: unknown): string => {
+  if (typeof value !== 'string' || !value) return '-'
+  const date = new Date(value)
+  return Number.isNaN(date.getTime()) ? value : date.toLocaleString()
+}
+
+/** 组织配额用尽文案（429 ORG_TOKEN_QUOTA_EXCEEDED，四语 i18n）。 */
+const quotaErrorMessage = (detail: Record<string, unknown>): string =>
+  t('errors.orgTokenQuotaExceeded', {
+    used: Number(detail.used ?? 0),
+    quota: Number(detail.quota ?? 0),
+    resetAt: formatQuotaResetAt(detail.reset_at),
+  })
 import type { SSEMessage } from '@/types/api'
 
 interface RetryOptions {
@@ -170,6 +185,32 @@ class SSEService {
 
         if (!response.ok) {
           const retryAfter = response.headers.get('Retry-After')
+          // 批次十四：组织配额用尽虽然是 429，但**不是可退避重试**的限流
+          // ——重试只会继续得到 429。先读错误体，命中配额码立即终态。
+          let errorBody: Record<string, unknown> | null = null
+          if (response.status === 429 && typeof response.json === 'function') {
+            try {
+              errorBody = (await response.json()) as Record<string, unknown>
+            } catch {
+              errorBody = null
+            }
+          }
+          if (response.status === 429 && errorBody?.error_code === 'ORG_TOKEN_QUOTA_EXCEEDED') {
+            const rawDetail = errorBody.detail
+            const detail =
+              rawDetail && typeof rawDetail === 'object'
+                ? (rawDetail as Record<string, unknown>)
+                : {}
+            this.setStatus('error')
+            this.emit('error', {
+              type: 'error',
+              code: 'ORG_TOKEN_QUOTA_EXCEEDED',
+              content: quotaErrorMessage(detail),
+              detail,
+            } as SSEMessage)
+            return false
+          }
+
           const shouldRetry = response.status === 429 || response.status === 503
 
           if (shouldRetry && attempt < this.maxRetries) {

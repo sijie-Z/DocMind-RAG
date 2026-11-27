@@ -137,6 +137,8 @@ export interface SSEMessage {
   content?: string
   /** 后端错误码（如 USER_LLM_REQUEST_FAILED）；前端按码映射四语文案。 */
   code?: string
+  /** 后端结构化错误明细（如配额 429 的 used/quota/reset_at）。 */
+  detail?: Record<string, unknown>
   conversationId?: string | number
   messageId?: string
   sources?: KnowledgeSourceRef[]
