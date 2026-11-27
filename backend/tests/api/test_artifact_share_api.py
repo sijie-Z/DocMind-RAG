@@ -617,6 +617,41 @@ async def test_legacy_null_count_is_reported_as_zero(factory):
         assert status["access_count"] == 1
 
 
+async def test_list_excludes_artifact_from_other_org(factory):
+    """列表必须同时校验 artifact 的 organization_id（防御越权/脏数据行）。"""
+    async with _Ctx(_user(), factory) as ac:
+        created = await _create(ac, title="跨组织工件", content="正文")
+        await _share(ac, created["id"])
+    async with factory() as db:
+        artifact = await db.get(AgentArtifact, created["id"])
+        artifact.organization_id = OTHER_ORG
+        await db.commit()
+    async with _Ctx(_user(), factory) as ac:
+        data = (await ac.get("/api/v1/artifacts/shares")).json()["data"]
+        assert all(item["artifact_id"] != created["id"] for item in data["items"])
+
+
+async def test_record_public_access_never_raises_on_db_failure():
+    """服务契约：计数失败只记 warning，绝不向调用方抛出。"""
+    from types import SimpleNamespace
+
+    from app.services import artifact_share_service
+
+    class _BrokenSession:
+        async def execute(self, *args, **kwargs):
+            raise RuntimeError("db down")
+
+        async def commit(self):
+            raise AssertionError("commit must not be reached")
+
+        async def rollback(self):
+            return None
+
+    await artifact_share_service.record_public_access(
+        _BrokenSession(), SimpleNamespace(id="share-1")
+    )
+
+
 async def test_list_active_shares_owner_only_filtered_and_leak_free(factory):
     """列表：owner-only；只含未撤销未过期；字段白名单；无 token/内部字段。"""
     async with _Ctx(_user(), factory) as ac:

@@ -310,14 +310,19 @@ function formatSize(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
 }
 
+let statusSeq = 0
+let sharesSeq = 0
+
 async function loadStatus() {
   if (!props.artifact) return
+  const seq = ++statusSeq
   loading.value = true
   error.value = ''
   token.value = ''
   copyState.value = 'idle'
   try {
     const res = await artifactsApi.getShare(props.artifact.id)
+    if (seq !== statusSeq) return
     const data = res.data?.data
     shared.value = !!data?.shared
     createdAt.value = data?.created_at ?? null
@@ -327,6 +332,7 @@ async function loadStatus() {
     lastAccessedAt.value = data?.last_accessed_at ?? null
     expiryChoice.value = expiryChoiceFrom(expiresAt.value)
   } catch {
+    if (seq !== statusSeq) return
     // 状态拉取失败不等于未分享：保留错误提示，禁用依赖状态的推断。
     // 同时清空上一工件的过期/撤销/统计，防止跨工件复用显示陈旧状态。
     shared.value = false
@@ -337,22 +343,25 @@ async function loadStatus() {
     lastAccessedAt.value = null
     error.value = t('artifacts.share.loadFailed')
   } finally {
-    loading.value = false
+    if (seq === statusSeq) loading.value = false
   }
 }
 
 /** 我的有效分享列表：跨工件；失败只影响列表区，不影响当前工件状态。 */
 async function loadShares() {
+  const seq = ++sharesSeq
   sharesLoading.value = true
   sharesError.value = ''
   try {
     const res = await artifactsApi.listShares()
+    if (seq !== sharesSeq) return
     shares.value = res.data?.data?.items || []
   } catch {
+    if (seq !== sharesSeq) return
     shares.value = []
     sharesError.value = t('artifacts.share.mySharesLoadFailed')
   } finally {
-    sharesLoading.value = false
+    if (seq === sharesSeq) sharesLoading.value = false
   }
 }
 

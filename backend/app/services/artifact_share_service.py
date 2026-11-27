@@ -40,6 +40,9 @@ logger = logging.getLogger(__name__)
 # 过期上限：分享是临时协作手段，不允许变相永久公开。
 MAX_EXPIRY_DAYS = 90
 # token 长度上限：正常 token ~32 字符；超长输入直接按无效处理（不做哈希）。
+MAX_SHARE_LIST = 200
+"""所有者有效分享列表单次返回上限（防止无界响应）。"""
+
 MAX_TOKEN_CHARS = 128
 
 _SHARE_INVALID = "分享链接不存在或已失效"
@@ -326,9 +329,11 @@ async def list_active_shares(
                 AgentArtifactShare.revoked_at.is_(None),
                 or_(AgentArtifactShare.expires_at.is_(None), AgentArtifactShare.expires_at > now),
                 AgentArtifact.organization_id == organization_id,
+                AgentArtifact.user_id == user_id,
                 AgentArtifact.status == "ready",
             )
             .order_by(AgentArtifactShare.created_at.desc())
+            .limit(MAX_SHARE_LIST)
         )
     ).all()
     return [
