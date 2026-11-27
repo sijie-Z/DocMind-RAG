@@ -331,7 +331,7 @@ describe('ArtifactSharePanel', () => {
                 version_no: 2,
                 file_size: 2048,
                 created_at: '2026-11-26T10:00:00+00:00',
-                expires_at: null,
+                expires_at: '2026-12-26T10:00:00+00:00',
                 access_count: 3,
                 last_accessed_at: '2026-11-27T09:00:00+00:00',
               },
@@ -349,7 +349,8 @@ describe('ArtifactSharePanel', () => {
     expect(item.text()).toContain('季度报告')
     expect(item.text()).toContain('v2')
     expect(item.text()).toContain('Views: 3')
-    expect(item.text()).toContain('Never expires')
+    expect(item.text()).toContain('Expires')
+    expect(item.text()).toContain('Last accessed')
 
     await w.find('[data-testid="artifact-share-list-revoke-art-1"]').trigger('click')
     await flushPromises()
@@ -408,5 +409,48 @@ describe('ArtifactSharePanel', () => {
       'Failed to revoke share',
     )
     expect(w.find('[data-testid="artifact-share-list-item-art-2"]').exists()).toBe(true)
+  })
+
+  it('刷新按钮同时重读当前工件状态与分享列表', async () => {
+    const w = mountPanel()
+    await flushPromises()
+    expect(getShareMock).toHaveBeenCalledTimes(1)
+    expect(listSharesMock).toHaveBeenCalledTimes(1)
+
+    await w.find('[data-testid="artifact-share-list-refresh"]').trigger('click')
+    await flushPromises()
+    expect(getShareMock).toHaveBeenCalledTimes(2)
+    expect(listSharesMock).toHaveBeenCalledTimes(2)
+  })
+
+  it('切换工件后状态加载失败，不残留上一工件的撤销/统计', async () => {
+    getShareMock
+      .mockResolvedValueOnce({
+        data: {
+          success: true,
+          data: {
+            shared: false,
+            created_at: '2026-11-26T10:00:00+00:00',
+            expires_at: null,
+            revoked_at: '2026-11-27T10:00:00+00:00',
+            access_count: 5,
+            last_accessed_at: '2026-11-27T09:00:00+00:00',
+          },
+        },
+      })
+      .mockRejectedValueOnce(new Error('boom'))
+    const w = mountPanel()
+    await flushPromises()
+    expect(w.find('[data-testid="artifact-share-revoked"]').exists()).toBe(true)
+    expect(w.find('[data-testid="artifact-share-stats"]').exists()).toBe(true)
+
+    await w.setProps({ artifact: artifact({ id: 'art-2', title: '另一个工件' }) })
+    await flushPromises()
+    expect(w.find('[data-testid="artifact-share-error"]').text()).toContain(
+      'Failed to load share status',
+    )
+    expect(w.find('[data-testid="artifact-share-revoked"]').exists()).toBe(false)
+    expect(w.find('[data-testid="artifact-share-expired"]').exists()).toBe(false)
+    expect(w.find('[data-testid="artifact-share-stats"]').exists()).toBe(false)
   })
 })

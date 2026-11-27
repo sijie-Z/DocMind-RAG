@@ -202,7 +202,10 @@ async def create_or_rotate_share(
             await session.flush()
         except IntegrityError:
             # 并发双创建：对方已插入同一 artifact 的行 → 回滚后转为轮换。
+            # 竞赛失败方覆盖的是对方刚生效的 token（对方链接立即失效），
+            # 语义上是轮换，审计动作也按轮换记。
             await session.rollback()
+            rotated = True
             share = await _share_for_artifact(session, artifact_id)
             if share is None:  # pragma: no cover — 约束冲突后行必然存在
                 raise

@@ -156,7 +156,7 @@
             class="artifact-share-list-refresh"
             data-testid="artifact-share-list-refresh"
             :disabled="sharesLoading"
-            @click="loadShares"
+            @click="refreshAll"
           >
             {{ t('common.refresh') }}
           </button>
@@ -328,8 +328,13 @@ async function loadStatus() {
     expiryChoice.value = expiryChoiceFrom(expiresAt.value)
   } catch {
     // 状态拉取失败不等于未分享：保留错误提示，禁用依赖状态的推断。
+    // 同时清空上一工件的过期/撤销/统计，防止跨工件复用显示陈旧状态。
     shared.value = false
     createdAt.value = null
+    expiresAt.value = null
+    revokedAt.value = null
+    accessCount.value = 0
+    lastAccessedAt.value = null
     error.value = t('artifacts.share.loadFailed')
   } finally {
     loading.value = false
@@ -349,6 +354,12 @@ async function loadShares() {
   } finally {
     sharesLoading.value = false
   }
+}
+
+/** 刷新：当前工件状态与我的分享列表一起重读（计数/最后访问随之更新）。 */
+function refreshAll() {
+  void loadStatus()
+  void loadShares()
 }
 
 watch(

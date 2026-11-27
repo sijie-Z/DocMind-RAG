@@ -146,13 +146,11 @@ async def get_public_artifact_content(
             raise
         _check_link_rate_limit(token)
         payload = await artifact_service.read_content(artifact)
-        # 访问统计（批次十一）：正文成功读取后才计数；元数据端点不计数。
-        # 计数是旁路：即使服务层意外抛错，也必须返回正常正文。
-        try:
-            await artifact_share_service.record_public_access(db, share)
-        except Exception as e:  # noqa: BLE001 — 计数失败不影响响应
-            logger.warning(f"Record public artifact access failed: {type(e).__name__}: {e}")
-        return StreamingResponse(
+        # 先把响应所需字段固化进响应对象，再执行计数：计数失败会 rollback
+        # 请求会话并使 ORM 实例过期，之后再同步读取 artifact.mime_type/filename
+        # 会触发 async 惰性加载（MissingGreenlet → 500），违反「计数失败不影响
+        # 200」。响应构造本身不发送，计数仍发生在正文成功读取之后。
+        response = StreamingResponse(
             iter([payload]),
             media_type=artifact.mime_type,
             headers={
@@ -169,6 +167,13 @@ async def get_public_artifact_content(
                 "Cache-Control": "no-store",
             },
         )
+        # 访问统计（批次十一）：正文成功读取后才计数；元数据端点不计数。
+        # 计数是旁路：即使服务层意外抛错，也必须返回正常正文。
+        try:
+            await artifact_share_service.record_public_access(db, share)
+        except Exception as e:  # noqa: BLE001 — 计数失败不影响响应
+            logger.warning(f"Record public artifact access failed: {type(e).__name__}: {e}")
+        return response
     except NotFoundError:
         raise
     except AppError:

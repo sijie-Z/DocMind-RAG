@@ -23,7 +23,7 @@ from types import SimpleNamespace
 
 import pytest
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 import app.models  # noqa: F401
@@ -773,3 +773,92 @@ async def test_audit_failure_does_not_break_share_endpoints(monkeypatch, factory
         assert (await _share(ac, created["id"])).status_code == 200
         assert (await _share(ac, created["id"])).status_code == 200
         assert (await ac.delete(f"/api/v1/artifacts/{created['id']}/share")).status_code == 200
+
+
+async def test_access_count_db_failure_still_returns_content(factory):
+    """真实 DB 写入失败（SQLite 触发器）时正文仍 200。
+
+    变异点：计数失败后 rollback 过期请求会话中的 artifact，端点再同步读取
+    mime_type/filename → MissingGreenlet → 500。响应必须在计数前固化。
+    """
+    async with _Ctx(_user(), factory) as ac:
+        created = await _create(ac, content="DB 计数失败正文")
+        token = (await _share(ac, created["id"])).json()["data"]["token"]
+
+    async with factory() as db:
+        await db.execute(
+            text(
+                "CREATE TRIGGER fail_share_count BEFORE UPDATE OF access_count "
+                "ON agent_artifact_share BEGIN SELECT RAISE(ABORT, 'count storage down'); END"
+            )
+        )
+        await db.commit()
+
+    async with _Ctx(_user(), factory) as ac:
+        content = await ac.get(f"/api/v1/public/artifacts/{token}/content")
+        assert content.status_code == 200, content.text
+        assert content.content.decode("utf-8") == "DB 计数失败正文"
+        assert content.headers["content-disposition"].startswith("inline;")
+        status = (await ac.get(f"/api/v1/artifacts/{created['id']}/share")).json()["data"]
+        assert status["access_count"] == 0, "计数失败不得伪装成已累加"
+
+
+async def test_list_excludes_non_ready_artifacts(factory):
+    """列表只列可读工件：status != ready 的分享不出现（公开面同样 404）。"""
+    async with _Ctx(_user(), factory) as ac:
+        created = await _create(ac, content="未就绪列表正文")
+        token = (await _share(ac, created["id"])).json()["data"]["token"]
+        assert (await ac.get("/api/v1/artifacts/shares")).json()["data"]["total"] == 1
+
+    async with factory() as db:
+        artifact = await db.get(AgentArtifact, created["id"])
+        artifact.status = "pending"
+        await db.commit()
+
+    async with _Ctx(_user(), factory) as ac:
+        assert (await ac.get("/api/v1/artifacts/shares")).json()["data"]["total"] == 0
+        assert (await ac.get(f"/api/v1/public/artifacts/{token}/content")).status_code == 404
+
+
+async def test_concurrent_first_create_is_classified_as_rotation(monkeypatch, factory):
+    """并发首建：IntegrityError 分支覆盖的是对方刚生效的 token，审计应按轮换。"""
+    from app.services import artifact_share_service
+
+    async with _Ctx(_user(), factory) as ac:
+        created = await _create(ac, content="并发首建正文")
+
+    async with factory() as db:
+        db.add(
+            AgentArtifactShare(
+                id="winner-share",
+                organization_id=ORG,
+                user_id=USER,
+                artifact_id=created["id"],
+                token_hash="b" * 64,
+                created_by=USER,
+                created_at=datetime.now(UTC),
+            )
+        )
+        await db.commit()
+
+    real_lookup = artifact_share_service._share_for_artifact
+    calls = {"count": 0}
+
+    async def _racy_lookup(session, artifact_id):
+        calls["count"] += 1
+        if calls["count"] == 1:
+            return None  # 竞赛失败方先看到「不存在」，插入时撞唯一约束
+        return await real_lookup(session, artifact_id)
+
+    monkeypatch.setattr(artifact_share_service, "_share_for_artifact", _racy_lookup)
+    async with factory() as db:
+        share, token, rotated = await artifact_share_service.create_or_rotate_share(
+            db,
+            artifact_id=created["id"],
+            organization_id=ORG,
+            user_id=USER,
+        )
+        await db.commit()
+        assert rotated is True, "并发首建的失败方实际是在轮换对方的 token"
+        assert share.id == "winner-share"
+        assert share.token_hash == hashlib.sha256(token.encode("utf-8")).hexdigest()

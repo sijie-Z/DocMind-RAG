@@ -127,3 +127,19 @@ def test_047_upgrade_is_idempotent(tmp_path, monkeypatch):
     command.upgrade(cfg, HEAD)
     assert _revision(db_path) == {HEAD}
     assert set(NEW_COLUMNS) <= set(_columns(db_path))
+
+
+def test_047_upgrade_handles_only_one_column_already_present(tmp_path, monkeypatch):
+    """半迁移只建了第一列时，upgrade 必须只补第二列。"""
+    db_path = tmp_path / "artifact-share-047-partial.db"
+    monkeypatch.setattr(settings, "DATABASE_URL", f"sqlite+aiosqlite:///{db_path.as_posix()}")
+    cfg = _cfg()
+    command.upgrade(cfg, PREVIOUS)
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.execute(f"ALTER TABLE {TABLE} ADD COLUMN access_count INTEGER")
+        conn.commit()
+    command.upgrade(cfg, HEAD)
+    assert _revision(db_path) == {HEAD}
+    cols = _columns(db_path)
+    assert set(NEW_COLUMNS) <= set(cols)
+    assert cols["last_accessed_at"][3] == 0
