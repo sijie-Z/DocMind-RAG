@@ -10,12 +10,13 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.exceptions import AppError, NotFoundError, ValidationError
 from app.models.document import Document
 from app.models.knowledge_base import KnowledgeBase
+from app.models.public_kb import DocumentPublication, KbPublication
 
 MAX_PAGE_SIZE = 100
 MAX_NAME_LENGTH = 200
@@ -155,6 +156,25 @@ class KnowledgeBaseService:
         # 同样先做 org 边界校验；后续解除关联仅命中本组织文档。
         kb = await self.get(db, organization_id, knowledge_base_id)
         try:
+            # 批次十三：知识库删除后其公开发布不再有任何意义（文档会被解除
+            # 关联，白名单检索必然为空）。显式清理发布与白名单行，避免悬空
+            # 公开页继续暴露旧标题/描述；先清白名单再清发布头（FK 顺序）。
+            publication_ids = select(KbPublication.id).where(
+                KbPublication.organization_id == organization_id,
+                KbPublication.knowledge_base_id == knowledge_base_id,
+            )
+            await db.execute(
+                delete(DocumentPublication).where(
+                    DocumentPublication.organization_id == organization_id,
+                    DocumentPublication.publication_id.in_(publication_ids),
+                )
+            )
+            await db.execute(
+                delete(KbPublication).where(
+                    KbPublication.organization_id == organization_id,
+                    KbPublication.knowledge_base_id == knowledge_base_id,
+                )
+            )
             await db.execute(
                 Document.__table__.update()
                 .where(

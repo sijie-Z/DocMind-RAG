@@ -165,7 +165,7 @@ async def delete_knowledge_base(
         action="delete_knowledge_base",
         target_type="knowledge_base",
         target_id=knowledge_base_id,
-        detail="删除知识库（文档保留并解除关联）",
+        detail="删除知识库（文档保留并解除关联；该库的公开链接一并失效）",
         db=db,
     )
     return {"success": True, "message": "知识库已删除；原库内文档已回到组织级默认库"}

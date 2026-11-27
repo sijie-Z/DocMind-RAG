@@ -869,7 +869,7 @@ class SemanticCache:
             pipe.setex(cache_key, self.ttl, json.dumps(data, ensure_ascii=False))
             pipe.zadd(index_key, {cache_key: score})
             await pipe.execute()
-            logger.info(f"Semantic cache stored: '{query[:30]}...'")
+            logger.info("Semantic cache stored: query_len=%d", len(query))
         except Exception as e:
             logger.error(f"Semantic cache store failed: {e}")
 

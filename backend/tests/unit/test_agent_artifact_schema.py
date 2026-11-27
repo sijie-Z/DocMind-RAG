@@ -74,7 +74,7 @@ def test_041_revision_chain():
     assert script.get_revision("045_artifact_share").down_revision == "044_answer_quality_eval"
     assert script.get_revision("046_org_skill").down_revision == "045_artifact_share"
     assert script.get_revision(FINAL_HEAD).down_revision == "046_org_skill"
-    assert set(script.get_heads()) == {"048_session_share_expiry"}, "批次十二后唯一 head 是 048"
+    assert set(script.get_heads()) == {"049_public_kb"}, "批次十三后唯一 head 是 049"
 
 
 def test_artifact_constants_are_closed_sets():
