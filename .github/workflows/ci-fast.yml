@@ -36,7 +36,9 @@ jobs:
   backend-tests:
     name: Backend Tests
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    # 全量后端套件已增长到 ~18 分钟（3.12），20 分钟上限在负载抖动时会误杀；
+    # 放大到 35 分钟，仍保留超时保护。
+    timeout-minutes: 35
     strategy:
       fail-fast: false
       matrix:
