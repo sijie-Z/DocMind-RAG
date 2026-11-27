@@ -140,12 +140,18 @@ async def get_public_artifact_content(
     _require_share_enabled()
     try:
         try:
-            artifact, _share = await artifact_share_service.resolve_public_share(db, token)
+            artifact, share = await artifact_share_service.resolve_public_share(db, token)
         except NotFoundError:
             _check_invalid_rate_limit(request)
             raise
         _check_link_rate_limit(token)
         payload = await artifact_service.read_content(artifact)
+        # 访问统计（批次十一）：正文成功读取后才计数；元数据端点不计数。
+        # 计数是旁路：即使服务层意外抛错，也必须返回正常正文。
+        try:
+            await artifact_share_service.record_public_access(db, share)
+        except Exception as e:  # noqa: BLE001 — 计数失败不影响响应
+            logger.warning(f"Record public artifact access failed: {type(e).__name__}: {e}")
         return StreamingResponse(
             iter([payload]),
             media_type=artifact.mime_type,

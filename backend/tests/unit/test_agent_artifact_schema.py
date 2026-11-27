@@ -27,7 +27,7 @@ BACKEND_ROOT = Path(__file__).resolve().parents[2]
 HEAD = "041_agent_artifact"
 CURRENT_HEAD = "042_rubric_eval"
 LATEST_HEAD = "043_session_tree"
-FINAL_HEAD = "046_org_skill"
+FINAL_HEAD = "047_artifact_share_analytics"
 PREVIOUS = "040_inbound_redline_ledger"
 TABLE = "agent_artifact"
 
@@ -72,8 +72,9 @@ def test_041_revision_chain():
     assert script.get_revision(LATEST_HEAD).down_revision == CURRENT_HEAD
     assert script.get_revision("044_answer_quality_eval").down_revision == LATEST_HEAD
     assert script.get_revision("045_artifact_share").down_revision == "044_answer_quality_eval"
-    assert script.get_revision(FINAL_HEAD).down_revision == "045_artifact_share"
-    assert set(script.get_heads()) == {FINAL_HEAD}, "046 必须是当前唯一 head"
+    assert script.get_revision("046_org_skill").down_revision == "045_artifact_share"
+    assert script.get_revision(FINAL_HEAD).down_revision == "046_org_skill"
+    assert set(script.get_heads()) == {FINAL_HEAD}, "047 必须是当前唯一 head"
 
 
 def test_artifact_constants_are_closed_sets():
