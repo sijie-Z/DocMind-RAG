@@ -2370,6 +2370,21 @@ export default {
       saving: 'Enregistrement…',
       saved: 'Paramètres de chat mis à jour'
     },
+    embed: {
+      title: 'Intégrer à votre site (iframe)',
+      hint: 'Intégrez la page publique à votre site ou centre d’aide. La génération du code nécessite le token du lien public (affiché lors de la création ou de la régénération du lien).',
+      linkLabel: 'Lien public ou token',
+      linkPlaceholder: 'Collez https://…/public/kb/<token> ou le token seul',
+      invalidLink:
+        'Lien invalide : collez un lien public de la forme /public/kb/<token>, ou le token seul',
+      snippetLabel: 'Code iframe',
+      frameTitle: 'Base de connaissances publique DocMind',
+      warning:
+        'Le lien public est un identifiant bearer : toute personne disposant du lien ou du code d’intégration peut ouvrir la page publique. L’intégration expose le token dans le code source de la page hôte ; n’intégrez que des documents publiables.',
+      crossOrigin:
+        'Ce lien pointe vers un autre site ({origin}). Ne l’intégrez que si vous faites confiance à ce site ; le token y sera envoyé.',
+      copyFailed: 'Échec de la copie ; sélectionnez le code iframe et copiez-le manuellement'
+    },
     public: {
       title: 'Base de connaissances publique',
       searchPlaceholder: 'Rechercher dans les documents publics…',

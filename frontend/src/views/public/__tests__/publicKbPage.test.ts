@@ -50,12 +50,15 @@ import PublicKbPage from '../kb.vue'
 
 const i18n = createI18n({ legacy: false, locale: 'en', messages: { en } })
 
-async function mountPage(token = 'token-1') {
+async function mountPage(
+  token = 'token-1',
+  query: Record<string, string> = {},
+) {
   const router = createRouter({
     history: createMemoryHistory(),
     routes: [{ path: '/public/kb/:token', component: { template: '<div />' } }],
   })
-  await router.push(`/public/kb/${token}`)
+  await router.push({ path: `/public/kb/${token}`, query })
   await router.isReady()
   const wrapper = mount(PublicKbPage, { global: { plugins: [i18n, router] } })
   return { wrapper, router }
@@ -530,5 +533,84 @@ describe('public KB chat generation guard (review follow-up)', () => {
     expect(wrapper.text()).toContain('Second KB')
     expect(wrapper.find('[data-testid="public-kb-chat-empty"]').exists()).toBe(true)
     expect(wrapper.find('[data-testid="public-kb-chat-error"]').exists()).toBe(false)
+  })
+})
+
+describe('public KB embed mode (batch 18)', () => {
+  it('embed=1 隐藏品牌与页脚，保留标题、检索与聊天', async () => {
+    enableChat()
+    const { wrapper } = await mountPage('token-1', { embed: '1' })
+    await flushPromises()
+
+    expect(wrapper.find('.public-kb-page').classes()).toContain('is-embed')
+    expect(wrapper.find('.public-kb-page').attributes('data-embed')).toBe('1')
+    expect(wrapper.find('[data-testid="public-kb-brand"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="public-kb-page-footer"]').exists()).toBe(false)
+    expect(wrapper.text()).toContain('Public policy KB')
+    expect(wrapper.find('[data-testid="public-kb-search-input"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="public-kb-chat"]').exists()).toBe(true)
+  })
+
+  it('普通模式保持品牌与页脚（嵌入分支不得影响默认外观）', async () => {
+    const { wrapper } = await mountPage()
+    await flushPromises()
+
+    expect(wrapper.find('.public-kb-page').classes()).not.toContain('is-embed')
+    expect(wrapper.find('.public-kb-page').attributes('data-embed')).toBeUndefined()
+    expect(wrapper.find('[data-testid="public-kb-brand"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="public-kb-page-footer"]').exists()).toBe(true)
+    expect(wrapper.text()).toContain('Powered by DocMind')
+  })
+
+  it('embed=1 但 chat_enabled=false 时不渲染聊天区', async () => {
+    const { wrapper } = await mountPage('token-1', { embed: '1' })
+    await flushPromises()
+
+    expect(wrapper.find('.public-kb-page').classes()).toContain('is-embed')
+    expect(wrapper.find('[data-testid="public-kb-chat"]').exists()).toBe(false)
+  })
+
+  it('非 1 的 embed 值不启用嵌入模式', async () => {
+    const { wrapper } = await mountPage('token-1', { embed: '0' })
+    await flushPromises()
+
+    expect(wrapper.find('.public-kb-page').classes()).not.toContain('is-embed')
+    expect(wrapper.find('[data-testid="public-kb-brand"]').exists()).toBe(true)
+  })
+})
+
+describe('public KB token hygiene (batch 18 review M2)', () => {
+  it('token 不进入 document.title', async () => {
+    const token = 'tok-title-secret-123'
+    document.title = 'DocMind'
+    const { wrapper } = await mountPage(token)
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('Public policy KB')
+    expect(document.title).not.toContain(token)
+  })
+
+  it('load/chat 路径不把 token 输出到 console.log/warn/error', async () => {
+    const token = 'tok-console-secret-456'
+    const spies = [
+      vi.spyOn(console, 'log').mockImplementation(() => {}),
+      vi.spyOn(console, 'warn').mockImplementation(() => {}),
+      vi.spyOn(console, 'error').mockImplementation(() => {}),
+    ]
+    try {
+      enableChat()
+      const { wrapper } = await mountPage(token)
+      await flushPromises()
+      await wrapper.find('[data-testid="public-kb-chat-input"]').setValue('console hygiene?')
+      await wrapper.find('form.public-kb-chat-form').trigger('submit')
+      await flushPromises()
+
+      const output = spies
+        .flatMap((spy) => spy.mock.calls.map((args) => args.map((arg) => String(arg)).join(' ')))
+        .join('\n')
+      expect(output).not.toContain(token)
+    } finally {
+      spies.forEach((spy) => spy.mockRestore())
+    }
   })
 })

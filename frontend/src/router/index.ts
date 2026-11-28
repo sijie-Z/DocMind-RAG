@@ -6,6 +6,11 @@ import { getToken, isTokenExpired, removeToken } from '@/utils/auth'
 import { silentRefreshAccessToken } from '@/utils/request'
 import { startRouteProgress, finishRouteProgress } from '@/utils/routeProgress'
 import { applyRoutePageTitle } from './pageTitle'
+import {
+  isBlockedPublicKbEntryTarget,
+  isPublicKbEntryDocument,
+  PUBLIC_KB_ENTRY_META_NAME,
+} from './publicKbEntry'
 
 /** 路由 meta 扩展（T9 定位三件套）：生效侧栏高亮键 */
 declare module 'vue-router' {
@@ -33,6 +38,19 @@ declare module 'vue-router' {
 
 let sessionValidated = false
 let lastValidatedAt = 0
+// 批次十八：若本 SPA 文档是从可被任意来源 iframe 的公开知识库入口加载的，
+// 客户端路由不得再进入管理/登录界面（CSP 不会随 router.push 重新协商）。
+// 入口证据：nginx 注入 meta 标记优先；无标记时退回 nginx 口径的路径规范化
+// （避免 `//public/kb/x`、`/%70ublic/kb/x` 等写法绕过）。
+const startedOnPublicKbEntry =
+  typeof window !== 'undefined' &&
+  isPublicKbEntryDocument(
+    typeof document !== 'undefined' &&
+      document.querySelector(
+        `meta[name="${PUBLIC_KB_ENTRY_META_NAME}"][content="1"]`,
+      ) !== null,
+    window.location.pathname,
+  )
 // admin 路由重新校验角色的时间间隔（毫秒）：超过则重新调用 getUserInfo 刷新角色
 const ADMIN_REVALIDATE_INTERVAL = 5 * 60 * 1000
 
@@ -536,6 +554,20 @@ router.beforeEach(async (to, from, next) => {
   // W0-1：平台级页面（监控/审计/MCP）只对显式 is_superuser 开放；
   // 组织管理员（is_org_admin）只能进入组织管理页。
   const requiresPlatformAdmin = to.matched.some((record) => record.meta.requiresPlatformAdmin)
+
+  // 批次十八：公开知识库文档（nginx 允许跨源嵌入）内禁止客户端跳转到
+  // 管理/登录界面，否则这些界面会在不重新协商 CSP 的同一文档里被框住。
+  if (
+    startedOnPublicKbEntry &&
+    isBlockedPublicKbEntryTarget(to.name, {
+      requiresAuth,
+      requiresAdmin,
+      requiresPlatformAdmin,
+    })
+  ) {
+    next(false)
+    return
+  }
 
   // token 本地判定过期 → 先尝试用 refresh_token 静默续期（与 401 拦截器共享单飞队列），
   // 续期成功继续原导航（刷新页面不再丢登录态）；续期失败才清号。

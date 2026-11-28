@@ -1,9 +1,11 @@
 <template>
   <!-- 公开知识库只读检索页（批次十三）：无登录、无生成、无内部字段。
-       token 即全部权限；撤销/过期/禁用/不存在统一显示「不可用」。 -->
-  <div class="public-kb-page">
+       token 即全部权限；撤销/过期/禁用/不存在统一显示「不可用」。
+       批次十八：?embed=1 为 iframe 嵌入形态——隐藏品牌/页脚，只留标题、
+       检索与聊天；普通模式保持原样。 -->
+  <div class="public-kb-page" :class="{ 'is-embed': isEmbed }" :data-embed="isEmbed ? '1' : undefined">
     <header class="public-kb-page-header">
-      <div class="public-kb-brand">DocMind</div>
+      <div v-if="!isEmbed" class="public-kb-brand" data-testid="public-kb-brand">DocMind</div>
       <div class="public-kb-heading">
         <h1 class="public-kb-page-title">
           {{ meta?.title || t('publicKb.public.title') }}
@@ -218,7 +220,9 @@
       </template>
     </main>
 
-    <footer class="public-kb-page-footer">{{ t('publicKb.public.poweredBy') }}</footer>
+    <footer v-if="!isEmbed" class="public-kb-page-footer" data-testid="public-kb-page-footer">
+      {{ t('publicKb.public.poweredBy') }}
+    </footer>
   </div>
 </template>
 
@@ -237,6 +241,9 @@ import {
 
 const route = useRoute()
 const { t } = useI18n()
+
+// 批次十八：iframe 嵌入形态。只认显式 embed=1，避免任意 query 改变页面外观。
+const isEmbed = computed(() => route.query.embed === '1')
 
 const meta = ref<PublicKbMeta | null>(null)
 const loading = ref(true)
@@ -503,6 +510,40 @@ onMounted(() => {
 .dark .public-kb-page {
   background: #020617;
   color: #e2e8f0;
+}
+/* 嵌入形态：iframe 高度由宿主决定（snippet 默认 600px），页面占满视口，
+   导航/页脚隐藏，主区内部滚动，避免宿主页面出现双滚动条。 */
+.public-kb-page.is-embed {
+  height: 100vh;
+  min-height: 100vh;
+  overflow: hidden;
+}
+.public-kb-page.is-embed .public-kb-page-header {
+  flex-shrink: 0;
+}
+.public-kb-page.is-embed .public-kb-page-main {
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+@media (max-width: 640px) {
+  .public-kb-page.is-embed .public-kb-page-header {
+    padding: 12px 14px;
+  }
+  .public-kb-page.is-embed .public-kb-page-title {
+    font-size: 18px;
+  }
+  .public-kb-page.is-embed .public-kb-page-main {
+    padding: 16px 14px 24px;
+  }
+  .public-kb-page.is-embed .public-kb-search,
+  .public-kb-page.is-embed .public-kb-chat-form {
+    flex-direction: column;
+  }
+  .public-kb-page.is-embed .public-kb-search-btn,
+  .public-kb-page.is-embed .public-kb-chat-stop {
+    width: 100%;
+  }
 }
 .public-kb-page-header {
   display: flex;

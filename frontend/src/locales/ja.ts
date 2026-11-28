@@ -2369,6 +2369,21 @@ export default {
       saving: '保存中…',
       saved: 'チャット設定を更新しました'
     },
+    embed: {
+      title: 'サイトに埋め込む（iframe）',
+      hint: '公開ページを自社サイトやヘルプセンターに埋め込みます。コードの生成には公開リンクの token が必要です（リンク作成時または再生成時に表示されます）。',
+      linkLabel: '公開リンクまたは token',
+      linkPlaceholder: 'https://…/public/kb/<token> または token を貼り付け',
+      invalidLink:
+        '無効なリンクです。/public/kb/<token> 形式の公開リンク、または token を貼り付けてください',
+      snippetLabel: 'iframe コード',
+      frameTitle: 'DocMind 公開ナレッジベース',
+      warning:
+        '公開リンクは bearer 認証情報です。リンクまたは埋め込みコードを取得した人は誰でも公開ページを開けます。埋め込むと token がホストページのソースに表示されるため、公開してよいドキュメントだけを埋め込んでください。',
+      crossOrigin:
+        'このリンクは別サイト（{origin}）を指しています。信頼できるサイトのみ埋め込んでください。token はそのサイトに送信されます。',
+      copyFailed: 'コピーに失敗しました。iframe コードを選択して手動でコピーしてください'
+    },
     public: {
       title: '公開ナレッジベース',
       searchPlaceholder: '公開ドキュメントを検索…',
