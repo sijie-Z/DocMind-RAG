@@ -2292,8 +2292,8 @@ export default {
   },
   publicKb: {
     title: 'Base de connaissances publique',
-    subtitle: 'Publiez une liste blanche explicite de documents sous forme de lien à jeton ; les visiteurs anonymes ne peuvent que rechercher en lecture seule.',
-    warning: 'Toute personne disposant du lien peut rechercher les documents choisis. Ne sélectionnez que des documents destinés à être publics.',
+    subtitle: 'Publiez une liste blanche explicite de documents sous forme de lien à jeton ; les visiteurs anonymes peuvent rechercher en lecture seule et, si le chat est activé, poser des questions sur ces documents.',
+    warning: 'Toute personne disposant du lien peut rechercher les documents choisis et, si le chat est activé, poser des questions à leur sujet. Ne sélectionnez que des documents destinés à être publics.',
     empty: 'Aucune base de connaissances publique pour le moment',
     create: 'Publier une base',
     loading: 'Chargement…',
@@ -2304,6 +2304,7 @@ export default {
       knowledgeBase: 'Base de connaissances',
       status: 'Statut',
       documents: 'Documents',
+      chat: 'Chat',
       expires: 'Expiration',
       actions: 'Actions'
     },
@@ -2312,6 +2313,8 @@ export default {
     statusExpired: 'Expirée',
     statusDisabled: 'Désactivée',
     statusInactive: 'Indisponible',
+    chatEnabled: 'Activé',
+    chatDisabled: 'Désactivé',
     actions: {
       manage: 'Gérer les documents',
       rotate: 'Régénérer le lien',
@@ -2355,6 +2358,18 @@ export default {
     notSearchable: 'Non recherchable actuellement',
     candidatesTruncated: 'Trop de documents candidats ; les 500 premiers sont affichés',
     operationFailed: 'Échec de l’opération, réessayez plus tard',
+    chat: {
+      title: 'Chat anonyme',
+      toggle: 'Autoriser le chat anonyme',
+      hint: 'Une fois activé, toute personne disposant du lien peut poser des questions sur les documents de la liste blanche. Désactivé par défaut.',
+      budget: 'Budget quotidien de tokens',
+      budgetPlaceholder: 'Vide = valeur globale par défaut',
+      budgetHint: '0 = chat désactivé ; vide = quota par défaut de la plateforme.',
+      budgetInvalid: 'Le budget doit être un entier entre 0 et 10000000',
+      save: 'Enregistrer les paramètres de chat',
+      saving: 'Enregistrement…',
+      saved: 'Paramètres de chat mis à jour'
+    },
     public: {
       title: 'Base de connaissances publique',
       searchPlaceholder: 'Rechercher dans les documents publics…',
@@ -2365,7 +2380,24 @@ export default {
       emptyHint: 'Essayez d’autres mots-clés.',
       unavailable: 'Ce lien public n’existe pas ou a expiré',
       loadFailed: 'Échec de la recherche, réessayez plus tard',
-      poweredBy: 'Recherche en lecture seule · sans génération, chat ni téléversement'
+      chatTitle: 'Interroger les documents publics',
+      chatHint: 'Les réponses s’appuient uniquement sur les documents publics de la liste blanche. Les conversations ne sont pas enregistrées.',
+      chatEmpty: 'Posez une question ; l’assistant répondra à partir des documents publics.',
+      chatPlaceholder: 'Posez une question…',
+      chatSend: 'Demander',
+      chatSending: 'Génération…',
+      chatStop: 'Arrêter',
+      chatStopped: 'Génération arrêtée',
+      chatYou: 'Vous',
+      chatAssistant: 'Assistant',
+      chatSources: 'Sources',
+      chatNoAnswer: 'Aucune information pertinente trouvée dans les documents.',
+      chatBudgetExceeded: 'Le budget de chat du jour est épuisé ({used}/{budget} tokens) ; réinitialisation à {resetAt}',
+      chatOrgQuota: 'Le quota mensuel de tokens de l’organisation est épuisé ({used}/{quota}) ; réinitialisation à {resetAt}',
+      chatRateLimited: 'Trop de questions ; réessayez plus tard',
+      chatUnavailable: 'Le chat n’est pas disponible pour ce lien',
+      chatFailed: 'Échec de la génération de la réponse ; réessayez plus tard',
+      poweredBy: 'Propulsé par DocMind'
     }
   },
   reviews: {

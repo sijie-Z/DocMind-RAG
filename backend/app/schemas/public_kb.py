@@ -9,13 +9,18 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 MAX_TITLE_CHARS = 100
 MAX_DESCRIPTION_CHARS = 500
 MAX_DOCUMENTS_PER_BATCH = 200
 MAX_QUERY_CHARS = 200
 MAX_TOP_K = 10
+# 公开聊天：schema 只做防滥用硬上限（True 的业务上限由服务层按配置校验并返回 400）。
+MAX_CHAT_MESSAGE_HARD_CAP = 4000
+MAX_CHAT_HISTORY_HARD_CAP = 20
+MAX_CHAT_HISTORY_CONTENT_HARD_CAP = 8000
+MAX_DAILY_TOKEN_BUDGET = 10_000_000
 
 
 class PublicationCreate(BaseModel):
@@ -60,3 +65,54 @@ class PublicKbSearchRequest(BaseModel):
 
     query: str = Field(..., description="检索词（服务层限制 1–200 字符）")
     top_k: int = Field(default=5, description="返回条数（服务层限制 1–10）")
+
+
+class PublicKbChatHistoryItem(BaseModel):
+    """客户端携带的单条历史（只允许 user/assistant，服务层复核）。"""
+
+    role: str = Field(..., max_length=20, description="角色：user / assistant")
+    content: str = Field(
+        ...,
+        max_length=MAX_CHAT_HISTORY_CONTENT_HARD_CAP,
+        description="历史消息正文（服务层限制 1–2000 字符）",
+    )
+
+
+class PublicKbChatRequest(BaseModel):
+    """公开匿名聊天请求（非流式 / SSE 流式共用）。
+
+    历史由客户端携带，服务端**不持久化**任何会话/消息；``history`` 的服务层
+    上限为 ``PUBLIC_KB_CHAT_MAX_HISTORY`` 条、每条 2000 字符。
+    """
+
+    message: str = Field(
+        ...,
+        max_length=MAX_CHAT_MESSAGE_HARD_CAP,
+        description="提问（服务层限制 1–PUBLIC_KB_CHAT_MAX_QUERY_CHARS 字符）",
+    )
+    history: list[PublicKbChatHistoryItem] | None = Field(
+        default=None,
+        max_length=MAX_CHAT_HISTORY_HARD_CAP,
+        description="最近对话（仅 user/assistant；缺省 = 无历史）",
+    )
+    stream: bool = Field(default=False, description="true = SSE 流式")
+
+
+class PublicationChatSettingsUpdate(BaseModel):
+    """管理面：更新发布级聊天开关与日预算（空预算 = 使用全局默认）。"""
+
+    chat_enabled: bool = Field(..., description="发布级聊天开关")
+    daily_token_budget: int | None = Field(
+        default=None,
+        ge=0,
+        le=MAX_DAILY_TOKEN_BUDGET,
+        description="每日 token 预算；null = 全局默认，0 = 禁止聊天",
+    )
+
+    @field_validator("daily_token_budget", mode="before")
+    @classmethod
+    def _reject_boolean_budget(cls, value):
+        """bool 是 int 的子类；True/False 不得被静默转成 1/0。"""
+        if isinstance(value, bool):
+            raise ValueError("daily_token_budget 必须是整数或空，不能是布尔值")
+        return value

@@ -23,30 +23,40 @@ from __future__ import annotations
 import json
 import logging
 import time
+from collections.abc import AsyncGenerator
 from typing import Any
 
+import anyio
 from fastapi import APIRouter, Depends, Query, Request, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.v1.endpoints.token_usage import record_token_usage
+from app.api.v1.streaming import ClosingStreamingResponse
 from app.core.config import settings
 from app.core.database import get_db
+from app.core.llm_failures import UserLLMRequestError
 from app.core.security import get_current_user, require_org_admin, require_organization
 from app.exceptions import (
     AppError,
     ExternalServiceError,
     NotFoundError,
     RateLimitError,
+    ServiceUnavailableError,
 )
 from app.models.user import User
-from app.rag.errors import RetrievalUnavailableError
+from app.rag.errors import LLMNotConfiguredError, RetrievalUnavailableError
 from app.schemas.public_kb import (
+    PublicationChatSettingsUpdate,
     PublicationCreate,
     PublicationDocumentsUpdate,
     PublicationRotateRequest,
+    PublicKbChatRequest,
     PublicKbSearchRequest,
 )
+from app.services import openai_compat_service as compat
 from app.services import public_kb_service as service
 from app.services.audit_service import audit_service
+from app.services.organization_settings_service import organization_settings_service
 from app.services.share_link_service import share_token_digest
 
 logger = logging.getLogger(__name__)
@@ -97,6 +107,14 @@ def _check_link_rate_limit(token: str) -> None:
     _consume_bucket(
         f"kb-token:{share_token_digest(token)}",
         max(1, int(settings.PUBLIC_KB_RATE_LIMIT_PER_MINUTE)),
+    )
+
+
+def _check_chat_rate_limit(token: str) -> None:
+    """公开聊天：独立于只读检索的每 token 桶（默认 10/min）。"""
+    _consume_bucket(
+        f"kb-chat-token:{share_token_digest(token)}",
+        max(1, int(settings.PUBLIC_KB_CHAT_RATE_LIMIT_PER_MINUTE)),
     )
 
 
@@ -153,11 +171,21 @@ async def _view_for(
     return data
 
 
+def _public_headers(*, stream: bool = False) -> dict[str, str]:
+    """公开面统一安全头；SSE 额外关闭反向代理缓冲。"""
+    headers = {
+        "Cache-Control": "no-store",
+        "Referrer-Policy": "no-referrer",
+        "X-Robots-Tag": "noindex",
+        "X-Content-Type-Options": "nosniff",
+    }
+    if stream:
+        headers["X-Accel-Buffering"] = "no"
+    return headers
+
+
 def _set_public_headers(response: Response) -> None:
-    response.headers["Cache-Control"] = "no-store"
-    response.headers["Referrer-Policy"] = "no-referrer"
-    response.headers["X-Robots-Tag"] = "noindex"
-    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers.update(_public_headers())
 
 
 # ── 管理面 ──────────────────────────────────────────────────────────────────
@@ -340,6 +368,44 @@ async def revoke_publication(
         raise AppError("撤销公开知识库失败") from e
 
 
+@router.post("/{publication_id}/chat-settings", response_model=dict)
+async def update_publication_chat_settings(
+    publication_id: str,
+    payload: PublicationChatSettingsUpdate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """管理面：发布级聊天开关 + 日预算（空预算 = 全局默认；0 = 禁止聊天）。"""
+    try:
+        org_id = await _admin_org(db, current_user)
+        publication = await service.update_chat_settings(
+            db,
+            publication_id=publication_id,
+            organization_id=org_id,
+            chat_enabled=payload.chat_enabled,
+            daily_token_budget=payload.daily_token_budget,
+        )
+        await db.commit()
+        data = await _view_for(db, publication)
+        await _audit(
+            user_id=current_user.id,
+            action="update_kb_publication_chat",
+            publication_id=publication.id,
+            detail={
+                "organization_id": org_id,
+                "user_id": current_user.id,
+                "chat_enabled": bool(publication.chat_enabled),
+                "daily_token_budget": publication.daily_token_budget,
+            },
+        )
+        return {"success": True, "data": data}
+    except AppError:
+        raise
+    except Exception as e:  # noqa: BLE001
+        logger.error("Update kb publication chat settings failed: %s", type(e).__name__)
+        raise AppError("更新公开知识库聊天设置失败") from e
+
+
 @router.post("/{publication_id}/documents", response_model=dict)
 async def set_publication_documents(
     publication_id: str,
@@ -481,3 +547,301 @@ async def search_public_kb(
     except Exception as e:  # noqa: BLE001 — 映射为统一失败信封
         logger.error("Search public kb failed: %s", type(e).__name__)
         raise AppError("检索公开知识库失败") from e
+
+
+# ── 公开面：匿名聊天（批次十七）─────────────────────────────────────────────
+
+_CHAT_GENERIC_ERROR = "生成回答失败，请稍后重试"
+_CHAT_UNAVAILABLE = "聊天服务暂不可用，请稍后再试"
+
+
+def _sse_event(event: str, payload: dict[str, Any]) -> str:
+    """单帧 SSE：``event:`` 名 + JSON ``data:``（与前端解析器约定一致）。"""
+    return f"event: {event}\ndata: {json.dumps(payload, ensure_ascii=False)}\n\n"
+
+
+def _chat_model() -> str:
+    """本次生成/记账使用的模型（进程默认模型，与 pipeline 实际一致）。"""
+    return compat.effective_model(None)
+
+
+def _chat_error(exc: Exception) -> tuple[int, str, str]:
+    """把生成期异常映射为对公开访客安全的 (status, code, message)。"""
+    if isinstance(exc, LLMNotConfiguredError):
+        return 503, "LLM_NOT_CONFIGURED", _CHAT_UNAVAILABLE
+    if isinstance(exc, UserLLMRequestError):
+        return 502, "PUBLIC_KB_CHAT_GENERATION_FAILED", _CHAT_GENERIC_ERROR
+    # 未预期异常同样只回固定文案，绝不回显上游异常正文。
+    return 502, "PUBLIC_KB_CHAT_GENERATION_FAILED", _CHAT_GENERIC_ERROR
+
+
+def _chat_app_error(exc: Exception) -> AppError:
+    status, code, message = _chat_error(exc)
+    if status == 503:
+        return ServiceUnavailableError(message, error_code=code)
+    return ExternalServiceError(message, error_code=code)
+
+
+def _chat_usage_pair(usage: tuple[int, int] | None) -> tuple[int, int]:
+    if not usage:
+        return 0, 0
+    try:
+        return max(0, int(usage[0])), max(0, int(usage[1]))
+    except (TypeError, ValueError, IndexError):
+        return 0, 0
+
+
+async def _finalize_chat(
+    *,
+    db: AsyncSession,
+    publication,
+    usage: tuple[int, int] | None,
+    stream: bool,
+    source_count: int,
+) -> None:
+    """断连/完成统一收口：token 记账 + 审计（均无正文/明文 token）。
+
+    记账归属 = 发布创建人（``publication.created_by``）+ 发布所属组织；
+    ``feature=public_kb_chat:<pub_id>`` 同时是日预算的统计键。记账/审计失败
+    只 warning，不得反噬已生成的回答。
+    """
+    input_tokens, output_tokens = _chat_usage_pair(usage)
+    if input_tokens > 0 or output_tokens > 0:
+        try:
+            await record_token_usage(
+                db=db,
+                user_id=publication.created_by,
+                organization_id=publication.organization_id,
+                model=_chat_model(),
+                source=service.CHAT_SOURCE,
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                feature=f"{service.CHAT_FEATURE_PREFIX}{publication.id}",
+            )
+        except Exception as e:  # noqa: BLE001 — 记账是旁路
+            logger.warning("Public kb chat token usage failed: %s", type(e).__name__)
+
+    detail = json.dumps(
+        {
+            "publication_id": publication.id,
+            "organization_id": publication.organization_id,
+            "stream": bool(stream),
+            "source_count": max(0, int(source_count)),
+            "input_tokens": input_tokens,
+            "output_tokens": output_tokens,
+            "total_tokens": input_tokens + output_tokens,
+        },
+        ensure_ascii=False,
+        sort_keys=True,
+    )
+    try:
+        await audit_service.log_activity(
+            user_id=publication.created_by,
+            action="public_kb_chat",
+            target_type="kb_publication",
+            target_id=publication.id,
+            detail=detail,
+        )
+    except Exception as e:  # noqa: BLE001 — 审计是旁路
+        logger.warning("Write public kb chat audit failed: %s", type(e).__name__)
+
+
+async def _stream_chat(
+    *,
+    db: AsyncSession,
+    publication,
+    message: str,
+    history: list[dict[str, str]],
+    history_mask_mapping: dict[str, str],
+    context: list[dict[str, Any]],
+    citations: list[dict[str, Any]],
+) -> AsyncGenerator[str, None]:
+    """SSE：sources → delta* → done / error。
+
+    所有 404/429 已在生成器启动前完成；本生成器只处理生成期错误。断连时
+    ``finally`` 内显式关闭上游生成器（否则 pipeline 的 token 估算拖到 GC），
+    并在 shield 内完成记账/审计——取消不得吞掉已产生的用量。
+    """
+    completion: AsyncGenerator[str, None] | None = None
+    usage: tuple[int, int] | None = None
+    try:
+        yield _sse_event("sources", {"sources": citations})
+        if not context:
+            # 零白名单/零命中：不调用 LLM（不产生可被幻觉利用的空上下文回答）。
+            yield _sse_event("done", {"done": True, "source_count": 0})
+            return
+        try:
+            completion = compat.iter_completion_chunks(
+                query=message,
+                context_results=context,
+                history=history,
+                system_prompt=service.CHAT_SYSTEM_PROMPT,
+                model=_chat_model(),
+                enable_masking=True,
+                extra_mask_mapping=history_mask_mapping,
+            )
+            async for text in completion:
+                if text:
+                    yield _sse_event("delta", {"delta": text})
+            usage = compat.current_token_usage()
+        except Exception as exc:  # noqa: BLE001 — 生成错误必须落成 SSE error
+            _status, code, message_text = _chat_error(exc)
+            logger.warning("Public kb chat stream failed: %s", type(exc).__name__)
+            yield _sse_event("error", {"error_code": code, "message": message_text})
+            return
+        yield _sse_event("done", {"done": True, "source_count": len(citations)})
+    finally:
+        with anyio.CancelScope(shield=True):
+            if completion is not None:
+                try:
+                    await completion.aclose()
+                except Exception:  # noqa: BLE001 — 关闭失败不得阻断记账
+                    logger.warning("Public kb chat completion close failed", exc_info=True)
+            final_usage = usage if usage is not None else compat.current_token_usage()
+            await _finalize_chat(
+                db=db,
+                publication=publication,
+                usage=final_usage,
+                stream=True,
+                source_count=len(citations),
+            )
+
+
+async def _non_stream_chat(
+    *,
+    db: AsyncSession,
+    publication,
+    message: str,
+    history: list[dict[str, str]],
+    history_mask_mapping: dict[str, str],
+    context: list[dict[str, Any]],
+    citations: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """非流式：完整生成后返回 ``{answer, sources}``；空上下文不调用 LLM。"""
+    if not context:
+        await _finalize_chat(
+            db=db,
+            publication=publication,
+            usage=None,
+            stream=False,
+            source_count=0,
+        )
+        return {"answer": "", "sources": []}
+    try:
+        answer = await compat.collect_completion(
+            query=message,
+            context_results=context,
+            history=history,
+            system_prompt=service.CHAT_SYSTEM_PROMPT,
+            model=_chat_model(),
+            enable_masking=True,
+            extra_mask_mapping=history_mask_mapping,
+        )
+    except Exception as exc:  # noqa: BLE001 — 统一映射为 AppError 信封
+        # 上游失败前也可能已经消耗 token：如实入账，不丢掉失败调用的成本。
+        await _finalize_chat(
+            db=db,
+            publication=publication,
+            usage=compat.current_token_usage(),
+            stream=False,
+            source_count=len(citations),
+        )
+        logger.warning("Public kb chat completion failed: %s", type(exc).__name__)
+        raise _chat_app_error(exc) from exc
+    await _finalize_chat(
+        db=db,
+        publication=publication,
+        usage=compat.current_token_usage(),
+        stream=False,
+        source_count=len(citations),
+    )
+    return {"answer": answer, "sources": citations}
+
+
+@public_router.post("/kb/{token}/chat")
+async def chat_public_kb(
+    token: str,
+    payload: PublicKbChatRequest,
+    request: Request,
+    response: Response,
+    db: AsyncSession = Depends(get_db),
+):
+    """匿名聊天：全局/发布开关、撤销/过期统一 404；预算/配额/限流首帧前 429。
+
+    红线：只检索显式白名单文档；不创建 chat_sessions/chat_messages/记忆；
+    引用只含 rank/title/snippet/score；审计/token 账目无正文与 token 明文。
+    """
+    # 404/429 也必须带 no-store/no-referrer/noindex/nosniff（token 链接不得被
+    # 缓存或经 Referer 泄露）：异常 handler 读取该 state 合并响应头。
+    request.state.public_headers = _public_headers()
+    _require_enabled()
+    if not settings.PUBLIC_KB_CHAT_ENABLED:
+        raise NotFoundError(service.PUBLICATION_INVALID)
+    try:
+        try:
+            publication = await service.resolve_public_chat(db, token)
+        except NotFoundError:
+            _check_invalid_rate_limit(request)
+            raise
+        # 有效链接的每 token 桶；无效 token 走 IP 高阈值桶（仅约束扫描）。
+        _check_chat_rate_limit(token)
+        message = service.validate_chat_message(payload.message)
+        history = service.normalize_chat_history(payload.history)
+        # 匿名端点的客户端历史同样要在离开服务器前掩码（pipeline 只掩码
+        # context/query）；映射用于输出时还原引用型占位符。
+        history, history_mask_mapping = service.mask_chat_history(history)
+        # 首帧前：日预算 + 组织月度配额（两者都是 429，但错误码/语义不同）。
+        await service.ensure_daily_budget(db, publication)
+        await organization_settings_service.ensure_monthly_quota(
+            db, publication.organization_id, user=None
+        )
+        context, citations = await service.public_chat_context(
+            db, publication=publication, query=message
+        )
+    except AppError:
+        raise
+    except RetrievalUnavailableError as e:
+        # 检索后端故障必须与「没有相关内容」区分（issue #292 同口径）。
+        logger.error("Public kb chat retrieval unavailable: kind=%s", getattr(e, "kind", "-"))
+        raise ExternalServiceError(
+            "知识库检索服务暂不可用，请稍后重试",
+            error_code="RETRIEVAL_UNAVAILABLE",
+        ) from e
+    except Exception as e:  # noqa: BLE001 — 统一失败信封
+        logger.error("Public kb chat failed: %s", type(e).__name__)
+        raise AppError("公开知识库聊天失败") from e
+
+    if payload.stream:
+        # 匿名长连接不占用 DB 连接：预检/检索已完成，流式生成器只读已加载的
+        # publication 快照，记账/审计各用独立 session（record_token_usage 忽略
+        # 传入的 db）。先释放请求 session，避免少量匿名长流耗尽连接池。
+        await db.close()
+        return ClosingStreamingResponse(
+            _stream_chat(
+                db=db,
+                publication=publication,
+                message=message,
+                history=history,
+                history_mask_mapping=history_mask_mapping,
+                context=context,
+                citations=citations,
+            ),
+            media_type="text/event-stream",
+            headers=_public_headers(stream=True),
+        )
+
+    _set_public_headers(response)
+    # 非流式同样在生成前释放请求 session：匿名者可用 stream=false 让连接在
+    # LLM 生成期间一直挂起；记账/审计各自使用独立 session，publication 的
+    # 已加载字段足够完成收口。
+    await db.close()
+    data = await _non_stream_chat(
+        db=db,
+        publication=publication,
+        message=message,
+        history=history,
+        history_mask_mapping=history_mask_mapping,
+        context=context,
+        citations=citations,
+    )
+    return {"success": True, "data": data}

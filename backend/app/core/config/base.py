@@ -135,6 +135,20 @@ class BaseAppSettings(BaseSettings):
     # 公开知识库端点限流：每 token / 每 IP 每分钟上限（进程内固定窗口桶）。
     PUBLIC_KB_RATE_LIMIT_PER_MINUTE: int = 60
 
+    # ── 公开知识库匿名聊天（批次十七）──────────────────────────────────────
+    # 总开关，默认关闭：关闭时 ``POST /public/kb/{token}/chat`` 统一 404，
+    # 公开元数据中的 ``chat_enabled`` 也按 false 投影（前端隐藏聊天区）。
+    PUBLIC_KB_CHAT_ENABLED: bool = False
+    # 发布未显式设置 ``daily_token_budget`` 时的每日 token 上限。
+    # <=0 等价于禁止聊天（每次请求 429）。
+    PUBLIC_KB_CHAT_DAILY_TOKENS_DEFAULT: int = 50_000
+    # 公开聊天每 token 每分钟上限（与只读检索的 60/min 分开，聊天成本更高）。
+    PUBLIC_KB_CHAT_RATE_LIMIT_PER_MINUTE: int = 10
+    # 客户端可携带的历史消息条数上限（只收 user/assistant）。
+    PUBLIC_KB_CHAT_MAX_HISTORY: int = 6
+    # 单次提问字符上限。
+    PUBLIC_KB_CHAT_MAX_QUERY_CHARS: int = 200
+
     # ── 入站 MCP Server（批次十六）────────────────────────────────────────
     # 默认关闭：关闭时 ``/api/v1/mcp/server`` 一律 404（路由仍挂载但不暴露）。
     # 开启后只接受 ``dm_`` API Key（要求 knowledge:read scope 且 key 绑定组织），

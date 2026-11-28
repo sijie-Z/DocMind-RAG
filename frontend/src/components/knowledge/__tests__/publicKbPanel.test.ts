@@ -22,6 +22,7 @@ const mocks = vi.hoisted(() => ({
   candidates: vi.fn(),
   documents: vi.fn(),
   setDocuments: vi.fn(),
+  setChatSettings: vi.fn(),
   listKnowledgeBases: vi.fn(),
 }))
 
@@ -35,8 +36,9 @@ vi.mock('@/api/publicKb', () => ({
     candidates: mocks.candidates,
     documents: mocks.documents,
     setDocuments: mocks.setDocuments,
+    setChatSettings: mocks.setChatSettings,
   },
-  publicKbPublicApi: { get: vi.fn(), search: vi.fn() },
+  publicKbPublicApi: { get: vi.fn(), search: vi.fn(), chat: vi.fn() },
 }))
 
 vi.mock('@/api/knowledgeBases', () => ({
@@ -55,6 +57,8 @@ const publication = {
   description: null,
   enabled: true,
   active: true,
+  chat_enabled: false,
+  daily_token_budget: null,
   expires_at: null,
   revoked_at: null,
   created_at: '2026-11-27T10:00:00Z',
@@ -95,6 +99,11 @@ beforeEach(() => {
   })
   mocks.revoke.mockResolvedValue({ ...publication, active: false })
   mocks.setDocuments.mockResolvedValue({ documents: [], document_count: 2 })
+  mocks.setChatSettings.mockResolvedValue({
+    ...publication,
+    chat_enabled: true,
+    daily_token_budget: 1234,
+  })
 })
 
 describe('PublicKbPanel', () => {
@@ -170,5 +179,118 @@ describe('PublicKbPanel', () => {
     await flushPromises()
     expect(mocks.revoke).toHaveBeenCalledWith('pub-1')
     expect(mocks.list).toHaveBeenCalledTimes(2)
+  })
+})
+
+describe('PublicKbPanel chat settings (batch 17)', () => {
+  it('列表展示聊天开关状态（默认未开启）', async () => {
+    const wrapper = mountPanel()
+    await flushPromises()
+    const status = wrapper.find('[data-testid="public-kb-chat-status-pub-1"]')
+    expect(status.exists()).toBe(true)
+    expect(status.text()).toBe('Off')
+  })
+
+  it('管理对话框保存聊天开关与日预算（走 chat-settings，不是白名单 replace）', async () => {
+    const wrapper = mountPanel()
+    await flushPromises()
+    await wrapper.find('[data-testid="public-kb-manage-pub-1"]').trigger('click')
+    await flushPromises()
+
+    const enabled = wrapper.find('[data-testid="public-kb-chat-enabled"]')
+    expect((enabled.element as HTMLInputElement).checked).toBe(false)
+    expect(
+      (wrapper.find('[data-testid="public-kb-chat-budget"]').element as HTMLInputElement).value,
+    ).toBe('')
+
+    await enabled.setValue(true)
+    await wrapper.find('[data-testid="public-kb-chat-budget"]').setValue('1234')
+    await wrapper.find('[data-testid="public-kb-chat-settings-save"]').trigger('click')
+    await flushPromises()
+
+    expect(mocks.setChatSettings).toHaveBeenCalledWith('pub-1', {
+      chat_enabled: true,
+      daily_token_budget: 1234,
+    })
+    expect(mocks.setDocuments).not.toHaveBeenCalled()
+    expect(mocks.list).toHaveBeenCalledTimes(2)
+    expect(wrapper.text()).toContain('Chat settings updated')
+  })
+
+  it('预算留空 = null（使用全局默认）', async () => {
+    const wrapper = mountPanel()
+    await flushPromises()
+    await wrapper.find('[data-testid="public-kb-manage-pub-1"]').trigger('click')
+    await flushPromises()
+    await wrapper.find('[data-testid="public-kb-chat-enabled"]').setValue(true)
+    await wrapper.find('[data-testid="public-kb-chat-settings-save"]').trigger('click')
+    await flushPromises()
+    expect(mocks.setChatSettings).toHaveBeenCalledWith('pub-1', {
+      chat_enabled: true,
+      daily_token_budget: null,
+    })
+  })
+
+  it('负数预算：前端拒绝且不调用 API', async () => {
+    const wrapper = mountPanel()
+    await flushPromises()
+    await wrapper.find('[data-testid="public-kb-manage-pub-1"]').trigger('click')
+    await flushPromises()
+    await wrapper.find('[data-testid="public-kb-chat-budget"]').setValue('-1')
+    await wrapper.find('[data-testid="public-kb-chat-settings-save"]').trigger('click')
+    await flushPromises()
+    expect(mocks.setChatSettings).not.toHaveBeenCalled()
+    expect(wrapper.find('[data-testid="public-kb-chat-settings-error"]').exists()).toBe(true)
+  })
+
+  it('已开启时列表显示 Enabled', async () => {
+    mocks.list.mockResolvedValue([{ ...publication, chat_enabled: true, daily_token_budget: 500 }])
+    const wrapper = mountPanel()
+    await flushPromises()
+    expect(wrapper.find('[data-testid="public-kb-chat-status-pub-1"]').text()).toBe('Enabled')
+  })
+})
+
+describe('PublicKbPanel chat settings edge cases (review hardening)', () => {
+  it('打开管理对话框时预填已保存的聊天开关与预算', async () => {
+    mocks.list.mockResolvedValue([
+      { ...publication, chat_enabled: true, daily_token_budget: 500 },
+    ])
+    const wrapper = mountPanel()
+    await flushPromises()
+    await wrapper.find('[data-testid="public-kb-manage-pub-1"]').trigger('click')
+    await flushPromises()
+
+    expect(
+      (wrapper.find('[data-testid="public-kb-chat-enabled"]').element as HTMLInputElement)
+        .checked,
+    ).toBe(true)
+    expect(
+      (wrapper.find('[data-testid="public-kb-chat-budget"]').element as HTMLInputElement).value,
+    ).toBe('500')
+  })
+
+  it('超过上限的预算：前端拒绝且不调用 API', async () => {
+    const wrapper = mountPanel()
+    await flushPromises()
+    await wrapper.find('[data-testid="public-kb-manage-pub-1"]').trigger('click')
+    await flushPromises()
+    await wrapper.find('[data-testid="public-kb-chat-budget"]').setValue('10000001')
+    await wrapper.find('[data-testid="public-kb-chat-settings-save"]').trigger('click')
+    await flushPromises()
+    expect(mocks.setChatSettings).not.toHaveBeenCalled()
+    expect(wrapper.find('[data-testid="public-kb-chat-settings-error"]').exists()).toBe(true)
+  })
+
+  it('保存失败：显示错误且不改写目标', async () => {
+    mocks.setChatSettings.mockRejectedValueOnce(new Error('network'))
+    const wrapper = mountPanel()
+    await flushPromises()
+    await wrapper.find('[data-testid="public-kb-manage-pub-1"]').trigger('click')
+    await flushPromises()
+    await wrapper.find('[data-testid="public-kb-chat-settings-save"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('[data-testid="public-kb-chat-settings-error"]').exists()).toBe(true)
+    expect(wrapper.text()).not.toContain('Chat settings updated')
   })
 })

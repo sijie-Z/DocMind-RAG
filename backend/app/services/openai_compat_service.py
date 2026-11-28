@@ -248,9 +248,17 @@ async def collect_completion(
     system_prompt: str | None,
     model: str,
     enable_masking: bool,
+    extra_mask_mapping: dict[str, str] | None = None,
 ) -> str:
-    """非流式：消费完整个 chunk 流，还原「引用型」PII 占位符后返回正文。"""
-    mask_mapping: dict[str, str] = {}
+    """非流式：消费完整个 chunk 流，还原「引用型」PII 占位符后返回正文。
+
+    ``extra_mask_mapping``：调用方在进入 pipeline 前自行掩码的额外文本
+    （如公开聊天的客户端 history）映射；默认 None 时行为与旧调用完全一致。
+    """
+    mask_mapping: dict[str, str] = dict(extra_mask_mapping or {})
+    # pipeline 会在流开始时 clear() 再写入 context/query 映射；用独立 sink
+    # 承接，避免把调用方的 extra（如公开聊天 history）映射清掉。
+    pipeline_mask_mapping: dict[str, str] = {}
     parts: list[str] = []
     stream = rag_service.chat_stream(
         query,
@@ -258,7 +266,7 @@ async def collect_completion(
         history,
         system_prompt_override=system_prompt,
         enable_masking=enable_masking,
-        mask_mapping_sink=mask_mapping,
+        mask_mapping_sink=pipeline_mask_mapping,
         model_override=model,
         # 显式传 client_override：pipeline 只有在 client_override 非空时才把
         # 上游异常转成 UserLLMRequestError；否则会把「系统处理异常」当正文
@@ -275,6 +283,7 @@ async def collect_completion(
         # 当前 cancel scope 立刻打断。
         with anyio.CancelScope(shield=True):
             await stream.aclose()
+    mask_mapping.update(pipeline_mask_mapping)
     answer = "".join(parts)
     return masking_service.unmask_text(answer, mask_mapping)
 
@@ -303,14 +312,18 @@ async def iter_completion_chunks(
     system_prompt: str | None,
     model: str,
     enable_masking: bool,
+    extra_mask_mapping: dict[str, str] | None = None,
 ) -> AsyncGenerator[str, None]:
     """流式：逐 chunk 产出已还原引用型占位符的正文。
 
     调用方断连/取消时在 ``finally`` 中显式 ``aclose`` 上游生成器，并用
     ``anyio.CancelScope(shield=True)`` 保证 close 的 await 不被已经取消的
     cancel scope 立刻打断，从而真正取消底层 LLM 流（不会双份生成）。
+    ``extra_mask_mapping`` 语义同 :func:`collect_completion`。
     """
-    mask_mapping: dict[str, str] = {}
+    mask_mapping: dict[str, str] = dict(extra_mask_mapping or {})
+    # 同 collect_completion：独立 sink 承接 pipeline 的 clear()+写入。
+    pipeline_mask_mapping: dict[str, str] = {}
     pending = ""
     stream = rag_service.chat_stream(
         query,
@@ -318,7 +331,7 @@ async def iter_completion_chunks(
         history,
         system_prompt_override=system_prompt,
         enable_masking=enable_masking,
-        mask_mapping_sink=mask_mapping,
+        mask_mapping_sink=pipeline_mask_mapping,
         model_override=model,
         # 同 collect_completion：非空 client_override 才会把上游异常转成
         # UserLLMRequestError，避免把错误文案当回答流给客户端。
@@ -329,6 +342,9 @@ async def iter_completion_chunks(
         async for chunk in stream:
             if not chunk:
                 continue
+            # pipeline 在首个 chunk 之前写入 sink；每帧合并一次（幂等、量小）。
+            if pipeline_mask_mapping:
+                mask_mapping.update(pipeline_mask_mapping)
             text = pending + chunk
             emit, pending = _split_partial_placeholder(text)
             if emit:
@@ -336,6 +352,8 @@ async def iter_completion_chunks(
     finally:
         with anyio.CancelScope(shield=True):
             await stream.aclose()
+    if pipeline_mask_mapping:
+        mask_mapping.update(pipeline_mask_mapping)
     if pending:
         yield masking_service.unmask_text(pending, mask_mapping)
 

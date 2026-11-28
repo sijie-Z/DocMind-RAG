@@ -2313,8 +2313,8 @@ export default {
   },
   publicKb: {
     title: '公开知识库',
-    subtitle: '把知识库中的显式白名单文档发布为 token 链接；匿名访客只能做只读检索。',
-    warning: '任何拿到链接的人都可以检索你选择公开的文档，请只选择可公开的制度/资料。',
+    subtitle: '把知识库中的显式白名单文档发布为 token 链接；匿名访客可只读检索，开启聊天后还可基于白名单文档提问。',
+    warning: '任何拿到链接的人都可以检索你选择公开的文档；开启聊天后还可基于这些文档提问。请只选择可公开的制度/资料。',
     empty: '还没有公开知识库',
     create: '发布知识库',
     loading: '加载中…',
@@ -2325,6 +2325,7 @@ export default {
       knowledgeBase: '知识库',
       status: '状态',
       documents: '文档数',
+      chat: '聊天',
       expires: '有效期',
       actions: '操作'
     },
@@ -2333,6 +2334,8 @@ export default {
     statusExpired: '已过期',
     statusDisabled: '已停用',
     statusInactive: '不可用',
+    chatEnabled: '已开启',
+    chatDisabled: '未开启',
     actions: {
       manage: '管理文档',
       rotate: '重新生成链接',
@@ -2376,6 +2379,18 @@ export default {
     notSearchable: '当前不可检索',
     candidatesTruncated: '候选文档过多，仅显示前 500 篇',
     operationFailed: '操作失败，请稍后重试',
+    chat: {
+      title: '匿名聊天',
+      toggle: '允许匿名聊天',
+      hint: '开启后，任何拿到链接的人都可以基于白名单文档提问；默认关闭。',
+      budget: '每日 token 预算',
+      budgetPlaceholder: '留空 = 全局默认',
+      budgetHint: '0 = 禁止聊天；留空使用平台默认额度。',
+      budgetInvalid: '预算必须是 0 到 10000000 之间的整数',
+      save: '保存聊天设置',
+      saving: '保存中…',
+      saved: '聊天设置已更新'
+    },
     public: {
       title: '公开知识库',
       searchPlaceholder: '搜索公开文档…',
@@ -2386,7 +2401,24 @@ export default {
       emptyHint: '换个关键词试试。',
       unavailable: '该公开链接不存在或已失效',
       loadFailed: '检索失败，请稍后重试',
-      poweredBy: '只读检索 · 不提供生成、聊天或上传'
+      chatTitle: '向公开文档提问',
+      chatHint: '只基于已公开的白名单文档回答；对话不会保存。',
+      chatEmpty: '输入问题，助手会基于公开文档回答。',
+      chatPlaceholder: '输入问题…',
+      chatSend: '提问',
+      chatSending: '生成中…',
+      chatStop: '停止',
+      chatStopped: '已停止生成',
+      chatYou: '你',
+      chatAssistant: '助手',
+      chatSources: '参考来源',
+      chatNoAnswer: '资料中没有找到相关内容。',
+      chatBudgetExceeded: '今日聊天额度已用完（{used}/{budget} tokens），{resetAt} 重置',
+      chatOrgQuota: '组织本月 token 配额已用尽（{used}/{quota}），{resetAt} 重置',
+      chatRateLimited: '提问过于频繁，请稍后再试',
+      chatUnavailable: '该链接当前不可聊天',
+      chatFailed: '生成回答失败，请稍后重试',
+      poweredBy: '由 DocMind 提供支持'
     }
   },
   reviews: {

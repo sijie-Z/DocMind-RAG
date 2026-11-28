@@ -3,9 +3,9 @@
 两张表构成「管理员显式白名单」的公开只读检索能力：
 
 - ``KbPublication``（``kb_publication``）：一次发布 = KB + 标题/描述 + token 摘要
-  + 启用/过期/撤销状态。token 只存 SHA-256 摘要，明文只在创建/轮换响应中
-  返回一次；失效状态由 ``enabled`` / ``expires_at`` / ``revoked_at`` 表达，
-  撤销只写 ``revoked_at``（行保留供审计），不提供删除路径。
+  + 启用/过期/撤销状态 + 聊天开关/日预算。token 只存 SHA-256 摘要，明文只在
+  创建/轮换响应中返回一次；失效状态由 ``enabled`` / ``expires_at`` /
+  ``revoked_at`` 表达，撤销只写 ``revoked_at``（行保留供审计），不提供删除路径。
 - ``DocumentPublication``（``document_publication``）：发布的白名单行。**只有**
   显式写入这里的文档才可能被匿名检索；``documents`` 表的 visibility/ACL 语义
   完全不变（公开面不读 ACL，也绝不走 ``viewer=None`` 的 fail-open 路径）。
@@ -21,7 +21,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, UniqueConstraint
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, UniqueConstraint, text
 from sqlalchemy.dialects import mysql
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.sql import func
@@ -61,6 +61,19 @@ class KbPublication(Base):
     )
     enabled: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=True, comment="启用开关（false 时公开面 404）"
+    )
+    chat_enabled: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+        # server_default 与迁移 050 同源：存量行回填 false，迁移库/create_all 库不漂移。
+        server_default=text("0"),
+        comment="发布级聊天开关（false 时公开聊天 404；默认关闭）",
+    )
+    daily_token_budget: Mapped[int | None] = mapped_column(
+        Integer,
+        nullable=True,
+        comment="每日 token 预算（NULL = 全局默认；0 = 禁止聊天）",
     )
     expires_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True),

@@ -129,6 +129,18 @@ class QuotaExceededError(AppError):
     message = "组织本月 token 配额已用尽"
 
 
+class PublicKbChatBudgetError(AppError):
+    """429 — 单个公开知识库发布的每日 token 预算用尽（批次十七）。
+
+    与组织月度配额分开：``detail`` 携带 ``used`` / ``budget`` / ``reset_at``
+    （次日 00:00 UTC）。前端必须显示「今日额度已用完」而不是可退避的限流。
+    """
+
+    status_code = 429
+    error_code = "PUBLIC_KB_CHAT_BUDGET_EXCEEDED"
+    message = "该公开知识库今日聊天额度已用尽"
+
+
 # ---- 5xx Server Errors ----
 
 
