@@ -18,7 +18,7 @@ import logging
 import os
 import sys
 import time
-from contextlib import asynccontextmanager
+from contextlib import AsyncExitStack, asynccontextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
@@ -400,6 +400,17 @@ def resolve_backend_port() -> int:
     return int(settings.PORT)
 
 
+def default_mcp_inbound_lifespan() -> Any:
+    """惰性解析入站 MCP Server 的 session-manager lifespan。
+
+    放在函数里避免 import 期构造 MCP SDK 对象；只有 ``MCP_SERVER_ENABLED=true``
+    时 lifespan 才会调用它。
+    """
+    from app.mcp_server.server import get_inbound_mcp_server
+
+    return get_inbound_mcp_server().session_lifespan()
+
+
 @dataclass(frozen=True)
 class LifespanDeps:
     """lifespan 启动/关闭所需的进程级依赖快照（便于测试注入与兼容壳转发）。"""
@@ -421,6 +432,9 @@ class LifespanDeps:
     # 测试与 app.main 兼容壳保持原行为；统一入口 python -m app 经
     # DEFAULT_LIFESPAN_DEPS 绑定 enforce_schema_guard）。
     schema_guard: Callable[[], Any] | None = None
+    # 批次十六：入站 MCP Server 的 Session Manager lifespan（默认解析真实单例；
+    # 测试可注入替身，验证接线而不启动 SDK 任务组）。
+    mcp_inbound_lifespan: Callable[[], Any] = default_mcp_inbound_lifespan
 
 
 DEFAULT_LIFESPAN_DEPS = LifespanDeps(
@@ -454,6 +468,11 @@ def build_lifespan(deps: LifespanDeps):
         with open(port_file, "w") as f:
             f.write(str(actual_port))
         logger.info(f"后端端口已同步到 .backend-port: {actual_port}")
+
+        # 批次十六：入站 MCP Server 的 Session Manager 必须由父应用 lifespan 进出
+        # （Starlette 不会自动运行 sub-app 的 lifespan）。AsyncExitStack 统一收尾，
+        # 进程退出时即使中途启动失败也不会留下悬空任务组。
+        mcp_exit_stack = AsyncExitStack()
 
         try:
             # issue #495：guarded 入口必须先校验/迁移，再让 init_db 考虑 create_all。
@@ -550,6 +569,18 @@ def build_lifespan(deps: LifespanDeps):
             except Exception as e:
                 logger.warning(f"MCP 初始化失败（不影响启动）: {e}")
 
+            # 批次十六：入站 MCP Server（只读知识库）。默认关闭；开启时在这里
+            # 进入 SDK Session Manager 的 run()，路由在 /api/v1/mcp/server。
+            # 启动失败只告警（路由会以 503 诚实失败），不阻塞主启动。
+            if settings.MCP_SERVER_ENABLED:
+                try:
+                    await mcp_exit_stack.enter_async_context(deps.mcp_inbound_lifespan())
+                    logger.info("MCP 入站 Server session manager 已启动")
+                except Exception as e:
+                    logger.warning(f"MCP 入站 Server 启动失败（不影响启动）: {e}")
+            else:
+                logger.info("MCP_SERVER_ENABLED=false，MCP 入站 Server 不启动")
+
             # Hooks（issue #474）：HOOKS_ENABLED=false（默认）时零读取、零行为变化；
             # true 时启动期加载并严格校验——非法配置 fail-closed 抛错，进程退出
             # （hook 会改写/阻断执行，带病运行比不启动更危险）。
@@ -633,14 +664,27 @@ def build_lifespan(deps: LifespanDeps):
 
         except Exception as e:
             logger.error(f"服务初始化失败: {str(e)}")
+            try:
+                await mcp_exit_stack.aclose()
+            except Exception as close_error:  # noqa: BLE001 — 收尾失败不掩盖原始启动错误
+                logger.warning(f"MCP 入站 Server 启动失败后的收尾异常: {close_error}")
             raise
 
-        yield
+        try:
+            yield
+        finally:
+            # 先摘入站 MCP（Session Manager 任务组 + 连接）。放在 finally 里，
+            # 即使 lifespan 被取消/异常打断也不会留下悬空任务组。
+            try:
+                await mcp_exit_stack.aclose()
+                logger.info("MCP 入站 Server session manager 已关闭")
+            except Exception as e:
+                logger.warning(f"MCP 入站 Server 关闭失败: {e}")
 
         # 关闭服务
         logger.info("DocMind 文档问答与合同核验平台 关闭中...")
 
-        # 先摘 MCP：注销动态工具 + 关闭常驻子进程/会话（内部自兜异常）
+        # 再关出站 MCP client：注销动态工具 + 关闭常驻子进程/会话（内部自兜异常）
         try:
             from app.agent.mcp.manager import mcp_manager
 
