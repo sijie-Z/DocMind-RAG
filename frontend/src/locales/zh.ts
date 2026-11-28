@@ -2391,6 +2391,20 @@ export default {
       saving: '保存中…',
       saved: '聊天设置已更新'
     },
+    embed: {
+      title: '嵌入网站（iframe）',
+      hint: '将公开页嵌入你的官网或帮助中心。生成代码需要公开链接中的 token（创建或重新生成链接时可见）。',
+      linkLabel: '公开链接或 token',
+      linkPlaceholder: '粘贴 https://…/public/kb/<token> 或直接粘贴 token',
+      invalidLink: '链接无效：请粘贴 /public/kb/<token> 形式的公开链接，或直接粘贴 token',
+      snippetLabel: 'iframe 代码',
+      frameTitle: 'DocMind 公开知识库',
+      warning:
+        '公开链接是 bearer 凭证：拿到链接或嵌入代码的人都能访问公开页。嵌入后 token 会出现在宿主页面源码中，请只嵌入可公开的文档。',
+      crossOrigin:
+        '该链接指向其他站点（{origin}）：只有确认该站点可信时才嵌入，token 会发送到该站点。',
+      copyFailed: '复制失败，请手动选择 iframe 代码复制'
+    },
     public: {
       title: '公开知识库',
       searchPlaceholder: '搜索公开文档…',

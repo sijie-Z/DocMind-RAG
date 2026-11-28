@@ -86,7 +86,7 @@
                 v-if="item.active"
                 class="public-kb-btn"
                 :data-testid="`public-kb-rotate-${item.id}`"
-                @click="rotateTarget = item"
+                @click="openRotate(item)"
               >
                 {{ t('publicKb.actions.rotate') }}
               </button>
@@ -321,6 +321,14 @@
               {{ chatSettingsSaving ? t('publicKb.chat.saving') : t('publicKb.chat.save') }}
             </button>
           </div>
+
+          <!-- 批次十八：仅在发布已开启匿名聊天且发布预算非 0 时提供 iframe
+               嵌入代码（全局聊天开关是否开启不在列表接口投影内，见报告残余
+               风险）。token 不进列表接口，需粘贴创建/轮换时拿到的公开链接。 -->
+          <PublicKbEmbedCode
+            v-if="manageTarget?.chat_enabled && manageTarget?.daily_token_budget !== 0"
+            :title="manageTarget?.title"
+          />
         </template>
         <div class="public-kb-dialog-actions">
           <button class="public-kb-btn" @click="closeManage">{{ t('publicKb.cancel') }}</button>
@@ -346,7 +354,14 @@
       <div class="public-kb-dialog" role="dialog" aria-modal="true">
         <div class="public-kb-dialog-header">
           <span>{{ t('publicKb.rotateTitle') }}</span>
-          <button class="public-kb-close" @click="closeRotate">×</button>
+          <button
+            class="public-kb-close"
+            data-testid="public-kb-rotate-close"
+            :disabled="rotateBusy"
+            @click="closeRotate"
+          >
+            ×
+          </button>
         </div>
         <template v-if="rotatedLink">
           <p class="public-kb-warning">{{ t('publicKb.onceNotice') }}</p>
@@ -355,6 +370,11 @@
             data-testid="public-kb-rotated-link"
             :value="rotatedLink"
             readonly
+          />
+          <PublicKbEmbedCode
+            v-if="rotateTarget.chat_enabled && rotateTarget.daily_token_budget !== 0"
+            :link="rotatedLink"
+            :title="rotateTarget.title"
           />
           <div class="public-kb-dialog-actions">
             <button class="public-kb-btn primary" @click="copyLink(rotatedLink)">
@@ -367,7 +387,9 @@
           <p class="public-kb-hint">{{ t('publicKb.rotateConfirm') }}</p>
           <p v-if="rotateError" class="public-kb-error" role="alert">{{ rotateError }}</p>
           <div class="public-kb-dialog-actions">
-            <button class="public-kb-btn" @click="closeRotate">{{ t('publicKb.cancel') }}</button>
+            <button class="public-kb-btn" :disabled="rotateBusy" @click="closeRotate">
+              {{ t('publicKb.cancel') }}
+            </button>
             <button
               class="public-kb-btn primary"
               data-testid="public-kb-rotate-confirm"
@@ -420,6 +442,7 @@ import {
   type KbCandidateDocument,
   type KbPublication,
 } from '@/api/publicKb'
+import PublicKbEmbedCode from './PublicKbEmbedCode.vue'
 
 const { t } = useI18n()
 
@@ -453,6 +476,13 @@ const manageChatBudget = ref<string | number>('')
 const chatSettingsSaving = ref(false)
 const chatSettingsError = ref('')
 const MAX_CHAT_DAILY_BUDGET = 10_000_000
+// 代际计数：管理对话框/轮换对话框关闭或切换目标后，旧请求的迟到响应
+// 不得写入新目标的列表、token 或嵌入片段。
+let manageGeneration = 0
+let rotateGeneration = 0
+// 保存请求序号：旧请求的 finally 不得清掉新请求的 busy 标志。
+let chatSaveToken = 0
+let manageSaveToken = 0
 
 const rotateTarget = ref<KbPublication | null>(null)
 const rotateBusy = ref(false)
@@ -589,6 +619,7 @@ async function submitCreate() {
 }
 
 async function openManage(item: KbPublication) {
+  const generation = ++manageGeneration
   manageTarget.value = item
   manageLoading.value = true
   manageError.value = ''
@@ -600,13 +631,16 @@ async function openManage(item: KbPublication) {
     item.daily_token_budget === null || item.daily_token_budget === undefined
       ? ''
       : String(item.daily_token_budget)
-  chatSettingsSaving.value = false
+  // 保存请求可能仍在飞行（关闭后重开同一发布）：保留 busy 状态，
+  // 避免并发提交让旧请求最后落库。
   chatSettingsError.value = ''
   try {
     const [published, candidates] = await Promise.all([
       publicKbApi.documents(item.id),
       publicKbApi.candidates(item.knowledge_base_id),
     ])
+    // 慢请求 + 关闭/切换目标：不得把 A 的白名单写进 B 的对话框。
+    if (generation !== manageGeneration || manageTarget.value?.id !== item.id) return
     const rows = new Map<string, { id: string; title: string; searchable: boolean }>()
     for (const doc of candidates.documents) {
       rows.set(doc.id, { id: doc.id, title: doc.title, searchable: true })
@@ -618,24 +652,30 @@ async function openManage(item: KbPublication) {
     manageSelected.value = published.documents.map((doc) => doc.id)
     manageTruncated.value = !!candidates.truncated
   } catch {
-    manageError.value = t('publicKb.loadFailed')
+    if (generation === manageGeneration && manageTarget.value?.id === item.id) {
+      manageError.value = t('publicKb.loadFailed')
+    }
   } finally {
-    manageLoading.value = false
+    if (generation === manageGeneration && manageTarget.value?.id === item.id) {
+      manageLoading.value = false
+    }
   }
 }
 
 function closeManage() {
+  manageGeneration += 1
   manageTarget.value = null
   manageRows.value = []
   manageSelected.value = []
   manageChatEnabled.value = false
   manageChatBudget.value = ''
-  chatSettingsSaving.value = false
   chatSettingsError.value = ''
 }
 
 async function saveChatSettings() {
   if (!manageTarget.value || chatSettingsSaving.value || manageSaving.value) return
+  const generation = manageGeneration
+  const requestToken = ++chatSaveToken
   const targetId = manageTarget.value.id
   const raw =
     typeof manageChatBudget.value === 'number'
@@ -660,8 +700,10 @@ async function saveChatSettings() {
       chat_enabled: manageChatEnabled.value,
       daily_token_budget: budget,
     })
-    // 慢请求 + 关闭/重开对话框时，不得把新目标（另一个发布）改写成旧响应。
-    if (manageTarget.value?.id !== targetId) return
+    // 服务端已生效：无论对话框是否仍指向原目标，都刷新列表真值。
+    await refreshAll()
+    // 慢请求 + 关闭/重开对话框时，不得改写新目标（含同一发布的新会话）的字段。
+    if (generation !== manageGeneration || manageTarget.value?.id !== targetId) return
     manageTarget.value = updated
     manageChatEnabled.value = !!updated.chat_enabled
     manageChatBudget.value =
@@ -669,54 +711,81 @@ async function saveChatSettings() {
         ? ''
         : String(updated.daily_token_budget)
     notice.value = t('publicKb.chat.saved')
-    await refreshAll()
   } catch {
-    if (manageTarget.value?.id === targetId) {
+    if (generation === manageGeneration && manageTarget.value?.id === targetId) {
       chatSettingsError.value = t('publicKb.operationFailed')
     }
   } finally {
-    chatSettingsSaving.value = false
+    // 旧请求不得清掉新请求的 busy 标志。
+    if (requestToken === chatSaveToken) chatSettingsSaving.value = false
   }
 }
 
 async function saveManage() {
   if (!manageTarget.value || manageSaving.value || chatSettingsSaving.value) return
+  const generation = manageGeneration
+  const requestToken = ++manageSaveToken
   const targetId = manageTarget.value.id
   manageSaving.value = true
   manageError.value = ''
   try {
     await publicKbApi.setDocuments(targetId, 'replace', manageSelected.value)
-    if (manageTarget.value?.id !== targetId) return
+    await refreshAll()
+    if (generation !== manageGeneration || manageTarget.value?.id !== targetId) return
     notice.value = t('publicKb.saved')
     closeManage()
-    await refreshAll()
   } catch {
-    if (manageTarget.value?.id === targetId) {
+    if (generation === manageGeneration && manageTarget.value?.id === targetId) {
       manageError.value = t('publicKb.operationFailed')
     }
   } finally {
-    manageSaving.value = false
+    if (requestToken === manageSaveToken) manageSaving.value = false
   }
 }
 
+function openRotate(item: KbPublication) {
+  // 轮换请求在飞行中时不得切换目标：旧链接已被服务端作废，新 token
+  // 只返回一次，切走会永久丢失它。
+  if (rotateBusy.value) return
+  rotateGeneration += 1
+  rotateTarget.value = item
+  rotatedLink.value = ''
+  rotateError.value = ''
+  copyState.value = 'idle'
+}
+
 function closeRotate() {
+  // 轮换进行中关闭会丢失一次性返回的新 token（旧链接已失效），禁止。
+  if (rotateBusy.value) return
+  rotateGeneration += 1
   rotateTarget.value = null
   rotatedLink.value = ''
   rotateError.value = ''
 }
 
 async function confirmRotate() {
-  if (!rotateTarget.value) return
+  const target = rotateTarget.value
+  if (!target || rotateBusy.value) return
+  const generation = rotateGeneration
+  const targetId = target.id
   rotateBusy.value = true
   rotateError.value = ''
   try {
-    const rotated = await publicKbApi.rotate(rotateTarget.value.id, null)
+    const rotated = await publicKbApi.rotate(targetId, null)
+    if (generation !== rotateGeneration || rotateTarget.value?.id !== targetId) return
+    // 以服务端响应为准：聊天开关/预算/标题可能已变化，嵌入片段必须用新值。
+    rotateTarget.value = rotated
     rotatedLink.value = absoluteLink(rotated.url)
+    copyState.value = 'idle'
+    // token 已展示，不再需要阻止关闭；列表刷新不应让 Done/Cancel 暂时失效。
+    rotateBusy.value = false
     await refreshAll()
   } catch {
-    rotateError.value = t('publicKb.operationFailed')
+    if (generation === rotateGeneration && rotateTarget.value?.id === targetId) {
+      rotateError.value = t('publicKb.operationFailed')
+    }
   } finally {
-    rotateBusy.value = false
+    if (generation === rotateGeneration) rotateBusy.value = false
   }
 }
 

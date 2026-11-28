@@ -2383,6 +2383,21 @@ export default {
       saving: 'Saving…',
       saved: 'Chat settings updated'
     },
+    embed: {
+      title: 'Embed on your site (iframe)',
+      hint: 'Embed the public page in your website or help center. Generating the code needs the token from the public link (shown when the link is created or rotated).',
+      linkLabel: 'Public link or token',
+      linkPlaceholder: 'Paste https://…/public/kb/<token> or the token itself',
+      invalidLink:
+        'Invalid link: paste a public link in the form /public/kb/<token>, or the token itself',
+      snippetLabel: 'iframe code',
+      frameTitle: 'DocMind public knowledge base',
+      warning:
+        'The public link is a bearer credential: anyone with the link or embed code can open the public page. Embedding exposes the token in the host page source; only embed documents that are safe to publish.',
+      crossOrigin:
+        'This link points to another site ({origin}). Only embed it if you trust that site; the token will be sent there.',
+      copyFailed: 'Copy failed; select the iframe code and copy it manually'
+    },
     public: {
       title: 'Public knowledge base',
       searchPlaceholder: 'Search public documents…',

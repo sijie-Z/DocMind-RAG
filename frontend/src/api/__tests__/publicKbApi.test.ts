@@ -295,3 +295,19 @@ describe('publicKb anonymous chat (batch 17)', () => {
     ).rejects.toMatchObject({ code: 'STREAM_INCOMPLETE' })
   })
 })
+
+describe('publicKb anonymous API token hygiene (batch 18 review M2)', () => {
+  it('公开 get/search 必带 X-Silent-Error，防止 request.ts 错误日志泄露含 token URL', async () => {
+    await publicKbPublicApi.get('tok-secret')
+    expect(getMock).toHaveBeenLastCalledWith('/public/kb/tok-secret', {
+      headers: { 'X-Silent-Error': '1' },
+    })
+
+    await publicKbPublicApi.search('tok-secret', 'query', 5)
+    expect(postMock).toHaveBeenLastCalledWith(
+      '/public/kb/tok-secret/search',
+      { query: 'query', top_k: 5 },
+      { headers: { 'X-Silent-Error': '1' } },
+    )
+  })
+})

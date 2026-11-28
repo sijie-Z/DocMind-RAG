@@ -197,6 +197,27 @@ GRAFANA_PASSWORD='<强口令>' ALERT_WEBHOOK_TOKEN='<URL 安全随机串>' \
 默认禁用（ENABLE_DEMO_ACCOUNT=false）。开启后 guest 账号仅在**首次创建**时
 使用随机生成（或 DEMO_PASSWORD 环境变量指定）的初始密码，不再每次启动重置。
 
+## 公开知识库嵌入（iframe）安全边界
+
+- 仅 `/public/kb/` 允许被任意来源 iframe 嵌入：该路径用 CSP
+  `frame-ancestors *` 放行，并且**不再发送** `X-Frame-Options`；其余
+  SPA（含管理/登录）路由仍发送 `X-Frame-Options: SAMEORIGIN`。公开入口
+  文档内还会禁止客户端路由跳转到管理/登录界面（CSP 不随 `router.push`
+  重新协商），避免这些界面在可嵌入文档里被框住。
+- 公开链接是 bearer 凭证：任何拿到链接或嵌入代码的人都能访问公开页；
+  嵌入后 token 会出现在宿主页面源码中。只发布可公开的文档；链接泄露时
+  在管理面板「重新生成链接」或「撤销」。
+- 若前置 Cloudflare Access、nginx `auth_basic` 或类似访问闸，必须对
+  `/public/kb/*` 放行匿名请求（例如 Access 策略排除该路径、该 location
+  加 `auth_basic off;`），否则匿名 iframe 会拿到登录/401 而不是公开页。
+- 如需收紧来源，把 `frontend/nginx.conf` 与
+  `deploy/demo/security_headers_embed.conf` 中的 `frame-ancestors *`
+  改为 `frame-ancestors https://your-site.example`，再重新构建前端镜像。
+- nginx 的 `add_header` 不跨层继承合并：任何自行声明 `add_header` 的
+  location 必须重复安全头。`frontend/src/__tests__/nginxPublicKbEmbed.test.ts`
+  会对「公开路径漏放行 / 管理路径误放行 / 安全头丢失 / server 级兜底被删」
+  做静态断言。
+
 ## Production Checklist
 
 - [ ] Run database migrations before rolling out app (compose `migrate` service / k8s `09-migrate-job.yaml`)

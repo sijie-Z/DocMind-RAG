@@ -20,6 +20,7 @@ FROM nginx:1.25-alpine
 COPY --from=builder /build/dist /usr/share/nginx/html
 COPY deploy/demo/nginx.demo.conf /etc/nginx/conf.d/default.conf
 COPY deploy/demo/security_headers.conf /etc/nginx/snippets/security_headers.conf
+COPY deploy/demo/security_headers_embed.conf /etc/nginx/snippets/security_headers_embed.conf
 
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
     CMD wget -qO- http://localhost:80/healthz || exit 1

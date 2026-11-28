@@ -294,3 +294,351 @@ describe('PublicKbPanel chat settings edge cases (review hardening)', () => {
     expect(wrapper.text()).not.toContain('Chat settings updated')
   })
 })
+
+describe('PublicKbPanel embed snippet (batch 18)', () => {
+  function enableChatPublication() {
+    mocks.list.mockResolvedValue([{ ...publication, chat_enabled: true }])
+  }
+
+  async function openManage() {
+    const wrapper = mountPanel()
+    await flushPromises()
+    await wrapper.find('[data-testid="public-kb-manage-pub-1"]').trigger('click')
+    await flushPromises()
+    return wrapper
+  }
+
+  it('chat_enabled=false 时管理对话框不展示嵌入代码', async () => {
+    const wrapper = await openManage()
+    expect(wrapper.find('[data-testid="public-kb-embed"]').exists()).toBe(false)
+  })
+
+  it('chat_enabled=true 时展示 bearer 警告，粘贴链接生成并复制片段', async () => {
+    enableChatPublication()
+    const writeText = vi.fn().mockResolvedValue(undefined)
+    Object.defineProperty(navigator, 'clipboard', {
+      value: { writeText },
+      configurable: true,
+    })
+    const wrapper = await openManage()
+
+    expect(wrapper.find('[data-testid="public-kb-embed"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="public-kb-embed-warning"]').text()).toContain(
+      'bearer credential',
+    )
+
+    await wrapper
+      .find('[data-testid="public-kb-embed-link"]')
+      .setValue('https://docs.example.org/public/kb/tok-9')
+    const snippet = (
+      wrapper.find('[data-testid="public-kb-embed-snippet"]').element as HTMLTextAreaElement
+    ).value
+    expect(snippet).toContain('https://docs.example.org/public/kb/tok-9?embed=1')
+    expect(snippet).toContain('width="100%"')
+    expect(snippet).toContain('height="600"')
+    expect(snippet).toContain('frameborder="0"')
+    expect(snippet).toContain('loading="lazy"')
+    expect(snippet).toContain('title="Public policy KB"')
+    // 粘贴的链接指向其他源时必须提示 token 会发往该站点。
+    expect(wrapper.find('[data-testid="public-kb-embed-cross-origin"]').text()).toContain(
+      'https://docs.example.org',
+    )
+
+    await wrapper.find('[data-testid="public-kb-embed-copy"]').trigger('click')
+    await flushPromises()
+    expect(writeText).toHaveBeenCalledWith(snippet)
+    expect(wrapper.find('[data-testid="public-kb-embed-copy"]').text()).toBe('Copied')
+  })
+
+  it('非公开路径/非法 token 显示提示且不生成片段', async () => {
+    enableChatPublication()
+    const wrapper = await openManage()
+
+    await wrapper
+      .find('[data-testid="public-kb-embed-link"]')
+      .setValue('https://docs.example.org/login')
+    expect(wrapper.find('[data-testid="public-kb-embed-invalid"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="public-kb-embed-snippet"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="public-kb-embed-copy"]').exists()).toBe(false)
+  })
+
+  it('保存聊天开关后嵌入区立即出现（无需重开对话框）', async () => {
+    const wrapper = await openManage()
+    expect(wrapper.find('[data-testid="public-kb-embed"]').exists()).toBe(false)
+
+    await wrapper.find('[data-testid="public-kb-chat-enabled"]').setValue(true)
+    // 未保存前仍以已保存状态为准：不得提前显示嵌入代码。
+    expect(wrapper.find('[data-testid="public-kb-embed"]').exists()).toBe(false)
+    await wrapper.find('[data-testid="public-kb-chat-settings-save"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('[data-testid="public-kb-embed"]').exists()).toBe(true)
+  })
+
+  it('轮换链接后为已开启聊天的发布直接生成片段（固定链接模式）', async () => {
+    enableChatPublication()
+    mocks.rotate.mockResolvedValue({
+      ...publication,
+      chat_enabled: true,
+      token: 'token-new',
+      url: '/public/kb/token-new',
+    })
+    const wrapper = mountPanel()
+    await flushPromises()
+    await wrapper.find('[data-testid="public-kb-rotate-pub-1"]').trigger('click')
+    await flushPromises()
+    await wrapper.find('[data-testid="public-kb-rotate-confirm"]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('[data-testid="public-kb-embed-link"]').exists()).toBe(false)
+    const snippet = (
+      wrapper.find('[data-testid="public-kb-embed-snippet"]').element as HTMLTextAreaElement
+    ).value
+    expect(snippet).toContain(`${window.location.origin}/public/kb/token-new?embed=1`)
+  })
+})
+
+describe('PublicKbPanel embed review hardening (batch 18)', () => {
+  function deferred<T>() {
+    let resolve!: (value: T) => void
+    let reject!: (reason?: unknown) => void
+    const promise = new Promise<T>((res, rej) => {
+      resolve = res
+      reject = rej
+    })
+    return { promise, resolve, reject }
+  }
+
+  async function openManage() {
+    const wrapper = mountPanel()
+    await flushPromises()
+    await wrapper.find('[data-testid="public-kb-manage-pub-1"]').trigger('click')
+    await flushPromises()
+    return wrapper
+  }
+
+  it('chat_enabled=true 但每日预算为 0（聊天实际不可用）时不提供嵌入片段', async () => {
+    mocks.list.mockResolvedValue([
+      { ...publication, chat_enabled: true, daily_token_budget: 0 },
+    ])
+    const wrapper = await openManage()
+    expect(wrapper.find('[data-testid="public-kb-embed"]').exists()).toBe(false)
+  })
+
+  it('复制失败时显示 iframe 代码专用提示', async () => {
+    mocks.list.mockResolvedValue([{ ...publication, chat_enabled: true }])
+    Object.defineProperty(navigator, 'clipboard', {
+      value: { writeText: vi.fn().mockRejectedValue(new Error('denied')) },
+      configurable: true,
+    })
+    const wrapper = await openManage()
+    await wrapper
+      .find('[data-testid="public-kb-embed-link"]')
+      .setValue('https://docs.example.org/public/kb/tok-9')
+    await wrapper.find('[data-testid="public-kb-embed-copy"]').trigger('click')
+    await flushPromises()
+
+    const error = wrapper.find('[data-testid="public-kb-embed-copy-error"]')
+    expect(error.exists()).toBe(true)
+    expect(error.text()).toContain('iframe code')
+  })
+
+  it('轮换进行中禁止关闭对话框，避免丢失一次性 token', async () => {
+    const pending = deferred<Record<string, unknown>>()
+    mocks.rotate.mockReturnValueOnce(pending.promise)
+    const wrapper = mountPanel()
+    await flushPromises()
+    await wrapper.find('[data-testid="public-kb-rotate-pub-1"]').trigger('click')
+    await flushPromises()
+    await wrapper.find('[data-testid="public-kb-rotate-confirm"]').trigger('click')
+    await flushPromises()
+
+    const close = wrapper.find('[data-testid="public-kb-rotate-close"]')
+    expect((close.element as HTMLButtonElement).disabled).toBe(true)
+    await close.trigger('click')
+    await flushPromises()
+    expect(wrapper.find('[data-testid="public-kb-rotate-dialog"]').exists()).toBe(true)
+
+    pending.resolve({ ...publication, token: 'token-new', url: '/public/kb/token-new' })
+    await flushPromises()
+    const link = (
+      wrapper.find('[data-testid="public-kb-rotated-link"]').element as HTMLInputElement
+    ).value
+    expect(link).toContain('/public/kb/token-new')
+  })
+
+  it('轮换响应为准：列表旧快照未开启聊天，响应开启后立即显示嵌入片段', async () => {
+    mocks.rotate.mockResolvedValue({
+      ...publication,
+      chat_enabled: true,
+      daily_token_budget: null,
+      token: 'token-new',
+      url: '/public/kb/token-new',
+    })
+    const wrapper = mountPanel()
+    await flushPromises()
+    await wrapper.find('[data-testid="public-kb-rotate-pub-1"]').trigger('click')
+    await flushPromises()
+    await wrapper.find('[data-testid="public-kb-rotate-confirm"]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('[data-testid="public-kb-embed"]').exists()).toBe(true)
+    const snippet = (
+      wrapper.find('[data-testid="public-kb-embed-snippet"]').element as HTMLTextAreaElement
+    ).value
+    expect(snippet).toContain('/public/kb/token-new?embed=1')
+  })
+
+  it('慢响应不得把 A 的白名单写进 B 的对话框', async () => {
+    mocks.list.mockResolvedValue([
+      { ...publication, id: 'pub-1', title: 'A', knowledge_base_id: 'kb-1' },
+      { ...publication, id: 'pub-2', title: 'B', knowledge_base_id: 'kb-2' },
+    ])
+    const pendingA = deferred<Record<string, unknown>>()
+    mocks.documents.mockImplementation((id: string) =>
+      id === 'pub-1'
+        ? pendingA.promise
+        : Promise.resolve({
+            documents: [{ id: 'doc-b', title: 'Policy B', status: 'indexed', searchable: true }],
+            document_count: 1,
+          }),
+    )
+    mocks.candidates.mockImplementation((kb: string) =>
+      Promise.resolve({
+        documents:
+          kb === 'kb-2'
+            ? [{ id: 'doc-b', title: 'Policy B' }]
+            : [{ id: 'doc-a', title: 'Policy A' }],
+        truncated: false,
+      }),
+    )
+
+    const wrapper = mountPanel()
+    await flushPromises()
+    await wrapper.find('[data-testid="public-kb-manage-pub-1"]').trigger('click')
+    await flushPromises()
+    await wrapper.find('[data-testid="public-kb-manage-close"]').trigger('click')
+    await flushPromises()
+    await wrapper.find('[data-testid="public-kb-manage-pub-2"]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('[data-testid="public-kb-manage-list"]').text()).toContain('Policy B')
+    pendingA.resolve({
+      documents: [{ id: 'doc-a', title: 'Policy A', status: 'indexed', searchable: true }],
+      document_count: 1,
+    })
+    await flushPromises()
+
+    const listText = wrapper.find('[data-testid="public-kb-manage-list"]').text()
+    expect(listText).toContain('Policy B')
+    expect(listText).not.toContain('Policy A')
+  })
+})
+
+describe('PublicKbPanel embed gating edges (batch 18)', () => {
+  it('轮换后 chat_enabled=false 不显示嵌入片段', async () => {
+    mocks.rotate.mockResolvedValue({
+      ...publication,
+      chat_enabled: false,
+      token: 'token-new',
+      url: '/public/kb/token-new',
+    })
+    const wrapper = mountPanel()
+    await flushPromises()
+    await wrapper.find('[data-testid="public-kb-rotate-pub-1"]').trigger('click')
+    await flushPromises()
+    await wrapper.find('[data-testid="public-kb-rotate-confirm"]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('[data-testid="public-kb-rotated-link"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="public-kb-embed"]').exists()).toBe(false)
+  })
+
+  it('修改链接后复制状态复位（不得把「已复制」显示给未复制的片段）', async () => {
+    mocks.list.mockResolvedValue([{ ...publication, chat_enabled: true }])
+    Object.defineProperty(navigator, 'clipboard', {
+      value: { writeText: vi.fn().mockResolvedValue(undefined) },
+      configurable: true,
+    })
+    const wrapper = mountPanel()
+    await flushPromises()
+    await wrapper.find('[data-testid="public-kb-manage-pub-1"]').trigger('click')
+    await flushPromises()
+
+    const linkInput = wrapper.find('[data-testid="public-kb-embed-link"]')
+    await linkInput.setValue('https://docs.example.org/public/kb/tok-1')
+    await wrapper.find('[data-testid="public-kb-embed-copy"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('[data-testid="public-kb-embed-copy"]').text()).toBe('Copied')
+
+    await linkInput.setValue('https://docs.example.org/public/kb/tok-2')
+    await flushPromises()
+    expect(wrapper.find('[data-testid="public-kb-embed-copy"]').text()).toBe('Copy')
+  })
+})
+
+describe('PublicKbPanel save/rotate race hardening (batch 18)', () => {
+  function deferred<T>() {
+    let resolve!: (value: T) => void
+    let reject!: (reason?: unknown) => void
+    const promise = new Promise<T>((res, rej) => {
+      resolve = res
+      reject = rej
+    })
+    return { promise, resolve, reject }
+  }
+
+  async function openManage() {
+    const wrapper = mountPanel()
+    await flushPromises()
+    await wrapper.find('[data-testid="public-kb-manage-pub-1"]').trigger('click')
+    await flushPromises()
+    return wrapper
+  }
+
+  it('聊天设置保存中关闭并重开同一发布：迟到响应不得改写或关闭新对话框', async () => {
+    const pending = deferred<Record<string, unknown>>()
+    mocks.setChatSettings.mockReturnValueOnce(pending.promise)
+    const wrapper = await openManage()
+
+    await wrapper.find('[data-testid="public-kb-chat-enabled"]').setValue(true)
+    await wrapper.find('[data-testid="public-kb-chat-settings-save"]').trigger('click')
+    await flushPromises()
+
+    await wrapper.find('[data-testid="public-kb-manage-close"]').trigger('click')
+    await flushPromises()
+    await wrapper.find('[data-testid="public-kb-manage-pub-1"]').trigger('click')
+    await flushPromises()
+
+    // 保存仍在飞行：关闭/重开不得把 busy 复位后允许并发提交。
+    const saveButton = wrapper.find('[data-testid="public-kb-chat-settings-save"]')
+    expect((saveButton.element as HTMLButtonElement).disabled).toBe(true)
+
+    pending.resolve({ ...publication, chat_enabled: true })
+    await flushPromises()
+
+    // 新对话框保持打开；旧响应不得改写其字段（重开时服务端快照仍为关闭）。
+    expect(wrapper.find('[data-testid="public-kb-manage-dialog"]').exists()).toBe(true)
+    expect(
+      (wrapper.find('[data-testid="public-kb-chat-enabled"]').element as HTMLInputElement).checked,
+    ).toBe(false)
+  })
+
+  it('轮换结果预算为 0 时不显示嵌入片段（旋转门控）', async () => {
+    mocks.rotate.mockResolvedValue({
+      ...publication,
+      chat_enabled: true,
+      daily_token_budget: 0,
+      token: 'token-new',
+      url: '/public/kb/token-new',
+    })
+    const wrapper = mountPanel()
+    await flushPromises()
+    await wrapper.find('[data-testid="public-kb-rotate-pub-1"]').trigger('click')
+    await flushPromises()
+    await wrapper.find('[data-testid="public-kb-rotate-confirm"]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('[data-testid="public-kb-rotated-link"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="public-kb-embed"]').exists()).toBe(false)
+  })
+})

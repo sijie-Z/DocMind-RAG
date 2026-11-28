@@ -6,6 +6,7 @@ import { resolve, dirname } from 'path'
 import { readFileSync, existsSync } from 'fs'
 import { fileURLToPath } from 'url'
 import type { Plugin } from 'vite'
+import { PUBLIC_KB_NAVIGATE_DENYLIST } from './src/config/pwa'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
@@ -75,6 +76,9 @@ export default defineConfig({
       },
       workbox: {
         globPatterns: ['**/*.{js,css,html,ico,png,svg,woff2}'],
+        // 公开知识库必须走网络（nginx 单独下发 embed 头）；预缓存 index.html
+        // 的 SAMEORIGIN 响应会让 iframe 被浏览器拒绝。
+        navigateFallbackDenylist: PUBLIC_KB_NAVIGATE_DENYLIST,
         runtimeCaching: [
           {
             urlPattern: /^https:\/\/fonts\.googleapis\.com\/.*/i,
