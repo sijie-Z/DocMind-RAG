@@ -37,6 +37,7 @@
             <th>{{ t('publicKb.columns.knowledgeBase') }}</th>
             <th>{{ t('publicKb.columns.status') }}</th>
             <th>{{ t('publicKb.columns.documents') }}</th>
+            <th>{{ t('publicKb.columns.chat') }}</th>
             <th>{{ t('publicKb.columns.expires') }}</th>
             <th>{{ t('publicKb.columns.actions') }}</th>
           </tr>
@@ -55,6 +56,17 @@
               </span>
             </td>
             <td>{{ item.document_count }}</td>
+            <td>
+              <span
+                class="public-kb-status"
+                :class="item.chat_enabled ? 'is-active' : 'is-inactive'"
+                :data-testid="`public-kb-chat-status-${item.id}`"
+              >
+                {{
+                  item.chat_enabled ? t('publicKb.chatEnabled') : t('publicKb.chatDisabled')
+                }}
+              </span>
+            </td>
             <td>
               {{
                 item.expires_at
@@ -263,13 +275,59 @@
             </p>
             <p v-if="manageTruncated" class="public-kb-hint">{{ t('publicKb.candidatesTruncated') }}</p>
           </div>
+
+          <!-- 批次十七：发布级聊天开关 + 日预算 -->
+          <div class="public-kb-chat-settings" data-testid="public-kb-chat-settings">
+            <p class="public-kb-label">{{ t('publicKb.chat.title') }}</p>
+            <label class="public-kb-candidate">
+              <input
+                v-model="manageChatEnabled"
+                type="checkbox"
+                data-testid="public-kb-chat-enabled"
+              />
+              <span>{{ t('publicKb.chat.toggle') }}</span>
+            </label>
+            <p class="public-kb-hint">{{ t('publicKb.chat.hint') }}</p>
+            <label class="public-kb-label" for="public-kb-chat-budget">
+              {{ t('publicKb.chat.budget') }}
+            </label>
+            <input
+              id="public-kb-chat-budget"
+              v-model="manageChatBudget"
+              class="public-kb-input"
+              data-testid="public-kb-chat-budget"
+              type="number"
+              min="0"
+              max="10000000"
+              step="1"
+              :placeholder="t('publicKb.chat.budgetPlaceholder')"
+            />
+            <p class="public-kb-hint">{{ t('publicKb.chat.budgetHint') }}</p>
+            <p
+              v-if="chatSettingsError"
+              class="public-kb-error"
+              role="alert"
+              data-testid="public-kb-chat-settings-error"
+            >
+              {{ chatSettingsError }}
+            </p>
+            <button
+              class="public-kb-btn"
+              type="button"
+              data-testid="public-kb-chat-settings-save"
+              :disabled="chatSettingsSaving || manageSaving"
+              @click="saveChatSettings"
+            >
+              {{ chatSettingsSaving ? t('publicKb.chat.saving') : t('publicKb.chat.save') }}
+            </button>
+          </div>
         </template>
         <div class="public-kb-dialog-actions">
           <button class="public-kb-btn" @click="closeManage">{{ t('publicKb.cancel') }}</button>
           <button
             class="public-kb-btn primary"
             data-testid="public-kb-manage-save"
-            :disabled="manageSaving || manageLoading"
+            :disabled="manageSaving || manageLoading || chatSettingsSaving"
             @click="saveManage"
           >
             {{ manageSaving ? t('publicKb.saving') : t('publicKb.save') }}
@@ -389,6 +447,12 @@ const manageLoading = ref(false)
 const manageSaving = ref(false)
 const manageError = ref('')
 const manageTruncated = ref(false)
+const manageChatEnabled = ref(false)
+// type=number 的 v-model 会把输入转成 number（空值保持字符串 ''），两者都要接受。
+const manageChatBudget = ref<string | number>('')
+const chatSettingsSaving = ref(false)
+const chatSettingsError = ref('')
+const MAX_CHAT_DAILY_BUDGET = 10_000_000
 
 const rotateTarget = ref<KbPublication | null>(null)
 const rotateBusy = ref(false)
@@ -531,6 +595,13 @@ async function openManage(item: KbPublication) {
   manageRows.value = []
   manageSelected.value = []
   manageTruncated.value = false
+  manageChatEnabled.value = !!item.chat_enabled
+  manageChatBudget.value =
+    item.daily_token_budget === null || item.daily_token_budget === undefined
+      ? ''
+      : String(item.daily_token_budget)
+  chatSettingsSaving.value = false
+  chatSettingsError.value = ''
   try {
     const [published, candidates] = await Promise.all([
       publicKbApi.documents(item.id),
@@ -557,19 +628,72 @@ function closeManage() {
   manageTarget.value = null
   manageRows.value = []
   manageSelected.value = []
+  manageChatEnabled.value = false
+  manageChatBudget.value = ''
+  chatSettingsSaving.value = false
+  chatSettingsError.value = ''
+}
+
+async function saveChatSettings() {
+  if (!manageTarget.value || chatSettingsSaving.value || manageSaving.value) return
+  const targetId = manageTarget.value.id
+  const raw =
+    typeof manageChatBudget.value === 'number'
+      ? String(manageChatBudget.value)
+      : manageChatBudget.value.trim()
+  let budget: number | null = null
+  if (raw !== '') {
+    if (!/^\d+$/.test(raw)) {
+      chatSettingsError.value = t('publicKb.chat.budgetInvalid')
+      return
+    }
+    budget = Number(raw)
+    if (!Number.isSafeInteger(budget) || budget < 0 || budget > MAX_CHAT_DAILY_BUDGET) {
+      chatSettingsError.value = t('publicKb.chat.budgetInvalid')
+      return
+    }
+  }
+  chatSettingsSaving.value = true
+  chatSettingsError.value = ''
+  try {
+    const updated = await publicKbApi.setChatSettings(targetId, {
+      chat_enabled: manageChatEnabled.value,
+      daily_token_budget: budget,
+    })
+    // 慢请求 + 关闭/重开对话框时，不得把新目标（另一个发布）改写成旧响应。
+    if (manageTarget.value?.id !== targetId) return
+    manageTarget.value = updated
+    manageChatEnabled.value = !!updated.chat_enabled
+    manageChatBudget.value =
+      updated.daily_token_budget === null || updated.daily_token_budget === undefined
+        ? ''
+        : String(updated.daily_token_budget)
+    notice.value = t('publicKb.chat.saved')
+    await refreshAll()
+  } catch {
+    if (manageTarget.value?.id === targetId) {
+      chatSettingsError.value = t('publicKb.operationFailed')
+    }
+  } finally {
+    chatSettingsSaving.value = false
+  }
 }
 
 async function saveManage() {
-  if (!manageTarget.value) return
+  if (!manageTarget.value || manageSaving.value || chatSettingsSaving.value) return
+  const targetId = manageTarget.value.id
   manageSaving.value = true
   manageError.value = ''
   try {
-    await publicKbApi.setDocuments(manageTarget.value.id, 'replace', manageSelected.value)
+    await publicKbApi.setDocuments(targetId, 'replace', manageSelected.value)
+    if (manageTarget.value?.id !== targetId) return
     notice.value = t('publicKb.saved')
     closeManage()
     await refreshAll()
   } catch {
-    manageError.value = t('publicKb.operationFailed')
+    if (manageTarget.value?.id === targetId) {
+      manageError.value = t('publicKb.operationFailed')
+    }
   } finally {
     manageSaving.value = false
   }
@@ -863,6 +987,14 @@ async function copyLink(link: string) {
   color: #b45309;
   padding: 1px 8px;
   font-size: 11px;
+}
+.public-kb-chat-settings {
+  margin-top: 16px;
+  border-top: 1px dashed #cbd5e1;
+  padding-top: 8px;
+}
+.dark .public-kb-chat-settings {
+  border-color: #475569;
 }
 .public-kb-dialog-actions {
   display: flex;

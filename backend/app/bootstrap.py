@@ -43,6 +43,7 @@ from app.core.elasticsearch import es_client, init_elasticsearch
 from app.core.kafka_client import kafka_producer
 from app.core.middleware import (
     PerformanceASGIMiddleware,
+    PublicKbSecurityHeadersMiddleware,
     RateLimitASGIMiddleware,
     metrics_collector,
 )
@@ -1221,9 +1222,23 @@ def _overall_status(services: dict) -> str:
 
 
 # 异常处理
+def _public_response_headers(
+    request: Request, headers: dict[str, str] | None = None
+) -> dict[str, str] | None:
+    """合并端点登记的统一安全头（批次十七公开面）；其它端点保持原样。"""
+    merged: dict[str, str] = dict(headers or {})
+    public_headers = getattr(getattr(request, "state", None), "public_headers", None)
+    if isinstance(public_headers, dict):
+        merged.update(public_headers)
+    return merged or None
+
+
 async def app_error_handler(request: Request, exc: AppError):
     """Domain exception handler — converts AppError subclasses to JSON."""
     request_id = getattr(getattr(request, "state", None), "request_id", None)
+    # RFC 9110：401 MUST 携带 `WWW-Authenticate`。`AuthenticationError` 及其子类
+    # 走的是这条 handler，此前同样没有该头（issue #82）。
+    base_headers: dict[str, str] = {"WWW-Authenticate": "Bearer"} if exc.status_code == 401 else {}
     return JSONResponse(
         status_code=exc.status_code,
         content={
@@ -1235,9 +1250,7 @@ async def app_error_handler(request: Request, exc: AppError):
             "request_id": request_id,
             "data": None,
         },
-        # RFC 9110：401 MUST 携带 `WWW-Authenticate`。`AuthenticationError` 及其子类
-        # 走的是这条 handler，此前同样没有该头（issue #82）。
-        headers={"WWW-Authenticate": "Bearer"} if exc.status_code == 401 else None,
+        headers=_public_response_headers(request, base_headers),
     )
 
 
@@ -1257,7 +1270,7 @@ async def http_exception_handler(request: Request, exc: HTTPException):
         # 必须透传：RFC 9110 规定 401 MUST 携带 `WWW-Authenticate`。
         # 原先没传这一项，导致 auth_service 里显式设置的 `WWW-Authenticate: Bearer`
         # 全部到不了客户端（issue #82）。
-        headers=exc.headers,
+        headers=_public_response_headers(request, exc.headers),
     )
 
 
@@ -1289,6 +1302,7 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
             "request_id": request_id,
             "data": None,
         },
+        headers=_public_response_headers(request),
     )
 
 
@@ -1321,7 +1335,9 @@ async def general_exception_handler(request: Request, exc: Exception):
         },
         # 该响应由最外层的 ServerErrorMiddleware 直接发出，不经过
         # RequestIDMiddleware 的 send_wrapper，故这里显式补响应头。
-        headers={"X-Request-ID": request_id} if request_id else None,
+        headers=_public_response_headers(
+            request, {"X-Request-ID": request_id} if request_id else None
+        ),
     )
 
 
@@ -1406,6 +1422,10 @@ def build_app(
     if settings.ENABLE_RATE_LIMIT:
         app.add_middleware(RateLimitASGIMiddleware)
     app.add_middleware(PerformanceASGIMiddleware)
+
+    # 5. 公开知识库安全头（纯 ASGI，不缓冲 SSE）：必须在最外层用户中间件，
+    #    覆盖 Pydantic 422 / 限流 429 / 404 等不经端点体的响应。
+    app.add_middleware(PublicKbSecurityHeadersMiddleware)
 
     # 异常处理（handler 定义在模块级：app.main 兼容导出，且可被单测直接调用）
     app.add_exception_handler(AppError, app_error_handler)

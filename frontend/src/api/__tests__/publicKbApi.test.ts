@@ -1,11 +1,11 @@
 /**
- * 公开知识库客户端契约（批次十三）。
+ * 公开知识库客户端契约（批次十三/十七）。
  *
  * 钉住：管理面/公开面 URL、silent header（不弹全局 toast）、apiUnwrap 解包、
- * 轮换请求的 expires_in_days 透传。公开面不发送 Authorization 由 request
- * 拦截器按登录态决定；token 是唯一权限凭证。
+ * 轮换请求的 expires_in_days 透传、聊天设置的开关/预算透传，以及匿名聊天的
+ * POST + fetch-SSE 帧解析（sources/delta/done/error）与 429 错误形状。
  */
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 
 const { getMock, postMock } = vi.hoisted(() => ({ getMock: vi.fn(), postMock: vi.fn() }))
 
@@ -13,7 +13,7 @@ vi.mock('@/utils/request', () => ({
   default: { get: getMock, post: postMock },
 }))
 
-import { publicKbApi, publicKbPublicApi } from '../publicKb'
+import { publicKbApi, publicKbPublicApi, PublicKbChatError } from '../publicKb'
 
 const publication = {
   id: 'pub-1',
@@ -23,6 +23,8 @@ const publication = {
   description: null,
   enabled: true,
   active: true,
+  chat_enabled: true,
+  daily_token_budget: 1000,
   expires_at: null,
   revoked_at: null,
   created_at: '2026-11-27T10:00:00Z',
@@ -31,6 +33,31 @@ const publication = {
 
 function response(payload: unknown) {
   return { data: { success: true, data: payload }, status: 200, statusText: 'OK', headers: {}, config: {} }
+}
+
+function makeStreamResponse(chunks: string[]) {
+  const encoder = new TextEncoder()
+  let i = 0
+  const cancel = vi.fn(async () => undefined)
+  const releaseLock = vi.fn()
+  return {
+    response: {
+      ok: true,
+      status: 200,
+      body: {
+        getReader: () => ({
+          read: async () =>
+            i < chunks.length
+              ? { done: false, value: encoder.encode(chunks[i++]) }
+              : { done: true, value: undefined },
+          cancel,
+          releaseLock,
+        }),
+      },
+    },
+    cancel,
+    releaseLock,
+  }
 }
 
 beforeEach(() => {
@@ -112,6 +139,21 @@ describe('publicKb admin API', () => {
       { headers: { 'X-Silent-Error': '1' } },
     )
   })
+
+  it('setChatSettings → POST chat-settings，透传开关与预算（null = 全局默认）', async () => {
+    postMock.mockResolvedValueOnce(response({ ...publication, chat_enabled: false, daily_token_budget: null }))
+    const updated = await publicKbApi.setChatSettings('pub-1', {
+      chat_enabled: false,
+      daily_token_budget: null,
+    })
+    expect(postMock).toHaveBeenLastCalledWith(
+      '/kb-publications/pub-1/chat-settings',
+      { chat_enabled: false, daily_token_budget: null },
+      { headers: { 'X-Silent-Error': '1' } },
+    )
+    expect(updated.chat_enabled).toBe(false)
+    expect(updated.daily_token_budget).toBeNull()
+  })
 })
 
 describe('publicKb anonymous API', () => {
@@ -131,5 +173,125 @@ describe('publicKb anonymous API', () => {
       { query: '制度', top_k: 10 },
       { headers: { 'X-Silent-Error': '1' } },
     )
+  })
+})
+
+describe('publicKb anonymous chat (batch 17)', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  it('POST + fetch-SSE：跨 chunk 分帧、sources/delta/done 逐帧回调', async () => {
+    const stream = makeStreamResponse([
+      'event: sources\ndata: {"sources":[{"rank":1,"title":"制度 A","snippet":"正文","score":0.9}]}\n\n',
+      'event: del',
+      'ta\ndata: {"delta":"回答"}\n\nevent: delta\ndata: {"delta":"完毕"}\n\n',
+      'event: done\ndata: {"done":true,"source_count":1}\n\n',
+      // done 之后的尾随帧必须被忽略。
+      'event: delta\ndata: {"delta":"不应出现"}\n\n',
+    ])
+    const fetchMock = vi.fn().mockResolvedValue(stream.response)
+    vi.stubGlobal('fetch', fetchMock)
+    const sources: unknown[] = []
+    const deltas: string[] = []
+    const done: unknown[] = []
+    const controller = new AbortController()
+
+    await publicKbPublicApi.chat(
+      'tok/1',
+      { message: '制度？', history: [{ role: 'user', content: '上一问' }] },
+      {
+        onSources: (value) => sources.push(value),
+        onDelta: (value) => deltas.push(value),
+        onDone: (value) => done.push(value),
+      },
+      { signal: controller.signal },
+    )
+
+    const [url, init] = fetchMock.mock.calls[0]
+    expect(url).toBe('/api/v1/public/kb/tok%2F1/chat')
+    expect(init.method).toBe('POST')
+    expect(init.headers.Accept).toBe('text/event-stream')
+    expect(init.signal).toBeInstanceOf(AbortSignal)
+    expect(JSON.parse(init.body)).toEqual({
+      message: '制度？',
+      history: [{ role: 'user', content: '上一问' }],
+      stream: true,
+    })
+    expect(sources).toHaveLength(1)
+    expect((sources[0] as Array<{ title: string }>)[0].title).toBe('制度 A')
+    expect(deltas).toEqual(['回答', '完毕'])
+    expect(done).toEqual([{ done: true, source_count: 1 }])
+    expect(stream.cancel).toHaveBeenCalled()
+  })
+
+  it('HTTP 429 预算错误 → PublicKbChatError(code/detail/status)', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: false,
+        status: 429,
+        json: async () => ({
+          error_code: 'PUBLIC_KB_CHAT_BUDGET_EXCEEDED',
+          message: 'budget',
+          detail: { used: 5, budget: 5, reset_at: '2026-11-29T00:00:00+00:00' },
+        }),
+      }),
+    )
+    await expect(
+      publicKbPublicApi.chat('tok-1', { message: '制度' }, {}),
+    ).rejects.toMatchObject({
+      name: 'PublicKbChatError',
+      code: 'PUBLIC_KB_CHAT_BUDGET_EXCEEDED',
+      status: 429,
+      detail: { used: 5, budget: 5 },
+    })
+  })
+
+  it('SSE error 事件 → onError（不是静默结束）', async () => {
+    const stream = makeStreamResponse([
+      'event: sources\ndata: {"sources":[]}\n\n',
+      'event: error\ndata: {"error_code":"PUBLIC_KB_CHAT_GENERATION_FAILED","message":"failed"}\n\n',
+    ])
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(stream.response))
+    const errors: PublicKbChatError[] = []
+    await publicKbPublicApi.chat('tok-1', { message: '制度' }, {
+      onError: (error) => errors.push(error),
+    })
+    expect(errors).toHaveLength(1)
+    expect(errors[0].code).toBe('PUBLIC_KB_CHAT_GENERATION_FAILED')
+  })
+
+  it('CRLF 帧边界同样可解析（代理重写不吞事件）', async () => {
+    const stream = makeStreamResponse([
+      'event: sources\r\ndata: {"sources":[]}\r\n\r\n',
+      'event: done\r\ndata: {"done":true}\r\n\r\n',
+    ])
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(stream.response))
+    const events: string[] = []
+    await publicKbPublicApi.chat('tok-1', { message: '制度' }, {
+      onSources: () => events.push('sources'),
+      onDone: () => events.push('done'),
+    })
+    expect(events).toEqual(['sources', 'done'])
+  })
+
+  it('没有 done/error 的截断流 → STREAM_INCOMPLETE（不伪装成完整回答）', async () => {
+    const stream = makeStreamResponse(['event: delta\ndata: {"delta":"半句"}\n\n'])
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(stream.response))
+    await expect(
+      publicKbPublicApi.chat('tok-1', { message: '制度' }, {}),
+    ).rejects.toMatchObject({ code: 'STREAM_INCOMPLETE' })
+  })
+
+  it('data: null 等非法帧不会抛 TypeError，最终按截断流处理', async () => {
+    const stream = makeStreamResponse([
+      'event: delta\ndata: null\n\n',
+      'event: sources\ndata: [1,2,3]\n\n',
+    ])
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(stream.response))
+    await expect(
+      publicKbPublicApi.chat('tok-1', { message: '制度' }, {}),
+    ).rejects.toMatchObject({ code: 'STREAM_INCOMPLETE' })
   })
 })

@@ -256,7 +256,15 @@ async def test_create_status_public_search_revoke_roundtrip(factory, fake_pipeli
 
         meta = await ac.get(f"/api/v1/public/kb/{token}")
         assert meta.status_code == 200, meta.text
-        assert set(meta.json()["data"]) == {"title", "description", "expires_at"}
+        assert set(meta.json()["data"]) == {
+            "title",
+            "description",
+            "expires_at",
+            "chat_enabled",
+        }
+        # 批次十七：聊天默认关闭；公开元数据只投影生效能力，不暴露日预算。
+        assert meta.json()["data"]["chat_enabled"] is False
+        assert "daily_token_budget" not in meta.json()["data"]
         assert meta.headers["cache-control"] == "no-store"
         assert meta.headers["referrer-policy"] == "no-referrer"
         assert meta.headers["x-robots-tag"] == "noindex"

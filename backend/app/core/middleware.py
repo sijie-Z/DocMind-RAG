@@ -13,6 +13,7 @@ from collections import defaultdict, deque
 from typing import Any
 
 from fastapi.responses import JSONResponse
+from starlette.datastructures import MutableHeaders
 
 from app.core.config import settings
 from app.core.redis import redis_client
@@ -455,3 +456,37 @@ class RateLimitASGIMiddleware:
             return
 
         await self.app(scope, receive, send)
+
+
+class PublicKbSecurityHeadersMiddleware:
+    """公开知识库前缀的纯 ASGI 安全头（批次十七）。
+
+    端点体在请求体 Pydantic 校验之后才执行；422 等校验失败响应不会经过
+    ``request.state.public_headers``。这里按路径前缀在 response.start 上直接
+    写入安全头，覆盖成功、404/429/422/500 全部响应，且不缓冲 SSE body。
+    """
+
+    PREFIX = "/api/v1/public/kb"
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope.get("type") != "http":
+            await self.app(scope, receive, send)
+            return
+        path = scope.get("path", "")
+        if not (path == self.PREFIX or path.startswith(f"{self.PREFIX}/")):
+            await self.app(scope, receive, send)
+            return
+
+        async def send_wrapper(message):
+            if message["type"] == "http.response.start":
+                headers = MutableHeaders(scope=message)
+                headers["Cache-Control"] = "no-store"
+                headers["Referrer-Policy"] = "no-referrer"
+                headers["X-Robots-Tag"] = "noindex"
+                headers["X-Content-Type-Options"] = "nosniff"
+            await send(message)
+
+        await self.app(scope, receive, send_wrapper)

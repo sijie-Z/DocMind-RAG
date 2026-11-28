@@ -160,7 +160,7 @@ async def get_token_usage_summary(
         None, description="按组织过滤（超管可指定；组织管理员仅限本组织）"
     ),
     feature: str | None = Query(
-        None, max_length=50, description="按功能过滤（如 rag_chat / agent）"
+        None, max_length=64, description="按功能过滤（如 rag_chat / public_kb_chat:<id>）"
     ),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),

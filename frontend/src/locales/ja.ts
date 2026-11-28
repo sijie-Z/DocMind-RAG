@@ -2291,8 +2291,8 @@ export default {
   },
   publicKb: {
     title: '公開ナレッジベース',
-    subtitle: 'ナレッジベース内の明示的な許可リストのドキュメントを token リンクとして公開します。匿名の訪問者は読み取り検索のみ可能です。',
-    warning: 'リンクを知っている人は選択したドキュメントを検索できます。公開してよいドキュメントだけを選択してください。',
+    subtitle: 'ナレッジベース内の明示的な許可リストのドキュメントを token リンクとして公開します。匿名の訪問者は読み取り検索に加え、チャット有効時は許可リストのドキュメントについて質問できます。',
+    warning: 'リンクを知っている人は選択したドキュメントを検索でき、チャット有効時はそれらについて質問できます。公開してよいドキュメントだけを選択してください。',
     empty: '公開ナレッジベースはまだありません',
     create: 'ナレッジベースを公開',
     loading: '読み込み中…',
@@ -2303,6 +2303,7 @@ export default {
       knowledgeBase: 'ナレッジベース',
       status: '状態',
       documents: 'ドキュメント数',
+      chat: 'チャット',
       expires: '有効期限',
       actions: '操作'
     },
@@ -2311,6 +2312,8 @@ export default {
     statusExpired: '期限切れ',
     statusDisabled: '停止中',
     statusInactive: '利用不可',
+    chatEnabled: '有効',
+    chatDisabled: '無効',
     actions: {
       manage: 'ドキュメントを管理',
       rotate: 'リンクを再生成',
@@ -2354,6 +2357,18 @@ export default {
     notSearchable: '現在検索不可',
     candidatesTruncated: '候補ドキュメントが多いため、先頭 500 件のみ表示しています',
     operationFailed: '操作に失敗しました。しばらくしてから再試行してください',
+    chat: {
+      title: '匿名チャット',
+      toggle: '匿名チャットを許可',
+      hint: '有効にすると、リンクを知っている人は許可リストのドキュメントについて質問できます。既定では無効です。',
+      budget: '1 日あたりの token 予算',
+      budgetPlaceholder: '空欄 = グローバル既定値',
+      budgetHint: '0 = チャット禁止。空欄はプラットフォーム既定値を使用します。',
+      budgetInvalid: '予算は 0 から 10000000 の整数で入力してください',
+      save: 'チャット設定を保存',
+      saving: '保存中…',
+      saved: 'チャット設定を更新しました'
+    },
     public: {
       title: '公開ナレッジベース',
       searchPlaceholder: '公開ドキュメントを検索…',
@@ -2364,7 +2379,24 @@ export default {
       emptyHint: '別のキーワードをお試しください。',
       unavailable: 'この公開リンクは存在しないか、無効になっています',
       loadFailed: '検索に失敗しました。しばらくしてから再試行してください',
-      poweredBy: '読み取り専用検索 · 生成・チャット・アップロードは提供しません'
+      chatTitle: '公開ドキュメントに質問',
+      chatHint: '公開された許可リストのドキュメントだけを根拠に回答します。会話は保存されません。',
+      chatEmpty: '質問を入力すると、公開ドキュメントに基づいて回答します。',
+      chatPlaceholder: '質問を入力…',
+      chatSend: '質問する',
+      chatSending: '生成中…',
+      chatStop: '停止',
+      chatStopped: '生成を停止しました',
+      chatYou: 'あなた',
+      chatAssistant: 'アシスタント',
+      chatSources: '参考元',
+      chatNoAnswer: 'ドキュメントに関連する情報が見つかりませんでした。',
+      chatBudgetExceeded: '本日のチャット予算を使い切りました（{used}/{budget} tokens）。{resetAt} にリセットされます',
+      chatOrgQuota: '組織の今月の token クォータを使い切りました（{used}/{quota}）。{resetAt} にリセットされます',
+      chatRateLimited: '質問が多すぎます。しばらくしてから再試行してください',
+      chatUnavailable: 'このリンクでは現在チャットできません',
+      chatFailed: '回答の生成に失敗しました。しばらくしてから再試行してください',
+      poweredBy: 'DocMind 提供'
     }
   },
   reviews: {

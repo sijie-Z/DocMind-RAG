@@ -2305,8 +2305,8 @@ export default {
   },
   publicKb: {
     title: 'Public knowledge base',
-    subtitle: 'Publish an explicit allow-list of documents as a token link; anonymous visitors can only run read-only search.',
-    warning: 'Anyone with the link can search the documents you choose. Only select material that is safe to make public.',
+    subtitle: 'Publish an explicit allow-list of documents as a token link; anonymous visitors can run read-only search and, when chat is enabled, ask questions about the allow-listed documents.',
+    warning: 'Anyone with the link can search the documents you choose, and can ask questions about them when chat is enabled. Only select material that is safe to make public.',
     empty: 'No public knowledge base yet',
     create: 'Publish knowledge base',
     loading: 'Loading…',
@@ -2317,6 +2317,7 @@ export default {
       knowledgeBase: 'Knowledge base',
       status: 'Status',
       documents: 'Documents',
+      chat: 'Chat',
       expires: 'Expires',
       actions: 'Actions'
     },
@@ -2325,6 +2326,8 @@ export default {
     statusExpired: 'Expired',
     statusDisabled: 'Disabled',
     statusInactive: 'Inactive',
+    chatEnabled: 'Enabled',
+    chatDisabled: 'Off',
     actions: {
       manage: 'Manage documents',
       rotate: 'Regenerate link',
@@ -2368,6 +2371,18 @@ export default {
     notSearchable: 'Not searchable now',
     candidatesTruncated: 'Too many candidate documents; showing the first 500',
     operationFailed: 'Operation failed, please retry later',
+    chat: {
+      title: 'Anonymous chat',
+      toggle: 'Allow anonymous chat',
+      hint: 'When enabled, anyone with the link can ask questions about the allow-listed documents. Off by default.',
+      budget: 'Daily token budget',
+      budgetPlaceholder: 'Blank = global default',
+      budgetHint: '0 disables chat; blank uses the platform default.',
+      budgetInvalid: 'Budget must be an integer between 0 and 10000000',
+      save: 'Save chat settings',
+      saving: 'Saving…',
+      saved: 'Chat settings updated'
+    },
     public: {
       title: 'Public knowledge base',
       searchPlaceholder: 'Search public documents…',
@@ -2378,7 +2393,24 @@ export default {
       emptyHint: 'Try different keywords.',
       unavailable: 'This public link does not exist or has expired',
       loadFailed: 'Search failed, please retry later',
-      poweredBy: 'Read-only search · no generation, chat or uploads'
+      chatTitle: 'Ask the public documents',
+      chatHint: 'Answers use only the published allow-listed documents. Conversations are not saved.',
+      chatEmpty: 'Ask a question and the assistant will answer from the public documents.',
+      chatPlaceholder: 'Ask a question…',
+      chatSend: 'Ask',
+      chatSending: 'Generating…',
+      chatStop: 'Stop',
+      chatStopped: 'Generation stopped',
+      chatYou: 'You',
+      chatAssistant: 'Assistant',
+      chatSources: 'Sources',
+      chatNoAnswer: 'No relevant information was found in the documents.',
+      chatBudgetExceeded: "Today's chat budget is used up ({used}/{budget} tokens); resets at {resetAt}",
+      chatOrgQuota: "The organization's monthly token quota is used up ({used}/{quota}); resets at {resetAt}",
+      chatRateLimited: 'Too many questions; please retry later',
+      chatUnavailable: 'Chat is not available for this link',
+      chatFailed: 'Failed to generate an answer; please retry later',
+      poweredBy: 'Powered by DocMind'
     }
   },
   reviews: {

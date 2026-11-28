@@ -36,7 +36,10 @@ class TokenUsageRecord(Base):
         String(64), nullable=True, index=True, comment="HTTP 请求 ID（X-Request-ID）"
     )
     feature: Mapped[str | None] = mapped_column(
-        String(50), nullable=True, index=True, comment="功能来源: rag_chat, agent, tool_call"
+        String(64),
+        nullable=True,
+        index=True,
+        comment="功能来源: rag_chat, agent, tool_call, public_kb_chat:<pub_id>",
     )
     prompt_version: Mapped[str | None] = mapped_column(
         String(100), nullable=True, comment="提示词版本"

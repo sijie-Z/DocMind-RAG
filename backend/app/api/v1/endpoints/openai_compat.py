@@ -22,10 +22,11 @@ from collections.abc import AsyncGenerator, Callable
 import anyio
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import JSONResponse
 from fastapi.routing import APIRoute
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.v1.streaming import ClosingStreamingResponse
 from app.core.database import get_db
 from app.core.llm_failures import UserLLMRequestError
 from app.core.request_id import get_request_id
@@ -159,30 +160,16 @@ class OpenAICompatRoute(APIRoute):
         return handler
 
 
-class OpenAICompatStreamingResponse(StreamingResponse):
-    """在响应返回/断连后，于**当前请求任务上下文**关闭 body 迭代器。
+class OpenAICompatStreamingResponse(ClosingStreamingResponse):
+    """兼容旧导入名：批次十五的响应关闭包装器已抽到共享模块。
 
     Starlette 在 ASGI 2.3 断连时只取消 stream task，不会 close body_iterator；
     若客户端恰好在 `send` 边界断开，端点生成器停在 `yield` 上，其 finally
     只能等 GC 才执行——而 GC finalizer 运行在另一份 context 里，内层
     pipeline 在 finally 里写入的 token 用量 ContextVar 对端点不可见，导致
-    计量丢失。这里在 `__call__` 返回后主动 aclose，保证 finally 与
+    计量丢失。共享类在 `__call__` 返回后主动 aclose，保证 finally 与
     `report_tokens`、`current_token_usage()` 处在同一上下文。
     """
-
-    async def __call__(self, scope, receive, send) -> None:
-        try:
-            await super().__call__(scope, receive, send)
-        finally:
-            close_method = getattr(self.body_iterator, "aclose", None)
-            if close_method is not None:
-                try:
-                    with anyio.CancelScope(shield=True):
-                        await close_method()
-                except Exception:  # noqa: BLE001 — 收尾失败不得覆盖响应结果
-                    logger.warning(
-                        "openai_compat response body iterator close failed", exc_info=True
-                    )
 
 
 # ── 响应构造 ────────────────────────────────────────────────────────
