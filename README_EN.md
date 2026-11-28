@@ -275,7 +275,7 @@ DocMind/
 | Session Fork | `/sessions` | Session fork / seed / lineage (issue #476) |
 | Persistent Terminal | `/terminal` | Container-backed persistent PTY: session CRUD, one-time WS tickets, WebSocket bridge (issue #477) |
 | Agent Commands | `/commands` | Server-side command catalog and model-free execution (/help, /status, /export, /tools) |
-| MCP | `/mcp` | MCP server status (admin, read-only) |
+| MCP | `/mcp` | Outbound MCP server status (admin, read-only) and inbound read-only server `/mcp/server` |
 | JSON-RPC | `/rpc` | HTTP JSON-RPC 2.0 (API key + `rpc` scope; gated by `RPC_HTTP_ENABLED`) |
 | User Settings | `/user` | Personal UI preferences |
 | Webhooks | `/webhooks` | Inbound webhook rule management, HMAC-verified delivery, outbox processing (issue #478) |
@@ -295,6 +295,21 @@ streaming final-chunk `docmind_citations`) with public id / title / score only.
 **not** change the actual generation parameters (server defaults are used);
 `finish_reason` is always `stop`; `usage` is a server-side token estimate derived
 from input/output text length, not a value returned by the upstream model.
+
+**Inbound MCP Server (read-only knowledge base, batch 16)**:
+`/api/v1/mcp/server` (Streamable HTTP, stateless + JSON responses). Disabled by
+default (`MCP_SERVER_ENABLED=false` returns 404). Accepts only
+`Authorization: Bearer dm_...` (requires the `knowledge:read` scope; the
+organization is always the key-bound organization — JWTs and org-unbound keys
+are rejected). Exposes two read-only tools, `search_knowledge_base` and
+`get_document`: retrieval always passes `viewer_user_id` (private documents
+never enter results), document reads enforce the key-bound organization plus
+the viewer ACL, and cross-organization/private documents return the same
+not-found text; `top_k`/`max_chars` are server-capped. Each key has an
+in-process fixed-window rate limit (429 + `Retry-After`), and audit records only
+tool/org/result count/latency (never document text or the raw key). Point any
+MCP client's Streamable HTTP URL at this endpoint. Counters are per replica;
+cross-replica consistency is future work.
 
 Swagger docs: `http://localhost:8000/docs` (OpenAPI: `/api/v1/openapi.json`).
 

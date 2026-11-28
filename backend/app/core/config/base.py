@@ -135,6 +135,19 @@ class BaseAppSettings(BaseSettings):
     # 公开知识库端点限流：每 token / 每 IP 每分钟上限（进程内固定窗口桶）。
     PUBLIC_KB_RATE_LIMIT_PER_MINUTE: int = 60
 
+    # ── 入站 MCP Server（批次十六）────────────────────────────────────────
+    # 默认关闭：关闭时 ``/api/v1/mcp/server`` 一律 404（路由仍挂载但不暴露）。
+    # 开启后只接受 ``dm_`` API Key（要求 knowledge:read scope 且 key 绑定组织），
+    # 提供只读知识库工具。不影响既有出站 MCP client / ``/mcp/servers`` 管理面。
+    MCP_SERVER_ENABLED: bool = False
+    # 每把 API Key 的进程内固定窗口限流（60s）；<=0 表示不限制。
+    # 多副本部署时各副本独立计数，跨副本一致性留后续（README 已写明）。
+    MCP_SERVER_RATE_LIMIT_PER_MINUTE: int = 60
+    # 单次检索返回的分块上限；调用方传更大值会被钳制到该值。
+    MCP_SERVER_MAX_TOP_K: int = 10
+    # get_document 单次返回的字符上限；调用方传更大值会被钳制到该值。
+    MCP_SERVER_MAX_CHARS: int = 20_000
+
     # User Commands（issue #475）kill-switch：关闭后命令通道整体回退——
     # GET /commands 返回 enabled=false + 空清单（前端回退本地模板），
     # POST /commands/execute 返回 503 SERVICE_UNAVAILABLE，聊天入口不再拦截 "/"

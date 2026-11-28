@@ -274,7 +274,7 @@ DocMind/
 | 会话分叉 | `/sessions` | 会话 fork / seed / 谱系（issue #476） |
 | 持久终端 | `/terminal` | 容器持久 PTY：会话 CRUD、一次性 WS 票据、WebSocket 桥（issue #477） |
 | Agent 命令 | `/commands` | 服务端命令清单与无模型轮次执行（/help、/status、/export、/tools） |
-| MCP 工具 | `/mcp` | MCP 服务器状态（管理员只读） |
+| MCP 工具 | `/mcp` | 出站 MCP 服务器状态（管理员只读）与入站只读 Server `/mcp/server` |
 | JSON-RPC | `/rpc` | HTTP JSON-RPC 2.0（API Key + `rpc` scope；`RPC_HTTP_ENABLED` 门控） |
 | 用户设置 | `/user` | 个人 UI 偏好 |
 | Webhook 规则 | `/webhooks` | 入站 Webhook 规则管理、HMAC 验签投递与 outbox 处理（issue #478） |
@@ -292,6 +292,19 @@ SSE 流式（标准 `chat.completion.chunk` + `[DONE]`）；引用作为非破�
 **v1 口径说明**：`temperature` / `max_tokens` 会被接受（不触发 422），但当前
 **不改变**实际生成参数（仍使用服务端默认值）；`finish_reason` 恒为 `stop`；
 `usage` 是服务端按输入/输出文本长度估算的 token 数，不是上游模型返回值。
+
+**入站 MCP Server（只读知识库，批次十六）**：`/api/v1/mcp/server`
+（Streamable HTTP，stateless + JSON response）。默认关闭
+（`MCP_SERVER_ENABLED=false` 时一律 404）。只接受
+`Authorization: Bearer dm_...`（要求 `knowledge:read` scope，且 organization
+只取 key 绑定组织；JWT 与 org-unbound key 均拒绝）。提供
+`search_knowledge_base` 与 `get_document` 两个只读工具：检索必传
+`viewer_user_id`（私有文档不进结果），文档读取先按绑定组织 + viewer ACL
+判定，跨组织/私有不可见统一返回同一条 not-found 文案；`top_k` / `max_chars`
+有服务端上限。每 key 进程内固定窗口限流（429 + `Retry-After`），审计只记
+tool/org/结果数/latency（无正文、无原始 key）。Claude Desktop / Cursor 等
+MCP 客户端把该 URL 配成 Streamable HTTP server 即可接入。多副本部署时各副本
+独立计数，跨副本一致性留后续。
 
 Swagger 文档：`http://localhost:8000/docs`（OpenAPI：`/api/v1/openapi.json`）。
 
